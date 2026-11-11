@@ -10,11 +10,11 @@
   through every binding of an alias, a re-export by another source module, ``getattr``, an import or
   ``sys.modules`` by literal name, and a ``**mapping`` of options; a launcher the scan cannot follow (kept in a
   container, attribute or parameter, reached by a computed name, code run from text) is in a closed reviewed
-  table (DEC-011 L1, L2).
+  table (v2 DEC-011 L1, L2).
 * Google: every API method called under ``src/auditex/google_workspace/`` is a read, and every requested
   scope is read-only, metadata-only or a write-capable scope in the closed accepted-exception table (DEC-010),
   with its blast radius, used only for list and get calls. Handles are resolved per Python scope, ``getattr``
-  with a literal name is followed, and a service or handle that leaves the traced names fails (DEC-011 L3, L4).
+  with a literal name is followed, and a service or handle that leaves the traced names fails (v2 DEC-011 L3, L4).
 
 Text a user or administrator wrote that a settings read still receives (inventory section G) is pinned in
 ``_TEXT_EXPOSURES`` with its disposition; the discarded rows are proved discarded here.
@@ -143,7 +143,7 @@ _UNRESOLVED_RUNNER_INPUTS: dict[tuple[str, str], str] = {
 
 # Closed: sites where a launcher or the module that holds one is reached in a way the scan cannot follow (a
 # dynamic import or attribute, or a launcher kept in a container, attribute or parameter), each with why that is
-# safe. A new one fails the scan until it is made a direct call or reviewed into this table (DEC-011 L2).
+# safe. A new one fails the scan until it is made a direct call or reviewed into this table (v2 DEC-011 L2).
 _UNTRACEABLE_LAUNCHES: dict[tuple[str, str], str] = {
     ("src/azure_tenant_audit/value_rules/__init__.py", "_registry"): (
         "imports each value_rules submodule found by pkgutil under this package and reads only its KINDS dict"
@@ -356,6 +356,12 @@ def _enclosing(node: ast.AST, parents: dict[ast.AST, ast.AST], kinds: tuple[type
     return None
 # Calls whose value is (one of) their positional arguments: URL builders, conversions, the vetted-command wrapper.
 _TRANSPARENT_CALLS = frozenset({"graph_url", "str", "list", "tuple", "sorted", "VettedCommand"})
+# Shortcut callees (here and in ``_READ_ONLY_CALLS``) that are source names, not builtins: an import of this origin,
+# or its definition in its own module, is the callee the shortcut assumes. Any other binding shadows it.
+_SHORTCUT_ORIGINS = {
+    "graph_url": "azure_tenant_audit.graph.graph_url",
+    "VettedCommand": "azure_tenant_audit.adapters.read_guard.VettedCommand",
+}
 # String methods whose result is built from the receiver (and, for join and format, the arguments).
 _STRING_METHODS = frozenset({"strip", "lstrip", "rstrip", "lower", "upper", "replace", "format", "join", "removeprefix",
                              "removesuffix"})
@@ -372,7 +378,8 @@ class _Module:
         self.parents = _parents(self.tree)
         self.docstrings = _docstring_nodes(self.tree)
         self.constants = _module_constants(self.tree)
-        # (scope, name) -> [(expr, path)]; a path applies "item" (an element of an iterable) and tuple indexes.
+        # (scope, name) -> [(expr, path)]: a scope is a function, lambda, comprehension or class body, None for the
+        # module; a path applies "item" (an element of an iterable) and tuple indexes.
         self.bindings: dict[tuple[ast.AST | None, str], list[tuple[ast.AST, tuple[Any, ...]]]] = {}
         self.attributes: dict[str, list[tuple[ast.AST, tuple[Any, ...]]]] = {}  # class and ``self.x`` attributes
         self.functions: dict[str, list[ast.AST]] = {}
@@ -388,6 +395,9 @@ class _Module:
         # (function or class, name) -> ast.Global or ast.Nonlocal: where that body's bindings of the name land.
         self.declared: dict[tuple[ast.AST, str], type] = {}
         self._own_names: dict[ast.AST | None, set[str]] | None = None
+        # name -> the origin of each binding of it, in any scope and form (None unless an import or a module-level
+        # definition); "*" -> [None] for a star import, which may bind any name.
+        self._binders: dict[str, list[str | None]] | None = None
         for node in ast.walk(self.tree):
             if isinstance(node, (ast.Global, ast.Nonlocal)):
                 block = _enclosing(node, self.parents, (*_FUNCTION_NODES, ast.ClassDef))
@@ -492,22 +502,62 @@ class _Module:
 
     def _declared_binding(self, node: ast.AST, name: str | None, value: ast.AST) -> None:
         """A binding the scan does not model as a value (a ``def``, ``class``, ``with`` or ``except`` target, a
-        ``match`` capture, an import) joins the binding union of the scope a ``global`` or ``nonlocal``
-        declaration sends it to; ``value`` stands for it there (``_Resolver`` follows an imported name and
-        counts any other as unresolved)."""
+        ``match`` capture, an import) joins the binding union of its scope: the one a ``global`` or ``nonlocal``
+        declaration sends it to, else the scope it is made in (a class body's goes to the class namespace).
+        ``value`` stands for it there (``_Resolver`` follows an imported name and counts any other as unresolved);
+        as a class attribute the statement stands for it, so ``self.name`` stays unresolved."""
         if name is None:
             return
         declared, scope = self._declared(node, name)
         if declared:
             self.bindings.setdefault((scope, name), []).append((value, ()))
             self.by_name.setdefault(name, []).append((value, ()))
+        elif self._in_class_body(node):
+            self.attributes.setdefault(name, []).append((node, ()))
+            self.bindings.setdefault((scope, name), []).append((value, ()))
+        else:
+            self.bindings.setdefault((self.scope_of(node), name), []).append((value, ()))
 
     def _import_scope(self, node: ast.AST, alias: ast.alias, name: str) -> ast.AST | None:
+        self._declared_binding(node, name, alias)
         declared, scope = self._declared(node, name)
-        if declared:
-            self._declared_binding(node, name, alias)
-            return scope
-        return self.scope_of(node)
+        return scope if declared else self.scope_of(node)
+
+    def shadows(self, name: str) -> bool:
+        """The module binds ``name`` itself, in any scope and any form (a parameter, an assignment or other target,
+        ``def``, ``class``, an import or a star import), so a call of that name may not be the builtin or source
+        function a read-only or transparent shortcut assumes. An import of the ``_SHORTCUT_ORIGINS`` origin, or its
+        definition in its own module, does not shadow it."""
+        if self._binders is None:
+            self._binders = {}
+            for node in ast.walk(self.tree):
+                if isinstance(node, ast.arg):
+                    found: list[tuple[str, str | None]] = [(node.arg, None)]
+                elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+                    found = [(node.id, None)]
+                elif isinstance(node, ast.Import):
+                    found = [((alias.asname or alias.name).split(".", 1)[0], None) for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    base = self._import_base(node)
+                    found = [
+                        ("*", None) if alias.name == "*" else (alias.asname or alias.name, base and f"{base}.{alias.name}")
+                        for alias in node.names
+                    ]
+                elif isinstance(node, (*_FUNCTION_NODES, ast.ClassDef)):
+                    top = isinstance(self.parents.get(node), ast.Module) and self.dotted
+                    found = [(node.name, top and f"{self.dotted}.{node.name}")]
+                elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+                    found = [(node.name, None)] if node.name else []
+                elif isinstance(node, ast.MatchMapping):
+                    found = [(node.rest, None)] if node.rest else []
+                else:
+                    continue
+                for bound, origin in found:
+                    self._binders.setdefault(bound, []).append(origin or None)
+        canonical = _SHORTCUT_ORIGINS.get(name)
+        return "*" in self._binders or any(
+            canonical is None or origin != canonical for origin in self._binders.get(name, [])
+        )
 
     def own_names(self, block: ast.AST | None) -> set[str]:
         """Every name ``block`` (a function, lambda, comprehension or class, None for the module) binds itself, in
@@ -540,10 +590,15 @@ class _Module:
 
     def lookup(self, node: ast.AST, name: str) -> Iterator[ast.AST | None]:
         """The scopes whose bindings a use of ``name`` at ``node`` reads, innermost first, ending at the module
-        (None). A ``global`` declaration in the function or class body around the use, or in a function on the
-        way out, goes to the module; a ``nonlocal`` one to the function that binds the name."""
-        declared, scope = self._redirect(_enclosing(node, self.parents, (*_SCOPE_NODES, ast.ClassDef)), name)
+        (None). A use in a class body that binds the name reads the class namespace first (the functions in the
+        class do not see it); ``_Resolver._name`` reads the scopes after it too, for a use before the class binds
+        the name. A ``global`` declaration in the function or class body around the use, or in a function on the way out, goes
+        to the module; a ``nonlocal`` one to the function that binds the name."""
+        block = _enclosing(node, self.parents, (*_SCOPE_NODES, ast.ClassDef))
+        declared, scope = self._redirect(block, name)
         if not declared:
+            if isinstance(block, ast.ClassDef) and name in self.own_names(block):
+                yield block
             scope = self.scope_of(node)
         while True:
             yield scope
@@ -571,10 +626,13 @@ class _Module:
             # A ``global`` or ``nonlocal`` declaration sends the binding to the module or an enclosing function.
             declared, scope = self._declared(owner, target.id)
             if not declared and self._in_class_body(owner):
+                # A class attribute, and a name in the class namespace for the class body's own reads.
                 self.attributes.setdefault(target.id, []).append((value, path))
+                self.bindings.setdefault((scope, target.id), []).append((value, path))
                 return
-            if not declared:
-                # A comprehension's targets belong to the comprehension; anything else to its enclosing scope.
+            if not declared and not isinstance(owner, ast.NamedExpr):
+                # A comprehension's targets belong to the comprehension; a walrus binds in the scope around any
+                # comprehension it is in (``_declared`` found it); anything else in its enclosing scope.
                 scope = self.parents.get(owner) if isinstance(owner, ast.comprehension) else self.scope_of(owner)
             self.bindings.setdefault((scope, target.id), []).append((value, path))
             self.by_name.setdefault(target.id, []).append((value, path))
@@ -666,22 +724,24 @@ class _Module:
                 if node.args or node.keywords:
                     calls.append(node)
 
-        # Calls that may keep or change a container passed to them: all but a read-only builtin or formatter, a
-        # launch (judged on what it is given) and a source function, of this module or imported by name, whose
-        # parameters stay unchanged in its own module.
+        # Calls that may keep or change a container passed to them: all but a read-only builtin or formatter the
+        # module does not shadow, a launch (judged on what it is given) and a source function, of this module or
+        # imported by name, whose parameters stay unchanged in its own module. A shadowed read-only name is not
+        # followed: whatever it is, it may keep or change what it is given.
         handed: list[tuple[_Module, list[ast.AST] | None, list[ast.AST]]] = []
         for call in calls:
             callee = _callee_name(call)
             receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
-            if callee in _READ_ONLY_CALLS or callee in _LOOP_LAUNCHERS or (
+            shadowed = callee in _READ_ONLY_CALLS and self.shadows(callee)
+            if (callee in _READ_ONLY_CALLS and not shadowed) or callee in _LOOP_LAUNCHERS or (
                 callee == "run" and not (isinstance(receiver, ast.Name) and receiver.id in _NON_RUNNER_RECEIVERS)
             ):
                 continue
             if any(_is_launcher(origin) for origin in _origins(self, call.func)):
                 continue
             own = isinstance(call.func, ast.Name) or (isinstance(receiver, ast.Name) and receiver.id in {"self", "cls"})
-            owner, local = self, self.functions.get(callee) if own else None
-            if local is None and isinstance(call.func, ast.Name) and callee in self.imports:
+            owner, local = self, self.functions.get(callee) if own and not shadowed else None
+            if local is None and not shadowed and isinstance(call.func, ast.Name) and callee in self.imports:
                 target, imported = self.imports[callee]
                 other = _load_module(target)
                 if other is not None and imported in other.functions:
@@ -921,14 +981,13 @@ class _Resolver:
         if isinstance(expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
             return [(module, ast.List(elts=[expr.elt], ctx=ast.Load()))], True
         if isinstance(expr, ast.alias):
-            # ``from base import name`` sent to another scope by a declaration: what ``base`` binds ``name`` to.
+            # ``from base import name`` in a scope's binding union: what ``base`` binds ``name`` to.
             statement = module.parents.get(expr)
             base = module._import_base(statement) if isinstance(statement, ast.ImportFrom) else None
             other = _load_module(base) if base else None
             if other is None:
                 return [], False
-            found, complete = self._bound(other, other.bindings.get((None, expr.name), []), depth)
-            return found, complete and not (self.strict and (None, expr.name) in other.mutations()[0])
+            return self._imported(other, expr.name, depth)
         return [], False
 
     def _union(self, module: _Module, exprs: Any, depth: int) -> tuple[list[Value], bool]:
@@ -992,7 +1051,14 @@ class _Resolver:
 
     def _name(self, module: _Module, expr: ast.Name, depth: int) -> tuple[list[Value], bool]:
         grown: list[tuple[ast.AST, tuple[Any, ...]]] = []  # ``x.append(v)`` in a scope that does not bind ``x``
+        own: list[Value] = []  # the class namespace, for a use in a class body that binds the name
+        own_complete = True
         for scope in module.lookup(expr, expr.id):
+            if isinstance(scope, ast.ClassDef):
+                # Read before the class binds the name, the scopes around it answer instead: both count.
+                own, own_complete = self._bound(module, module.bindings.get((scope, expr.id), []), depth)
+                own_complete &= not (self.strict and (scope, expr.id) in module.mutations()[0])
+                continue
             bound = module.bindings.get((scope, expr.id), [])
             parameter = isinstance(scope, (*_FUNCTION_NODES, ast.Lambda)) and expr.id in _parameter_names(scope)
             if not parameter and all(id(value) in module._grown for value, _ in bound):
@@ -1005,16 +1071,26 @@ class _Resolver:
                     values, ok = self._arguments(module, scope, expr.id, depth)
                     found += values
                     complete &= ok
-                return found, complete and not (self.strict and (scope, expr.id) in module.mutations()[0])
+                mutated = self.strict and (scope, expr.id) in module.mutations()[0]
+                return found + own, complete and own_complete and not mutated
         if expr.id in module.imports:
             target, name = module.imports[expr.id]
             other = _load_module(target)
             if other is not None:
-                found, complete = self._bound(other, other.bindings.get((None, name), []), depth)
+                found, complete = self._imported(other, name, depth)
                 found += self._bound(module, grown, depth)[0]
-                mutated = self.strict and ((None, name) in other.mutations()[0] or (None, expr.id) in module.mutations()[0])
-                return found, complete and not mutated
-        return (self._bound(module, grown, depth)[0] if grown else []), False
+                mutated = self.strict and (None, expr.id) in module.mutations()[0]
+                return found + own, complete and own_complete and not mutated
+        return (self._bound(module, grown, depth)[0] if grown else []) + own, False
+
+    def _imported(self, other: _Module, name: str, depth: int) -> tuple[list[Value], bool]:
+        """What ``other`` binds ``name`` to at module level. A binding there that is itself an import is not
+        followed on: the name is then unresolved."""
+        bound = other.bindings.get((None, name), [])
+        direct = [(value, path) for value, path in bound if not isinstance(value, ast.alias)]
+        found, complete = self._bound(other, direct, depth)
+        mutated = self.strict and (None, name) in other.mutations()[0]
+        return found, complete and len(direct) == len(bound) and not mutated
 
     def _arguments(self, module: _Module, function: ast.AST, name: str, depth: int) -> tuple[list[Value], bool]:
         """Values passed for parameter ``name`` at every call of ``function`` in the same module."""
@@ -1091,7 +1167,9 @@ class _Resolver:
                 return found + items, complete and ok and step_ok
             return self._union(module, parts, depth)
         if name in _TRANSPARENT_CALLS:
-            return self._union(module, call.args, depth)
+            found, complete = self._union(module, call.args, depth)
+            # A name the module binds itself may not be the conversion: its arguments are scanned, its value unknown.
+            return found, complete and not module.shadows(name)
         if name in module.functions:
             return self._returns(module, module.functions[name], depth)
         if isinstance(call.func, ast.Name) and name in module.imports:
@@ -1552,7 +1630,7 @@ def _origins(
 
 
 def _launcher_table() -> dict[str, tuple[int, int | None]]:
-    """Process launchers outside ``subprocess`` (DEC-011 L1) by import origin, with the slice of positional
+    """Process launchers outside ``subprocess`` (v2 DEC-011 L1) by import origin, with the slice of positional
     arguments that carry the program, argv or shell text (a spawn mode or an environment mapping is skipped)."""
     table: dict[str, tuple[int, int | None]] = {
         "os.system": (0, 1), "os.popen": (0, 1), "os.startfile": (0, None), "os.posix_spawn": (0, 2),
@@ -2048,7 +2126,7 @@ def test_aliased_process_launch_with_unseen_input_is_reported(source: str) -> No
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        # DEC-011 L1: launchers outside ``subprocess``, shell text and argv forms, under any import spelling.
+        # v2 DEC-011 L1: launchers outside ``subprocess``, shell text and argv forms, under any import spelling.
         ('import os\ndef f():\n    os.system("pwsh -NoProfile -Command Set-Mailbox x")\n',
          "Set-Mailbox is not on the read allow-list"),
         ('import os\ndef f():\n    return os.popen("pwsh -c \'Remove-Mailbox x\'").read()\n',
@@ -2075,7 +2153,7 @@ def test_aliased_process_launch_with_unseen_input_is_reported(source: str) -> No
         ('import asyncio\nasync def f():\n    loop = asyncio.get_running_loop()\n'
          '    await loop.subprocess_exec(object, "pwsh", "-Command", "Set-Mailbox x")\n',
          "Set-Mailbox is not on the read allow-list"),
-        # DEC-011 L2: a launcher reached through getattr or an import by literal name is resolved.
+        # v2 DEC-011 L2: a launcher reached through getattr or an import by literal name is resolved.
         ('import subprocess\ndef f():\n    getattr(subprocess, "Popen")(["pwsh", "-Command", "Set-Mailbox x"])\n',
          "Set-Mailbox is not on the read allow-list"),
         ('import importlib\ndef f():\n    importlib.import_module("subprocess").check_output(["pwsh", "-Command", "Set-Mailbox x"])\n',
@@ -2125,7 +2203,7 @@ def test_untraceable_launches_are_exactly_the_reviewed_ones() -> None:
 @pytest.mark.parametrize(
     ("source", "why"),
     [
-        # DEC-011 L2: a launcher in a dict, a list, a class attribute or a self attribute.
+        # v2 DEC-011 L2: a launcher in a dict, a list, a class attribute or a self attribute.
         ('import subprocess\nLAUNCH = {"go": subprocess.run}\ndef f():\n    LAUNCH["go"](["pwsh", "-Command", "Set-Mailbox x"])\n',
          "subprocess.run used as a value"),
         ('import subprocess as sp\nLAUNCHERS = [sp.Popen]\ndef f():\n    LAUNCHERS[0](["pwsh"])\n',
@@ -2507,6 +2585,166 @@ def test_a_google_handle_declared_global_is_a_module_handle() -> None:
     assert sorted(_non_reads(source)) == ["<untraceable handle service bound at module scope>", "users.delete"]
 
 
+# Plan v4 M05-T01: the limits v3 DEC-008 left open, closed for planted cases under the same fail-closed rule. Each
+# planted case passed silently before. A read-only hand-off or transparent conversion is taken on trust only when the
+# module does not bind the callee name itself, in any form or scope.
+def _handed_to(binding: str, call: str = "info(argv)") -> str:
+    return f'import subprocess\n{binding}\ndef audit():\n    argv = {_ARGV}\n    {call}\n    subprocess.run(argv)\n'
+
+
+_SHADOWED_HAND_OFFS = [
+    # The re-scope's case: a local function that shadows ``info`` and changes its argument.
+    _handed_to('def info(value):\n    value.append("Set-Mailbox x")'),
+    # The same name bound by an import, a star import, an assignment, a class, a method or a parameter.
+    _handed_to("from helpers import info"),
+    _handed_to("from helpers import *"),
+    _handed_to('def fill(value):\n    value.append("Set-Mailbox x")\ninfo = fill'),
+    _handed_to('class info:\n    def __init__(self, value):\n        value.append("Set-Mailbox x")'),
+    _handed_to('class R:\n    def info(self, value):\n        value.append("Set-Mailbox x")', "R().info(argv)"),
+    f'import subprocess\ndef audit(info):\n    argv = {_ARGV}\n    info(argv)\n    subprocess.run(argv)\n',
+    # Any read-only name, a builtin or a source function bound from somewhere other than its own module.
+    _handed_to("from helpers import dumps", "dumps(argv)"),
+    _handed_to("def len(value):\n    value.clear()\n    return 0", "len(argv)"),
+    _handed_to("from helpers import VettedCommand", "VettedCommand(argv)"),
+    _handed_to("from helpers import graph_url", "graph_url(argv)"),
+]
+
+
+@pytest.mark.parametrize("source", _SHADOWED_HAND_OFFS)
+def test_a_shadowed_read_only_hand_off_leaves_the_launch_unresolved(tmp_path: Path, source: str) -> None:
+    unresolved = _command_sites_in(_planted(tmp_path, source))[1]
+    assert [qualname for _, qualname, _ in unresolved] == ["audit"], unresolved
+
+
+def _converted_by(binding: str, call: str = "list(ARGV)") -> str:
+    return f'import subprocess\nARGV = {_ARGV}\n{binding}\ndef audit():\n    subprocess.run({call})\n'
+
+
+_SHADOWED_CONVERSIONS = [
+    # The re-scope's case: a local function that shadows ``list``.
+    _converted_by('def list(value):\n    return ["pwsh", "-Command", "Set-Mailbox x"]'),
+    # The same name bound by an import, a star import, an assignment, a class, a method or a parameter.
+    _converted_by("from helpers import list"),
+    _converted_by("from helpers import *"),
+    _converted_by('def build(value):\n    return ["pwsh", "-Command", "Set-Mailbox x"]\nlist = build'),
+    _converted_by("class tuple:\n    def __init__(self, value):\n        pass", "tuple(ARGV)"),
+    _converted_by("class R:\n    def sorted(self, value):\n        return value", "R().sorted(ARGV)"),
+    f'import subprocess\nARGV = {_ARGV}\ndef audit(str):\n    subprocess.run(str(ARGV))\n',
+    # A source function or class bound from somewhere other than its own module.
+    _converted_by("from helpers import graph_url", "graph_url(ARGV)"),
+    _converted_by("from helpers import VettedCommand", "VettedCommand(ARGV)"),
+]
+
+
+@pytest.mark.parametrize("source", _SHADOWED_CONVERSIONS)
+def test_a_shadowed_transparent_conversion_leaves_the_launch_unresolved(tmp_path: Path, source: str) -> None:
+    unresolved = _command_sites_in(_planted(tmp_path, source))[1]
+    assert [qualname for _, qualname, _ in unresolved] == ["audit"], unresolved
+
+
+def test_a_shortcut_callee_the_module_does_not_shadow_stays_resolved(tmp_path: Path) -> None:
+    # Builtins the module never binds, and the source names imported from their own modules, keep the shortcut.
+    source = (
+        'import subprocess\nfrom azure_tenant_audit.adapters.read_guard import VettedCommand\n'
+        f'from azure_tenant_audit.graph import graph_url\nARGV = {_ARGV}\n'
+        'def audit():\n    VettedCommand(ARGV)\n    graph_url(ARGV)\n    len(ARGV)\n'
+        '    subprocess.run(list(ARGV))\n    subprocess.run(sorted(VettedCommand(graph_url(ARGV))))\n'
+    )
+    sites, unresolved = _command_sites_in(_planted(tmp_path, source))
+    assert unresolved == [], unresolved
+    assert _command_violations(sites)[0] == []
+
+
+def _rebound_after_literal(body: str, where: str) -> str:
+    """``body`` rebinds ``argv`` after a literal assignment, in a function, at module level or in a class body (over
+    a module-level literal too); the launch is in ``audit`` or in the class body ``Job``."""
+    head = f"import contextlib, subprocess\nargv = {_ARGV}\n"
+    if where == "module":
+        return f"{head}{body}\ndef audit():\n    subprocess.run(argv)\n"
+    indented = body.replace("\n", "\n    ")
+    if where == "class":
+        return f"{head}class Job:\n    argv = {_ARGV}\n    {indented}\n    subprocess.run(argv)\n"
+    return f"import contextlib, subprocess\ndef audit():\n    argv = {_ARGV}\n    {indented}\n    subprocess.run(argv)\n"
+
+
+_UNMODELLED_BINDING_FORMS = [
+    "from helpers import argv",
+    "import shlex as argv",
+    f"with contextlib.nullcontext({_SET_MAILBOX}) as argv:\n    pass",
+    f"with contextlib.nullcontext((1, {_SET_MAILBOX})) as (_, argv):\n    pass",
+    "def argv():\n    pass",
+    "class argv:\n    pass",
+    f"try:\n    raise ValueError({_SET_MAILBOX})\nexcept ValueError as argv:\n    pass",
+    f"match {_SET_MAILBOX}:\n    case argv:\n        pass",
+    f"match {_SET_MAILBOX}:\n    case [*argv]:\n        pass",
+    'match {"a": 1}:\n    case {**argv}:\n        pass',
+]
+
+
+@pytest.mark.parametrize("where", ["function", "module", "class"])
+@pytest.mark.parametrize("body", _UNMODELLED_BINDING_FORMS)
+def test_an_undeclared_binding_the_scan_cannot_follow_leaves_the_launch_unresolved(
+    tmp_path: Path, body: str, where: str
+) -> None:
+    # Without a ``global`` or ``nonlocal`` declaration, an import, plain ``with``, ``def``, ``class``, ``except`` or
+    # ``match`` binding after a literal assignment joins its scope's binding union too (a class body's namespace).
+    unresolved = _command_sites_in(_planted(tmp_path, _rebound_after_literal(body, where)))[1]
+    assert [qualname for _, qualname, _ in unresolved] == ["Job" if where == "class" else "audit"], unresolved
+
+
+@pytest.mark.parametrize("where", ["function", "module"])  # a comprehension walrus in a class body is a SyntaxError
+@pytest.mark.parametrize(
+    "body", [f'[argv := {_SET_MAILBOX} for _ in "x"]', f'[[argv := {_SET_MAILBOX} for _ in "x"] for _ in "y"]']
+)
+def test_a_comprehension_walrus_binds_in_the_scope_around_it(tmp_path: Path, body: str, where: str) -> None:
+    source = _rebound_after_literal(body, where)
+    violations, _ = _command_violations(_command_sites_in(_planted(tmp_path, source))[0])
+    assert any("Set-Mailbox is not on the read allow-list" in item for item in violations), violations
+
+
+@pytest.mark.parametrize("where", ["function", "module", "class"])
+def test_an_undeclared_import_joins_its_scope_and_is_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    commands = _planted(tmp_path, f"argv = {_SET_MAILBOX}\n", "commands.py", "planted_m05.commands")
+    monkeypatch.setitem(_MODULE_CACHE, "planted_m05.commands", commands)
+    source = _rebound_after_literal("from planted_m05.commands import argv", where)
+    sites, unresolved = _command_sites_in(_planted(tmp_path, source, "user.py", "planted_m05.user"))
+    assert any("Set-Mailbox is not on the read allow-list" in item for item in _command_violations(sites)[0])
+    assert unresolved == []
+
+
+_CLASS_LOCAL_READS = [
+    # A launch in a class body reads the class's own binding of the name, by assignment or loop target.
+    f"import subprocess\nargv = {_ARGV}\nclass Job:\n    argv = {_SET_MAILBOX}\n    subprocess.run(argv)\n",
+    f"import subprocess\nargv = {_ARGV}\nclass Job:\n    for argv in [{_SET_MAILBOX}]:\n        pass\n"
+    "    subprocess.run(argv)\n",
+    # In a class inside a function, over the function's binding.
+    f"import subprocess\ndef audit():\n    argv = {_ARGV}\n    class Job:\n        argv = {_SET_MAILBOX}\n"
+    "        subprocess.run(argv)\n",
+    # A method's default value and a comprehension's first iterable are evaluated in the class body.
+    f"import subprocess\nargv = {_ARGV}\nclass Job:\n    argv = {_SET_MAILBOX}\n    def go(self, command=argv):\n"
+    "        subprocess.run(command)\nJob().go()\n",
+    f"import subprocess\nargv = {_ARGV}\nclass Job:\n    argv = {_SET_MAILBOX}\n"
+    "    done = [subprocess.run(item) for item in [argv]]\n",
+]
+
+
+@pytest.mark.parametrize("source", _CLASS_LOCAL_READS)
+def test_a_class_body_name_resolves_in_the_class_namespace(tmp_path: Path, source: str) -> None:
+    violations, _ = _command_violations(_command_sites_in(_planted(tmp_path, source))[0])
+    assert any("Set-Mailbox is not on the read allow-list" in item for item in violations), violations
+
+
+def test_a_class_namespace_is_not_read_from_its_methods(tmp_path: Path) -> None:
+    # A method reads the module's name, not the class body's; a class-local literal read in the body stays resolved.
+    source = (f"import subprocess\nargv = {_ARGV}\nclass Job:\n    argv = {_SET_MAILBOX}\n    def go(self):\n"
+              f"        subprocess.run(argv)\nclass Probe:\n    argv = {_ARGV}\n    subprocess.run(argv)\n")
+    sites, unresolved = _command_sites_in(_planted(tmp_path, source))
+    assert unresolved == [], unresolved
+    assert _command_violations(sites)[0] == []
+
+
 _IMPORTER_FORMS = (
     "importlib.import_module", "importlib.__import__", "builtins.__import__", "__import__",
 )
@@ -2788,15 +3026,15 @@ def _google_calls_in(source: str, label: str) -> list[tuple[str, int, str, ast.A
     on it, inline or through the name it is bound to, and no ``HttpRequest`` member (``execute``, ``uri``,
     ``body``, ``to_json`` ...) is touched on it. Every other call is a request and is recorded, whether it is
     executed inline, bound to a name and executed later, inspected, passed on or returned. ``getattr(x, "name")``
-    with a literal name reads as ``x.name`` (DEC-011 L3).
+    with a literal name reads as ``x.name`` (v2 DEC-011 L3).
 
-    Names are resolved per Python scope, not per module (DEC-011 L4): a name is a handle in the function, lambda,
+    Names are resolved per Python scope, not per module (v2 DEC-011 L4): a name is a handle in the function, lambda,
     comprehension or class that binds it, only when every binding there is a service, an accessor or one method
     reference, and its uses there make it one. A name bound more than one way is a request. A default value,
     annotation or decorator is read in the scope that defines the function, a comprehension's first iterable in
     the scope around it, as Python evaluates them.
 
-    Fails closed (DEC-011 L3): a service or handle that leaves the names the scan follows (stored in a container
+    Fails closed (v2 DEC-011 L3): a service or handle that leaves the names the scan follows (stored in a container
     or attribute, passed as an argument or default, returned, bound to a name that is not a handle) or is read
     through ``getattr`` with a computed name is recorded as an ``<untraceable ...>`` call, which is not a read
     method; so is a handle bound at module scope (importable elsewhere) or in a class body (read as an
@@ -3050,7 +3288,7 @@ _GMAIL_SETTINGS = (
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        # DEC-011 L3: a method fetched by getattr with a literal name, called inline or through a bound name.
+        # v2 DEC-011 L3: a method fetched by getattr with a literal name, called inline or through a bound name.
         (_GMAIL_SETTINGS + '    getattr(settings, "updateImap")(userId="me", body={}).execute()\n', ["updateImap"]),
         (_GMAIL_SETTINGS + '    update = getattr(settings, "updateImap")\n    update(userId="me", body={}).execute()\n',
          ["updateImap"]),
@@ -3086,7 +3324,7 @@ def test_google_calls_held_or_fetched_indirectly_fail_closed(source: str, expect
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        # DEC-011 L4: the same name is a handle in one function and a request in another.
+        # v2 DEC-011 L4: the same name is a handle in one function and a request in another.
         ('def a(self):\n    service = self._service("admin", "directory_v1")\n    users = service.users()\n'
          '    return users.list(customer="c").execute()\n'
          'def b(self):\n    service = self._service("admin", "directory_v1")\n'
