@@ -8,3 +8,5 @@ changes: none in the repo (no new commit; branch head 409ddb8). Evidence file wr
 verification: `ruff check --no-cache .` at 409ddb8: pass. `make lint` at 409ddb8: pass. `make test` not run, by the brief; the orchestrator's tracked job runs it. `make contract-smoke` and compare-run-outputs were not re-run because the code has not changed since they passed at 409ddb8 in the previous round. `git status --porcelain`: empty.
 risks: The same-pass-count criterion depends on the orchestrator's full-suite job at 409ddb8. The B905 change in the vendored file `tenant-bootstrap/vendor/.../evaluation.py` needs Python 3.10 or later if that script is ever run outside the project's 3.11 floor.
 questions_for_g: none
+
+orchestrator note (11 Nov 2026): full suite at head 409ddb8 under a tracked job: lint clean; 22623 passed, 273 skipped, 7 deselected, 34 xfailed. Base 5cc8518: 22621 passed, 275 skipped; total 22896 in both. The two extra passes are storage-gated tests (tests/test_key_guard_swaps.py, tests/test_index_unproved_storage.py) that skip on encrypted internal temp storage and run on the external volume (REV-M00-T01). Contract-smoke digests: 43 of 43 match.

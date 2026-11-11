@@ -1,0 +1,1 @@
+--task M07-T09 --role terra --account claude-1 --readonly --tags debug --timeout 3000 --max-turns 150 --budget 12 --brief .plan/work/M07-T09/brief-src.md

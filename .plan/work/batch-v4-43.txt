@@ -1,0 +1,1 @@
+--task REV-M07-populator --role codex --model gpt-6.1-sol --account codex2 --readonly --timeout 1500 --brief .plan/work/REV-M07-populator/brief-src-6.md

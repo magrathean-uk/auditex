@@ -1,0 +1,1 @@
+--task REV-M00-T01 --role sol --account claude-1 --brief .plan/work/REV-M00-T01/brief-src-2.md --readonly --sha task/M00-T01-ruff-wider --tags cross-cutting --timeout 3600 --max-turns 150 --budget 25 --var TASK=M00-T01 --var MILESTONE=.plan/milestones/M00-foundation.md --var BRANCH=task/M00-T01-ruff-wider
