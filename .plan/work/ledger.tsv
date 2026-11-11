@@ -361,3 +361,6 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T16:06:40Z	REV-M07-populator	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	612		done	9bc817b
 2026-11-11T16:16:26Z	REV-M07-populator	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	231		done	9bc817b
 2026-11-11T16:18:30Z	REV-M07-populator	codex	codex2	gpt-6.1-sol	medium	readonly	0	49		done	9bc817b
+2026-11-11T16:31:29Z	M02-T02	sol	claude-1	claude-opus-5-5	high	branch	0	6122	8.7989	done	task/M02-T02-heldout-set
+2026-11-11T16:32:03Z	M02-T04	sol	claude-3	claude-opus-5-5	xhigh	branch	0	3286	3.0631	done	task/M02-T04-judging-method
+2026-11-11T16:40:10Z	REV-M02-T02	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	519		done	e62aab4

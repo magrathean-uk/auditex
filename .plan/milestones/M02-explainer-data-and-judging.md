@@ -11,8 +11,8 @@ Track B, same rules as M01 (results only in `.plan/work/<id>/result.md`; code an
 Before any large run: the held-out twin count is reconciled under one written definition, a clean held-out set exists, the deterministic checks are frozen before any training data is generated, prose training data for the explainer job is built from training-split cases only and passes those frozen checks, and a judging method for free text (deterministic checks first, then a calibrated open-weight judge, no paid API) and its acceptance bar are validated and recorded.
 
 ## Definition of Done
-- [ ] The twin definition is written and the 137 versus 318 counts are explained under it: `grep -q '^twin-definition: ' .plan/work/M02-T01/result.md && grep -qx 'twin-counts: reconciled' .plan/work/M02-T01/result.md`
-- [ ] The clean held-out set has zero twins against every training split by that definition, no policy above its stated share cap, and is sealed in the kit with a recorded sha256, recomputed by the verifier: `grep -qx 'heldout-twins: 0' .plan/work/M02-T02/result.md && grep -qE '^heldout-sha256: [0-9a-f]{64}$' .plan/work/M02-T02/result.md && "$AIRR_KIT/bin/kit-check" twins --result .plan/work/M02-T02/result.md`
+- [x] The twin definition is written and the 137 versus 318 counts are explained under it: `grep -q '^twin-definition: ' .plan/work/M02-T01/result.md && grep -qx 'twin-counts: reconciled' .plan/work/M02-T01/result.md`
+- [x] The clean held-out set has zero twins against every training split by that definition, no policy above its stated share cap, and is sealed in the kit with a recorded sha256, recomputed by the verifier: `grep -qx 'heldout-twins: 0' .plan/work/M02-T02/result.md && grep -qE '^heldout-sha256: [0-9a-f]{64}$' .plan/work/M02-T02/result.md && "$AIRR_KIT/bin/kit-check" twins --result .plan/work/M02-T02/result.md`
 - [ ] The judging method is calibrated: deterministic checks catch every planted defect of their classes, and the judge meets its detection and position-swap consistency thresholds, recomputed from the saved judgements: `grep -qx 'judge-calibration: pass' .plan/work/M02-T04/result.md && "$AIRR_KIT/bin/kit-check" calibration --result .plan/work/M02-T04/result.md`
 - [ ] The prose training data covers every policy and verdict state in the template, comes only from training-split cases, and every kept row passes the deterministic checks frozen by M02-T04 (same checks hash): `grep -qx 'prose-data: pass' .plan/work/M02-T03/result.md && h=$(sed -n 's/^checks-sha256: \([0-9a-f]\{64\}\)$/\1/p' .plan/work/M02-T04/result.md) && test -n "$h" && grep -qx "checks-sha256: $h" .plan/work/M02-T03/result.md && "$AIRR_KIT/bin/kit-check" checks --result .plan/work/M02-T03/result.md`
 - [ ] The acceptance bar is validated against the template explainer and planted bad outputs and recorded as a DECISIONS.md entry before any M03 run: `grep -qx 'bar-validated: yes' .plan/work/M02-T05/result.md && grep -q '^## DEC-[0-9]* Explainer acceptance bar' .plan/DECISIONS.md && "$AIRR_KIT/bin/kit-check" bar --result .plan/work/M02-T05/result.md`
@@ -23,7 +23,7 @@ Before any large run: the held-out twin count is reconciled under one written de
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M02-T01 | Reconcile the held-out twin counts under one written definition | terra | S | - | done |
-| M02-T02 | Build and seal the clean held-out set | codex | M | - | todo |
+| M02-T02 | Build and seal the clean held-out set | codex | M | - | done |
 | M02-T04 | Build, freeze and calibrate the judging method for free text | codex | M | hard | todo |
 | M02-T03 | Build the prose training data for the explainer job | codex | M | - | todo |
 | M02-T05 | Validate and record the explainer acceptance bar | sol | S | - | todo |
