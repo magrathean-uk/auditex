@@ -1,20 +1,28 @@
 ## RESULT PLAN-v4
 status: done
-summary: Second revision round on the plan v4 draft. The reset commit 761b4c6 stands from round one; the plan commit is 5efc94a on task/PLAN-v4-plan-v4. current: 4% (as percent.py computes it; M00 50%).
-Fixed gaps 5, 6, 7, N1 and N2: exact `bc` budget sums, the M04 digest-strategy file permission set by G's design decision, M06 checks in the candidate worktree, M02-T02 after M01-T03, and per-task `runs/usage/<task-id>/` folders.
-Added G's scope-approval rulings: Mistral Small 4 as teacher, no tell-first download lines, and STATE noting that the orchestrator records DEC-001's date and status. Notes: .plan/work/PLAN-v4/notes.md
-changes: .plan/master-plan.md, .plan/ARCHITECTURE.md, .plan/DECISIONS.md, .plan/STATE.md, .plan/milestones/M01-airr-bring-up.md, M02-explainer-data-and-judging.md, M03-explainer-training.md, M04-d5-keyed-pseudonyms.md, M06-release-1-5-0.md; notes.md in the work folder
-verification: PASS percent.py --repo . --check (4%); PASS budget predicate probes 14/14 in bash, zsh, sh; PASS candidate-worktree probe (make ran at the candidate after a later .plan commit, dirty worktree fails); PASS digest-strategy probe (seed pass, normalise and unknown fail); PASS bash -n on 92 DoD and verify commands; PASS git diff --check; PASS no workstation paths in the plan files
-risks: The candidate-worktree predicate depends on CLEAN_DEV_WORK and the main .venv, and it is tested only on a toy repository, not a real release-check. The digest-strategy line relies on the orchestrator writing `- digest-strategy:` into G's M04 design decision. Running a zsh -c probe created a throwaway worktree under the real 4TB worktrees/auditex folder; I removed it with git worktree remove.
-questions_for_g: none new; the M04 design gate will carry the key location and the digest strategy (recommendation: a key file in the run folder, seeded in contract-smoke).
+summary: I fixed the check's three defects in commit c33d6e8 on task/PLAN-v4-plan-v4 and changed nothing else.
+- M04-T03 no longer lists mcp_server.py as an allowed file. The MCP notice now goes through redact_payload, and the verify fails if mcp_server.py changes.
+- M00-T06 can now change cli.py to dispatch, validate and forward the `--as-of` date to the offline run handlers, not only add the parser option.
+- The M00-T06 criterion, its verify and the M00 DoD item now require one shared date, written out as a fixed date on each offline invocation in the contract smoke.
+The reset commit from the first round still stands. Repair notes are under "Amendment 1 repair" in .plan/work/PLAN-v4/notes.md. Percentage: 12% before and 12% after the repair. current: 12%
+changes: .plan/milestones/M00-foundation.md, .plan/milestones/M04-d5-keyed-pseudonyms.md (plus notes.md in the work folder). STATE.md and DECISIONS.md were not touched.
+verification:
+- PASS: percent.py --repo . --check on c33d6e8 (exit 0)
+- PASS: git diff --check 8749be5 HEAD
+- PASS: shell syntax check of the new M00 commands in sh, bash and zsh, and of the M04-T03 verify in bash
+- PASS: date predicate probe in sh, bash and zsh. The same fixed date on all eight offline runs exits 0; a computed date exits 1. The current tree, two different dates, seven of eight runs and eight other bad forms also exit 1.
+- PASS: no workstation paths in either milestone file
+- Not run: percent.py --write, which the brief forbids. The master-plan table still shows M00 at 58 until the orchestrator's checkpoint.
+risks: The predicate expects the space form `--as-of YYYY-MM-DD` on each recipe line and does not accept a Makefile variable. M00-T06's criterion says so, so the implementer knows.
+questions_for_g: none
 ### Findings
 | id | name | weight | DoD items | ticked |
 |---|---|---|---|---|
-| M00 | foundation | 8 | 12 | 6 |
-| M01 | airr-bring-up | 15 | 8 | 0 |
-| M02 | explainer-data-and-judging | 15 | 7 | 0 |
-| M03 | explainer-training | 17 | 8 | 0 |
-| M04 | d5-keyed-pseudonyms | 18 | 8 | 0 |
-| M05 | scanners-and-hygiene | 12 | 6 | 0 |
-| M06 | release-1-5-0 | 15 | 10 | 0 |
-current: 4% (percent.py). Revision notes: .plan/work/PLAN-v4/notes.md
+| M00 | foundation | 8 | 11 | 6 |
+| M01 | airr-bring-up | 15 | see file | 38% |
+| M02 | explainer-data-and-judging | 15 | see file | 0% |
+| M03 | explainer-training | 17 | see file | 0% |
+| M04 | d5-keyed-pseudonyms | 18 | see file | 13% |
+| M05 | scanners-and-hygiene | 12 | see file | 0% |
+| M06 | release-1-5-0 | 15 | see file | 0% |
+Honest current percentage: 12% (M00 54%). Revision notes: .plan/work/PLAN-v4/notes.md

@@ -94,8 +94,8 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 <!-- milestones:begin -->
 | id | name | weight | % | status |
 |---|---|---|---|---|
-| M00 | foundation | 8 | 58 | active |
-| M01 | airr-bring-up | 15 | 38 | planned |
+| M00 | foundation | 8 | 54 | active |
+| M01 | airr-bring-up | 15 | 50 | planned |
 | M02 | explainer-data-and-judging | 15 | 0 | planned |
 | M03 | explainer-training | 17 | 0 | planned |
 | M04 | d5-keyed-pseudonyms | 18 | 13 | planned |
