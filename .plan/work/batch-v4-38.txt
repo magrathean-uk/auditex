@@ -1,0 +1,1 @@
+--task M07-T06 --role sol --brief .plan/work/M07-T06/brief-src-2.md --branch --slug kit-round-7p --tags hard --account claude-3 --max-turns 300 --timeout 10800 --budget 50
