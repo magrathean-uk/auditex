@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 28% (was 24%)
+overall: 30% (was 28%)
 milestone: M00-foundation 85%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: ad01e24 2026-11-11T18:53:00Z
+last_checkpoint: df3edce 2026-11-11T19:04:59Z
 
 ## Next tasks
 - M00-T04 Re-run the gate chain on main after the M00 merges (luna)
@@ -22,12 +22,12 @@ last_checkpoint: ad01e24 2026-11-11T18:53:00Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 25% orchestrator
+claude 26% orchestrator
 claude-1 40% ok
 claude-2 47% shared
-claude-3 31% ok
+claude-3 32% ok
 claude-4 86% hot
 claude-5 63% ok
 codex 91% hot
-codex2 80% ok
+codex2 81% ok
 <!-- quota:end -->
