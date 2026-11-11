@@ -20,12 +20,14 @@ Track A, product release 1.5.0:
 - `make lint` enforces Ruff E4, E7, E9, F, W, I, B and UP over the whole repository, and `make lint`, `make test`,
   `make contract-smoke`, `make acceptance` (full v3.9.1 replay, no skips, the value-rule contract test included),
   `make release-check` and `make audit-deps` exit 0 on the release commit; two plain `make dist` builds are
-  byte-identical; the contract-smoke digest comparison passes, with digests changed only for pseudonym-bearing
-  artefacts in M04-T03.
-- Shareable output pseudonyms come from a private per-run key: knowing the run path reproduces no pseudonym, and
-  the key appears in no report, pack, export, notification, MCP output or log; G approved the design; privacy
-  reviews by both providers approve the merged heads; `CONTRACT_VERSION`, schemas and the output contract change
-  together and the notes say what it means for 1.4.0 bundles.
+  byte-identical; the contract-smoke digest comparison passes and no digest depends on the run date (`--as-of` on
+  every offline smoke run, DEC-005); M04-T03 changes only DEC-004's two label-only digest entries.
+- Shareable output pseudonyms come from a private per-run key made at collection (older runs are masked with a
+  temporary key until `auditex report prepare-key`): knowing the run path reproduces no pseudonym, no read path
+  writes a run, and the key appears in no report, pack, export, notification, MCP output or log; G approved the
+  design (DEC-004) and its six amendments are tested; privacy reviews by both providers approve the merged heads;
+  `CONTRACT_VERSION`, schemas and the output contract change together and the notes say what it means for 1.4.0
+  bundles.
 - Names with middle initials or titles and name-equal mapping keys are masked or counted, with probes at most
   tokens x 6 and the 90,000-record HTML peak within the baseline plus 15 percent.
 - The v3 DEC-008 and DEC-009 scanner limits are closed for planted cases under the fail-closed rule; any other class
@@ -106,10 +108,11 @@ Track B: M01-T01 and M01-T03 in parallel; M01-T02 after G's login; then M01-T04 
 beside M01; M02-T02 (CPU) after M02-T01 and M01-T03 (it needs `kit-check`); M01-T04 -> M02-T04 (freezes the checks)
 -> M02-T05; M02-T03 after M02-T04 and M02-T02; M03-T01 after M01-T05, M02-T03, the bar and the budget look; then
 M03-T02 -> M03-T03 -> M03-T04.
-Track A: M00-T05, then M00-T01 alone, then M00-T02 and M00-T03 in parallel, then M00-T04. M04-T01 (read-only design)
-may run during M00. After M00: M04-T02 -> M04-T03 (after G's design DEC) -> M04-T04 -> M04-T05; M05-T01 and M05-T02 in
-parallel beside M04; M05-T05 at any time after M00; M05-T03 after M05-T01, M05-T02 and M04-T05; M05-T04 after
-M04-T05 and M05-T03. M06 after M00, M04 and M05.
+Track A: M00-T05, then M00-T01 alone, then M00-T02 and M00-T03 in parallel, M00-T06 after M00-T02 (shared
+`Makefile`) beside M00-T03, then M00-T04. M04-T01 (read-only design) may run during M00. After M00: M04-T02 ->
+M04-T03 (after G's design DEC) -> M04-T04 -> M04-T05; M05-T01 and M05-T02 in parallel beside M04; M05-T05 at any
+time after M00; M05-T03 after M05-T01, M05-T02 and M04-T05; M05-T04 after M04-T05 and M05-T03. M06 after M00, M04
+and M05.
 
 ## Top risks
 1. Isambard-AI is aarch64 with unknown compute-node internet, wheel support for PEFT and bitsandbytes, and driver

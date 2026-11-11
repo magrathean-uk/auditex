@@ -42,7 +42,7 @@ Before any large run: the held-out twin count is reconciled under one written de
 - Freezes the set in the kit with a manifest and sha256; it is used once per build in M03-T03 and never for selection. Adds the `twins` subcommand.
 - Writes `heldout-twins: 0`, `heldout-sha256: <64 hex>`, the row and policy counts and `gpu-hours: heldout 0` under `### Findings`. CPU only.
 - verify: `grep -qx 'heldout-twins: 0' .plan/work/M02-T02/result.md && "$AIRR_KIT/bin/kit-check" twins --result .plan/work/M02-T02/result.md`
-- files: `heldout/**` (except `heldout/notes/**` and `heldout/twin_definition.py`) and `checks/twins.py` in the AIRR kit folder; `.plan/work/M02-T02/result.md`
+- files: `heldout/**` (except `heldout/notes/**` and `heldout/twin_definition.py`), `checks/twins.py` and `checks/SHA256SUMS` (its own check modules' lines only, DEC-003; M02-T02, M02-T04 and M02-T05 never hold it at the same time) in the AIRR kit folder; `.plan/work/M02-T02/result.md`
 
 ### M02-T04 Build, freeze and calibrate the judging method for free text
 - Preconditions: M01-T04 done (the judge runs on the allocation in the qualified environment).
@@ -51,7 +51,7 @@ Before any large run: the held-out twin count is reconciled under one written de
 - Calibration set of planted defects (wrong verdict, invented value, missing remediation step, wrong policy, contradictory step, padding): the deterministic checks catch every planted defect of their own classes; the judge flags at least 90 per cent of the rest and agrees with itself under position swap on at least 90 per cent of pairs. Noise band by bootstrap over cases. Raw judgements are saved with `SHA256SUMS`; adds the `checks` and `calibration` subcommands.
 - Saves the scheduler accounting export of its jobs under `runs/usage/M02-T04/`. Writes `judge-calibration: pass`, `checks-sha256: <64 hex>` and `gpu-hours: judging <used>` under `### Findings`.
 - verify: `grep -qx 'judge-calibration: pass' .plan/work/M02-T04/result.md && "$AIRR_KIT/bin/kit-check" calibration --result .plan/work/M02-T04/result.md`
-- files: `judging/**` (except `judging/bar/**`), `checks/{checks,calibration}.py` and `runs/usage/M02-T04/**` in the AIRR kit folder; `.plan/work/M02-T04/result.md`
+- files: `judging/**` (except `judging/bar/**`), `checks/{checks,calibration}.py`, `checks/SHA256SUMS` (its own check modules' lines only, DEC-003; M02-T02, M02-T04 and M02-T05 never hold it at the same time) and `runs/usage/M02-T04/**` in the AIRR kit folder; `.plan/work/M02-T04/result.md`
 
 ### M02-T03 Build the prose training data for the explainer job
 - Preconditions: M02-T04 done (frozen deterministic checks; the qualified environment of M01-T04); M02-T02 done (so no held-out case leaks into training).
@@ -68,4 +68,4 @@ Before any large run: the held-out twin count is reconciled under one written de
 - The orchestrator records the bar as `## DEC-nnn Explainer acceptance bar` (approver orchestrator, shown to G at the budget look) before any M03 run.
 - Saves the scheduler accounting export of its jobs under `runs/usage/M02-T05/`. Writes `bar-validated: yes` and `gpu-hours: judging <used>` under `### Findings`.
 - verify: `grep -qx 'bar-validated: yes' .plan/work/M02-T05/result.md && "$AIRR_KIT/bin/kit-check" bar --result .plan/work/M02-T05/result.md`
-- files: `judging/bar/**`, `checks/bar.py` and `runs/usage/M02-T05/**` in the AIRR kit folder; `.plan/work/M02-T05/result.md`
+- files: `judging/bar/**`, `checks/bar.py`, `checks/SHA256SUMS` (its own check modules' lines only, DEC-003; M02-T02, M02-T04 and M02-T05 never hold it at the same time) and `runs/usage/M02-T05/**` in the AIRR kit folder; `.plan/work/M02-T05/result.md`
