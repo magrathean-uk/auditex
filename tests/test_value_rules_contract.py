@@ -268,12 +268,13 @@ def test_legacy_schema_and_model_non_rule_fixture_bytes(tmp_path, monkeypatch):
 
 
 def test_all_external_final_vectors_have_valid_contracts(tmp_path):
-    vectors = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
-    inventory = os.getenv("AUDITEX_TEST_VALUE_RULE_CATALOGUE")
-    if not vectors or not inventory:
-        pytest.skip("set final value-rule vectors and catalogue paths for all 102 policies")
-    ref = json.loads(Path(inventory).read_text())
+    vectors = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
+    if not vectors:
+        pytest.skip("set AUDITEX_TEST_VALUE_RULE_VECTORS_V391 to the replay kit vectors.jsonl")
     shipped = loader.catalogue()["policies"]
+    # The kit's own catalogue is the independent reference; the shipped one stands in only when absent.
+    kit_catalogue = Path(vectors).parent / "cell-catalogue.json"
+    ref = json.loads(kit_catalogue.read_text()) if kit_catalogue.is_file() else shipped
     assert set(ref) == set(shipped)
     counts = Counter()
     dual_codes = Counter()

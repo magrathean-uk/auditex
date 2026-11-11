@@ -13,6 +13,7 @@ acceptance:
 	@test -n "$$AUDITEX_TEST_VALUE_RULE_VECTORS_V391" || { echo "make acceptance: AUDITEX_TEST_VALUE_RULE_VECTORS_V391 is unset; point it at the replay kit vectors.jsonl" >&2; exit 2; }
 	@test -f "$$AUDITEX_TEST_VALUE_RULE_VECTORS_V391" || { echo "make acceptance: AUDITEX_TEST_VALUE_RULE_VECTORS_V391 names a missing file: $$AUDITEX_TEST_VALUE_RULE_VECTORS_V391" >&2; exit 2; }
 	$(PYTHON) -m pytest tests/test_value_rules_replay.py -m value_rule_acceptance -p no:cacheprovider -q -s -o addopts=
+	$(PYTHON) -m pytest tests/test_value_rules_contract.py -p no:cacheprovider -q -s -o addopts=
 	for chunk in 00 01 02 03; do \
 		PYTHONPATH="$$PWD/src" perl -e 'alarm 300; exec @ARGV' $(PYTHON) -B -I -m pytest tests/explainer_checks/test_mutation.py -m explainer_acceptance -k "chunk-$$chunk" -p no:cacheprovider -q -s -o addopts= || exit 1; \
 	done
