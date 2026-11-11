@@ -377,3 +377,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T17:47:18Z	REV-M07-T06-codex	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	707		done	d2fbe5e
 2026-11-11T17:52:56Z	M00-T02	terra	claude-1	claude-sonnet-5-5	low	branch	0	350	0.2334	done	task/M00-T02-contract-test-kit-var
 2026-11-11T17:55:49Z	REV-M00-T02	sol	claude-5	claude-opus-5-5	high	readonly	0	140	0.7142	done	task/M00-T02-contract-test-kit-var
+2026-11-11T18:00:03Z	M05-T02	sol	claude-3	claude-opus-5-5	xhigh	branch	0	557	1.9467	done	task/M05-T02-http-scanner-attr-store
+2026-11-11T18:04:46Z	M01-T05	terra	claude-1	claude-sonnet-5-5	high	branch	0	8849	1.8508	done	task/M01-T05-v10-repro
