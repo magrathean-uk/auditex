@@ -1,0 +1,1 @@
+--task M01-T05b --role terra --account claude-3 --tags mechanical --timeout 1200 --max-turns 40 --budget 3 --brief .plan/work/M01-T05b/brief-src.md

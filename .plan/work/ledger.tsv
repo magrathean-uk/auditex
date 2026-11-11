@@ -386,3 +386,7 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T18:18:41Z	REV-M05-T01	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	274		done	task/M05-T01-read-boundary-limits
 2026-11-11T18:21:14Z	REV-M05-T01	codex	codex2	gpt-6.1-sol	medium	readonly	0	62		done	task/M05-T01-read-boundary-limits
 2026-11-11T18:22:38Z	M00-T06	sol	claude-5	claude-opus-5-5	high	branch	0	597	1.0410	done	task/M00-T06-as-of-date
+2026-11-11T18:24:05Z	M05-T05	terra	claude-3	claude-sonnet-5-5	medium	readonly	0	34	0.3794	done	e1770c1
+2026-11-11T18:25:36Z	REV-M01-kit	codex	codex2	gpt-6.1-sol	xhigh	readonly	1	641		partial	e38c34b
+2026-11-11T18:27:29Z	M01-T05b	terra	claude-3	claude-sonnet-5-5	low	readonly	0	23	0.1369	done	78a1551
+2026-11-11T18:29:14Z	REV-M01-kit	codex	codex2	gpt-6.1-sol	medium	readonly	0	40		done	78a1551

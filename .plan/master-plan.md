@@ -95,7 +95,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | id | name | weight | % | status |
 |---|---|---|---|---|
 | M00 | foundation | 8 | 77 | active |
-| M01 | airr-bring-up | 15 | 75 | planned |
+| M01 | airr-bring-up | 15 | 100 | done |
 | M02 | explainer-data-and-judging | 15 | 29 | planned |
 | M03 | explainer-training | 17 | 0 | planned |
 | M04 | d5-keyed-pseudonyms | 18 | 13 | planned |
