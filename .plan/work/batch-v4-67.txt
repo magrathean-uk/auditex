@@ -1,0 +1,1 @@
+--task M00-T04 --role luna --brief .plan/work/M00-T04/brief-src.md --readonly --timeout 9000 --max-turns 80
