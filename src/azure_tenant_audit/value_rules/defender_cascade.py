@@ -6,11 +6,20 @@ owned by the dispatch boundary.
 """
 from __future__ import annotations
 
-from .helpers import (PRESET_RE, _accepted, _cite, _cover, _empty3, _licence_cell,
-                      _preset_pair, _shape, _state)
+from .helpers import (
+    PRESET_RE,
+    _accepted,
+    _cite,
+    _cover,
+    _empty3,
+    _licence_cell,
+    _preset_pair,
+    _shape,
+    _state,
+)
 from .record import _A, _rec
 
-CASCADE_PRESETS = tuple(zip(("Strict", "Standard"), PRESET_RE))
+CASCADE_PRESETS = tuple(zip(("Strict", "Standard"), PRESET_RE, strict=False))
 
 
 def _join_key(value):

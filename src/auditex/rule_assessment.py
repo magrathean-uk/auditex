@@ -5,30 +5,50 @@ is a template over the rule answer and never decides a verdict. Nothing here cal
 """
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import datetime, timezone
-from hashlib import sha256
 import json
 import logging
 import os
-from pathlib import Path
 import re
+from copy import deepcopy
+from datetime import UTC, datetime
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.explainer import explain as render_explanation
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
-from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guarded_operation, read_guarded_bytes
-from azure_tenant_audit.output_redaction import PROFILE_EXPLAINER, RedactionContext, context_for_run, redact_output
+from azure_tenant_audit.guarded_io import (
+    UnsafeRunFileError,
+    current_context,
+    guarded_operation,
+    read_guarded_bytes,
+)
+from azure_tenant_audit.output_redaction import (
+    PROFILE_EXPLAINER,
+    RedactionContext,
+    context_for_run,
+    redact_output,
+)
 from azure_tenant_audit.private_io import make_private_dirs, write_private_text
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.scuba_assessment import validate_explainer, value_rule_verdict
-from azure_tenant_audit.scuba_precheck import optional_collection_entry, precheck_policy, precheck_response
+from azure_tenant_audit.scuba_precheck import (
+    optional_collection_entry,
+    precheck_policy,
+    precheck_response,
+)
 
 from .scope_postcheck import collect_scope_evidence
 from .scuba_projection import (
-    DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS,
-    policy_section, project_run, rule_policy_section,
+    DEFAULT_MAX_CHARS,
+    DEFAULT_MAX_ITEMS,
+    DEFAULT_SCAN_MAX_BYTES,
+    DEFAULT_SCAN_MAX_CHUNKS,
+    DEFAULT_SCAN_MAX_ROWS,
+    policy_section,
+    project_run,
+    rule_policy_section,
 )
 
 SCHEMA_VERSION = "2026-11-05"
@@ -326,7 +346,7 @@ def assess_run(run_dir: str | Path, *, policies: list[str] | None = None,
     """Write ``model_assessment.json`` for a finished run from the value rules alone."""
     root, manifest, catalogue, selected = _admit_run(run_dir, policies, ASSESSMENT_FILENAME)
     target = root / ASSESSMENT_FILENAME
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
     projection = project_run(root, redact=True, max_items=projection_max_items,
                              max_chars=projection_max_chars, scan_max_rows=projection_scan_max_rows,
                              scan_max_bytes=projection_scan_max_bytes, scan_max_chunks=projection_scan_max_chunks)
@@ -359,7 +379,12 @@ def _export_view(export_path: str | Path, output_dir: str | Path, *, results_pat
                  verdict_map: dict[str, str]) -> dict[str, Any]:
     """Load, project and read the verdicts of a ScubaGear export; shared by every export writer."""
     from .scubagear_export import (
-        build_baseline, load_export, load_results, project_export, resolve_output_directory, scubaresults_layout_ok,
+        build_baseline,
+        load_export,
+        load_results,
+        project_export,
+        resolve_output_directory,
+        scubaresults_layout_ok,
     )
     target_dir = resolve_output_directory(output_dir)
     catalogue = policy_catalogue()
@@ -402,7 +427,7 @@ def _export_view(export_path: str | Path, output_dir: str | Path, *, results_pat
     return {"target_dir": target_dir, "catalogue": catalogue, "selected": selected, "loaded": loaded,
             "projection": projection, "extras": extras, "baseline": baseline, "reasons": reasons,
             "unmappable": unmappable, "verdict_source": verdict_source, "verdict_state": verdict_state,
-            "generated_at": datetime.now(timezone.utc).isoformat()}
+            "generated_at": datetime.now(UTC).isoformat()}
 
 
 def _export_sidecar(view: dict[str, Any], scope: Any, verdict_map: dict[str, str]) -> dict[str, Any]:

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import azure_tenant_audit.assurance as assurance
-from azure_tenant_audit.assurance import build_assurance_summary, build_surface_coverage_map
+from azure_tenant_audit.assurance import (
+    build_assurance_summary,
+    build_surface_coverage_map,
+)
 
 
 def test_assurance_summary_scores_partial_failed_and_truncated_evidence() -> None:

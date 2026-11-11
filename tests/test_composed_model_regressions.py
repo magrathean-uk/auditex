@@ -10,14 +10,12 @@ import logging
 import os
 
 import pytest
-
-from auditex import rule_assessment
-from auditex.rule_assessment import assess_run
-from auditex.reporting import load_report_bundle
-from azure_tenant_audit.run_files import UnsafeRunFileError
-
 from test_explainer_wire import PBI, assessment, make_report_run  # noqa: F401  (assessment is a fixture)
 
+from auditex import rule_assessment
+from auditex.reporting import load_report_bundle
+from auditex.rule_assessment import assess_run
+from azure_tenant_audit.run_files import UnsafeRunFileError
 
 # --- finding 2: direct MemoryError propagates; ordinary failures stay suppressed ------------------------------------------
 
@@ -63,9 +61,10 @@ def test_report_unsafe_file_still_propagates(tmp_path, assessment):  # noqa: F81
 
 
 def test_derive_explainer_memory_error_propagates_and_runtime_error_returns_none(monkeypatch):
+    from test_explainer_wire import explained
+
     from azure_tenant_audit import explainer
     from azure_tenant_audit.scuba_assessment import derive_explainer
-    from test_explainer_wire import explained
     row = explained("not_met")
     assert derive_explainer(row) is not None  # ordinary valid control
     monkeypatch.setattr(explainer, "explain", lambda *a, **k: (_ for _ in ()).throw(MemoryError()))

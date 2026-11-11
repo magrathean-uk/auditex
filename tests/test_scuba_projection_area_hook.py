@@ -1,14 +1,14 @@
 """Area adapter registration uses synthetic modules and evidence only."""
-from hashlib import sha256
 import json
 import sys
+from hashlib import sha256
 from types import ModuleType
 
 import pytest
+from test_scuba_projection import EXPECTED, complete_bundle  # noqa: F401 - shared pytest fixture
 
 from auditex import scuba_projection
 from auditex.rule_assessment import canonical
-from test_scuba_projection import EXPECTED, complete_bundle  # noqa: F401 - shared pytest fixture
 
 
 def register_modules(monkeypatch, *modules):

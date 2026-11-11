@@ -8,12 +8,11 @@ import json
 import re
 import shutil
 import tomllib
+from datetime import UTC
 from importlib import resources
 from pathlib import Path
 
 import pytest
-
-from azure_tenant_audit.cli import run_offline
 
 from auditex.cli import main as auditex_main
 from auditex.demo import DEMO_AS_OF, DemoOptions, run_demo
@@ -24,6 +23,7 @@ from auditex.explorer import (
     render_explorer_html,
     write_explorer,
 )
+from azure_tenant_audit.cli import run_offline
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEMO_DIR = REPO_ROOT / "examples" / "demo_tenant"
@@ -250,10 +250,10 @@ def test_explorer_assets_ship_as_package_data() -> None:
 
 
 def test_barlow_fonts_are_embedded_and_allowed_only_as_data(tmp_path) -> None:  # noqa: ANN001
-    from azure_tenant_audit.cli import run_offline
     from pathlib import Path as _Path
 
     from auditex.explorer import write_explorer
+    from azure_tenant_audit.cli import run_offline
 
     sample = _Path(__file__).resolve().parents[1] / "examples" / "sample_audit_bundle" / "known_bad_result.json"
     assert run_offline(sample, tmp_path, "demo", "fonts") == 0
@@ -266,7 +266,7 @@ def test_barlow_fonts_are_embedded_and_allowed_only_as_data(tmp_path) -> None:  
 
 
 def test_the_demo_judges_its_devices_as_of_the_snapshot_date_not_today(tmp_path: Path) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     stream = io.StringIO()
     options = DemoOptions(out_dir=tmp_path / "demo", pause=False, html=False, stream=stream)
@@ -280,10 +280,10 @@ def test_the_demo_judges_its_devices_as_of_the_snapshot_date_not_today(tmp_path:
     assert by_rule["intune.device_stale_sync"] == {"HFL-LT-019"}
     assert by_rule["intune.device_encryption_off"] == {"HFL-LT-007", "HFL-LT-011", "HFL-IPH-022"}
     assert by_rule["intune.device_os_end_of_life"] == {"HFL-LT-007"}, "Windows 10 22H2 only; the 23H2 devices depend on the edition until November"
-    assert DEMO_AS_OF == datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+    assert DEMO_AS_OF == datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
 
     # A caller can pin another day; the same fixture is judged as of that day.
-    later = DemoOptions(out_dir=tmp_path / "later", pause=False, html=False, stream=io.StringIO(), as_of=datetime(2026, 12, 1, tzinfo=timezone.utc))
+    later = DemoOptions(out_dir=tmp_path / "later", pause=False, html=False, stream=io.StringIO(), as_of=datetime(2026, 12, 1, tzinfo=UTC))
     assert run_demo(later) == 0
     later_findings = json.loads((tmp_path / "later" / "runs" / "halcyon-demo" / "findings" / "findings.json").read_text(encoding="utf-8"))
     later_rules = {item["rule_id"]: {x["affected_objects"][0] for x in later_findings if x["rule_id"] == item["rule_id"]} for item in later_findings}

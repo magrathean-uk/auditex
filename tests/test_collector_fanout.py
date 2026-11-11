@@ -1,20 +1,24 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import replace
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from azure_tenant_audit.attack_graph import analyze_attack_graph, build_attack_graph
-from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunHooks, CollectorRunner
+from azure_tenant_audit.collector_runner import (
+    AuditWriterCollectorAdapter,
+    CollectorRunContext,
+    CollectorRunHooks,
+    CollectorRunner,
+)
 from azure_tenant_audit.collectors.app_consent import AppConsentCollector
 from azure_tenant_audit.collectors.identity import IdentityCollector
 from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.output import AuditWriter
-
 
 GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 ROLE_MANAGEMENT = "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8"

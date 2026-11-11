@@ -7,22 +7,28 @@ Admin console and API output; an unrecognised text is unknown, never a pass and 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from auditex import cli as auditex_cli
-from auditex.google_workspace.findings import DEFAULT_STALE_DEVICE_DAYS, build_google_findings
-from auditex.google_workspace.normalize import build_google_normalized_snapshot, compromised_state
+from auditex.google_workspace.findings import (
+    DEFAULT_STALE_DEVICE_DAYS,
+    build_google_findings,
+)
+from auditex.google_workspace.normalize import (
+    build_google_normalized_snapshot,
+    compromised_state,
+)
 from auditex.google_workspace.run import GoogleRunConfig, run_google_offline
 
 REPO = Path(__file__).resolve().parents[1]
 
 
 def _ago(days: int) -> str:
-    return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def _snapshot(mobile: list[dict[str, Any]] | None = None, chromeos: list[dict[str, Any]] | None = None) -> dict[str, Any]:

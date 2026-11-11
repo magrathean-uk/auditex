@@ -9,15 +9,22 @@ from pathlib import Path
 import pytest
 
 from auditex.compare import compare_runs, require_same_tenant_runs
-from auditex.explorer import ExplorerCompareError, build_explorer_bundle, build_explorer_data, render_explorer_html
+from auditex.explorer import (
+    ExplorerCompareError,
+    build_explorer_bundle,
+    build_explorer_data,
+    render_explorer_html,
+)
 from auditex.run_bundle import RunBundle
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.evidence_db import build_run_evidence_index
 from azure_tenant_audit.output import AuditWriter
-from azure_tenant_audit.provider_runtime import ProviderFinalizePlan, write_provider_bundle
+from azure_tenant_audit.provider_runtime import (
+    ProviderFinalizePlan,
+    write_provider_bundle,
+)
 from azure_tenant_audit.tenant_identity import IDENTITY_FIELDS, resolve_tenant_identity
-
 
 TENANT = "a1234567-1234-4123-8123-123456789abc"
 OTHER = "b1234567-1234-4123-8123-123456789abc"

@@ -21,13 +21,21 @@ from azure_tenant_audit.collector_runner import CollectorRunContext, CollectorRu
 from azure_tenant_audit.collectors.auth_methods import AuthMethodsCollector
 from azure_tenant_audit.collectors.base import context_limit, run_graph_endpoints
 from azure_tenant_audit.collectors.conditional_access import ConditionalAccessCollector
-from azure_tenant_audit.collectors.domains_hybrid import SYNC_SAMPLE_LIMIT, DomainsHybridCollector
+from azure_tenant_audit.collectors.domains_hybrid import (
+    SYNC_SAMPLE_LIMIT,
+    DomainsHybridCollector,
+)
 from azure_tenant_audit.collectors.identity import IdentityCollector
 from azure_tenant_audit.collectors.security import LOG_SAMPLE_LIMIT, SecurityCollector
 from azure_tenant_audit.config import AuthConfig
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.diagnostics import build_diagnostics
-from azure_tenant_audit.graph import GRAPH_ROOT, NEXT_LINK_REFUSED, GraphClient, GraphError
+from azure_tenant_audit.graph import (
+    GRAPH_ROOT,
+    NEXT_LINK_REFUSED,
+    GraphClient,
+    GraphError,
+)
 from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.run import build_coverage_ledger
 
@@ -41,7 +49,10 @@ APPLICATIONS = "/applications"
 
 
 def test_skipped_teams_sections_name_the_certificate_gap_without_claiming_a_failed_read():
-    from azure_tenant_audit.assurance import build_coverage_gap_summary, build_surface_coverage_map
+    from azure_tenant_audit.assurance import (
+        build_coverage_gap_summary,
+        build_surface_coverage_map,
+    )
     from azure_tenant_audit.collection_gaps import section_gap_records
     from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
 
@@ -754,7 +765,10 @@ def _intune_snapshot(policy_count: int, expanded: int, *, gap: bool) -> dict[str
 
 
 def test_unassigned_profiles_are_not_reported_from_a_fan_out_that_stopped_early() -> None:
-    from azure_tenant_audit.baselines import intune_assignments_are_a_sample, rule_inputs_gap
+    from azure_tenant_audit.baselines import (
+        intune_assignments_are_a_sample,
+        rule_inputs_gap,
+    )
 
     rule = "intune_depth.policies_without_assignments"
     complete = _intune_snapshot(3, 3, gap=False)
@@ -948,7 +962,9 @@ def test_the_ten_profile_assignment_fanout_of_intune_depth_is_a_section_gap_not_
 
 
 def test_a_site_ownership_rule_is_not_assessed_when_only_ten_sites_were_read() -> None:
-    from azure_tenant_audit.collectors.sharepoint_access import SharePointAccessCollector
+    from azure_tenant_audit.collectors.sharepoint_access import (
+        SharePointAccessCollector,
+    )
 
     rows = [{"id": f"s-{i}", "displayName": f"S{i}"} for i in range(11)]
     output = CollectorRunner().run(
@@ -1025,7 +1041,9 @@ def test_a_probe_does_not_record_a_reports_usage_cut_as_a_gap() -> None:
 def test_a_probe_does_not_record_a_directory_relationship_cut_as_a_gap() -> None:
     import uuid
 
-    from azure_tenant_audit.collectors.directory_relationships import DirectoryRelationshipsCollector
+    from azure_tenant_audit.collectors.directory_relationships import (
+        DirectoryRelationshipsCollector,
+    )
 
     groups = [{"id": str(uuid.UUID(int=i + 1)), "displayName": f"G{i}"} for i in range(20)]
     apps = [{"id": str(uuid.UUID(int=100 + i)), "displayName": f"A{i}"} for i in range(20)]
@@ -1085,7 +1103,10 @@ def test_default_workload_gaps_have_customer_reasons(collector, error_class, phr
 
 
 def test_shared_section_gap_reasons_do_not_contain_workload_failures():
-    from azure_tenant_audit.collection_gaps import SECTION_GAP_REASON_TEXT, collector_gap_reason
+    from azure_tenant_audit.collection_gaps import (
+        SECTION_GAP_REASON_TEXT,
+        collector_gap_reason,
+    )
     assert {'license_required', 'command_not_found', 'module_not_found', 'toolchain_unavailable'}.isdisjoint(SECTION_GAP_REASON_TEXT)
     assert 'Exchange' in collector_gap_reason('exchange_policy', 'license_required')
     assert collector_gap_reason('identity', 'license_required') is None

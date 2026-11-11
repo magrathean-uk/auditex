@@ -4,7 +4,11 @@ import os
 from pathlib import Path
 
 from azure_tenant_audit import m365_home
-from azure_tenant_audit.m365_home import is_m365_command, m365_environment, m365_subprocess_kwargs
+from azure_tenant_audit.m365_home import (
+    is_m365_command,
+    m365_environment,
+    m365_subprocess_kwargs,
+)
 
 
 def test_explicit_folder_wins_over_xdg_data_home(tmp_path: Path) -> None:

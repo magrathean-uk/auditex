@@ -1,15 +1,15 @@
 """Index reads on private and unproved temporary storage, using synthetic data."""
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import shutil
 import sqlite3
+from pathlib import Path
 
 import pytest
+from support import RunBundleBuilder
 
 from azure_tenant_audit import evidence_db
-from support import RunBundleBuilder
 
 
 def _run_with_index(tmp_path: Path) -> tuple[Path, Path]:

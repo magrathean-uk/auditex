@@ -4,12 +4,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.collectors.teams_policy import TEAMS_OPERATIONS, TeamsPolicyCollector
+from test_teams_admin_rest import Client
+
+from azure_tenant_audit.collectors.teams_policy import (
+    TEAMS_OPERATIONS,
+    TeamsPolicyCollector,
+)
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
-from test_teams_admin_rest import Client
-
 
 REQUIRED = {
     "meetingPolicies": [

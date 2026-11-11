@@ -8,9 +8,14 @@ import pytest
 
 from azure_tenant_audit.collectors import power_platform as module
 from azure_tenant_audit.collectors.power_platform import PowerPlatformCollector
-from azure_tenant_audit.scuba_assessment import COLLECTOR_ERROR_CLASSES
 from azure_tenant_audit.normalize import build_normalized_snapshot
-from azure_tenant_audit.power_platform import BAP_SCOPE, PowerPlatformClient, PowerPlatformError, power_platform_client_from
+from azure_tenant_audit.power_platform import (
+    BAP_SCOPE,
+    PowerPlatformClient,
+    PowerPlatformError,
+    power_platform_client_from,
+)
+from azure_tenant_audit.scuba_assessment import COLLECTOR_ERROR_CLASSES
 
 TENANT_ID = "11111111-2222-3333-4444-555555555555"
 CANARY = "synthetic-token-canary-never-retain"

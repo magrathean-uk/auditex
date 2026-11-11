@@ -14,11 +14,12 @@ a tenant API or verifies execution of a route.
 """
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import hashlib
-from typing import Any, Iterable
+from collections import deque
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
 DEFAULT_MAX_DEPTH = 5
 DEFAULT_MAX_PATHS = 10
@@ -226,7 +227,7 @@ def _parse_datetime(value: Any) -> datetime | None:
         parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _secret_state(credentials: Any, now: datetime) -> str | None:
@@ -272,7 +273,7 @@ def _role_template(record: dict[str, Any]) -> str:
 
 def build_attack_graph(snapshot: dict[str, Any], *, now: datetime | None = None) -> AttackGraph:
     """Build the privilege graph from a normalized snapshot."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     graph = AttackGraph()
     principal_index: dict[str, str] = {}
 

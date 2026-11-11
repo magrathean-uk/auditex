@@ -1,14 +1,13 @@
 """A target-bearing unsupported list is a diagnostic component, not a free-text passthrough."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 
 from azure_tenant_audit import cli
 from azure_tenant_audit.collectors.targeted_users_coverage import sanitise_sample
-
 
 CANARIES = ("Zebulon Quarkwright", "zq-canary@unlisted-canary.invalid")
 SAFE = {"id": "safe-identity", "displayName": "Ordinary", "enabled": True}

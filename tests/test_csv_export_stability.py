@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from auditex.reporting import _render_csv
 
-
 _FINDINGS_UNSORTED = [
     {
         "id": "rule.medium:obj-1",

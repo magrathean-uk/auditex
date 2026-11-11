@@ -5,10 +5,15 @@ import shlex
 import shutil
 import subprocess
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..m365_home import m365_subprocess_kwargs
-from ..secret_hygiene import collect_sensitive_argv_values, redact_command_string, redact_output
+from ..secret_hygiene import (
+    collect_sensitive_argv_values,
+    redact_command_string,
+    redact_output,
+)
 from .base import Adapter, AdapterMetadata
 from .read_guard import CommandRefused, check_command, refusal_response
 
@@ -121,7 +126,7 @@ class M365CLIAdapter(Adapter):
     def run(
         self,
         command: str,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
         safe_command = redact_command_string(command)
         try:

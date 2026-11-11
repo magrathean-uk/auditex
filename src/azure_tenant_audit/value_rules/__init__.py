@@ -14,7 +14,6 @@ from .gates import closed_gate
 from .powerbi import aad_3_4, powerbi
 from .record import _not_collected, as_pack_response, checked, rule_failure
 
-
 _REGISTRY: dict | None = None
 
 

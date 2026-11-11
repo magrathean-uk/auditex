@@ -1,8 +1,8 @@
 """Offline Teams rule-view contracts, including the unchanged model shape gate."""
-from collections import Counter
-from copy import deepcopy
 import inspect
 import json
+from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -11,7 +11,6 @@ from auditex.rule_assessment import canonical
 from auditex.scuba_adapters_teams import ADAPTERS, TEAMS_ADAPTERS
 from auditex.scuba_projection import AREA_ADAPTER_MODULES, PS_SECTIONS, project_run
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
-
 
 OPERATIONS = {
     "broadcast_policies": "broadcastPolicies",

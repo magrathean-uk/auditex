@@ -7,7 +7,7 @@ accepted_domains is optional and only informs domain-scope comparisons.
 from __future__ import annotations
 
 from .helpers import BUILTIN, PRESET_RE, _accepted, _cover, _licence_cell
-from .record import BAD_SECTION_LIST, ITEM_VALUE, _A, _rec
+from .record import _A, BAD_SECTION_LIST, ITEM_VALUE, _rec
 
 
 def _is_num(value):
@@ -36,7 +36,7 @@ def _preset_states(rules, accepted, trace):
         if type(ident) is not str:
             anyu.append("u")
             continue
-        tiers = [n for n, rx in zip(("Strict", "Standard"), PRESET_RE) if rx.search(ident)]
+        tiers = [n for n, rx in zip(("Strict", "Standard"), PRESET_RE, strict=False) if rx.search(ident)]
         if not tiers:
             continue
         if "State" not in r:

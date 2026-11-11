@@ -17,13 +17,12 @@ import secrets
 import string
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 
 import requests
-
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 COLLECTIONS = {"organization", "users", "groups", "applications", "servicePrincipals"}
@@ -122,7 +121,7 @@ class Manifest:
         self.path = output_dir / "manifest.json"
         self.data = {
             "schemaVersion": 1,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "createdAt": datetime.now(UTC).isoformat(),
             "tenantId": tenant_id, "domain": domain, "prefix": prefix,
             "mode": "execute" if execute else "plan",
             "state": "preflight" if execute else "planned", "complete": False,

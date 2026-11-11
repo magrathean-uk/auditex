@@ -3,18 +3,17 @@
 Constructed rows and pack train and validation rows from v3.9.1;
 held-out test and pilot rows excluded. Only constructed parents below are used.
 """
-from copy import deepcopy
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
+from test_teams_admin_rest import TOKEN, Client, Response, command_reader, connect
 
 from auditex.scuba_projection import PS_SECTIONS, project_run
 from azure_tenant_audit.adapters import teams_admin_rest as rest
-from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
-from test_teams_admin_rest import Client, Response, TOKEN, command_reader, connect
-
+from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures/teams-rule-vectors-v39.json").read_text())
 PARENTS = {

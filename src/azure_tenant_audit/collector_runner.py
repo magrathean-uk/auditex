@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict
 
-from .collectors.base import CollectorResult
 from .collection_gaps import NON_FATAL_COLLECTORS, collector_gap_reason
+from .collectors.base import CollectorResult
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 ChunkWriter = Callable[[str, str, int, list[dict[str, Any]], dict[str, Any] | None], str | None]

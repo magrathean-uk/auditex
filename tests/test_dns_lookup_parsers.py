@@ -26,7 +26,6 @@ from azure_tenant_audit.dns_lookup import (
     parse_spf,
 )
 
-
 # ---------- SPF ----------
 
 

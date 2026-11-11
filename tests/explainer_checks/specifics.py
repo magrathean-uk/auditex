@@ -27,14 +27,14 @@ EMAIL = re.compile(r"[\w.+*'%-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 GUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b[0-9a-f]{32}\b", re.I)
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b")
 TLDS = ("com|net|org|gov|edu|mil|int|info|biz|io|co|uk|eu|de|fr|nl|ie|us|ca|au|ch|se|no|fi|dk|be|at|es|it|pl|cz|example|test|local|internal|onmicrosoft|microsoft|cloud|xyz|online|site|tech|dev")
-DOMAIN = re.compile(r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:%s)\b" % TLDS, re.I)
+DOMAIN = re.compile(rf"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:{TLDS})\b", re.I)
 POLICY_ID = re.compile(r"\bMS\.[A-Z]+\.\d+(?:\.\d+)*(?:v\d+)?\b", re.I)
 HEX = re.compile(r"\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}\b", re.I)
 VERBS = ("Get|Set|New|Remove|Add|Clear|Connect|Disconnect|Enable|Disable|Export|Import|Invoke|Install|Uninstall|Update|Test|Start|Stop|Grant|Revoke|Find|Select|Write|Read|Out|"
          "Format|Where|ForEach|Register|Unregister|Send|Reset|Restart|Resolve|Show|Sync|Copy|Move|Rename|Save|Search|Publish|Approve|Confirm|Deny|Suspend|Resume|Wait|Use|Unlock|"
          "Lock|Join|Split|Merge|Compare|Convert|ConvertTo|ConvertFrom|Measure|Protect|Unprotect|Initialize|Mount|Dismount|Optimize|Repair|Request|Submit|Switch|Trace|Undo|Redo|"
          "Block|Unblock|Push|Pop|Limit|Edit|Debug|Backup|Restore|Compress|Expand|Complete|Enter|Exit|Hide|Watch|Assert|Build|Deploy|Receive|Ping|Sort|Group|Skip|Take|Unpublish")
-CMDLET = re.compile(r"(?<![\w-])(?:%s)-[A-Z][A-Za-z0-9]+\b" % VERBS)
+CMDLET = re.compile(rf"(?<![\w-])(?:{VERBS})-[A-Z][A-Za-z0-9]+\b")
 PARAM = re.compile(r"(?<![\w-])-[A-Z][A-Za-z0-9]+\b")
 SNAKE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b")
 CAMEL = re.compile(r"\b(?:[a-z]+[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|[A-Z]{2,}[a-z][A-Za-z0-9]*)\b")
@@ -43,7 +43,7 @@ NUM = re.compile(r"(?<![A-Za-z0-9_.])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?![\d]
 NUMWORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
             "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
             "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90, "hundred": 100, "thousand": 1000, "million": 10 ** 6, "billion": 10 ** 9, "dozen": 12}
-NUMWORD_RX = re.compile(r"\b(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-(?:one|two|three|four|five|six|seven|eight|nine)|%s)\b" % "|".join(NUMWORDS), re.I)
+NUMWORD_RX = re.compile(r"\b(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-(?:one|two|three|four|five|six|seven|eight|nine)|{})\b".format("|".join(NUMWORDS)), re.I)
 IDENT_CLASSES = ("url", "email", "guid", "ipv4", "domain", "policy_id", "hex")
 
 

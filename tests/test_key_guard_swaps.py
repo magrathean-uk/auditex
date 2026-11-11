@@ -4,18 +4,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sqlite3
 import traceback
 from contextlib import closing
+from pathlib import Path
 
 import pytest
+from support import RunBundleBuilder
 
 from auditex import cli, mcp_server
 from auditex.run_bundle import RunBundle
 from azure_tenant_audit.sensitive_users import SensitiveUsers, verify_sensitive_users
-from support import RunBundleBuilder
-
 
 KEY = b"guard-key-canary-012345678901234"
 ADDRESS = "guard-private@example.invalid"

@@ -3,11 +3,11 @@
 Inputs are audited synthetic/public contract fixtures. No dependency on Parts
 1/2/4/5, a live checkout, rule execution, vectors, a model or tenant evidence.
 """
-from copy import deepcopy
 import gzip
 import json
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 
 import jsonschema
 import pytest

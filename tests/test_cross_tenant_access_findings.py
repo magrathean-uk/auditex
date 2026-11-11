@@ -222,7 +222,9 @@ def test_findings_flag_auto_user_consent_outbound() -> None:
 
 def test_collector_normalizes_automatic_user_consent_settings() -> None:
     """Collector layer must surface automaticUserConsentSettings on the default policy."""
-    from azure_tenant_audit.collectors.cross_tenant_access import _normalize_default_policy
+    from azure_tenant_audit.collectors.cross_tenant_access import (
+        _normalize_default_policy,
+    )
 
     raw = {
         "isServiceDefault": False,

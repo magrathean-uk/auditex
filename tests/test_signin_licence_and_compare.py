@@ -1,9 +1,11 @@
 """Coverage for sign-in activity, Intune licence gating, compare markdown, and offline handoff."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from support import RunBundleBuilder
 
 from auditex import cli as auditex_cli
 from auditex.compare import render_compare_markdown
@@ -20,11 +22,9 @@ from azure_tenant_audit.graph import GraphError
 from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.run import reconcile_capability_matrix_rows
 
-from support import RunBundleBuilder
-
 
 def _iso(days_ago: int) -> str:
-    return (datetime.now(tz=timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(tz=UTC) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --- identity signInActivity -------------------------------------------------

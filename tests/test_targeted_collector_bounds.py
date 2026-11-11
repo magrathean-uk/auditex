@@ -1,8 +1,8 @@
 """Walk bounds must omit unusable data while retaining a collector's existing refusal."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -10,7 +10,6 @@ from auditex.scuba_projection import project_run
 from azure_tenant_audit import cli
 from azure_tenant_audit.collectors.targeted_users_coverage import sanitise_sample
 from azure_tenant_audit.value_rules import assess
-
 
 POLICY = "MS.AAD.6.1v1"
 CANARY = "zq-bounds-canary@unlisted.invalid"

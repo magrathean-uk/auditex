@@ -8,15 +8,19 @@ from __future__ import annotations
 
 import inspect
 import json
-from pathlib import Path
 import random
 import re
 import time
+from pathlib import Path
 
 import pytest
 
-from azure_tenant_audit.value_rules import assess
-from azure_tenant_audit.value_rules import defender_resolution, dns, power_platform
+from azure_tenant_audit.value_rules import (
+    assess,
+    defender_resolution,
+    dns,
+    power_platform,
+)
 from azure_tenant_audit.value_rules.catalogue import catalogue, row_for
 from azure_tenant_audit.value_rules.defender_spam import KINDS as SPAM_KINDS
 
@@ -214,7 +218,7 @@ def test_dmarc_uri_with_a_long_run_of_at_signs_is_linear():
     for tail, verdict in ((" z", "not_assessed"), ("!x", "not_assessed"), (";", "not_met")):
         rua = "mailto:" + "@" * (MB // 2) + tail
         sections = {"dmarc_records": [{"domain": "a.example", "rdata": [f"v=DMARC1; p=reject; rua={rua}"]}]}
-        record = _timed(lambda: assess(pid, sections))
+        record = _timed(lambda: assess(pid, sections))  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
         assert record["verdict"] == verdict
 
 

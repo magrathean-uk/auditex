@@ -2,20 +2,18 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-from datetime import datetime
 
 from . import auth_context
-from .adapters import get_adapter
-from .adapters import ADAPTERS
+from .adapters import ADAPTERS, get_adapter
 from .ai_context import build_privacy_block
 from .finalize import finalize_bundle_contract, seal_run_findings
 from .findings import build_report_pack
 from .output import AuditWriter
 from .profiles import get_profile
 from .secret_hygiene import redact_argv, sanitize_token_claims
-
 
 LAB_TENANT_ENV = "AUDITEX_LAB_TENANT_IDS"
 DEFAULT_LAB_TENANT_IDS: tuple[str, ...] = ()

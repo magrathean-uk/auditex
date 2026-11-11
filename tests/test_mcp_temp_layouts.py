@@ -2,17 +2,16 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import sqlite3
 import stat
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from azure_tenant_audit.cli import run_offline
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO = ROOT / "examples/demo_tenant/demo_tenant.json"
@@ -31,7 +30,10 @@ def test_demo_index_in_common_tmp_layouts(
     demo_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str, encrypted_proof: bool,
 ) -> None:
     from auditex import mcp_server
-    from auditex.reporting import verify_enterprise_handoff_pack, write_enterprise_handoff_pack
+    from auditex.reporting import (
+        verify_enterprise_handoff_pack,
+        write_enterprise_handoff_pack,
+    )
     from azure_tenant_audit import evidence_db
     from azure_tenant_audit.contracts import build_validation_report
 

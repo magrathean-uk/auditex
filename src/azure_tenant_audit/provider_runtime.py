@@ -4,11 +4,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .attack_graph import analyze_attack_graph
-from .detection_coverage import SECTION as DETECTION_SECTION, summarize_detection_coverage
+from .detection_coverage import SECTION as DETECTION_SECTION
+from .detection_coverage import summarize_detection_coverage
 from .exposure_lookup import summarize_public_footprint
 from .finalize import finalize_bundle_contract, seal_run_findings
 from .findings import build_report_pack
-
 
 PROVIDER_ADAPTER_VERSION = "2026-05-31"
 API_INVENTORY_RECORDER_VERSION = "2026-05-31"

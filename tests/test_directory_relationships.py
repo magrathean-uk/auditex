@@ -4,7 +4,9 @@ from uuid import UUID
 
 from azure_tenant_audit.attack_graph import analyze_attack_graph, build_attack_graph
 from azure_tenant_audit.catalog import load_catalog
-from azure_tenant_audit.collectors.directory_relationships import DirectoryRelationshipsCollector
+from azure_tenant_audit.collectors.directory_relationships import (
+    DirectoryRelationshipsCollector,
+)
 from azure_tenant_audit.directory_relationships import normalize_directory_relationships
 from azure_tenant_audit.graph import GraphError
 from azure_tenant_audit.scope_catalog import load_m365_scope_catalog

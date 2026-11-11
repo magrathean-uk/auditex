@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import csv
 import time
+from collections.abc import Callable, Iterable
 from io import StringIO
-from typing import Any, Callable, Iterable, Optional
+from typing import Any
 
 from ..collection_gaps import REASON_PAGINATION_NOT_FOLLOWED
 from ..graph import GraphError
@@ -53,9 +54,9 @@ def run_capability_gated_endpoints(
     client: Any,
     endpoints: Iterable[tuple[str, str]],
     *,
-    log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+    log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     skip_reason: str = "no Graph client available; service likely unlicensed in this tenant",
-    csv_rows: Optional[dict[str, Callable[[list[dict[str, str]]], list[dict[str, Any]]]]] = None,
+    csv_rows: dict[str, Callable[[list[dict[str, str]]], list[dict[str, Any]]]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Run each endpoint once; ``csv_rows`` maps endpoint names that return CSV reports to a row mapper."""
     payload: dict[str, Any] = {}

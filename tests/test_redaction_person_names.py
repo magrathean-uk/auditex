@@ -6,10 +6,15 @@ import re
 from pathlib import Path
 
 import pytest
+from test_reporting import _write_run
 
 from azure_tenant_audit import output_redaction as redaction
-from azure_tenant_audit.output_redaction import RedactionContext, pseudonym, redact_output, run_salt
-from test_reporting import _write_run
+from azure_tenant_audit.output_redaction import (
+    RedactionContext,
+    pseudonym,
+    redact_output,
+    run_salt,
+)
 
 NAME = "Priya Kovalenko"
 UPN = "priya.kovalenko@contoso.example"
@@ -186,7 +191,7 @@ def test_guard_keeps_words_and_reports_reasons_without_names() -> None:
     for name, _upn, _reason in GUARDED:
         assert redact_output(f"x {name} y", context=context) == f"x {name} y", name
     structured = redact_output({"records": users}, context=context)["records"]
-    for row, (name, _upn, _reason) in zip(structured, GUARDED):
+    for row, (name, _upn, _reason) in zip(structured, GUARDED, strict=False):
         assert row["display_name"] == _prose(name=name)
     expected: dict[str, int] = {}
     for _name, _upn, reason in GUARDED:
@@ -457,9 +462,10 @@ def test_every_builtin_exporter_masks_names(run: Path, tmp_path: Path, name: str
 
 
 def test_customer_pack_contains_no_person_token(tmp_path: Path) -> None:
-    from auditex import cli as auditex_cli
     from support import make_contract_valid
     from test_auditex_product import _build_customer_pack_run
+
+    from auditex import cli as auditex_cli
 
     run_dir = _build_customer_pack_run(tmp_path)
     (run_dir / "normalized").mkdir(exist_ok=True)

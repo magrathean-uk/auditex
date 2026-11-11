@@ -68,7 +68,13 @@ def checked(record: dict[str, Any]) -> dict[str, Any]:
     A1.2: ``rule_evaluation_failed`` is dispatched first, before any cell lookup; it is not a cell, so its record
     has ``cell`` None and the catalogued constant text.
     """
-    from .catalogue import cell_entry, citation_variants, reason_matches, row_for, shared_reason
+    from .catalogue import (
+        cell_entry,
+        citation_variants,
+        reason_matches,
+        row_for,
+        shared_reason,
+    )
     row = row_for(record["policy_id"])
     if record["cell"] in {RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE}:
         raise ValueError("Legacy rule-failure sentinel: a shared reason is not a cell, the record's cell must be null")

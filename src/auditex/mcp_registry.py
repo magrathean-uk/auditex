@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from .features import response_enabled
 from .mcp_paths import confine_handler
-
 
 Handler = Callable[..., dict[str, Any]]
 

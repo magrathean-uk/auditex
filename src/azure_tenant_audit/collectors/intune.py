@@ -5,7 +5,12 @@ from typing import Any
 from ..data_minimisation import minimise_device_configurations, minimising_chunk_writer
 from ..graph import GraphClient
 from ..os_lifecycle import FAMILY_WINDOWS, os_family
-from ._endpoint_reads import assignment_fanout, collector_partial, protection_state_fanout, scoped_gap_message
+from ._endpoint_reads import (
+    assignment_fanout,
+    collector_partial,
+    protection_state_fanout,
+    scoped_gap_message,
+)
 from .base import Collector, CollectorResult, run_graph_endpoints
 
 # ``managedDeviceOwnerType`` is the v1.0 name of the ownership field (``ownerType`` exists only on beta);

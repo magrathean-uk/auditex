@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_INPUT_LIMITED, TRUNCATION_ERROR_CLASS
+from ..collection_gaps import (
+    REASON_FANOUT_LIMIT,
+    REASON_INPUT_LIMITED,
+    TRUNCATION_ERROR_CLASS,
+)
 from ..graph import GraphClient
 from ._endpoint_reads import STATUS_OK, ObjectRead, input_rows, read_endpoints
 from .base import Collector, CollectorResult, run_graph_endpoints
@@ -175,7 +179,7 @@ class IdentityGovernanceCollector(Collector):
         values: list[dict[str, Any]] = []
         failures: list[ObjectRead] = []
         malformed = 0
-        for policy_id, result in zip(targets, results):
+        for policy_id, result in zip(targets, results, strict=False):
             if result.status != STATUS_OK or result.rows is None:
                 failures.append(result)
                 continue

@@ -7,9 +7,15 @@ owned by the dispatch boundary.
 from __future__ import annotations
 
 from .defender_cascade import _cover_custom, _join_key
-from .defender_targeted_users import BINDING_KEY, COVERAGE_KEY, binding_from_config, membership, membership_from_coverage
+from .defender_targeted_users import (
+    BINDING_KEY,
+    COVERAGE_KEY,
+    binding_from_config,
+    membership,
+    membership_from_coverage,
+)
 from .helpers import PRESET_RE, _accepted, _cite, _cover, _licence_cell, _shape, _state
-from .record import EMPTY_SECTION, _A, _rec
+from .record import _A, EMPTY_SECTION, _rec
 
 UNACCEPTABLE_ACTIONS = ("noaction", "bccmessage")
 ACCEPTABLE_ACTIONS = ("movetojmf", "quarantine", "redirect")

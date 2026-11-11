@@ -24,7 +24,12 @@ Matching rules (all after textnorm.norm; a step is checked on its own):
 """
 import re
 
-from .config import PARAPHRASE_MAX_NOVEL, PARAPHRASE_MIN_TOKENS, PARAPHRASE_THETA, PARAPHRASE_WINDOW_UNITS
+from .config import (
+    PARAPHRASE_MAX_NOVEL,
+    PARAPHRASE_MIN_TOKENS,
+    PARAPHRASE_THETA,
+    PARAPHRASE_WINDOW_UNITS,
+)
 from .specifics import extract
 from .textnorm import norm, sentence_split
 
@@ -151,7 +156,7 @@ def _sentence_eval(sent, units):
         if best:
             break
     if not best:
-        return False, "containment below %.2f in every window of up to %d approved units: %r" % (PARAPHRASE_THETA, PARAPHRASE_WINDOW_UNITS, sent[:60])
+        return False, f"containment below {PARAPHRASE_THETA:.2f} in every window of up to {PARAPHRASE_WINDOW_UNITS:d} approved units: {sent[:60]!r}"
     a, w, novel = best
     if len(novel) > allowed_novel:
         return False, f"{len(novel)} novel content tokens {novel[:4]} exceed the allowance of {allowed_novel}"
@@ -159,7 +164,7 @@ def _sentence_eval(sent, units):
     if any(cand_states[k] > wstates.get(k, 0) for k in cand_states):
         return False, f"state word changed: candidate {sorted(cand_states)} vs window {sorted(wstates)}"
     lost = []
-    for u, uc in zip(units[a:a + w], ucontent[a:a + w]):
+    for u, uc in zip(units[a:a + w], ucontent[a:a + w], strict=False):
         if uc and len(uc & cset) / len(uc) >= 0.5:
             for k, v in state_counts(u).items():
                 if cand_states.get(k, 0) < v:

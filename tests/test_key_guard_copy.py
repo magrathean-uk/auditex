@@ -1,20 +1,19 @@
 """Customer-pack copy and digest boundaries must not disclose private inputs."""
 from __future__ import annotations
 
-from contextlib import nullcontext
 import hashlib
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
+from support import RunBundleBuilder
 
 from auditex.reporting import _copy_source_artifact
 from azure_tenant_audit import run_files
 from azure_tenant_audit.evidence_refs import file_sha256
 from azure_tenant_audit.sensitive_users import SensitiveUsers
-from support import RunBundleBuilder
-
 
 KEY = b'{"PRIVATEKEY":0,"PRIVATEKEY":1} '
 ADDRESS = "private-copy@example.invalid"
@@ -77,6 +76,7 @@ def test_evidence_file_sha256_never_hashes_registered_key(sealed_run: Path) -> N
 
 def test_guarded_text_decode_error_never_contains_input_bytes(tmp_path: Path) -> None:
     import traceback
+
     from auditex.run_bundle import _read_text
 
     run = RunBundleBuilder(tmp_path).build()

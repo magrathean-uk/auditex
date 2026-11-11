@@ -6,7 +6,7 @@ alignment). Dates are relative to a fixed ``NOW`` so no test depends on the day 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,7 @@ from azure_tenant_audit.baselines import build_baseline_alignment, rule_inputs_g
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
-NOW = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
 ALL_DEVICES = {"@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"}
 GROUP = {"@odata.type": "#microsoft.graph.groupAssignmentTarget", "groupId": "g1"}
 BLOCKED = {"error": "denied", "error_class": "insufficient_permissions"}

@@ -5,12 +5,12 @@ Prints the manifest entry to stdout. No held-out rows are retained.
 """
 from __future__ import annotations
 
-from hashlib import sha256
 import importlib.util
 import json
-from pathlib import Path
 import sys
 import tempfile
+from hashlib import sha256
+from pathlib import Path
 
 
 def build(source: Path, target: Path) -> dict:

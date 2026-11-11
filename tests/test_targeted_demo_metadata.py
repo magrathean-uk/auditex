@@ -8,7 +8,6 @@ import pytest
 
 from auditex import demo
 
-
 CANARY = "zq-canary@unlisted-canary.invalid"
 
 

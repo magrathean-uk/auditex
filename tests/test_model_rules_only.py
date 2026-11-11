@@ -1,15 +1,15 @@
 """Rules-only assessment contracts, compatibility and network isolation."""
-from pathlib import Path
+import http.client
 import json
 import socket
 import urllib.request
-import http.client
+from pathlib import Path
 
 import jsonschema
 import pytest
 
-from auditex.cli import main
 from auditex import rule_assessment
+from auditex.cli import main
 from auditex.rule_assessment import assess_run, assess_scubagear_export
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.scuba_assessment import validate_assessment
@@ -51,7 +51,7 @@ def historical_row(case, answer):
 
 
 def model_row():
-    from test_model_serving import sample_case, sample_answer
+    from test_model_serving import sample_answer, sample_case
     return historical_row(sample_case(), sample_answer())
 
 
@@ -200,7 +200,7 @@ def test_legacy_environment_keeps_rules(tmp_path, monkeypatch, capsys):
 
 @pytest.mark.parametrize('withdrawn', [False, True], ids=['all-rules', 'one-rule-withdrawn'])
 def test_no_model_or_network_is_reachable_on_demo_and_mocktenant_exports(tmp_path, monkeypatch, request, withdrawn):
-    from auditex.demo import DEMO_SAMPLE, DEMO_AS_OF
+    from auditex.demo import DEMO_AS_OF, DEMO_SAMPLE
     expected = set()
     if withdrawn:
         expected = {request.getfixturevalue('uncovered_policy')}
@@ -231,7 +231,8 @@ def test_no_model_or_network_is_reachable_on_demo_and_mocktenant_exports(tmp_pat
 @pytest.mark.parametrize('version', ['2026-10-27', '2026-10-27.1', '2026-10-28', '2026-10-29'])
 def test_historical_model_records_keep_their_recorded_schema(tmp_path, version, recorded):
     # Legacy files are unchanged: the rules-only envelope check applies to 2026-11-05 only.
-    from test_model_serving import sample_case, sample_answer
+    from test_model_serving import sample_answer, sample_case
+
     from auditex.rule_assessment import _totals
     (tmp_path / 'run-manifest.json').write_text('{"run_id":"historical-synthetic"}')
     case = sample_case()
@@ -260,7 +261,7 @@ def test_historical_model_records_keep_their_recorded_schema(tmp_path, version, 
 
 
 def _demo_run(tmp_path):
-    from auditex.demo import DEMO_SAMPLE, DEMO_AS_OF
+    from auditex.demo import DEMO_AS_OF, DEMO_SAMPLE
     assert run_offline(ROOT / DEMO_SAMPLE, tmp_path, 'synthetic', 'demo', plane='full', as_of=DEMO_AS_OF) == 0
     return tmp_path / 'synthetic-demo'
 

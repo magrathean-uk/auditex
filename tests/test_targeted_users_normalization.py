@@ -6,8 +6,8 @@ unrepresentable rows never do. Local retention of the summary is intentional; sh
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 
 from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.value_rules.defender_targeted_users import COVERAGE_KEY

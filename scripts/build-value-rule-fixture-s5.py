@@ -5,14 +5,14 @@ Includes the held SS 1.1 rule; excludes all held-out test and pilot rows.
 """
 from __future__ import annotations
 
-from collections import Counter
-from copy import deepcopy
-from hashlib import sha256
 import importlib.util
 import json
 import lzma
-from pathlib import Path
 import sys
+from collections import Counter
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICIES = frozenset({"MS.EXO.1.1v2"} | {

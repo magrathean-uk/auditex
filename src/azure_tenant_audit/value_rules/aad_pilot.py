@@ -71,7 +71,7 @@ def _am_low(policy_id: str, row: dict, sections: dict) -> dict:
     on = [k for k in LOW3 if 'enabled' in seen[k]]
     if on:
         return _answer(policy_id, 'method_enabled', text=f"Requirement not met: {', '.join(on)} authentication is enabled.")
-    odd = [k for k in LOW3 if any((s not in ('enabled', 'disabled') for s in seen[k]))]
+    odd = [k for k in LOW3 if any(s not in ('enabled', 'disabled') for s in seen[k])]
     if odd:
         return _answer(policy_id, 'method_state_unusable', text=f"Data unusable: the state of {', '.join(odd)} authentication is not enabled or disabled; the policy was not assessed.", cited=[AM])
     miss = [k for k in LOW3 if not seen[k]]
@@ -155,7 +155,7 @@ def _risky_items(cl):
     items = [x for x in cl if x is not None]
     for x in items:
         n = x.get('RiskyPermClassifications') if isinstance(x, dict) else None
-        if isinstance(n, str) and n or (isinstance(n, list) and n and all((type(e) is str and e for e in n))):
+        if isinstance(n, str) and n or (isinstance(n, list) and n and all(type(e) is str and e for e in n)):
             risky = True
         else:
             odd = True
@@ -172,7 +172,7 @@ def _consent(policy_id: str, row: dict, sections: dict) -> dict:
     per, grants_bad = ([], False)
     for p in objs:
         g = p.get('PermissionGrantPolicyIdsAssignedToDefaultUserRole')
-        if not (isinstance(g, list) and all((type(x) is str for x in g))):
+        if not (isinstance(g, list) and all(type(x) is str for x in g)):
             grants_bad = True
             continue
         per.append((type(p.get('Id')) is str, g))
@@ -217,7 +217,7 @@ def _admin_consent(policy_id: str, row: dict, sections: dict) -> dict:
         return _answer(policy_id, 'value_conflict', cited=['directory_settings'])
     if not vals:
         return _answer(policy_id, 'no_setting', cited=['directory_settings'])
-    if any((x not in ('true', 'false') for x in low)):
+    if any(x not in ('true', 'false') for x in low):
         return _answer(policy_id, 'value_unusable', cited=['directory_settings'])
     return _answer(policy_id, 'admin_consent_on')
 
@@ -311,7 +311,7 @@ def _app_restriction(policy_id: str, row: dict, sections: dict) -> dict:
     sp = row['params']
     a = sp['app']
     dp, cp = (sections[DEFAULT_POLICY], sections[CUSTOM_POLICIES])
-    if not isinstance(dp, list) or any((not isinstance(e, dict) for e in dp)):
+    if not isinstance(dp, list) or any(not isinstance(e, dict) for e in dp):
         return _answer(policy_id, 'section_shape_unusable', text=f'Data unusable: {DEFAULT_POLICY} is not a list of objects; the policy was not assessed.', cited=[DEFAULT_POLICY])
     if not isinstance(cp, list):
         return _answer(policy_id, 'section_shape_unusable', text=f'Data unusable: {CUSTOM_POLICIES} is not a list; the policy was not assessed.', cited=[CUSTOM_POLICIES])
@@ -324,14 +324,14 @@ def _app_restriction(policy_id: str, row: dict, sections: dict) -> dict:
     # Password lifetimes apply only in scopes where password addition is permitted.
     if a['moot']:
         ab, au, _, ae = _eval_app(pol, cp, 'PasswordCredentials', 'passwordAddition', None)
-        if not ab and (not au) and all((ae[sc] for sc in APP_SCOPES)):
+        if not ab and (not au) and all(ae[sc] for sc in APP_SCOPES):
             return _answer(policy_id, 'moot_addition_blocked')
         cb, cu, _, _ = _eval_app(pol, cp, 'PasswordCredentials', 'passwordAddition', None, scopes=())
         if not cb and (not cu):
             st = {}
             for sc in APP_SCOPES:
                 ks = [_eval_entry(e, None)[0] for e in ae[sc]]
-                st[sc] = 'blocked' if ks and all((k == 'ok' for k in ks)) else 'open' if 'bad' in ks else 'unknown'
+                st[sc] = 'blocked' if ks and all(k == 'ok' for k in ks) else 'open' if 'bad' in ks else 'unknown'
             if 'blocked' in st.values():
                 if 'unknown' in st.values():
                     return _answer(policy_id, 'moot_scope_unknown', cited=[DEFAULT_POLICY])
@@ -342,7 +342,7 @@ def _app_restriction(policy_id: str, row: dict, sections: dict) -> dict:
     if un:
         return _answer(policy_id, 'restriction_unusable', text=f'Data unusable: {sorted(set(un))[0]}; the policy was not assessed.', cited=[CUSTOM_POLICIES, DEFAULT_POLICY])
     if missing:
-        return _answer(policy_id, 'entry_missing', text=f"Data unavailable: the default policy shows no {a['rtype']} restriction for {' or '.join((m.replace('Restrictions', '') for m in missing))}; the policy was not assessed.", cited=[DEFAULT_POLICY])
+        return _answer(policy_id, 'entry_missing', text=f"Data unavailable: the default policy shows no {a['rtype']} restriction for {' or '.join(m.replace('Restrictions', '') for m in missing)}; the policy was not assessed.", cited=[DEFAULT_POLICY])
     return _answer(policy_id, 'restrictions_compliant', text=f"Requirement met: the {a['rtype']} restriction is enabled for every app in " + ('both scopes' if scopes == APP_SCOPES else 'the scope where password addition is permitted') + (f" within {a['maxd']} days." if a['maxd'] else '.'))
 
 

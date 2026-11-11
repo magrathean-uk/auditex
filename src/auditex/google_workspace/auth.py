@@ -8,7 +8,6 @@ from typing import Any
 
 from azure_tenant_audit.secret_hygiene import secure_write_text
 
-
 DEFAULT_GOOGLE_SCOPES: tuple[str, ...] = (
     "https://www.googleapis.com/auth/admin.directory.user.readonly",
     "https://www.googleapis.com/auth/admin.directory.group.readonly",

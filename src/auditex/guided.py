@@ -17,7 +17,12 @@ from azure_tenant_audit.secret_hygiene import build_argument_parser
 
 from . import auth as auditex_auth
 from .bootstrap import build_doctor_report, run_setup
-from .operator_flow import flow_choices, flow_plan, guided_choice_options, resolve_auto_flow
+from .operator_flow import (
+    flow_choices,
+    flow_plan,
+    guided_choice_options,
+    resolve_auto_flow,
+)
 
 REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
 
@@ -424,8 +429,14 @@ def _run_ga_setup_flow(
 
 
 def run_guided(args: argparse.Namespace) -> int:
-    from azure_tenant_audit.sensitive_users import SensitiveUsersError, load_sensitive_users
-    from azure_tenant_audit.partner_domains import PartnerDomainsError, load_partner_domains
+    from azure_tenant_audit.partner_domains import (
+        PartnerDomainsError,
+        load_partner_domains,
+    )
+    from azure_tenant_audit.sensitive_users import (
+        SensitiveUsersError,
+        load_sensitive_users,
+    )
 
     try:
         sensitive_users = load_sensitive_users(getattr(args, "sensitive_users", None))

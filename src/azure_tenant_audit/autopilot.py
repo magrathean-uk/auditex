@@ -6,7 +6,6 @@ from typing import Any
 from .evidence_gates import build_evidence_gate_summary, capability_status
 from .evidence_refs import confidence_for, ref_proof_status, refs_checked
 
-
 SCHEMA_VERSION = "2026-04-21"
 
 _EXPECTED_COLLECTORS = {
@@ -112,7 +111,7 @@ def build_audit_autopilot_plan(
     }
     capability_statuses = [capability_status(capability_by_collector.get(collector)) for collector in selected]
     reasons: list[str] = []
-    for collector, status in zip(selected, capability_statuses):
+    for collector, status in zip(selected, capability_statuses, strict=False):
         if status != "complete":
             row = capability_by_collector.get(collector)
             reasons.append(

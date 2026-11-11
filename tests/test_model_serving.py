@@ -1,24 +1,32 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from hashlib import sha256
-import json
 from pathlib import Path
 
 import jsonschema
 import pytest
 
 from auditex.cli import main
-from auditex.rule_assessment import assess_run
-from auditex.rule_assessment import PolicyUnavailable, build_case, canonical, policy_catalogue
+from auditex.rule_assessment import (
+    PolicyUnavailable,
+    assess_run,
+    build_case,
+    canonical,
+    policy_catalogue,
+)
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
 from azure_tenant_audit.cli import run_offline
-from azure_tenant_audit.contracts import build_validation_report, contract_schema_manifest
-from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.contracts import (
+    build_validation_report,
+    contract_schema_manifest,
+)
 from azure_tenant_audit.resources import shipped_resource_manifest
 from azure_tenant_audit.run_files import UnsafeRunFileError
+from azure_tenant_audit.scuba_assessment import validate_assessment
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = [json.loads(line) for line in (ROOT / "tests/fixtures/model-serving-cases.jsonl").read_text().splitlines()]
@@ -384,7 +392,9 @@ def test_absent_field_rule_is_served_and_validated(tmp_path, monkeypatch):
     import json as _json
     from copy import deepcopy as _deepcopy
     from pathlib import Path as _Path
+
     import jsonschema as _jsonschema
+
     from auditex.rule_assessment import assess_run as _assess
     from auditex.rule_assessment import policy_catalogue as _catalogue
     from azure_tenant_audit.scuba_assessment import validate_assessment as _validate

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -94,7 +94,7 @@ def test_token_claim_sanitization_removes_raw_claims() -> None:
 
 
 def test_token_freshness_and_validation_blocks_expired_token() -> None:
-    now = datetime(2026, 5, 6, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 6, tzinfo=UTC)
     claims = {
         "tenant_id": "tenant-1",
         "audience": "https://graph.microsoft.com",

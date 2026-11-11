@@ -8,7 +8,8 @@ redirects, multi-tenant audience drift, and orphaned ownership.
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlparse
 
 from ..graph import GraphClient, GraphError, graph_api_version, graph_url
@@ -50,7 +51,7 @@ class AppCredentialsCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient | None = context.get("client")
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         payload: dict[str, Any] = {
             "applicationCredentials": {"value": []},
@@ -133,7 +134,7 @@ class AppCredentialsCollector(Collector):
         *,
         params: dict[str, Any],
         coverage: list[dict[str, Any]],
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None,
         name: str | None = None,
     ) -> list[dict[str, Any]]:
         endpoint_name = name or path.lstrip("/")

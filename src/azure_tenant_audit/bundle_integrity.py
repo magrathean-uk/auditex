@@ -34,9 +34,10 @@ from pathlib import Path
 from typing import Any
 
 from .evidence_refs import HASH_ALGORITHM
+from .partner_domains import BUNDLE_PATH as PARTNER_DOMAINS_PATH
+from .partner_domains import KEY_PATH as PARTNER_DOMAINS_KEY_PATH
 from .run_files import hash_run_file, read_run_file
 from .sensitive_users import BUNDLE_PATH, KEY_PATH
-from .partner_domains import BUNDLE_PATH as PARTNER_DOMAINS_PATH, KEY_PATH as PARTNER_DOMAINS_KEY_PATH
 
 BUNDLE_HASHES_PATH = "bundle-hashes.json"
 BUNDLE_HASHES_SCHEMA_VERSION = "2026-10-22"

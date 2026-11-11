@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Sequence
 
 from .features import response_disabled_message, response_enabled
 

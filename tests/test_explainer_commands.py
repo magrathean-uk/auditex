@@ -1,16 +1,16 @@
 """R4: executable pre blocks survive rendering with PowerShell syntax intact."""
-from copy import deepcopy
 import gzip
 import json
-from pathlib import Path
 import re
 import shutil
 import subprocess
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
 from azure_tenant_audit.explainer import build_view, render, render_full
-from azure_tenant_audit.explainer.generate import _units, _chunk, LIMITS
+from azure_tenant_audit.explainer.generate import LIMITS, _chunk, _units
 from azure_tenant_audit.explainer.textkit import expand_template
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,12 +99,12 @@ Write-Output $rows.Count
 def test_only_whole_executable_units_are_exempt_from_word_limit():
     import sys
     sys.path.insert(0, str(ROOT / 'tests'))
-    from explainer_checks.corpus import base_pairs as local_pairs
-    from explainer_checks.support import local_resources
-    from explainer_checks.context import Context
-    from explainer_checks.chk_s import Output, check_s
     from explainer_checks.chk_e import check_e
     from explainer_checks.chk_e3 import check_e3
+    from explainer_checks.chk_s import Output, check_s
+    from explainer_checks.context import Context
+    from explainer_checks.corpus import base_pairs as local_pairs
+    from explainer_checks.support import local_resources
     command = "Get-Thing -Name '" + ' '.join(['word'] * 40) + "'"
     row = {'text': command, 'kind': 'pre', 'command': True, 'source': {'policy_id': 'p', 'file': 'p.md', 'line_start': 1, 'line_end': 4}}
     units, _, _ = _units([row], False)

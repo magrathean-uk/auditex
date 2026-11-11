@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from azure_tenant_audit import cli
-from auditex.rules import list_rule_inventory
 from auditex import cli as auditex_cli
+from auditex.rules import list_rule_inventory
+from azure_tenant_audit import cli
 
 
 def test_parser_accepts_collector_preset() -> None:
@@ -23,7 +23,10 @@ def test_parser_accepts_collector_preset() -> None:
 
 
 def test_collector_preset_resolves_before_profile_defaults(tmp_path: Path) -> None:
-    from azure_tenant_audit.presets import load_collector_presets, resolve_collector_selection
+    from azure_tenant_audit.presets import (
+        load_collector_presets,
+        resolve_collector_selection,
+    )
 
     preset_path = tmp_path / "collector-presets.json"
     preset_path.write_text(
@@ -53,7 +56,10 @@ def test_collector_preset_resolves_before_profile_defaults(tmp_path: Path) -> No
 
 
 def test_explicit_collectors_override_preset(tmp_path: Path) -> None:
-    from azure_tenant_audit.presets import load_collector_presets, resolve_collector_selection
+    from azure_tenant_audit.presets import (
+        load_collector_presets,
+        resolve_collector_selection,
+    )
 
     preset_path = tmp_path / "collector-presets.json"
     preset_path.write_text(

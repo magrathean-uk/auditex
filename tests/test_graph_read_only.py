@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from support import graph_auth, graph_response
 
 from azure_tenant_audit.graph import (
     GRAPH_BETA_ROOT,
@@ -13,7 +14,6 @@ from azure_tenant_audit.graph import (
     GraphError,
     read_only_violation,
 )
-from support import graph_auth, graph_response
 
 
 class _Recorder:

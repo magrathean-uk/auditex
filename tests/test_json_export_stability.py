@@ -17,7 +17,6 @@ import json
 
 from auditex.reporting import _render_json
 
-
 _SAMPLE_SECTIONS = {
     "findings": [
         {

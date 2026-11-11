@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -29,5 +30,5 @@ class Adapter:
     def dependency_check(self) -> bool:
         raise NotImplementedError
 
-    def run(self, command: str, log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None) -> dict[str, Any]:
+    def run(self, command: str, log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None) -> dict[str, Any]:
         raise NotImplementedError

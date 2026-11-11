@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.data_handling import collector_activity_notices
@@ -14,7 +15,6 @@ from azure_tenant_audit.scope_catalog import (
     build_m365_scope_catalog,
 )
 from azure_tenant_audit.selection import select_collectors
-
 
 GOOGLE_PROVIDER_ALIASES = {"google", "google_workspace", "workspace"}
 M365_PROVIDER_ALIASES = {"m365", "entra", "microsoft365", "microsoft_365"}

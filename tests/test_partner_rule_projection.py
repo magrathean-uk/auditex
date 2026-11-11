@@ -12,13 +12,25 @@ from pathlib import Path
 
 import pytest
 
-from azure_tenant_audit.guarded_io import UnsafeRunFileError
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.guarded_io import UnsafeRunFileError
 from azure_tenant_audit.partner_domains import (
-    BUNDLE_PATH as PARTNER_PATH, KEY_PATH as PARTNER_KEY_PATH, PartnerDomains,
+    BUNDLE_PATH as PARTNER_PATH,
+)
+from azure_tenant_audit.partner_domains import (
+    KEY_PATH as PARTNER_KEY_PATH,
+)
+from azure_tenant_audit.partner_domains import (
+    PartnerDomains,
 )
 from azure_tenant_audit.sensitive_users import (
-    BUNDLE_PATH as USERS_PATH, KEY_PATH as USERS_KEY_PATH, SensitiveUsers,
+    BUNDLE_PATH as USERS_PATH,
+)
+from azure_tenant_audit.sensitive_users import (
+    KEY_PATH as USERS_KEY_PATH,
+)
+from azure_tenant_audit.sensitive_users import (
+    SensitiveUsers,
 )
 
 SS21 = "MS.SECURITYSUITE.2.1v1"
@@ -244,8 +256,9 @@ def test_private_values_never_reach_model_views_or_public_outputs(tmp_path, monk
 
 
 def test_assessment_and_case_outputs_keep_partner_domains_private(tmp_path, monkeypatch, capsys, caplog):
-    from auditex.rule_assessment import assess_run
     from test_model_serving import case_texts
+
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
 
     caplog.set_level("DEBUG")
@@ -286,6 +299,7 @@ def write_policy(root, **changes):
 
 def direct_record(projection):
     from copy import deepcopy
+
     from azure_tenant_audit.value_rules import assess
 
     sections = deepcopy(projection.rule_sections)
@@ -357,6 +371,7 @@ def test_absent_partner_domains_keep_ss23_not_collected(tmp_path, monkeypatch):
 
 def test_resume_and_offline_replay_reach_the_same_ss23_cells(tmp_path):
     import shutil
+
     from auditex.rule_assessment import assess_run
     from auditex.scuba_projection import project_run
     from azure_tenant_audit.output import AuditWriter
@@ -384,8 +399,10 @@ def test_resume_and_offline_replay_reach_the_same_ss23_cells(tmp_path):
 
 def test_ss23_end_to_end_keeps_model_shape_and_canaries_private(tmp_path, monkeypatch, capsys, caplog):
     import json as _json
-    from auditex import scuba_projection as module
+
     from test_model_serving import case_texts
+
+    from auditex import scuba_projection as module
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
 

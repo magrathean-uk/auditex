@@ -8,7 +8,11 @@ from urllib.parse import parse_qs, urlsplit
 
 from ..collection_gaps import REASON_PAGINATION_FAILED, REASON_PAGINATION_NOT_FOLLOWED
 from ..power_platform import (
-    POWER_PLATFORM_ROOT, PowerPlatformClient, http_error_class, power_platform_client_from, same_origin,
+    POWER_PLATFORM_ROOT,
+    PowerPlatformClient,
+    http_error_class,
+    power_platform_client_from,
+    same_origin,
 )
 from .base import Collector, CollectorResult, record_truncation
 

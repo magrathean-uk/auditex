@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
 from math import ceil
+from typing import Any
 
 from ..adapters import get_adapter
 from .base import Collector, CollectorResult
@@ -70,7 +71,7 @@ class PurviewCollector(Collector):
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get(
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get(
             "audit_logger"
         )
         plane = str(context.get("plane", "inventory")).lower()
@@ -204,7 +205,7 @@ class PurviewCollector(Collector):
         self,
         commands: list[str],
         operation: str,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
         last_response: dict[str, Any] = {}
         for command in commands:
@@ -233,7 +234,7 @@ class PurviewCollector(Collector):
     def _run_command(
         self,
         command: str,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
         adapter = get_adapter("m365_cli")
         response = adapter.run(command, log_event=log_event)

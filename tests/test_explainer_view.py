@@ -1,13 +1,18 @@
 """Part 3 privacy boundary and isolation controls, adapted from S/A tests."""
-from copy import deepcopy
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from azure_tenant_audit.explainer import build_view
 from azure_tenant_audit.explainer.textkit import FAULT, canonical, resolved_units
-from azure_tenant_audit.explainer.view import EMAIL, VIEW_FIELDS, mask_emails, shown_section
+from azure_tenant_audit.explainer.view import (
+    EMAIL,
+    VIEW_FIELDS,
+    mask_emails,
+    shown_section,
+)
 
 FIX = Path(__file__).parent / "fixtures/explainer/renderer"
 B = json.loads((Path(__file__).resolve().parents[1] / "configs/explainer-baselines.json").read_text())

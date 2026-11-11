@@ -5,10 +5,10 @@ canaries reach ``raw/sample_input.json`` and the tests fail on their assertions.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -142,18 +142,18 @@ def test_each_fresh_replay_binds_to_its_own_key(tmp_path):
     second = _replay(tmp_path, _sample(deepcopy(ALL_SHAPES)), name="second")
     digests = [_manifest(run)["operator_inputs"]["sensitive_users"]["hmac_sha256"] for run in (first, second)]
     assert digests[0] != digests[1], "a new run never imports an old run's key"
-    for run, digest in zip((first, second), digests):
+    for run, digest in zip((first, second), digests, strict=False):
         assert _anti_phish(run)["value"][0]["TargetedUsersCoverage"]["input_hmac_sha256"] == digest
     assert (first / "operator-inputs/sensitive-users.key").read_bytes() != (
         second / "operator-inputs/sensitive-users.key").read_bytes()
 
 
 def test_replayed_summary_reaches_the_rule_and_stays_out_of_every_shareable_output(tmp_path):
-    from auditex.cli import write_customer_pack
-    from auditex.reporting import render_report
-    from auditex.rule_assessment import assess_run
     from test_model_serving import case_texts
-    from auditex.reporting import FORMAT_EXTENSIONS
+
+    from auditex.cli import write_customer_pack
+    from auditex.reporting import FORMAT_EXTENSIONS, render_report
+    from auditex.rule_assessment import assess_run
     from auditex.scuba_projection import project_run, rule_policy_section
     from azure_tenant_audit.value_rules import assess
 

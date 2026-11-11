@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 
+from support import FakeDoctorToolchain
+
 from auditex import bootstrap
 from auditex import cli as auditex_cli
-from support import FakeDoctorToolchain
 
 
 def test_build_doctor_report_includes_versions_and_readiness_split(monkeypatch) -> None:

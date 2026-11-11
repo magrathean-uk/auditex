@@ -5,7 +5,7 @@ import math
 import os
 from collections import Counter
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -18,20 +18,31 @@ from .baselines import (
     intune_assignments_are_a_sample,
     latest_secure_score,
 )
+from .break_glass import SECTION as _BREAK_GLASS_SECTION
 from .effective_admins import (
     ROUTE_DIRECT as _ADMIN_ROUTE_DIRECT,
+)
+from .effective_admins import (
     ROUTE_ELIGIBLE as _ADMIN_ROUTE_ELIGIBLE,
+)
+from .effective_admins import (
     ROUTE_GROUP as _ADMIN_ROUTE_GROUP,
+)
+from .effective_admins import (
     ROW_KIND as _ADMIN_ROW_KIND,
+)
+from .effective_admins import (
     SECTION as _ADMIN_SET_SECTION,
+)
+from .effective_admins import (
     STATE_COMPLETE as _ADMIN_SET_COMPLETE,
+)
+from .effective_admins import (
     SUMMARY_KIND as _ADMIN_SUMMARY_KIND,
 )
-from .break_glass import SECTION as _BREAK_GLASS_SECTION
 from .identity_controls import SECTION as _IDENTITY_CONTROL_SECTION
 from .resources import resolve_resource_path
 from .waivers import apply_waivers, load_waivers
-
 
 _PERMISSION_CLASSES = {"insufficient_permissions", "unauthenticated"}
 _SERVICE_CLASSES = {
@@ -498,7 +509,7 @@ _MULTI_TENANT_AUDIENCES = {
 }
 
 
-def _parse_iso_datetime(value: Any) -> "datetime | None":
+def _parse_iso_datetime(value: Any) -> datetime | None:
     from datetime import datetime
 
     if not isinstance(value, str) or not value:
@@ -515,14 +526,14 @@ def _parse_iso_datetime(value: Any) -> "datetime | None":
 def _credential_expiry_state(
     end_date_time: Any, *, warning_days: int = _APP_CREDENTIAL_EXPIRY_WARNING_DAYS
 ) -> tuple[str | None, int | None]:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     parsed = _parse_iso_datetime(end_date_time)
     if parsed is None:
         return None, None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    delta = parsed - datetime.now(tz=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    delta = parsed - datetime.now(tz=UTC)
     days = int(delta.total_seconds() // 86400)
     if delta.total_seconds() < 0:
         return "expired", days
@@ -586,7 +597,7 @@ def _is_credential_dormant(item: dict[str, Any]) -> bool:
     we cannot distinguish 'never signed in' from 'we never asked' and stay silent
     rather than flooding findings with false positives.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     if not item.get("signin_data_available"):
         return False
@@ -595,15 +606,15 @@ def _is_credential_dormant(item: dict[str, Any]) -> bool:
     if created is None:
         return False
     if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    one_year_ago = datetime.now(tz=timezone.utc) - timedelta(days=365)
+        created = created.replace(tzinfo=UTC)
+    one_year_ago = datetime.now(tz=UTC) - timedelta(days=365)
     if created > one_year_ago:
         return False
     if last_signin is None:
         # Old app + collector tried + got null → dormant.
         return True
     if last_signin.tzinfo is None:
-        last_signin = last_signin.replace(tzinfo=timezone.utc)
+        last_signin = last_signin.replace(tzinfo=UTC)
     return last_signin < one_year_ago
 
 
@@ -1151,8 +1162,8 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
         if last_password_change is None:
             continue
         if last_password_change.tzinfo is None:
-            last_password_change = last_password_change.replace(tzinfo=timezone.utc)
-        if last_password_change >= datetime.now(tz=timezone.utc) - timedelta(days=365):
+            last_password_change = last_password_change.replace(tzinfo=UTC)
+        if last_password_change >= datetime.now(tz=UTC) - timedelta(days=365):
             continue
         affected = user.get("principal_name") or user.get("display_name") or principal_id
         findings.append(
@@ -1705,7 +1716,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                         "basis": mfa.get("basis") or [],
                         "covered_exclusions": [
                             {**row_summary, "covered_by_policy_ids": item["covered_by_policy_ids"]}
-                            for row_summary, item in zip(rows, covered)
+                            for row_summary, item in zip(rows, covered, strict=False)
                         ],
                     },
                     "evidence_refs": [
@@ -2365,8 +2376,8 @@ def _is_stale_timestamp(value: Any, *, days: int = 90) -> bool:
     if parsed is None:
         return False
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed < datetime.now(tz=timezone.utc) - timedelta(days=days)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed < datetime.now(tz=UTC) - timedelta(days=days)
 
 
 def _build_inbox_rule_findings(item: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2923,7 +2934,7 @@ def _summary_record(normalized_snapshot: dict[str, Any], section: str, kind: str
 
 
 def _utc_now() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _device_base(device: dict[str, Any]) -> dict[str, Any]:

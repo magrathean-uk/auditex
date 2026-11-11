@@ -1,15 +1,15 @@
 """Regression tests for readers that hash or reopen an already selected input."""
 from __future__ import annotations
 
-from contextlib import nullcontext
 import hashlib
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
+from test_guarded_admission import private_run  # noqa: F401 - shared fixture
 
 from azure_tenant_audit import run_files
-from test_guarded_admission import private_run  # noqa: F401 - shared fixture
 
 
 def _context(run: Path):

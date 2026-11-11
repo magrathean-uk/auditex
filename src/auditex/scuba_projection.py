@@ -5,23 +5,30 @@ No collection, network calls, defaults for unread settings or sidecar writes.
 """
 from __future__ import annotations
 
+import json
+import os
+import re
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-import json
-import os
 from pathlib import Path
-import re
 from typing import Any
 
 from azure_tenant_audit.chunk_reader import _open_chunk
-from azure_tenant_audit.guarded_io import guarded_operation
-from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
-from azure_tenant_audit.scuba_assessment import collector_error_class, safe_projection_enum_value
-from azure_tenant_audit.run_files import MAX_RUN_FILE_BYTES, UnsafeRunFileError, read_run_file
+from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
+from azure_tenant_audit.guarded_io import guarded_operation
 from azure_tenant_audit.resources import open_text_resource
+from azure_tenant_audit.run_files import (
+    MAX_RUN_FILE_BYTES,
+    UnsafeRunFileError,
+    read_run_file,
+)
+from azure_tenant_audit.scuba_assessment import (
+    collector_error_class,
+    safe_projection_enum_value,
+)
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 from azure_tenant_audit.value_rules.defender_targeted_users import (
     BINDING_KEY,
@@ -537,7 +544,7 @@ class Bundle:
                         raise _collector_error(row) if row.get("error_classes") else Unavailable()
                     self._row_health(row)
                 except Unavailable as exc:
-                    raise self._attribute_row(exc, row, groups, named, collector, reads)
+                    raise self._attribute_row(exc, row, groups, named, collector, reads)  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
                 complete = True
         if summary_only and not surveyed:
             raise Unavailable(field="coverage_gaps")
@@ -551,7 +558,7 @@ class Bundle:
             return exc
         if named:
             return _attribute(exc, collector, next(iter(sorted(n for n in groups[0] if n in reads) or [None])))
-        for item, names in zip(row.get("diagnostics", []), groups):
+        for item, names in zip(row.get("diagnostics", []), groups, strict=False):
             if names & reads and isinstance(item, dict) and (item.get("error") or item.get("error_class")):
                 return _attribute(_collector_error(item), collector, item.get("item"))
         return exc
@@ -645,7 +652,7 @@ class Bundle:
                 _healthy(envelope)
             except Unavailable as exc:
                 if name in reads or not _OPERATION_NAME.fullmatch(name) or not isinstance(envelope, dict):
-                    raise _attribute(exc, collector, name)
+                    raise _attribute(exc, collector, name)  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
                 self.ignored.add(f"{collector}.{name}")
 
     def operation(self, collector: str, operation: str) -> list[dict[str, Any]]:
@@ -674,7 +681,7 @@ class Bundle:
         try:
             _healthy(section)
         except Unavailable as exc:
-            raise _attribute(exc, collector, operation)
+            raise _attribute(exc, collector, operation)  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
         _require(not any(section.get(k) for k in (
             "error", "error_class", "collection_truncated", "bounded_sample", "@odata.nextLink",
             "truncation_reason", "incomplete", "partial")))
@@ -1083,7 +1090,7 @@ def _roles(bundle: Bundle) -> Any:
         template = row.get("RoleTemplateId")
         # A role id that is this role's template id says nothing new; another one would attribute the row elsewhere.
         def same_role(value: Any) -> bool:
-            return isinstance(value, str) and isinstance(template, str) and value.lower() == template.lower()
+            return isinstance(value, str) and isinstance(template, str) and value.lower() == template.lower()  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
         # ``key`` is the normalized record's own identity (the bundle contract needs one); it is never projected.
         bundle.qualified_fields(row, {"DisplayName", "RoleTemplateId", "Assignments", "Rules", "key"}, "",
                                 {**ROLE_HARMLESS, "TemplateId": same_role})
@@ -1111,7 +1118,7 @@ def _roles(bundle: Bundle) -> Any:
             bundle.qualified_fields(rule, set(rule_fields), "Rules", {
                 "Target": _rule_target(rule.get("Id")),
                 # Notification_<Recipient>_<Caller>_<Level>: the recipient type the id already names.
-                "RecipientType": lambda value: len(parts) == 4 and isinstance(value, str) and value.lower() == parts[1].lower()})
+                "RecipientType": lambda value: len(parts) == 4 and isinstance(value, str) and value.lower() == parts[1].lower()})  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
             for key in ("Id", "RuleSource", "RuleSourceType"):
                 _require(key in rule, "Rules." + key, "missing_field")
             _require(_text(rule["Id"]), "Rules.Id", "invalid_type")

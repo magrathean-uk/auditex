@@ -5,9 +5,10 @@ import os
 import re
 import shlex
 import stat
-from datetime import datetime, timezone
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from .argument_parser import DiagnosticRedactingArgumentParser, build_argument_parser  # noqa: F401 - re-exported for callers of this module
 
@@ -277,18 +278,18 @@ def _iso_to_datetime(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def token_freshness(token_claims: Mapping[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
     expires_at = _iso_to_datetime(token_claims.get("expires_at_utc"))
     if expires_at is None:
         return {"status": "unknown", "expires_at_utc": token_claims.get("expires_at_utc"), "seconds_remaining": None}
-    current = now or datetime.now(timezone.utc)
+    current = now or datetime.now(UTC)
     if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-    seconds = int((expires_at - current.astimezone(timezone.utc)).total_seconds())
+        current = current.replace(tzinfo=UTC)
+    seconds = int((expires_at - current.astimezone(UTC)).total_seconds())
     if seconds <= 0:
         status = "expired"
     elif seconds <= 3600:

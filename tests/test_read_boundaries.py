@@ -32,7 +32,11 @@ import pytest
 
 from azure_tenant_audit import api_inventory
 from azure_tenant_audit.adapters import read_guard
-from azure_tenant_audit.adapters.m365dsc import COMPATIBILITY_SCRIPT, MINIMUM_MODULE_VERSION, M365DSCAdapter
+from azure_tenant_audit.adapters.m365dsc import (
+    COMPATIBILITY_SCRIPT,
+    MINIMUM_MODULE_VERSION,
+    M365DSCAdapter,
+)
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 from azure_tenant_audit.adapters.read_guard import CommandRefused, VettedCommand
 from azure_tenant_audit.data_minimisation import (
@@ -555,7 +559,7 @@ class _Module:
     def _bind(self, owner: ast.AST, target: ast.AST, value: ast.AST, path: tuple[Any, ...]) -> None:
         if isinstance(target, (ast.Tuple, ast.List)):
             if not path and isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
-                for item_target, item_value in zip(target.elts, value.elts):
+                for item_target, item_value in zip(target.elts, value.elts, strict=False):
                     self._bind(owner, item_target, item_value, ())
                 return
             for index, item_target in enumerate(target.elts):
@@ -723,9 +727,9 @@ class _Module:
 
         def defaults(function: ast.AST) -> dict[str, ast.AST]:
             positional = [arg.arg for arg in (*function.args.posonlyargs, *function.args.args)]
-            found = dict(zip(reversed(positional), reversed(function.args.defaults)))
+            found = dict(zip(reversed(positional), reversed(function.args.defaults), strict=False))
             found.update({
-                arg.arg: value for arg, value in zip(function.args.kwonlyargs, function.args.kw_defaults) if value
+                arg.arg: value for arg, value in zip(function.args.kwonlyargs, function.args.kw_defaults, strict=False) if value
             })
             return found
 
@@ -1020,8 +1024,8 @@ class _Resolver:
         method = bool(positional) and positional[0] in {"self", "cls"} and isinstance(
             module.parents.get(function), ast.ClassDef
         )
-        defaults = dict(zip(reversed(positional), reversed(function.args.defaults)))
-        defaults.update({arg.arg: value for arg, value in zip(function.args.kwonlyargs, function.args.kw_defaults) if value})
+        defaults = dict(zip(reversed(positional), reversed(function.args.defaults), strict=False))
+        defaults.update({arg.arg: value for arg, value in zip(function.args.kwonlyargs, function.args.kw_defaults, strict=False) if value})
         calls = [(module, call) for call in module.calls.get(function.name, [])]
         if module.at_module_level(function) and module.dotted:
             calls += _importer_calls(module.dotted, function.name)
@@ -1052,7 +1056,7 @@ class _Resolver:
         found: list[Value] = []
         for owner, node in containers:
             if isinstance(node, ast.Dict):
-                chosen = [v for k, v in zip(node.keys, node.values) if key is None or (isinstance(k, ast.Constant) and k.value == key)]
+                chosen = [v for k, v in zip(node.keys, node.values, strict=False) if key is None or (isinstance(k, ast.Constant) and k.value == key)]
                 complete &= key is None or None not in node.keys
             elif isinstance(node, (ast.List, ast.Tuple)) and not any(isinstance(e, ast.Starred) for e in node.elts):
                 chosen = [node.elts[key]] if isinstance(key, int) and -len(node.elts) <= key < len(node.elts) else node.elts
@@ -1178,7 +1182,7 @@ def _resolved_params(module: _Module, expr: ast.AST | None, depth: int = 0) -> t
         if not isinstance(node, ast.Dict) or depth > _MAX_DEPTH:
             complete = False
             continue
-        for key, value in zip(node.keys, node.values):
+        for key, value in zip(node.keys, node.values, strict=False):
             if key is None:
                 inner, ok = _resolved_params(owner, value, depth + 1)
                 complete &= ok
@@ -1208,7 +1212,7 @@ def _request_associations(module: _Module) -> Iterator[tuple[ast.AST, list[ast.A
         if isinstance(node, ast.Dict):
             entries = {
                 key.value: value
-                for key, value in zip(node.keys, node.values)
+                for key, value in zip(node.keys, node.values, strict=False)
                 if isinstance(key, ast.Constant) and isinstance(key.value, str)
             }
             if "endpoint" in entries and "params" in entries:
@@ -1608,7 +1612,7 @@ def _unpacked(module: _Module, expr: ast.AST, options: frozenset[str] = _LAUNCH_
     return [
         (owner, value)
         for owner, node in values
-        for key, value in zip(node.keys, node.values)
+        for key, value in zip(node.keys, node.values, strict=False)
         if key.value not in options
     ]
 
@@ -3364,7 +3368,10 @@ def test_alert_mask_drops_message_text_and_keeps_normalised_fields() -> None:
 def test_group_settings_fields_cover_every_setting_the_normaliser_reads() -> None:
     from types import SimpleNamespace
 
-    from auditex.google_workspace.client import GROUP_SETTING_FIELDS, GoogleWorkspaceClient
+    from auditex.google_workspace.client import (
+        GROUP_SETTING_FIELDS,
+        GoogleWorkspaceClient,
+    )
 
     source = (REPO_ROOT / "src/auditex/google_workspace/normalize.py").read_text(encoding="utf-8")
     block = source.split('"google_groups_settings.groupSettings"', 1)[1].split("for item in _values", 1)[0]

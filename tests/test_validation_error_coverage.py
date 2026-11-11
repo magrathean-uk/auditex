@@ -20,11 +20,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from azure_tenant_audit.contracts import build_validation_report
-from azure_tenant_audit.finalize import finalize_bundle_contract
-
 # Re-use the bundle prep from C1.
 from test_finalize_idempotent import _prepare_bundle_for_finalize
+
+from azure_tenant_audit.contracts import build_validation_report
+from azure_tenant_audit.finalize import finalize_bundle_contract
 
 
 def _bundle(tmp_path: Path) -> Path:

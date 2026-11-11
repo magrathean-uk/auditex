@@ -1,8 +1,14 @@
 """Closed, cited view of already redacted evidence; no I/O or rule evaluation."""
-from copy import deepcopy
 import re
+from copy import deepcopy
 
-from .textkit import FAULT, shared_exceptions, canonical, collection_lines, resolved_units
+from .textkit import (
+    FAULT,
+    canonical,
+    collection_lines,
+    resolved_units,
+    shared_exceptions,
+)
 
 FIELDS = ("policy_id", "verdict", "cell", "reason_code", "reason_text")
 VIEW_FIELDS = frozenset((*FIELDS, "evidence", "approved_remediation"))

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
+from typing import TYPE_CHECKING, Any
 
 from ..collection_gaps import (
     REASON_NEXT_LINK_REFUSED,
@@ -14,8 +14,14 @@ from ..collection_gaps import (
     sampling,
     truncation_message,
 )
+from ..graph import (
+    INCOMPLETE_EVIDENCE,
+    NEXT_LINK_REFUSED,
+    GraphClient,
+    GraphError,
+    graph_url,
+)
 from ..perf_runtime import EndpointAccumulator, PageWindow
-from ..graph import GraphClient, GraphError, INCOMPLETE_EVIDENCE, NEXT_LINK_REFUSED, graph_url
 
 if TYPE_CHECKING:
     from ..collector_runner import CollectorRunContext
@@ -238,8 +244,8 @@ def run_graph_endpoints(
     top: int | None,
     *,
     page_size: int | None = None,
-    chunk_writer: Optional[Callable[[str, str, int, list[dict[str, Any]], Optional[dict[str, Any]]], str | None]] = None,
-    log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+    chunk_writer: Callable[[str, str, int, list[dict[str, Any]], dict[str, Any] | None], str | None] | None = None,
+    log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Execute a set of Graph endpoints for one collector.
 
@@ -522,7 +528,7 @@ class CollectorResult:
     payload: dict[str, Any]
     item_count: int
     message: str = ""
-    error: Optional[str] = None
+    error: str | None = None
     coverage: list[dict[str, Any]] | None = None
 
 
@@ -535,7 +541,7 @@ class Collector:
     # and a resumed run under another window re-runs it instead of carrying evidence of a different one.
     time_windowed: bool = False
 
-    def run(self, context: "CollectorRunContext | dict[str, Any]") -> CollectorResult:
+    def run(self, context: CollectorRunContext | dict[str, Any]) -> CollectorResult:
         raise NotImplementedError
 
     @staticmethod

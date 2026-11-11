@@ -5,21 +5,20 @@ This is an offline, conservative scan of the pinned OPA parser AST. It never inv
 """
 from __future__ import annotations
 
-from collections import deque
-from hashlib import sha256
 import inspect
 import json
 import os
-from pathlib import Path
 import subprocess
-import tempfile
 import sys
+import tempfile
+from collections import deque
+from hashlib import sha256
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
-
 from auditex.scuba_projection import PACK_SHAPE_DIGESTS, _json  # noqa: E402
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 
 PINNED_REVISION = "2446ad723b7f55031cc02c8aca244d731d468cba"
 SECTIONS = ("SPO_tenant", "accepted_domains", "authorization_policies", "conditional_access_policies",
@@ -243,7 +242,7 @@ def scan_rego(sources: dict[str, str], validated: dict[str, tuple[str, ...]],
         definitions.setdefault(rule["head"]["name"], []).append((path, rule))
 
     aliases: dict[str, dict[str, tuple]] = {section: {} for section in SECTIONS}
-    for path, rule in rules:
+    for _path, rule in rules:
         value = rule["head"].get("value")
         if not isinstance(value, dict):
             continue

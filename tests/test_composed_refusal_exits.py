@@ -6,10 +6,10 @@ import sqlite3
 import stat
 
 import pytest
+from test_index_unproved_storage import _proof, _summary_run, _validation_codes
 
 from azure_tenant_audit import evidence_db
 from azure_tenant_audit.guarded_io import UnsafeRunFileError
-from test_index_unproved_storage import _proof, _summary_run, _validation_codes
 
 
 @pytest.mark.parametrize("proved", [False, True])
@@ -79,9 +79,10 @@ def test_real_permission_change_before_sqlite_open_refuses(tmp_path, monkeypatch
 
 
 def test_derive_preserves_the_identical_unsafe_refusal(monkeypatch):
+    from test_explainer_wire import explained
+
     from azure_tenant_audit import explainer
     from azure_tenant_audit.scuba_assessment import derive_explainer
-    from test_explainer_wire import explained
 
     row = explained("not_met")
     assert derive_explainer(row) is not None
@@ -97,8 +98,9 @@ def test_derive_preserves_the_identical_unsafe_refusal(monkeypatch):
 
 
 def test_assessment_preserves_unsafe_refusal_without_writing_assessment(tmp_path, monkeypatch):
-    from auditex import rule_assessment
     from test_explainer_wire import PBI
+
+    from auditex import rule_assessment
 
     (tmp_path / "run-manifest.json").write_text('{"run_id":"context"}')
     failure = UnsafeRunFileError("input")
@@ -115,8 +117,9 @@ def test_assessment_preserves_unsafe_refusal_without_writing_assessment(tmp_path
 
 @pytest.mark.parametrize("hook", ["precheck_policy", "render_explanation", "redact_output"])
 def test_precheck_direct_hooks_preserve_unsafe_refusal(monkeypatch, hook):
-    from auditex import rule_assessment
     from test_explainer_wire import case_for
+
+    from auditex import rule_assessment
 
     failure = UnsafeRunFileError("input")
 

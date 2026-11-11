@@ -5,20 +5,19 @@ No pack vectors, credentials or tenant evidence are used.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 
 from auditex.rule_assessment import assess_run
 from auditex.scuba_projection import project_run
-from azure_tenant_audit.collectors import power_platform as pp
-from azure_tenant_audit.collectors.power_bi import PowerBICollector, TENANT_SETTINGS
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.collectors import power_platform as pp
+from azure_tenant_audit.collectors.power_bi import TENANT_SETTINGS, PowerBICollector
 from azure_tenant_audit.power_bi import PowerBIError
 from azure_tenant_audit.power_platform import PowerPlatformError
 from azure_tenant_audit.value_rules import assess
-
 
 TENANT = "11111111-1111-4111-8111-111111111111"
 DEFAULT = f"Default-{TENANT}"

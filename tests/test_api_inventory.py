@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from azure_tenant_audit.api_inventory import ApiInventoryRecorder, build_api_call_inventory
+from test_finalize_idempotent import _prepare_bundle_for_finalize
+
+from azure_tenant_audit.api_inventory import (
+    ApiInventoryRecorder,
+    build_api_call_inventory,
+)
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.finalize import finalize_bundle_contract
-from test_finalize_idempotent import _prepare_bundle_for_finalize
 
 
 def test_api_inventory_maps_observed_calls_to_read_only_customer_ledger() -> None:

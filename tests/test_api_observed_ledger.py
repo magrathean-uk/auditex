@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from support import graph_auth, graph_response
+from test_finalize_idempotent import _prepare_bundle_for_finalize
 
 from azure_tenant_audit.api_inventory import (
     build_api_call_inventory,
@@ -17,8 +19,6 @@ from azure_tenant_audit.api_inventory import (
 from azure_tenant_audit.finalize import finalize_bundle_contract
 from azure_tenant_audit.graph import GRAPH_ROOT, GraphClient
 from azure_tenant_audit.output import AuditWriter
-from support import graph_auth, graph_response
-from test_finalize_idempotent import _prepare_bundle_for_finalize
 
 GUID = "5f7b3a1e-0c4d-4e2b-9a6f-1d2c3b4a5e6f"
 
@@ -318,6 +318,8 @@ def test_writer_derives_the_ledger_from_its_own_audit_log(tmp_path: Path) -> Non
 
 @pytest.mark.parametrize("statuses", [(200, 200, 200, 200, 200), (200, 403, 404, 500, 200)])
 def test_teams_rest_run_writes_five_gets_and_statuses_without_token(monkeypatch, tmp_path: Path, statuses) -> None:
+    from test_teams_admin_rest import TOKEN, Client, Response, command_reader, connect
+
     from auditex.reporting import (
         _render_pack_readme,
         enterprise_handoff,
@@ -326,7 +328,6 @@ def test_teams_rest_run_writes_five_gets_and_statuses_without_token(monkeypatch,
     )
     from azure_tenant_audit.adapters.teams_admin_rest import TEAMS_READ_PATHS
     from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
-    from test_teams_admin_rest import TOKEN, Client, Response, command_reader, connect
 
     # All service rows and the certificate token are constructed, with no pack data.
     command_reader(monkeypatch)
@@ -340,7 +341,7 @@ def test_teams_rest_run_writes_five_gets_and_statuses_without_token(monkeypatch,
     inventory_path = writer.write_json_artifact("api-inventory.json", declared)
     inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
     ledger = inventory["observed_ledger"]["teams_admin_rest"]
-    expected = {url: status for (url, _), status in zip(session.calls, statuses)}
+    expected = {url: status for (url, _), status in zip(session.calls, statuses, strict=False)}
     assert len(expected) == len(ledger["endpoints"]) == ledger["request_attempts"] == 5
     assert ledger["methods_seen"] == inventory["safety"]["observed_methods"] == ["GET"]
     assert inventory["counts"]["observed_teams_admin_rest_requests"] == 5
@@ -442,9 +443,9 @@ def test_teams_summary_line_is_conditional_across_markdown_surfaces(tmp_path: Pa
     from auditex.reporting import (
         _render_pack_readme,
         enterprise_handoff,
+        preview_report,
         render_api_call_inventory_markdown,
         render_enterprise_handoff_markdown,
-        preview_report,
         write_enterprise_handoff_pack,
     )
 

@@ -30,7 +30,7 @@ filters or reshapes on either.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
 from .effective_admins import _privileged_roles
@@ -59,7 +59,7 @@ GAP_REASON = "artefact_withheld"
 GAP_LIST = SECTION
 
 _EXPIRATION, _NOTIFICATION, _APPROVAL = "Expiration_", "Notification_", "Approval_"
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 class Unreadable(ValueError):
@@ -84,7 +84,7 @@ def _date(value: Any) -> str:
     except ValueError as exc:
         raise Unreadable("date") from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     delta = parsed - _EPOCH
     return f"/Date({(delta.days * 86400 + delta.seconds) * 1000 + delta.microseconds // 1000})/"
 

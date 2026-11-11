@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from test_finalize_idempotent import _prepare_bundle_for_finalize
+
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.finalize import finalize_bundle_contract
 from azure_tenant_audit.findings import build_report_pack
-
-from test_finalize_idempotent import _prepare_bundle_for_finalize
 
 
 def test_autopilot_plan_marks_partial_with_exact_scope_blockers() -> None:

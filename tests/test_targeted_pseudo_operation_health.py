@@ -1,8 +1,8 @@
 """Minimisation keeps collector-wide refusals from unsupported pseudo-operations."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -10,7 +10,6 @@ from auditex.scuba_projection import project_run
 from azure_tenant_audit import cli
 from azure_tenant_audit.collectors.targeted_users_coverage import sanitise_sample
 from azure_tenant_audit.value_rules import assess
-
 
 CANARY = "zq-legacy-health@unlisted.invalid"
 ADMIN = "62e90394-69f5-4237-9190-012177145e10"

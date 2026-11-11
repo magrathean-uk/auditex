@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import random
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, Optional
+from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
@@ -13,7 +14,6 @@ from requests.exceptions import RequestException
 from . import auth_context
 from .config import AuthConfig
 from .versioning import package_user_agent
-
 
 LOG = logging.getLogger(__name__)
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
@@ -234,15 +234,15 @@ class GraphError(RuntimeError):
 class GraphClient:
     auth: AuthConfig
     session: requests.Session = field(default_factory=requests.Session)
-    _token: Optional[str] = None
-    audit_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None
+    _token: str | None = None
+    audit_event: Callable[[str, str, dict[str, Any] | None], None] | None = None
     # Explicit caller backstop only; ordinary inventories have no page-count ceiling.
     max_pages: int | None = None
     _next_request_not_before: float = field(default=0.0, init=False)
     _permission_failures: dict[str, int] = field(default_factory=dict, init=False)
-    _token_claims: Optional[dict[str, Any]] = field(default=None, init=False)
+    _token_claims: dict[str, Any] | None = field(default=None, init=False)
 
-    def _emit(self, event: str, message: str, details: Optional[dict[str, Any]] = None) -> None:
+    def _emit(self, event: str, message: str, details: dict[str, Any] | None = None) -> None:
         if self.audit_event is None:
             return
         try:
@@ -258,7 +258,7 @@ class GraphClient:
         return copy
 
     @staticmethod
-    def _params_overview(params: Optional[Dict[str, Any]]) -> dict[str, Any]:
+    def _params_overview(params: dict[str, Any] | None) -> dict[str, Any]:
         if not params:
             return {}
         return {key: params[key] for key in params.keys()}
@@ -416,7 +416,7 @@ class GraphClient:
         try:
             import msal
         except Exception as exc:  # noqa: BLE001
-            raise GraphError(f"Interactive auth requires msal dependency: {exc}")
+            raise GraphError(f"Interactive auth requires msal dependency: {exc}")  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
 
         requested_scopes = self.auth.interactive_scopes or [self.auth.graph_scope]
         scopes = list(dict.fromkeys(requested_scopes)) or ["User.Read"]
@@ -650,7 +650,7 @@ class GraphClient:
             current_url = target
         return response
 
-    def get_json(self, path: str, params: Optional[Dict[str, Any]] = None, full_url: bool = False) -> Dict[str, Any]:
+    def get_json(self, path: str, params: dict[str, Any] | None = None, full_url: bool = False) -> dict[str, Any]:
         url = path if full_url else f"{GRAPH_ROOT}{path}"
         if full_url:
             self._require_graph_url(url)
@@ -683,7 +683,7 @@ class GraphClient:
             raise GraphError(reason, status=response.status_code, request=error_url, error_code=error_code)
         return response.json()
 
-    def get_content(self, path: str, params: Optional[Dict[str, Any]] = None, full_url: bool = False) -> str:
+    def get_content(self, path: str, params: dict[str, Any] | None = None, full_url: bool = False) -> str:
         url = path if full_url else f"{GRAPH_ROOT}{path}"
         if full_url:
             self._require_graph_url(url)
@@ -709,7 +709,7 @@ class GraphClient:
             error_code=NEXT_LINK_REFUSED,
         )
 
-    def iter_pages(self, path: str, params: Optional[Dict[str, Any]] = None) -> Iterator[Dict[str, Any]]:
+    def iter_pages(self, path: str, params: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
         if self.max_pages is not None and (
             isinstance(self.max_pages, bool) or not isinstance(self.max_pages, int) or self.max_pages < 1
         ):
@@ -717,7 +717,7 @@ class GraphClient:
         if path.startswith("http"):
             # An absolute first URL (a batch body's nextLink, a beta endpoint) gets the same host check as every later page.
             self._require_graph_url(path)
-        page_url: Optional[str] = path if path.startswith("http") else f"{GRAPH_ROOT}{path}"
+        page_url: str | None = path if path.startswith("http") else f"{GRAPH_ROOT}{path}"
         current_params = params
         visited: set[str] = set()
         page_count = 0
@@ -743,10 +743,10 @@ class GraphClient:
     def iter_items(
         self,
         path: str,
-        params: Optional[Dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
         *,
         result_limit: int | None = None,
-    ) -> Iterator[Dict[str, Any]]:
+    ) -> Iterator[dict[str, Any]]:
         yielded = 0
         for payload in self.iter_pages(path, params=params):
             values = payload.get("value", [])
@@ -758,11 +758,11 @@ class GraphClient:
                 yield row
                 yielded += 1
 
-    def get_all(self, path: str, params: Optional[Dict[str, Any]] = None) -> list[Dict[str, Any]]:
+    def get_all(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         return list(self.iter_items(path, params=params))
 
     @staticmethod
-    def _batch_request_url(path: str, params: Optional[Dict[str, Any]] = None, *, full_url: bool = False) -> str:
+    def _batch_request_url(path: str, params: dict[str, Any] | None = None, *, full_url: bool = False) -> str:
         parsed = urlparse(path)
         batch_path = parsed.path or "/"
         parts = [item for item in batch_path.split("/") if item]

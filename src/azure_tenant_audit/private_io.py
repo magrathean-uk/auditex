@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import stat
-from typing import Callable
+from collections.abc import Callable
+from pathlib import Path
 
-from .guarded_io import UnsafeRunFileError, _DIR_FLAGS, _safe_directory, guard_session, open_pinned_binary
+from .guarded_io import (
+    _DIR_FLAGS,
+    UnsafeRunFileError,
+    _safe_directory,
+    guard_session,
+    open_pinned_binary,
+)
 
 PRIVATE_DIR_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600

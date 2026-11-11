@@ -3,31 +3,51 @@ from __future__ import annotations
 import json
 import logging
 import os
-import stat
 import secrets
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Optional
-
+import stat
 import time
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
-from .api_inventory import API_INVENTORY_ARTIFACT, read_audit_events, with_observed_ledger
-from .assurance import build_assurance_summary, build_coverage_gap_summary, build_provider_scorecard, build_surface_coverage_map
+from .api_inventory import (
+    API_INVENTORY_ARTIFACT,
+    read_audit_events,
+    with_observed_ledger,
+)
+from .assurance import (
+    build_assurance_summary,
+    build_coverage_gap_summary,
+    build_provider_scorecard,
+    build_surface_coverage_map,
+)
 from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
 from .evidence_db import register_run_log
 from .findings import apply_coverage_gaps_to_report_pack
-from .tenant_identity import IDENTITY_FIELDS
-from .private_io import make_private_dirs, write_private_text
 from .partner_domains import (
-    BUNDLE_PATH as PARTNER_DOMAINS_PATH, KEY_PATH as PARTNER_DOMAINS_KEY_PATH,
-    PartnerDomains, PartnerDomainsError,
+    BUNDLE_PATH as PARTNER_DOMAINS_PATH,
+)
+from .partner_domains import (
+    KEY_PATH as PARTNER_DOMAINS_KEY_PATH,
+)
+from .partner_domains import (
+    PartnerDomains,
+    PartnerDomainsError,
+)
+from .private_io import make_private_dirs, write_private_text
+from .sensitive_users import (
+    BUNDLE_PATH as SENSITIVE_USERS_PATH,
 )
 from .sensitive_users import (
-    BUNDLE_PATH as SENSITIVE_USERS_PATH, KEY_PATH as SENSITIVE_USERS_KEY_PATH,
-    SensitiveUsers, SensitiveUsersError,
+    KEY_PATH as SENSITIVE_USERS_KEY_PATH,
 )
+from .sensitive_users import (
+    SensitiveUsers,
+    SensitiveUsersError,
+)
+from .tenant_identity import IDENTITY_FIELDS
 
 LOG = logging.getLogger("azure_tenant_audit.output")
 RUN_MANIFEST_SCHEMA_VERSION = "2026-04-21"
@@ -53,7 +73,7 @@ def validate_bundle_name(value: str | None, label: str) -> str | None:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 @contextmanager
@@ -67,7 +87,12 @@ def _open_private(path: Path, mode: str = "w"):
 
 def harden_bundle(run_dir: Path) -> None:
     """Restrict admitted bundle files without following links or changing a private alias."""
-    from .guarded_io import UnsafeRunFileError, _safe_directory, guard_session, open_guarded_file
+    from .guarded_io import (
+        UnsafeRunFileError,
+        _safe_directory,
+        guard_session,
+        open_guarded_file,
+    )
 
     root = Path(run_dir)
     with guard_session() as context:
@@ -115,7 +140,7 @@ class AuditLogger:
                 pass
         register_run_log(run_dir)
 
-    def log(self, event: str, message: str, details: Optional[dict[str, Any]] = None) -> None:
+    def log(self, event: str, message: str, details: dict[str, Any] | None = None) -> None:
         payload = {
             "ts_utc": _now_iso(),
             "event": event,
@@ -143,7 +168,7 @@ class AuditWriter:
         self,
         base_dir: Path,
         tenant_name: str,
-        run_name: Optional[str] = None,
+        run_name: str | None = None,
         *,
         run_dir: Path | None = None,
         event_listener: Any = None,
@@ -611,7 +636,7 @@ class AuditWriter:
         name: str,
         page_number: int,
         records: list[dict[str, Any]],
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Path:
         collector_dir = self.chunks_dir / collector
         self._mkdir_private(collector_dir)
@@ -646,7 +671,7 @@ class AuditWriter:
         operation: str,
         page_number: int,
         records: list[dict[str, Any]],
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Path:
         section_dir = self.raw_dir / collector / operation
         self._mkdir_private(section_dir)
@@ -679,7 +704,7 @@ class AuditWriter:
                 handle.write(json.dumps(record, default=str) + "\n")
         self._record_artifact(index_path)
 
-    def log_event(self, event: str, message: str, details: Optional[dict[str, Any]] = None) -> None:
+    def log_event(self, event: str, message: str, details: dict[str, Any] | None = None) -> None:
         self.audit.log(event, message, details=details)
 
     def write_diagnostics(self, diagnostics: list[dict[str, Any]]) -> Path:

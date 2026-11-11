@@ -1,26 +1,39 @@
 from __future__ import annotations
 
 import argparse
-from functools import wraps
 import inspect
 import sys
+from functools import wraps
 from pathlib import Path
 from typing import Any
-from azure_tenant_audit.config import CollectorConfig
 
-from . import auth as auditex_auth
-from .features import response_disabled_message, response_enabled
-from azure_tenant_audit.diffing import diff_run_directories
-from azure_tenant_audit.profiles import PROFILES
 from azure_tenant_audit.adapters import list_adapters as _list_adapters
 from azure_tenant_audit.citations import build_citation_summary
-from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, assert_snapshot_stable, redact_payload, snapshot_run
-from azure_tenant_audit.response import response_actions
-from azure_tenant_audit.secret_hygiene import build_argument_parser
+from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.contracts import contract_schema_manifest
-from azure_tenant_audit.guarded_io import current_context, guard_session, guarded_operation, open_pinned_binary
-from .rules import list_rule_inventory
-from .command_runner import run_cli_command
+from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.guarded_io import (
+    current_context,
+    guard_session,
+    guarded_operation,
+    open_pinned_binary,
+)
+from azure_tenant_audit.output_redaction import (
+    PROFILE_SHAREABLE,
+    assert_snapshot_stable,
+    redact_payload,
+    snapshot_run,
+)
+from azure_tenant_audit.profiles import PROFILES
+from azure_tenant_audit.response import response_actions
+from azure_tenant_audit.scope_catalog import (
+    build_google_scope_catalog,
+    build_m365_scope_catalog,
+)
+from azure_tenant_audit.secret_hygiene import build_argument_parser
+from azure_tenant_audit.versioning import package_version_line
+
+from . import auth as auditex_auth
 from .command_builders import (
     AuditRunCommandSpec,
     GoogleRunCommandSpec,
@@ -28,15 +41,21 @@ from .command_builders import (
     ResponseCommandSpec,
     build_audit_run_command,
     build_google_run_command,
+)
+from .command_builders import (
     build_probe_command as build_probe_tool_command,
+)
+from .command_builders import (
     build_response_command as build_response_tool_command,
 )
+from .command_runner import run_cli_command
+from .features import response_disabled_message, response_enabled
 from .mcp_paths import McpPathError, mcp_root
 from .mcp_registry import iter_tool_specs, register_fastmcp_tools
+from .rules import list_rule_inventory
 from .run_bundle import RunBundle
 from .setup_guide import build_setup_guide
-from azure_tenant_audit.scope_catalog import build_google_scope_catalog, build_m365_scope_catalog
-from azure_tenant_audit.versioning import package_version_line
+
 SUPPORTED_PLANES = ("inventory", "full", "export")
 SUPPORTED_PROBE_MODES = ("delegated", "app", "response")
 

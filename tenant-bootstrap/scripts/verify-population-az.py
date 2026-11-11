@@ -7,18 +7,17 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import requests
 
-
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _safe_set(value: Any) -> set[str]:
@@ -147,8 +146,7 @@ class GraphClient:
             body = self.request("GET", next_url)
             if not isinstance(body, dict):
                 return
-            for item in body.get("value", []):
-                yield item
+            yield from body.get("value", [])
             next_url = body.get("@odata.nextLink")
 
 

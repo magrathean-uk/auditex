@@ -5,7 +5,6 @@ from typing import Any
 
 from .capability_gate import capability_blocker_summary, classify_capability_blocker
 
-
 _TRUSTED_CAPABILITY_STATUSES = {
     "ok",
     "supported",

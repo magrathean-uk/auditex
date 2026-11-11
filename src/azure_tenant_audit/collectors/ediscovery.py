@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..adapters import get_adapter
-from .base import Collector, CollectorResult, normalize_collection_limit, run_graph_endpoints
+from .base import (
+    Collector,
+    CollectorResult,
+    normalize_collection_limit,
+    run_graph_endpoints,
+)
 
 
 class EDiscoveryCollector(Collector):
@@ -59,7 +65,7 @@ class EDiscoveryCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         graph_client = context["client"]
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get(
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get(
             "audit_logger"
         )
         top = context.get("top")
@@ -276,7 +282,7 @@ class EDiscoveryCollector(Collector):
         self,
         commands: list[str],
         operation: str,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
         last_response: dict[str, Any] = {}
         for command in commands:
@@ -315,7 +321,7 @@ class EDiscoveryCollector(Collector):
     def _run_command(
         self,
         command: str,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
         adapter = get_adapter("m365_cli")
         response = adapter.run(command, log_event=log_event)

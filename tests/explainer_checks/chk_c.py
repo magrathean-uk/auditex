@@ -8,8 +8,8 @@ For the other verdicts check c passes trivially (no claim is made about missing 
 import re
 
 from . import verdict_classifier as vc
-from .textnorm import norm
 from .shared_reason import check_shared
+from .textnorm import norm
 
 COLLECT_VERB = re.compile(r"\b(collect|export|run|re-run|rerun|enable|grant|confirm|check|ensure)\b", re.I)
 TENANT_CHANGING = re.compile(r"\b(disable|turn\s+off|switch\s+off|delete|remove|set\s+\S+(?:\s+\S+){0,3}\s+to|revoke|block|reset|purge|deactivate|uninstall|wipe|reconfigure|modify|change)\b", re.I)

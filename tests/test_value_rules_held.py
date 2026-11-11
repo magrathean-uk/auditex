@@ -5,24 +5,32 @@ Offline and synthetic only: no sign-in, no tenant. The prepared rows stay in
 """
 from __future__ import annotations
 
-from collections import Counter
-from copy import deepcopy
 import json
 import lzma
+from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
+from test_scuba_adapters_defender import bundle, cases, fixture_document, operation  # noqa: F401 (fixtures)
+from test_value_rules_s4 import _serve_rule
 
-from auditex.rule_assessment import assess_run, assess_scubagear_export
-from auditex.rule_assessment import policy_catalogue
+from auditex.rule_assessment import (
+    assess_run,
+    assess_scubagear_export,
+    policy_catalogue,
+)
 from auditex.scuba_projection import NOT_COLLECTED, project_run, rule_policy_section
 from auditex.scubagear_export import load_export, project_export
 from azure_tenant_audit.scuba_assessment import validate_assessment
-from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for, rule_policies
+from azure_tenant_audit.value_rules import (
+    as_pack_response,
+    assess,
+    cells_for,
+    rule_policies,
+)
 from azure_tenant_audit.value_rules.catalogue import catalogue
 from azure_tenant_audit.value_rules.record import checked
-from test_scuba_adapters_defender import bundle, cases, fixture_document, operation  # noqa: F401 (fixtures)
-from test_value_rules_s4 import _serve_rule
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/value-rules"

@@ -1,10 +1,10 @@
 """Shipped value-rule policy and cell inventory."""
 from __future__ import annotations
 
-from functools import lru_cache
-from hashlib import sha256
 import json
 import re
+from functools import lru_cache
+from hashlib import sha256
 from typing import Any
 
 from azure_tenant_audit.resources import open_text_resource
@@ -72,7 +72,12 @@ def _check_shared_reasons(entries: Any) -> None:
 
 def _check_evidence(policy_id: str, cell: str, entry: dict) -> None:
     """A1: collected-but-unusable evidence has a kind, two limitations and one recommendation; nothing else does."""
-    from .record import LIMIT_UNUSABLE, REC_BY_KIND, SECTION_NOT_COLLECTED, evidence_kind
+    from .record import (
+        LIMIT_UNUSABLE,
+        REC_BY_KIND,
+        SECTION_NOT_COLLECTED,
+        evidence_kind,
+    )
     keys = {"evidence_kind", "limitations", "recommendations"}
     if entry["verdict"] != "not_assessed":
         if keys & entry.keys():

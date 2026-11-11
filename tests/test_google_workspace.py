@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import json
-from pathlib import Path
 import re
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from auditex import cli as auditex_cli
 
 
 def _utc_days_ago(days: int) -> str:
-    return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _sample_payload() -> dict[str, object]:
@@ -390,7 +390,10 @@ def test_google_dependency_status_handles_missing_google_namespace(monkeypatch) 
 
 
 def test_google_capability_rows_include_live_readiness() -> None:
-    from auditex.google_workspace.run import build_google_capability_rows, build_google_live_readiness
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_live_readiness,
+    )
 
     capability_rows = build_google_capability_rows(
         ["google_directory", "google_drive_posture"],
@@ -1639,7 +1642,10 @@ def test_google_gmail_send_as_visibility_gap_emits_collector_issue() -> None:
 
 
 def test_google_gmail_filter_external_forwarding_finding() -> None:
-    from auditex.google_workspace.findings import build_google_findings, google_rule_metadata
+    from auditex.google_workspace.findings import (
+        build_google_findings,
+        google_rule_metadata,
+    )
     from auditex.google_workspace.normalize import build_google_normalized_snapshot
 
     normalized = build_google_normalized_snapshot(
@@ -1679,7 +1685,10 @@ def test_google_gmail_filter_external_forwarding_finding() -> None:
 
 
 def test_google_gmail_hidden_forwarding_filter_finding() -> None:
-    from auditex.google_workspace.findings import build_google_findings, google_rule_metadata
+    from auditex.google_workspace.findings import (
+        build_google_findings,
+        google_rule_metadata,
+    )
     from auditex.google_workspace.normalize import build_google_normalized_snapshot
 
     normalized = build_google_normalized_snapshot(
@@ -1759,7 +1768,10 @@ def test_google_gmail_vacation_external_reply_finding() -> None:
 
 
 def test_google_findings_use_rule_catalog_metadata() -> None:
-    from auditex.google_workspace.findings import build_google_findings, google_rule_metadata
+    from auditex.google_workspace.findings import (
+        build_google_findings,
+        google_rule_metadata,
+    )
 
     normalized = {
         "snapshot": {"workspace_domain": "example.com"},
@@ -2397,7 +2409,11 @@ def test_google_rules_have_framework_mapping_floor() -> None:
 
 def test_gmail_settings_requests_carry_fields_masks_without_owner_text() -> None:
     from auditex.google_workspace.client import GoogleWorkspaceClient
-    from azure_tenant_audit.data_minimisation import GMAIL_FILTER_TEXT_FIELDS, SEND_AS_TEXT_FIELDS, VACATION_TEXT_FIELDS
+    from azure_tenant_audit.data_minimisation import (
+        GMAIL_FILTER_TEXT_FIELDS,
+        SEND_AS_TEXT_FIELDS,
+        VACATION_TEXT_FIELDS,
+    )
 
     calls: dict[str, dict] = {}
 

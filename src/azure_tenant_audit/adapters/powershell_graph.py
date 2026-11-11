@@ -8,12 +8,12 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..secret_hygiene import redact_command_string, redact_output
 from .base import Adapter, AdapterMetadata
 from .read_guard import CommandRefused, VettedCommand, check_command, refusal_response
-
 
 _ORGANIZATION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.onmicrosoft\.(?:com|us|de|cn)")
 # Bounded reads for a sensitive command: stdout chunk size and the stderr kept for failure classification only.
@@ -34,7 +34,7 @@ class _BoundedRun:
 def _run_bounded(
     argv: list[str],
     *,
-    env: Optional[dict[str, str]],
+    env: dict[str, str] | None,
     timeout: float,
     stdout_limit: int,
     chunk_size: int = READ_CHUNK,
@@ -101,7 +101,7 @@ def _run_bounded(
         if process.poll() is None:
             process.kill()
         process.wait()
-        for reader, stream in zip(readers, (process.stdout, process.stderr)):
+        for reader, stream in zip(readers, (process.stdout, process.stderr), strict=False):
             if reader.ident is not None:
                 reader.join(5)
             if not reader.is_alive():
@@ -181,7 +181,7 @@ class PowerShellGraphAdapter(Adapter):
         )
 
     @staticmethod
-    def _session_prelude(session: Optional[dict[str, Any]], env: dict[str, str]) -> str:
+    def _session_prelude(session: dict[str, Any] | None, env: dict[str, str]) -> str:
         """Connect step for a fresh pwsh process. Tokens travel in the environment, never on the command line."""
         if not session or session.get("kind") != "exchange_online":
             return ""
@@ -203,9 +203,9 @@ class PowerShellGraphAdapter(Adapter):
     def run(
         self,
         command: str,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
-        session: Optional[dict[str, Any]] = None,
-        response_transform: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
+        session: dict[str, Any] | None = None,
+        response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Run one checked read. ``response_transform`` is honoured only for the sensitive anti-phish read.
 
@@ -400,8 +400,8 @@ class PowerShellGraphAdapter(Adapter):
         command_words: tuple[str, ...],
         has_session: bool,
         prelude: bool,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
-        response_transform: Optional[Callable[[dict[str, Any]], dict[str, Any]]],
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None,
+        response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None,
     ) -> dict[str, Any]:
         """A read whose output can hold targeted users' names and addresses (``Get-AntiPhishPolicy``).
 
@@ -439,14 +439,14 @@ class PowerShellGraphAdapter(Adapter):
                 return {**failure("command_output_over_limit", "command_error", numbers), "state": "over_limit"}
             numbers["return_code"] = run.returncode
             try:
-                stdout: Optional[str] = str(run.stdout, "utf-8")
+                stdout: str | None = str(run.stdout, "utf-8")
             except UnicodeDecodeError:
                 stdout = None
             run.stdout = bytearray()
             stderr = run.stderr
             combined = f"{stdout or ''}\n{stderr}".lower()
 
-            def completed(error_class: Optional[str]) -> None:
+            def completed(error_class: str | None) -> None:
                 event("command.completed", "PowerShell command completed", {
                     "return_code": numbers["return_code"], "status": "ok" if error_class is None else "failed",
                     "error_class": error_class, "duration_ms": numbers["duration_ms"],
@@ -484,7 +484,12 @@ class PowerShellGraphAdapter(Adapter):
                     completed("command_parse_error")
                     return failure("command_output_parse_error", "command_parse_error", numbers)
             del stdout, combined, stderr
-            from ..collectors.anti_phish_admission import ADMITTED, REFUSED, SUCCESS_KEYS, admit_response
+            from ..collectors.anti_phish_admission import (
+                ADMITTED,
+                REFUSED,
+                SUCCESS_KEYS,
+                admit_response,
+            )
             # A wire object declaring operation metadata is an envelope, even when its value is missing or invalid.
             # Generic normalisation would otherwise wrap it as a policy row and hide its original refusal semantics.
             envelope_keys = SUCCESS_KEYS | {"chunk_files", "chunk_count", "details", "exception", "traceback",

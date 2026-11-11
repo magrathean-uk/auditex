@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from auditex.run_bundle import RunBundle
 from support import RunBundleBuilder
+
+from auditex.run_bundle import RunBundle
 
 
 def test_run_bundle_view_uses_contract_report_pack_then_artifact_fallbacks(tmp_path: Path) -> None:

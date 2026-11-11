@@ -3,18 +3,17 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import OrderedDict
 import subprocess
 import sys
-from datetime import datetime, timezone
+from collections import OrderedDict
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def run_az(args: list[str], *, dry_run: bool) -> dict:

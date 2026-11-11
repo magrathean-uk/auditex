@@ -12,11 +12,14 @@ from azure_tenant_audit.auth_context import (
     default_auth_contexts_path,
 )
 from azure_tenant_audit.m365_home import m365_subprocess_kwargs
-from azure_tenant_audit.secret_hygiene import redact_output, secure_write_json, secure_write_text
+from azure_tenant_audit.secret_hygiene import (
+    redact_output,
+    secure_write_json,
+    secure_write_text,
+)
 from azure_tenant_audit.utils import load_env_file
 
 from . import auth_runtime
-
 
 LOCAL_AUTH_ENV_VAR = "AUDITEX_LOCAL_AUTH_ENV"
 

@@ -7,7 +7,7 @@ Names and identity values never enter a record.
 from __future__ import annotations
 
 from .helpers import _scan_bad_wins
-from .record import BAD_SECTION_LIST, EMPTY_SECTION, ITEM_VALUE, _A, _rec
+from .record import _A, BAD_SECTION_LIST, EMPTY_SECTION, ITEM_VALUE, _rec
 
 RESTRICTED_GUEST = "2af84b1e-32c8-42b7-82bc-daa82404023b"
 LIMITED_GUEST = "10dae51f-b6af-4016-8d66-8c2a99b929b3"

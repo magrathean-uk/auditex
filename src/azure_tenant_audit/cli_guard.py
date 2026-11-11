@@ -2,16 +2,26 @@
 from __future__ import annotations
 
 import argparse
-from functools import wraps
 import os
 import stat
 import sys
+from functools import wraps
 from typing import Any
 
 from .guarded_io import (
-    _DIR_FLAGS, _MAX_MANIFEST, UnsafeRunFileError, _identity, _safe_directory, guard_session, open_pinned_binary,
+    _DIR_FLAGS,
+    _MAX_MANIFEST,
+    UnsafeRunFileError,
+    _identity,
+    _safe_directory,
+    guard_session,
+    open_pinned_binary,
 )
-from .secret_hygiene import SENSITIVE_ARG_FLAGS, _sensitive_option, collect_sensitive_argv_values
+from .secret_hygiene import (
+    SENSITIVE_ARG_FLAGS,
+    _sensitive_option,
+    collect_sensitive_argv_values,
+)
 
 _INPUT_FLAGS = frozenset({
     "--assessment", "--break-glass-accounts", "--config", "--env", "--input",

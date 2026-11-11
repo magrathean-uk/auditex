@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import sysconfig
+from pathlib import Path
 
 import pytest
-
 
 CANARY = "constructed-canary-r2-" * 18
 
@@ -43,9 +42,16 @@ _REDACTION_CASES = [
 @pytest.mark.parametrize("inline", [False, True], ids=["separate", "equals"])
 def test_sensitive_flag_inventory_is_redacted(redactor: str, flag: str, abbreviated: bool, inline: bool) -> None:
     from auditex.command_runner import SENSITIVE_ARGS, redact_command
-    from auditex.google_workspace.run import _SENSITIVE_COMMAND_FLAGS, scrub_google_command_line
+    from auditex.google_workspace.run import (
+        _SENSITIVE_COMMAND_FLAGS,
+        scrub_google_command_line,
+    )
     from azure_tenant_audit.auth_runtime import SENSITIVE_CLI_ARGS, scrub_command_line
-    from azure_tenant_audit.secret_hygiene import SENSITIVE_ARG_FLAGS, collect_sensitive_argv_values, redact_argv
+    from azure_tenant_audit.secret_hygiene import (
+        SENSITIVE_ARG_FLAGS,
+        collect_sensitive_argv_values,
+        redact_argv,
+    )
 
     flags, scrub = {
         "generic": (SENSITIVE_ARG_FLAGS, redact_argv),
@@ -224,6 +230,7 @@ def test_mcp_entrypoint_does_not_echo_unrecognised_secret(python: str) -> None:
 
 def test_parser_chained_exception_traceback_does_not_echo_secret(tmp_path: Path) -> None:
     import traceback
+
     from auditex.cli import main
 
     with pytest.raises(SystemExit) as error:

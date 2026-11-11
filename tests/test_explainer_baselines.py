@@ -1,14 +1,14 @@
 """Offline baseline acceptance; no reference checkout, network or other part needed."""
 from __future__ import annotations
 
-from copy import deepcopy
 import gzip
 import hashlib
 import importlib.util
 import json
-import tempfile
-from pathlib import Path
 import re
+import tempfile
+from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

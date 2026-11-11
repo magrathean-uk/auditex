@@ -5,8 +5,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .profiles import get_profile
 from .collection_gaps import collector_gap_reason
+from .profiles import get_profile
 
 
 def load_permission_hints(path: Path) -> dict[str, dict[str, Any]]:

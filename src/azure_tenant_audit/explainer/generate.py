@@ -4,8 +4,8 @@ Adapted from frozen S/B/build.py; baseline extraction originates in CISA
 ScubaGear (CC0, with Microsoft CC BY 4.0 portions). Attribution is carried in
 the injected BaselineIndex. No vector discovery, rule calls or collection writes.
 """
-from copy import deepcopy
 import re
+from copy import deepcopy
 
 from . import textkit as tk
 

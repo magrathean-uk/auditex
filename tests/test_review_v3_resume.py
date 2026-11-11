@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from auditex.gate import gate_findings
 from scripted_collectors import (
     Scripted,
     failed_step,
@@ -22,6 +20,8 @@ from scripted_collectors import (
     run_scripted,
     sample,
 )
+
+from auditex.gate import gate_findings
 
 ADMIN_COLLECTORS = ("identity", "identity_governance", "auth_methods", "licensing")
 
@@ -146,7 +146,7 @@ def test_a_resume_under_another_time_window_re_runs_a_windowed_collector(
     run_dir = _run_dir(tmp_path)
     assert load(run_dir / "checkpoints" / "checkpoint-state.json")["collectors"]["security"]["since"] == "2026-10-01T00:00:00Z"
 
-    extra = [item for key, value in zip(("--since", "--until"), resumed_window) if value for item in (key, value)]
+    extra = [item for key, value in zip(("--since", "--until"), resumed_window, strict=False) if value for item in (key, value)]
     assert run_scripted(monkeypatch, tmp_path, registry, "security,identity", "--resume-from", str(run_dir), *extra, run_name="resume") == 0
 
     assert security.calls == (2 if reruns else 1)

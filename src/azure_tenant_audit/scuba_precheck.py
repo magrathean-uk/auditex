@@ -247,8 +247,13 @@ def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], secti
         ], "limitations": [optional["reason_code"]], "recommendations": []}
     if detail["class"] == "value_rule":
         from .value_rules.catalogue import row_for
-        from .value_rules.record import (RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE, as_pack_response,
-                                         evidence_kind, is_shared_reason)
+        from .value_rules.record import (
+            RULE_FAILURE_CODE,
+            RULE_NOT_IMPLEMENTED_CODE,
+            as_pack_response,
+            evidence_kind,
+            is_shared_reason,
+        )
         # A1.2: a shared reason (failed rule, no rule) has no cell and is dispatched before any cell lookup.
         shared = detail["cell"] is None
         if detail["cell"] in {RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE}:

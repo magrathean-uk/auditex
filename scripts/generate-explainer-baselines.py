@@ -7,9 +7,9 @@ runtime consumes only configs/explainer-baselines.json. No network is used.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 # -I deliberately ignores editable installs/PYTHONPATH; import this worktree.
 sys.dont_write_bytecode = True

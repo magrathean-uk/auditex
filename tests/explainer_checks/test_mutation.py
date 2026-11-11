@@ -6,9 +6,9 @@ detected only if an EXPECTED check fails; a benign false positive is ANY failure
 canonical stream hash are pinned in tests/fixtures/explainer/corpus-manifest.json. Run each selection
 -k chunk-N independently when a full batch exceeds the cap.
 """
+import json
 from collections import Counter
 from functools import lru_cache
-import json
 from time import perf_counter
 
 import pytest

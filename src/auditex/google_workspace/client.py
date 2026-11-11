@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from azure_tenant_audit.data_minimisation import minimise_gmail_settings
 

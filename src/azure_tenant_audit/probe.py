@@ -5,26 +5,39 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 from . import auth_context
+from . import run as run_core
 from .adapters import get_adapter
 from .auth_runtime import (
     acquire_azure_cli_access_token as _acquire_azure_cli_access_token,
+)
+from .auth_runtime import (
     build_auth_context_payload as _build_auth_context_payload,
+)
+from .auth_runtime import (
     capture_signed_in_context as _capture_signed_in_context,
+)
+from .auth_runtime import (
     scrub_command_line as _scrub_command_line,
 )
-from . import run as run_core
-from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunOptions, CollectorRunner
 from .collection_gaps import sample_only
+from .collector_runner import (
+    AuditWriterCollectorAdapter,
+    CollectorRunContext,
+    CollectorRunner,
+    CollectorRunOptions,
+)
 from .collectors import REGISTRY
 from .collectors.base import run_graph_endpoints
 from .config import AuthConfig
 from .data_handling import collector_activity_notices
-from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
+from .diagnostics import build_diagnostics as _build_diagnostics
+from .diagnostics import load_permission_hints as _load_permission_hints
 from .findings import build_findings
 from .graph import GraphClient
 from .output import AuditWriter
@@ -163,7 +176,7 @@ def _toolchain_row(
 def _probe_toolchain_statuses(
     *,
     include_response: bool = False,
-    log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+    log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 

@@ -3,15 +3,20 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-import stat
 from typing import BinaryIO
 
 from .guarded_io import (
-    GuardContext, UnsafeRunFileError, current_context, guard_session, open_guarded_file, open_private_output,  # noqa: F401 - re-exported for callers of this module
+    GuardContext,  # noqa: F401 - re-exported for callers of this module
+    UnsafeRunFileError,
+    current_context,  # noqa: F401 - re-exported for callers of this module
+    guard_session,
+    open_guarded_file,  # noqa: F401 - re-exported for callers of this module
+    open_private_output,
 )
 
 MAX_RUN_FILE_BYTES = 32 * 1024 * 1024

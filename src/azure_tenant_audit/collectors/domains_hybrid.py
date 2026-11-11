@@ -5,7 +5,6 @@ from typing import Any
 from ..graph import GraphClient
 from .base import Collector, CollectorResult, run_graph_endpoints
 
-
 SYNC_SAMPLE_LIMIT = 100
 
 

@@ -31,9 +31,9 @@ control: baselines read ``basis`` and leave CIS 5.2.2.x and the SCuBA Conditiona
 """
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 KIND = "identity_control_verdict"
 SECTION = "identity_control_verdicts"
@@ -668,7 +668,7 @@ def _common_exclusions(
     possible = {
         principal
         for principal in set().union(*per_policy)
-        if all(principal in routes or groups for routes, groups in zip(per_policy, unread_groups))
+        if all(principal in routes or groups for routes, groups in zip(per_policy, unread_groups, strict=False))
     } - shared
     if not shared and not possible:
         return result
@@ -687,7 +687,7 @@ def _common_exclusions(
                 if principal in routes
                 else {"policy_id": policy["id"], "type": "group", "id": groups[0], "members_read": False}
             )
-            for policy, routes, groups in zip(policies, per_policy, unread_groups)
+            for policy, routes, groups in zip(policies, per_policy, unread_groups, strict=False)
         ]
         row = {
             "type": "user",

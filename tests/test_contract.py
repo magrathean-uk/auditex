@@ -6,9 +6,11 @@ import sqlite3
 from pathlib import Path
 
 from azure_tenant_audit.cli import run_offline
-from azure_tenant_audit.contracts import ROOT_REQUIRED_ARTIFACTS, build_validation_report
+from azure_tenant_audit.contracts import (
+    ROOT_REQUIRED_ARTIFACTS,
+    build_validation_report,
+)
 from azure_tenant_audit.evidence_db import _IN_PLACE_NOTICE
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

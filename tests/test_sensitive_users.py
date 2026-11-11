@@ -16,8 +16,14 @@ import pytest
 from azure_tenant_audit import cli
 from azure_tenant_audit.guarded_io import UnsafeRunFileError
 from azure_tenant_audit.sensitive_users import (
-    BUNDLE_PATH, KEY_PATH, MAX_BYTES, SensitiveUsers, SensitiveUsersError,
-    load_sensitive_users, sensitive_users_digest, verify_sensitive_users,
+    BUNDLE_PATH,
+    KEY_PATH,
+    MAX_BYTES,
+    SensitiveUsers,
+    SensitiveUsersError,
+    load_sensitive_users,
+    sensitive_users_digest,
+    verify_sensitive_users,
 )
 
 CANARIES = ("sensitive-canary-a@example.invalid", "sensitive-canary-b@example.invalid")
@@ -181,7 +187,10 @@ def test_decoder_failures_are_sanitised(tmp_path, monkeypatch, failure):
 @pytest.mark.parametrize("equals", [False, True])
 def test_sensitive_user_prefix_redaction(equals):
     from azure_tenant_audit.auth_runtime import scrub_command_line
-    from azure_tenant_audit.secret_hygiene import collect_sensitive_argv_values, redact_argv
+    from azure_tenant_audit.secret_hygiene import (
+        collect_sensitive_argv_values,
+        redact_argv,
+    )
 
     full = "--sensitive-users"
     canary_path = "/constructed/" + CANARIES[0] + ".txt"
@@ -369,15 +378,16 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
 
 @pytest.mark.parametrize("entrypoint", ["engine", "product"])
 def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplog, entrypoint):
-    from azure_tenant_audit import output
-    from azure_tenant_audit import evidence_db
     from auditex import cli as product_cli
     from auditex.explorer import write_explorer
     from auditex.exporters import BUILTIN_EXPORTERS, run_exporter
     from auditex.reporting import (
-        _copy_source_artifact, enterprise_handoff, verify_enterprise_handoff_pack,
+        _copy_source_artifact,
+        enterprise_handoff,
+        verify_enterprise_handoff_pack,
         write_enterprise_handoff_pack,
     )
+    from azure_tenant_audit import evidence_db, output
     from azure_tenant_audit.auth_runtime import scrub_command_line
     from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
     from azure_tenant_audit.secret_hygiene import redact_argv
@@ -917,7 +927,10 @@ def test_rule_input_private_capture_ignores_model_budgets_and_never_enters_gate(
 
 def test_rule_input_does_not_consume_extra_private_files_or_unmanifested_input(tmp_path, monkeypatch):
     from auditex.scuba_projection import project_run
-    from azure_tenant_audit.bundle_integrity import build_bundle_hash_manifest, verify_bundle_hashes
+    from azure_tenant_audit.bundle_integrity import (
+        build_bundle_hash_manifest,
+        verify_bundle_hashes,
+    )
 
     root = rule_input_bundle(tmp_path)
     before = project_run(root)
@@ -947,12 +960,19 @@ def test_rule_input_does_not_consume_extra_private_files_or_unmanifested_input(t
 def test_rule_input_assessment_replay_and_all_public_outputs_are_private(
     tmp_path, monkeypatch, capsys, caplog, action, cell,
 ):
-    from copy import deepcopy
     import shutil
-    from auditex import scuba_projection as module
-    from auditex.rule_assessment import assess_run, assess_scubagear_export, build_case, canonical
-    from auditex.rule_assessment import policy_catalogue
+    from copy import deepcopy
+
     from test_model_serving import case_texts
+
+    from auditex import scuba_projection as module
+    from auditex.rule_assessment import (
+        assess_run,
+        assess_scubagear_export,
+        build_case,
+        canonical,
+        policy_catalogue,
+    )
     from auditex.scubagear_export import load_export, project_export
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from azure_tenant_audit.value_rules import assess
@@ -1014,12 +1034,14 @@ def test_rule_input_verified_configuration_reaches_every_compatible_vector_cell(
     cannot be produced by a verified canonical list; the ordinary s5 harness
     still tests them, together with all other SS 2.1 cells.
     """
+    import lzma
     from collections import Counter
     from copy import deepcopy
-    import lzma
+
+    from test_value_rules_s4 import _serve_rule
+
     from auditex.scuba_projection import project_run
     from azure_tenant_audit.value_rules import assess, cells_for
-    from test_value_rules_s4 import _serve_rule
 
     source = Path("tests/fixtures/value-rules/vectors-s5.jsonl.xz")
     counts = Counter()
@@ -1062,8 +1084,9 @@ def test_rule_input_verified_configuration_reaches_every_compatible_vector_cell(
 
 def test_rule_input_met_canaries_with_synthetic_private_policy_evidence(tmp_path, monkeypatch, capsys, caplog):
     """A bound TargetedUsersCoverage establishes met; injected literal targets are ignored and never published."""
-    from auditex.rule_assessment import assess_run
     from test_model_serving import case_texts
+
+    from auditex.rule_assessment import assess_run
     from auditex.scuba_projection import project_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
 

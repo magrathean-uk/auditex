@@ -60,8 +60,9 @@ def test_unsafe_report_pack_is_refused_not_read_as_all_resolved(tmp_path):
 
 
 def test_cli_diff_refuses_unsafe_report_pack(tmp_path, capsys, monkeypatch):
-    from auditex import cli
     from gate_support import offline_run
+
+    from auditex import cli
 
     before = offline_run(tmp_path / "b", "before")
     after = offline_run(tmp_path / "a", "after")

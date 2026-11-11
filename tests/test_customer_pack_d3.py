@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import signal
+from pathlib import Path
 
 import pytest
-
 from gate_support import offline_run, rehash
 
 OWNER = "D3 PRIVATE OWNER 726"
@@ -28,7 +27,10 @@ def planted_run(tmp_path: Path) -> Path:
 
 
 def test_customer_pack_redacts_all_files_and_verifies(planted_run: Path, tmp_path: Path) -> None:
-    from auditex.reporting import verify_enterprise_handoff_pack, write_enterprise_handoff_pack
+    from auditex.reporting import (
+        verify_enterprise_handoff_pack,
+        write_enterprise_handoff_pack,
+    )
 
     target = tmp_path / "pack"
     result = write_enterprise_handoff_pack(planted_run, target)

@@ -14,8 +14,22 @@ from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.value_rules import assess, rule_failure
 from azure_tenant_audit.value_rules.catalogue import catalogue, shared_reason
 from azure_tenant_audit.value_rules.helpers import (
-    PRESET_RE, _accepted, _cover, _env_cell, _flag, _gate_slider, _int, _licence_cell, _list_state, _lst, _p2_gate,
-    _preset_pair, _scan_bad_wins, _scan_good_wins, _shape, _state,
+    PRESET_RE,
+    _accepted,
+    _cover,
+    _env_cell,
+    _flag,
+    _gate_slider,
+    _int,
+    _licence_cell,
+    _list_state,
+    _lst,
+    _p2_gate,
+    _preset_pair,
+    _scan_bad_wins,
+    _scan_good_wins,
+    _shape,
+    _state,
 )
 from azure_tenant_audit.value_rules.record import checked
 

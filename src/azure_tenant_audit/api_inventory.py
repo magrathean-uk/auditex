@@ -11,9 +11,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlparse
 
-from .adapters.read_guard import CommandRefused, check_m365_command, m365_command_words, words_are_read
+from .adapters.read_guard import (
+    CommandRefused,
+    check_m365_command,
+    m365_command_words,
+    words_are_read,
+)
 from .run_files import UnsafeRunFileError, read_run_file
-
 
 SCHEMA_VERSION = "2026-10-22"
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}

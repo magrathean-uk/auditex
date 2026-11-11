@@ -4,23 +4,35 @@ import argparse
 import json
 import logging
 import os
-from collections.abc import Collection, Sequence
-from datetime import datetime
-from typing import Any, Callable
 import sys
 import time
+from collections.abc import Callable, Collection, Sequence
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from . import auth_context
+from . import run as run_core
+from .ai_context import build_privacy_block
 from .auth_runtime import (
     acquire_azure_cli_access_token as _acquire_azure_cli_access_token,
+)
+from .auth_runtime import (
     build_auth_context_payload as _build_auth_context_payload,
+)
+from .auth_runtime import (
     capture_signed_in_context as _capture_signed_in_context,
+)
+from .auth_runtime import (
     inspect_access_token as _inspect_access_token,
+)
+from .auth_runtime import (
     scrub_command_line as _scrub_command_line,
 )
-from .collectors import REGISTRY
-from .collectors.base import normalize_collection_limit
+from .break_glass import load_accounts_argument as load_break_glass_accounts
+from .capability_gate import relabel_intune_license_blockers
+from .cli_guard import admit_sensitive_env, guarded_cli, parse_guarded
+from .collection_gaps import NON_FATAL_COLLECTORS
 from .collector_runner import (
     AuditWriterCollectorAdapter,
     CollectorRunContext,
@@ -28,34 +40,41 @@ from .collector_runner import (
     CollectorRunOptions,
     CollectorRunOutput,
 )
+from .collectors import REGISTRY
+from .collectors.base import normalize_collection_limit
 from .config import AuthConfig, CollectorConfig
-from .data_minimisation import minimise_user_text
 from .data_handling import collector_activity_notices
-from .collection_gaps import NON_FATAL_COLLECTORS
-from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
+from .data_minimisation import minimise_user_text
+from .diagnostics import build_diagnostics as _build_diagnostics
+from .diagnostics import load_permission_hints as _load_permission_hints
 from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
 from .graph import GraphClient
-from .normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
-from .offline_replay import absent_section_rows, planned_sections, replay_collector_status, replay_coverage_rows, replay_source
+from .guarded_io import current_context
+from .normalize import (
+    build_ai_safe_summary,
+    build_normalization_diagnostics,
+    build_normalized_snapshot,
+)
+from .offline_replay import (
+    absent_section_rows,
+    planned_sections,
+    replay_collector_status,
+    replay_coverage_rows,
+    replay_source,
+)
 from .output import AuditWriter
-from .secret_hygiene import build_argument_parser
-from .sensitive_users import SensitiveUsers, SensitiveUsersError, load_sensitive_users
 from .partner_domains import PartnerDomains, PartnerDomainsError, load_partner_domains
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .resources import resolve_resource_path
 from .rule_parameters import effective_rule_parameters
+from .secret_hygiene import build_argument_parser
+from .sensitive_users import SensitiveUsers, SensitiveUsersError, load_sensitive_users
 from .utils import load_env_file
-from .cli_guard import admit_sensitive_env, guarded_cli, parse_guarded
-from .guarded_io import current_context
 from .versioning import package_version_line
 from .waivers import WaiverFileError, apply_waivers, load_waivers
-from .ai_context import build_privacy_block
-from .break_glass import load_accounts_argument as load_break_glass_accounts
-from .capability_gate import relabel_intune_license_blockers
-from . import run as run_core
 
 LOG = logging.getLogger("azure_tenant_audit")
 

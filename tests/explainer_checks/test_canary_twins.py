@@ -60,6 +60,7 @@ def test_runtime_builder_twins_over_a_stable_sample():
     """Real build_view, real citations: every fifteenth generated base pair, five twins each (the full set is the
     explainer_acceptance twins job in test_explainer_integration)."""
     from azure_tenant_audit import explainer
+
     from . import corpus
     _, _, templates = explainer._resources()
     checked = 0

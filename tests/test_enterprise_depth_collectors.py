@@ -3,15 +3,20 @@ from __future__ import annotations
 from azure_tenant_audit.collectors.app_consent import AppConsentCollector
 from azure_tenant_audit.collectors.consent_policy import ConsentPolicyCollector
 from azure_tenant_audit.collectors.domains_hybrid import DomainsHybridCollector
-from azure_tenant_audit.collectors.exchange_policy import MAILBOX_FORWARDING_COMMAND, ExchangePolicyCollector
+from azure_tenant_audit.collectors.exchange_policy import (
+    MAILBOX_FORWARDING_COMMAND,
+    ExchangePolicyCollector,
+)
 from azure_tenant_audit.collectors.external_identity import ExternalIdentityCollector
-from azure_tenant_audit.collectors.identity_governance import IdentityGovernanceCollector
+from azure_tenant_audit.collectors.identity_governance import (
+    IdentityGovernanceCollector,
+)
 from azure_tenant_audit.collectors.intune_depth import IntuneDepthCollector
 from azure_tenant_audit.collectors.licensing import LicensingCollector
 from azure_tenant_audit.collectors.onedrive_posture import OneDrivePostureCollector
 from azure_tenant_audit.collectors.reports_usage import ReportsUsageCollector
-from azure_tenant_audit.collectors.sharepoint_access import SharePointAccessCollector
 from azure_tenant_audit.collectors.service_health import ServiceHealthCollector
+from azure_tenant_audit.collectors.sharepoint_access import SharePointAccessCollector
 from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
 from azure_tenant_audit.graph import GraphError
 

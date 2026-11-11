@@ -12,7 +12,6 @@ import pytest
 
 from azure_tenant_audit.explainer import collection
 
-
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/explainer/collection"
 RESOURCE = ROOT / collection.RESOURCE_PATH

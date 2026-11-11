@@ -23,14 +23,15 @@ import json
 import sqlite3
 from pathlib import Path
 
-
-from azure_tenant_audit.ai_context import build_privacy_block
-from azure_tenant_audit.ai_context import build_ai_context
+from azure_tenant_audit import run as run_core
+from azure_tenant_audit.ai_context import build_ai_context, build_privacy_block
 from azure_tenant_audit.finalize import finalize_bundle_contract
 from azure_tenant_audit.findings import build_findings, build_report_pack
-from azure_tenant_audit.normalize import build_ai_safe_summary, build_normalized_snapshot
+from azure_tenant_audit.normalize import (
+    build_ai_safe_summary,
+    build_normalized_snapshot,
+)
 from azure_tenant_audit.output import AuditWriter
-from azure_tenant_audit import run as run_core
 
 
 def _sha(path: Path) -> str:
@@ -253,7 +254,10 @@ def test_finalize_bundle_contract_is_idempotent_for_byte_stable_artifacts(
 
 
 def test_finalize_writes_a_hash_manifest_that_survives_a_second_finalize(tmp_path: Path) -> None:
-    from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundle_hashes
+    from azure_tenant_audit.bundle_integrity import (
+        BUNDLE_HASHES_PATH,
+        verify_bundle_hashes,
+    )
 
     writer, kwargs = _prepare_bundle_for_finalize(tmp_path)
 

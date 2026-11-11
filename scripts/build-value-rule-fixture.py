@@ -12,12 +12,12 @@ validation rows, and drop every held-out test-split row and every pilot row
 """
 from __future__ import annotations
 
-from collections import Counter
-from hashlib import sha256
 import json
 import lzma
-from pathlib import Path
 import sys
+from collections import Counter
+from hashlib import sha256
+from pathlib import Path
 
 FIELDS = ("vector_id", "policy", "criticality", "sections", "rule_verdict", "rule_cell",
           "rule_reason_code", "rule_reason_text", "rule_cited_sections", "gold_verdict",

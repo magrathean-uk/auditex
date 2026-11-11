@@ -18,12 +18,17 @@ from urllib.parse import quote
 
 from .bundle_integrity import evidence_index_is_hashed, evidence_sidecars
 from .guarded_io import (
-    _DIR_FLAGS, _FILE_FLAGS, _safe_directory, current_context, guard_session, guarded_operation, open_private_output,
+    _DIR_FLAGS,
+    _FILE_FLAGS,
+    _safe_directory,
+    current_context,
+    guard_session,
+    guarded_operation,
+    open_private_output,
 )
 from .perf_runtime import sqlite_bulk_pragmas
 from .run_files import UnsafeRunFileError, open_run_file
 from .tenant_identity import decode_identity_metadata
-
 
 _SCHEMA = (
     "DROP TABLE IF EXISTS run_meta",
@@ -223,7 +228,7 @@ def build_run_evidence_index(
     if os.path.lexists(run_path / "run-manifest.json") or os.path.lexists(run_path / "operator-inputs"):
         current_context().bind_run(run_path)
     target = Path(db_path) if db_path is not None else run_path / "index" / "evidence.sqlite"
-    from .private_io import make_private_dirs, _write_all
+    from .private_io import _write_all, make_private_dirs
     make_private_dirs(target.parent)
 
     # Construct a fresh database so tables from an older, newer or foreign
@@ -414,7 +419,7 @@ def open_private_run_index(run_dir: str | Path, *, hashed: bool, record_notice: 
                     descriptor = stack.enter_context(open_run_file(root, relative + suffix, max_bytes=None))
                 except FileNotFoundError:
                     if not suffix:
-                        raise _MissingIndex
+                        raise _MissingIndex  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
                     absent.append(suffix)
                     continue
                 sources[suffix] = (descriptor, _file_state(os.fstat(descriptor)))

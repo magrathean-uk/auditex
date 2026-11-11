@@ -14,9 +14,9 @@ from azure_tenant_audit.contracts import build_validation_report
 
 
 def _bundle(tmp_path: Path) -> Path:
-    from auditex.notify import _build_payload  # noqa: F401  (just to ensure import path works)
-
     from test_finalize_idempotent import _prepare_bundle_for_finalize
+
+    from auditex.notify import _build_payload  # noqa: F401  (just to ensure import path works)
     from azure_tenant_audit.finalize import finalize_bundle_contract
 
     writer, kwargs = _prepare_bundle_for_finalize(tmp_path)

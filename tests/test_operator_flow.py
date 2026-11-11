@@ -11,7 +11,6 @@ from auditex.operator_flow import (
     resolve_auto_flow,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -6,15 +6,20 @@ import subprocess
 from typing import Any
 
 import pytest
+from support import graph_auth, graph_response
 
 from azure_tenant_audit.api_inventory import (
     endpoint_template,
     observe_audit_events,
     with_observed_ledger,
 )
-from azure_tenant_audit.graph import GRAPH_ROOT, REDIRECT_REFUSED, GraphClient, GraphError
+from azure_tenant_audit.graph import (
+    GRAPH_ROOT,
+    REDIRECT_REFUSED,
+    GraphClient,
+    GraphError,
+)
 from azure_tenant_audit.secret_hygiene import redact_text
-from support import graph_auth, graph_response
 
 GUID = "5f7b3a1e-0c4d-4e2b-9a6f-1d2c3b4a5e6f"
 SIGNED = "https://reportsdata.office.com/data/download/abc123?sig=TOPSECRETSIGNATURE&se=2026"

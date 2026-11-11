@@ -6,13 +6,12 @@ import base64
 import json
 import os
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .secret_hygiene import sanitize_token_claims, validate_token_claims
 from .utils import parse_csv_list
-
 
 AUTH_CONTEXTS_PATH_ENV_VAR = "AUDITEX_AUTH_CONTEXTS_PATH"
 
@@ -78,7 +77,7 @@ def iso_from_epoch(value: Any) -> str | None:
         epoch = int(value)
     except (TypeError, ValueError):
         return None
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.fromtimestamp(epoch, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def inspect_token_claims(token: str, *, include_raw_claims: bool = False) -> dict[str, Any]:

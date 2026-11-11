@@ -5,18 +5,27 @@ Stage 1 (Power BI 8, AAD 3.4v1) replays ``vectors-v2.jsonl.xz``; stage 3 (the
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from copy import deepcopy
 import json
 import lzma
 import os
+from collections import Counter, defaultdict
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from azure_tenant_audit.resources import open_text_resource
-from azure_tenant_audit.scuba_precheck import check_gate, precheck_policy, precheck_response
-from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for, rule_policies
+from azure_tenant_audit.scuba_precheck import (
+    check_gate,
+    precheck_policy,
+    precheck_response,
+)
+from azure_tenant_audit.value_rules import (
+    as_pack_response,
+    assess,
+    cells_for,
+    rule_policies,
+)
 from azure_tenant_audit.value_rules.catalogue import catalogue
 from azure_tenant_audit.value_rules.gates import closed_gate
 
@@ -158,6 +167,7 @@ def test_catalogue_texts_are_closed_and_free_of_evidence():
     """Every text is a constant of at most 400 characters; the closed lists (cited
     sections, SS 4.1 alert names) are complete, so no reachable answer is missing."""
     from itertools import combinations
+
     from azure_tenant_audit.value_rules.lookups import REQUIRED_ALERTS, alert_text
     for policy, row in catalogue()["policies"].items():
         names = row["sections"]
@@ -419,6 +429,7 @@ def test_optional_full_source_vectors():
     if not path:
         pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     from hashlib import sha256
+
     from test_value_rules_replay import MANIFEST, _overrides, override_gold
 
     override_path = Path(path).with_name("a2-label-overrides.jsonl")
@@ -489,10 +500,11 @@ def test_optional_full_source_vectors():
 def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
     """Served stage-3 answers (the gate rendered as the rule's closed_gate cell, a lookup verdict, an environment
     cell and a raising rule) validate under the 2026-11-05 assessment validator and never call the model."""
+    from test_model_serving import fake_projection
+
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit import value_rules
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import fake_projection
 
     (tmp_path / "run-manifest.json").write_text('{"run_id":"stage3"}')
     rule_sections = {"meeting_policies": [{"Identity": "Global", "AllowExternalParticipantGiveRequestControl": True}],

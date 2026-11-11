@@ -5,9 +5,9 @@ breaking collection of the file; the fail-first proofs for the boundary live in 
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import importlib
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -35,7 +35,9 @@ def tuc():
 
 @pytest.fixture
 def binding():
-    from azure_tenant_audit.value_rules.defender_targeted_users import SensitiveUsersBinding
+    from azure_tenant_audit.value_rules.defender_targeted_users import (
+        SensitiveUsersBinding,
+    )
     return SensitiveUsersBinding(2, DIGEST)
 
 
@@ -71,7 +73,10 @@ def test_fixture_digest_is_the_writer_hmac_of_the_public_test_tuple():
     ([";alice@example.invalid", "x;bob@example.invalid;y;z"], (True, 0)),
 ])
 def test_known_summary_matches_the_product_membership_helper(tuc, binding, targets, expected):
-    from azure_tenant_audit.value_rules.defender_targeted_users import membership, validate_coverage_shape
+    from azure_tenant_audit.value_rules.defender_targeted_users import (
+        membership,
+        validate_coverage_shape,
+    )
     row = _row(targets)
     before = deepcopy(row)
     summary = tuc.summarise(row, USERS, binding)

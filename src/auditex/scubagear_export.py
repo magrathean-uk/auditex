@@ -4,32 +4,54 @@ No tenant connection, command execution or public CLI surface lives here.
 """
 from __future__ import annotations
 
+import json
+import math
+import re
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-import json
-import math
 from pathlib import Path
-import re
 from typing import Any
 from uuid import UUID
 
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.external_sharing import annotate_enum_names
 from azure_tenant_audit.guarded_io import read_guarded_bytes
-from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.scuba_scope import ScopeOversize, scope_entries, scope_summary
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
-from .scuba_projection import (
-    ASSIGNMENT_HARMLESS, PACK_SHAPE_DIGESTS, PROJECTION_VERSION, ROLE_HARMLESS,
-    SCUBA_CAP_EXCLUSION_POLICIES, SCUBA_ENVIRONMENT_POLICIES,
-    SCUBA_ROLE_EXCLUSION_POLICIES, RULE_ONLY_SECTIONS, _EMPTY_CAP, _EMPTY_ROLE, _FIELD_NAME, _annotation,
-    _blank, _oversize, _redact, _rule_target, _seen_shape, _user_entries, _json,
-    Bundle, Projection, Unavailable,
-)
-from .scubagear_prune_proof import PINNED_REVISION, PROOF_VERSION, PRUNE_PROOF, verdict_of
 from .scope_postcheck import ScopeEvidence, _mask_email
+from .scuba_projection import (
+    _EMPTY_CAP,
+    _EMPTY_ROLE,
+    _FIELD_NAME,
+    ASSIGNMENT_HARMLESS,
+    PACK_SHAPE_DIGESTS,
+    PROJECTION_VERSION,
+    ROLE_HARMLESS,
+    RULE_ONLY_SECTIONS,
+    SCUBA_CAP_EXCLUSION_POLICIES,
+    SCUBA_ENVIRONMENT_POLICIES,
+    SCUBA_ROLE_EXCLUSION_POLICIES,
+    Bundle,
+    Projection,
+    Unavailable,
+    _annotation,
+    _blank,
+    _json,
+    _oversize,
+    _redact,
+    _rule_target,
+    _seen_shape,
+    _user_entries,
+)
+from .scubagear_prune_proof import (
+    PINNED_REVISION,
+    PROOF_VERSION,
+    PRUNE_PROOF,
+    verdict_of,
+)
 
 _MAX_EXPORT_BYTES = 64 * 1024 * 1024
 _REPAIR = re.compile(r'("[^"]+"\s*:\s*)(?=,|\})')
@@ -208,14 +230,14 @@ def load_export(path: str | Path) -> LoadedExport:
                 return match[1] + "[]"
             matches = list(_REPAIR.finditer(text))
             if _matches_inside_strings(text, matches):
-                raise ValueError(_INVALID)
+                raise ValueError(_INVALID)  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
             repaired = _REPAIR.sub(replace, text)
             if repaired == text:
                 raise ValueError(_INVALID) from None
             document = _parse(repaired)
             marker = "__scubagear_repair_marker_4f10__"
             if marker in text:
-                raise ValueError(_INVALID)
+                raise ValueError(_INVALID)  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
             marked = _parse(_REPAIR.sub(lambda match: match[1] + json.dumps(marker), text))
             if isinstance(marked, dict):
                 root = marked.get("Raw", marked)
@@ -223,9 +245,9 @@ def load_export(path: str | Path) -> LoadedExport:
                 if "Results" in marked and _repair_locations(marked["Results"], marker):
                     repaired_sections.add("Results")
                 if "MetaData" in marked and _repair_locations(marked["MetaData"], marker):
-                    raise ValueError(_INVALID)
+                    raise ValueError(_INVALID)  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
             if "unrecognisedField" in repaired_sections:
-                raise ValueError(_INVALID)
+                raise ValueError(_INVALID)  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
         _shallow_and_clean(document)
         if not isinstance(document, dict):
             raise ValueError(_INVALID)
@@ -362,7 +384,7 @@ def qualifier_check(section: str, value: Any) -> dict[str, str] | None:
                 continue
             template = row.get("RoleTemplateId")
             def same_role(item: Any) -> bool:
-                return isinstance(item, str) and isinstance(template, str) and item.lower() == template.lower()
+                return isinstance(item, str) and isinstance(template, str) and item.lower() == template.lower()  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
             checks = [(row, {"DisplayName", "RoleTemplateId", "Assignments", "Rules", "key"}, "",
                        {**ROLE_HARMLESS, "TemplateId": same_role})]
             for assignment in row.get("Assignments", []) if isinstance(row.get("Assignments"), list) else []:

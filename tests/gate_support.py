@@ -73,7 +73,10 @@ def rehash(run_dir: Path) -> None:
     The helpers below edit a finalized bundle to set up a scenario; the gate checks the hash manifest, so
     each helper re-hashes afterwards. Tests that exercise tampering edit files directly and do not call it.
     """
-    from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, build_bundle_hash_manifest
+    from azure_tenant_audit.bundle_integrity import (
+        BUNDLE_HASHES_PATH,
+        build_bundle_hash_manifest,
+    )
 
     manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
     payload = build_bundle_hash_manifest(run_dir, run_id=manifest.get("run_id"), created_utc=manifest.get("created_utc"))

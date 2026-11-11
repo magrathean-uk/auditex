@@ -7,7 +7,6 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-
 _MATCH_FIELDS = ("finding_id", "rule_id", "collector", "category")
 # A waiver must name a specific finding or rule. collector and category only narrow it.
 _IDENTIFYING_FIELDS = ("finding_id", "rule_id")

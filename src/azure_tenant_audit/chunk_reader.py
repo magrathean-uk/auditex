@@ -5,11 +5,11 @@ directory or path from the payload is used as a fallback evidence root.
 """
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
 import errno
 import json
 import os
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO
 

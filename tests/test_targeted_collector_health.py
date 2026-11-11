@@ -1,8 +1,8 @@
 """Collector health cannot disappear before offline SS 2.1 and EXO qualification."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -10,7 +10,6 @@ from auditex.scuba_projection import project_run, rule_policy_section
 from azure_tenant_audit import cli
 from azure_tenant_audit.sensitive_users import SensitiveUsers
 from azure_tenant_audit.value_rules import assess
-
 
 ADDRESS = "alice@configured-canary.invalid"
 CANARY = "zq-canary@unlisted-canary.invalid"

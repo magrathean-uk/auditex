@@ -1,13 +1,13 @@
 """Optional synthetic differential replay against pinned OPA and ScubaGear Rego."""
 from __future__ import annotations
 
-from collections import defaultdict
-from hashlib import sha256
 import json
 import lzma
 import os
-from pathlib import Path
 import subprocess
+from collections import defaultdict
+from hashlib import sha256
+from pathlib import Path
 
 import pytest
 

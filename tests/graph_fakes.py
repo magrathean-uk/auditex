@@ -7,7 +7,7 @@ and the handoff made of it.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,7 @@ import pytest
 from azure_tenant_audit import cli
 from azure_tenant_audit.graph import GRAPH_BETA_ROOT, GRAPH_ROOT, GraphError
 
-NOW = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+NOW = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _key(path: str) -> str:

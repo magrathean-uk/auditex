@@ -5,9 +5,9 @@ import os
 from pathlib import Path
 
 import pytest
+from test_reporting import _write_run
 
 from auditex import cli
-from test_reporting import _write_run
 
 
 @pytest.mark.parametrize("kind", ["symlink", "fifo"])

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import time
 from collections import deque
 from pathlib import Path
-import time
 from typing import Any
 
 from ..chunk_reader import iter_endpoint_records

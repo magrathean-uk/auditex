@@ -8,7 +8,6 @@ from .config import CollectorConfig
 from .diagnostics import load_permission_hints
 from .provider_registry import provider_collectors
 
-
 GOOGLE_SCOPE_NOTES: dict[str, dict[str, str]] = {
     "https://www.googleapis.com/auth/admin.directory.user.security": {
         "risk": "write_capable",

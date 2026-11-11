@@ -6,18 +6,24 @@ fail closed. Cross-field accounting is checked after the structural contract.
 """
 from __future__ import annotations
 
-from .guarded_io import UnsafeRunFileError
-
 import json
 import math
 import re
 from functools import lru_cache
 from typing import Any
 
+from .guarded_io import UnsafeRunFileError
 from .resources import open_text_resource
 from .scuba_precheck import field_name, policy_rule, precheck_response, rule_catalogue
 from .scuba_scope import (
-    NAME_LIMIT as SCOPE_NAME_LIMIT, SECTION as SCOPE_SECTION, condition_paths, scope_catalogue,
+    NAME_LIMIT as SCOPE_NAME_LIMIT,
+)
+from .scuba_scope import (
+    SECTION as SCOPE_SECTION,
+)
+from .scuba_scope import (
+    condition_paths,
+    scope_catalogue,
 )
 
 # Historical row metadata remains valid; current assessments only write the scope envelope.
@@ -427,9 +433,18 @@ def validate_assessment(payload: Any) -> None:
             if detail["class"] == "value_rule":
                 if version != "2026-11-05":
                     raise ValueError("Value rule requires current schema")
-                from .value_rules.catalogue import (cell_entry, citation_variants, reason_matches, row_for,
-                                                    shared_reason)
-                from .value_rules.record import RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE, is_shared_reason
+                from .value_rules.catalogue import (
+                    cell_entry,
+                    citation_variants,
+                    reason_matches,
+                    row_for,
+                    shared_reason,
+                )
+                from .value_rules.record import (
+                    RULE_FAILURE_CODE,
+                    RULE_NOT_IMPLEMENTED_CODE,
+                    is_shared_reason,
+                )
                 value_row = row_for(row["policy_id"])
                 if not {"cell", "reason_code", "reason_text"} <= detail.keys():
                     raise ValueError("Missing value-rule cell or reason")

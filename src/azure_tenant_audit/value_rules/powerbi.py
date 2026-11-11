@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import re
+
 from .catalogue import row_for
-from .record import _rec, _not_collected
+from .record import _not_collected, _rec
 
 GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 AAD_34 = "MS.AAD.3.4v1"

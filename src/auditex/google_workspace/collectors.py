@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT, fanout_gap_row
-from azure_tenant_audit.collectors.base import CollectorResult, context_limit, record_truncation
+from azure_tenant_audit.collectors.base import (
+    CollectorResult,
+    context_limit,
+    record_truncation,
+)
 from azure_tenant_audit.dns_lookup import (
     DEFAULT_DOH_ENDPOINT,
     DohClient,
@@ -15,7 +20,6 @@ from azure_tenant_audit.dns_lookup import (
 
 from .auth import POLICIES_SCOPE
 from .client import classify_google_error, minimise_gmail_settings
-
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 

@@ -13,8 +13,12 @@ from typing import Any
 import requests
 
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
-
-from azure_tenant_audit.output_redaction import PROFILE_CUSTOMER_PACK, assert_snapshot_stable, redact_payload, snapshot_run
+from azure_tenant_audit.output_redaction import (
+    PROFILE_CUSTOMER_PACK,
+    assert_snapshot_stable,
+    redact_payload,
+    snapshot_run,
+)
 
 from .run_bundle import RunBundle
 
@@ -111,7 +115,7 @@ def _run_fingerprint(payload: dict[str, Any]) -> str:
         return carried
     tenant = str(payload.get("tenant_name") or "")
     run_dir = str(payload.get("run_dir") or "")
-    digest = hashlib.sha256(f"{tenant}|{run_dir}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{tenant}|{run_dir}".encode()).hexdigest()
     return digest[:16]
 
 

@@ -8,7 +8,6 @@ from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE
 
 from .reporting import render_report
 
-
 BUILTIN_EXPORTERS: dict[str, dict[str, Any]] = {
     "csv": {"name": "csv", "description": "Write finding rows as CSV", "formats": ["csv"], "builtin": True},
     "html": {"name": "html", "description": "Write a standalone HTML audit report", "formats": ["html"], "builtin": True},

@@ -30,8 +30,12 @@ from pathlib import Path
 from typing import Any
 
 from .collection_gaps import (
-    REASON_OPERATOR_LIMIT, REASON_UNKNOWN, SECTION_GAP_REASON_TEXT,
-    SECTION_SCOPED, TRUNCATION_ERROR_CLASS, section_was_cut,
+    REASON_OPERATOR_LIMIT,
+    REASON_UNKNOWN,
+    SECTION_GAP_REASON_TEXT,
+    SECTION_SCOPED,
+    TRUNCATION_ERROR_CLASS,
+    section_was_cut,
 )
 from .resources import resolve_resource_path
 

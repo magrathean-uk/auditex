@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any, NoReturn, Sequence
-
+from collections.abc import Sequence
+from typing import Any, NoReturn
 
 PARSER_ERROR_MESSAGE = "error: invalid arguments"
 

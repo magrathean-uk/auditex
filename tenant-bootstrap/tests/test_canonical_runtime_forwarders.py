@@ -6,7 +6,6 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = ROOT.parent
 CANONICAL_RUNTIME_ROOT = REPO_ROOT / "src" / "azure_tenant_audit"

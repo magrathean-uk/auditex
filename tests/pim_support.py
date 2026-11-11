@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from azure_tenant_audit.collectors.identity_governance import IdentityGovernanceCollector
+from azure_tenant_audit.collectors.identity_governance import (
+    IdentityGovernanceCollector,
+)
 from azure_tenant_audit.graph import GraphError
 from azure_tenant_audit.normalize import build_normalized_snapshot
 

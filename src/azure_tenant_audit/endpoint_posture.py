@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 from . import os_lifecycle
@@ -93,7 +93,7 @@ def parse_timestamp(value: Any) -> datetime | None:
         parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def stale_sync_days(days: int | str | None = None) -> int:
@@ -189,7 +189,7 @@ def lifecycle(device: Mapping[str, Any], today: date) -> os_lifecycle.Lifecycle:
 
 
 def today_utc() -> date:
-    return datetime.now(tz=timezone.utc).date()
+    return datetime.now(tz=UTC).date()
 
 
 def device_posture_summary(

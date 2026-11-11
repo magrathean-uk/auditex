@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import time
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _truncate(value: str, limit: int = 8000) -> str:

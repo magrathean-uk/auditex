@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from support import with_effective_admin_set
 
 import azure_tenant_audit.findings as findings_module
 from azure_tenant_audit.findings import build_findings, build_report_pack
-from support import with_effective_admin_set
 
 
 def _utc_days_ago(days: int) -> str:
-    return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def test_build_findings_classifies_permission_and_partial_failures() -> None:

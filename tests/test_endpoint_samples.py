@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +34,7 @@ NEW_RULES = {
 
 # The samples are judged as of a fixed instant, so what fires (and at what severity) does not depend on the day the
 # test runs: Windows 10's Extended Security Updates window, for one, closes in 2028 and would turn a finding high.
-AS_OF = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
 
 
 def _replay(sample: Path, tmp_path: Path, name: str) -> Path:

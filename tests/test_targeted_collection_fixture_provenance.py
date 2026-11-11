@@ -7,7 +7,6 @@ import pytest
 
 from azure_tenant_audit import cli
 
-
 CANARIES = ("Zebulon Quarkwright", "zq-canary@unlisted-canary.invalid")
 
 

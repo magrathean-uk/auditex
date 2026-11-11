@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from azure_tenant_audit.collection_gaps import (
@@ -14,7 +14,11 @@ from azure_tenant_audit.collection_gaps import (
 )
 from azure_tenant_audit.data_minimisation import minimise_gmail_settings
 
-from .collectors import SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPE_USER, SUBJECT_SCOPED_COLLECTORS
+from .collectors import (
+    SUBJECT_SCOPE_ADMIN,
+    SUBJECT_SCOPE_USER,
+    SUBJECT_SCOPED_COLLECTORS,
+)
 
 
 def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
@@ -46,7 +50,7 @@ def _email_domain(value: Any) -> str | None:
 
 
 def _utc_text(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -57,7 +61,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _epoch_text(value: Any) -> str | None:
@@ -71,12 +75,12 @@ def _epoch_text(value: Any) -> str | None:
     if len(text) == 8:
         # An Android patch level is sometimes a YYYYMMDD date rather than an epoch.
         try:
-            return _utc_text(datetime.strptime(text, "%Y%m%d").replace(tzinfo=timezone.utc))
+            return _utc_text(datetime.strptime(text, "%Y%m%d").replace(tzinfo=UTC))
         except ValueError:
             return None
     seconds = number / 1000 if number > 10**11 else number
     try:
-        return _utc_text(datetime.fromtimestamp(seconds, tz=timezone.utc))
+        return _utc_text(datetime.fromtimestamp(seconds, tz=UTC))
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -241,7 +245,7 @@ def build_google_normalized_snapshot(
     result_rows = result_rows or []
     coverage_rows = coverage_rows or []
     workspace_domain = str(domain or "").lower() or None
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     users = [
         _record(

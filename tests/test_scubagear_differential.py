@@ -5,15 +5,15 @@ Only synthetic inputs are evaluated. Neither tool is downloaded or invoked durin
 """
 from __future__ import annotations
 
-from copy import deepcopy
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import random
 import re
 import stat
 import subprocess
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 
 import pytest
 

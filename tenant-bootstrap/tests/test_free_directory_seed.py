@@ -14,7 +14,6 @@ from uuid import UUID
 import pytest
 import requests
 
-
 ROOT = Path(__file__).resolve().parents[1]
 TENANT = "11111111-2222-3333-4444-555555555555"
 DOMAIN = "freefixture.onmicrosoft.com"

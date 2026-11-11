@@ -13,7 +13,13 @@ from ..collection_gaps import (
 from ..data_minimisation import minimise_device_configurations, minimising_chunk_writer
 from ..endpoint_posture import UPDATE_RING_FIELDS, is_update_ring, project
 from ..graph import GraphClient, GraphError
-from ._endpoint_reads import assignment_fanout, collector_partial, input_rows, mark_section_scoped, scoped_gap_message
+from ._endpoint_reads import (
+    assignment_fanout,
+    collector_partial,
+    input_rows,
+    mark_section_scoped,
+    scoped_gap_message,
+)
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
 # deviceManagementScripts returns ``scriptContent`` (the base64 script body) unless
@@ -133,7 +139,7 @@ class IntuneDepthCollector(Collector):
                 batch_results = None
 
         if batch_results is not None and len(batch_results) == len(fanout_specs):
-            for spec, result in zip(fanout_specs, batch_results):
+            for spec, result in zip(fanout_specs, batch_results, strict=False):
                 endpoint = spec["endpoint"]
                 policy = spec["policy"]
                 policy_id = spec["policy_id"]

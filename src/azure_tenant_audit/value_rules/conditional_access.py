@@ -6,9 +6,9 @@ Conditions restrictions are checked independently of projection (N1/F2).
 """
 from __future__ import annotations
 
-from .helpers import _lst
 from .aad_roles import _p2_gate
-from .record import BAD_SECTION_LIST, EMPTY_SECTION, ITEM_VALUE, _A, _rec
+from .helpers import _lst
+from .record import _A, BAD_SECTION_LIST, EMPTY_SECTION, ITEM_VALUE, _rec
 
 CA_ID = "conditional_access_policies"
 AAD_91 = "MS.AAD.9.1v1"

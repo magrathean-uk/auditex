@@ -3,18 +3,18 @@ from __future__ import annotations
 
 import argparse
 import ast
-from collections import Counter
 import contextlib
 import copy
 import importlib.util
-import io
 import inspect
+import io
 import logging
 import os
-from pathlib import Path
 import re
 import sys
 import traceback
+from collections import Counter
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -24,7 +24,6 @@ from auditex.demo import build_demo_parser
 from auditex.guided import build_guided_parser
 from auditex.mcp_server import _build_mcp_parser
 from azure_tenant_audit import cli as engine_cli
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SECRET = "SECRETVALUE-1234"

@@ -32,7 +32,13 @@ from ..collection_gaps import (
     TRUNCATION_ERROR_CLASS,
     section_was_cut,
 )
-from ..endpoint_posture import PROTECTION_FIELDS, READ_FAILED, READ_NOT_REPORTED, READ_OK, project
+from ..endpoint_posture import (
+    PROTECTION_FIELDS,
+    READ_FAILED,
+    READ_NOT_REPORTED,
+    READ_OK,
+    project,
+)
 from ..graph import GraphError, graph_url
 from .base import _classify_graph_error
 
@@ -132,7 +138,7 @@ def read_endpoints(
         except Exception:  # noqa: BLE001
             batch = None
         if isinstance(batch, list) and len(batch) == len(endpoints):
-            results = [_from_batch(item, endpoint, rows=rows) for item, endpoint in zip(batch, endpoints)]
+            results = [_from_batch(item, endpoint, rows=rows) for item, endpoint in zip(batch, endpoints, strict=False)]
             if rows:
                 for result in results:
                     link = result.body.get("@odata.nextLink") if isinstance(result.body, dict) else None
@@ -260,7 +266,7 @@ def assignment_fanout(
     values: list[dict[str, Any]] = []
     failures: list[ObjectRead] = []
     total = 0
-    for row, result in zip(targets, results):
+    for row, result in zip(targets, results, strict=False):
         if result.status == STATUS_OK and result.rows is not None:
             values.append({"policyId": row["id"], "displayName": row.get("displayName"), "assignments": result.rows})
             total += len(result.rows)
@@ -326,7 +332,7 @@ def protection_state_fanout(
     values: list[dict[str, Any]] = []
     failures: list[ObjectRead] = []
     ok = 0
-    for row, result in zip(targets, results):
+    for row, result in zip(targets, results, strict=False):
         base = {"deviceId": row["id"], "deviceName": row.get("deviceName")}
         if result.status == STATUS_OK and isinstance(result.body, Mapping):
             values.append({**base, "read_status": READ_OK, **project(result.body, PROTECTION_FIELDS)})

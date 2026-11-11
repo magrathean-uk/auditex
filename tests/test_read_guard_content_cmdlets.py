@@ -1,5 +1,6 @@
 """Content-returning cmdlets must not cross the runtime read boundary."""
 import pytest
+from test_read_guard import _shipped_powershell_commands
 
 from azure_tenant_audit.adapters.read_guard import (
     CONTENT_CMDLET_DENY,
@@ -8,8 +9,6 @@ from azure_tenant_audit.adapters.read_guard import (
     classify_command,
     words_are_read,
 )
-from test_read_guard import _shipped_powershell_commands
-
 
 DENIED = (
     # Microsoft Graph mail, chats and channels

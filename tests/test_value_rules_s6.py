@@ -1,22 +1,27 @@
 """Stage 6: v3.9 SharePoint, authorisation and privileged-user contracts."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from copy import deepcopy
-from hashlib import sha256
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
+from collections import Counter, defaultdict
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 
 import pytest
+from test_value_rules_vectors import STAGE6_POLICIES, _grouped, _rows, _strip_names
 
-from azure_tenant_audit.scuba_precheck import check_gate, precheck_policy, precheck_response, rule_catalogue
-from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
+from azure_tenant_audit.scuba_precheck import (
+    check_gate,
+    precheck_policy,
+    precheck_response,
+    rule_catalogue,
+)
+from azure_tenant_audit.value_rules import as_pack_response, assess, cells_for
 from azure_tenant_audit.value_rules.catalogue import catalogue
 from azure_tenant_audit.value_rules.gates import closed_gate
-from test_value_rules_vectors import STAGE6_POLICIES, _grouped, _rows, _strip_names
 
 FIXTURE = Path(__file__).parent / "fixtures/value-rules/vectors-s6.jsonl.xz"
 
@@ -176,9 +181,10 @@ def test_no_stage6_evidence_echo(policy):
 
 
 def test_canary_rule_view_never_persists_or_logs(tmp_path, monkeypatch, caplog):
+    from test_model_serving import fake_projection
+
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import fake_projection
     canary_email, canary_name = "canary.person@example.invalid", "Canary Display Name"
     (tmp_path / "run-manifest.json").write_text('{"run_id":"stage6"}')
     def projected(root, **options):
@@ -201,7 +207,7 @@ def test_canary_rule_view_never_persists_or_logs(tmp_path, monkeypatch, caplog):
 
 
 def test_stratified_stage6_cells_against_pinned_rego(rows_s6, tmp_path):
-    from test_value_rules_oracle import OPA, SCUBA, REGO_SHA256, _outcome_v3
+    from test_value_rules_oracle import OPA, REGO_SHA256, SCUBA, _outcome_v3
     if not (OPA and OPA.is_file() and SCUBA and (SCUBA / "Rego").is_dir()):
         pytest.skip("set AUDITEX_TEST_OPA and AUDITEX_TEST_SCUBAGEAR for pinned offline replay")
     version = subprocess.run([str(OPA), "version"], capture_output=True, text=True, timeout=30)
@@ -215,7 +221,7 @@ def test_stratified_stage6_cells_against_pinned_rego(rows_s6, tmp_path):
                 groups[(policy, row["rule_cell"])].append(row)
     assert {policy for policy, _ in groups} == STAGE6_POLICIES
     assert len(groups) == 104
-    for key, rows in sorted(groups.items()):
+    for _key, rows in sorted(groups.items()):
         row = min(rows, key=lambda r: r["vector_id"])
         package, config = (("sharepoint", "SharePointConfig.rego") if row["policy"].startswith("MS.SHAREPOINT.")
                            else ("aad", "AADConfig.rego"))

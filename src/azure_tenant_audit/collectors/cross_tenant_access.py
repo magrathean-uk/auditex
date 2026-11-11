@@ -8,7 +8,8 @@ hybrid join).
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error
@@ -26,7 +27,7 @@ class CrossTenantAccessCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient | None = context.get("client")
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         payload: dict[str, Any] = {
             "crossTenantAccessPolicy": {"value": []},
@@ -121,7 +122,7 @@ class CrossTenantAccessCollector(Collector):
             "error": status["error"],
         }
 
-    def _log(self, log_event: Callable[[str, str, Optional[dict[str, Any]]], None], name: str, status: dict[str, Any], item_count: int) -> None:
+    def _log(self, log_event: Callable[[str, str, dict[str, Any] | None], None], name: str, status: dict[str, Any], item_count: int) -> None:
         log_event(
             "collector.endpoint.finished",
             "Collector endpoint request completed",

@@ -110,7 +110,7 @@ class _FakeSMTP:
     def __init__(self, host: str, port: int, timeout: float | None = None) -> None:
         pass
 
-    def __enter__(self) -> "_FakeSMTP":
+    def __enter__(self) -> _FakeSMTP:
         return self
 
     def __exit__(self, *args: Any) -> None:

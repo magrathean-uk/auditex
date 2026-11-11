@@ -9,21 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-from auditex.compare import reassessment_gap
-from auditex.gate import gate_findings
-from auditex.google_workspace.run import run_google_offline
-from azure_tenant_audit import baselines, cli
-from azure_tenant_audit.baselines import rule_inputs_gap
-from azure_tenant_audit.findings import build_findings
-from azure_tenant_audit.normalize import build_normalized_snapshot
-from azure_tenant_audit.offline_replay import absent_section_rows, planned_sections, replay_coverage_rows
-
 from scripted_collectors import (
     REPO_ROOT,
     Scripted,
@@ -35,7 +25,20 @@ from scripted_collectors import (
     sample,
 )
 
-AS_OF = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+from auditex.compare import reassessment_gap
+from auditex.gate import gate_findings
+from auditex.google_workspace.run import run_google_offline
+from azure_tenant_audit import baselines, cli
+from azure_tenant_audit.baselines import rule_inputs_gap
+from azure_tenant_audit.findings import build_findings
+from azure_tenant_audit.normalize import build_normalized_snapshot
+from azure_tenant_audit.offline_replay import (
+    absent_section_rows,
+    planned_sections,
+    replay_coverage_rows,
+)
+
+AS_OF = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
 MFA_RULES = (
     "identity.global_admin_mfa_not_registered",
     "identity.privileged_mfa_not_registered",

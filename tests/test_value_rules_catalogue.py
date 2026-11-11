@@ -1,21 +1,30 @@
 """Stage-5 rows obey the current shared catalogue and assessment contracts."""
-from collections import Counter
-from copy import deepcopy
 import json
 import os
+from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
+from test_value_rules_s5 import (
+    DIRECTORY,
+    FIXTURE,
+    POLICIES,
+    SS11,
+    direct,
+    read_rows,
+    rule_rows,
+)
 
 from azure_tenant_audit.value_rules import catalogue as loader
 from azure_tenant_audit.value_rules.record import checked
-from test_value_rules_s5 import DIRECTORY, FIXTURE, POLICIES, SS11, direct, read_rows, rule_rows
 
 
 def assessment_with_comparison(template, record):
     """Replace claims, derive their comparison and refresh the summary totals."""
-    from auditex.rule_assessment import _totals
     from test_value_rules_contract import assessment_for
+
+    from auditex.rule_assessment import _totals
 
     result = assessment_for(template, record)
     row = result["policies"][0]
@@ -65,9 +74,9 @@ def test_fixture_origins_and_p9_correction_are_auditable():
 
 
 def test_each_cell_validates_as_a_modern_assessment(tmp_path, monkeypatch):
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from azure_tenant_audit.value_rules.record import as_pack_response
-    from auditex.rule_assessment import assess_run
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     (tmp_path / "run-manifest.json").write_text('{"run_id":"synthetic-stage5"}')

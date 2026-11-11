@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from gate_support import offline_run
 
 SENTINEL = "structured-refusal-sentinel@example.invalid"
@@ -200,7 +199,10 @@ def test_other_commands_keep_the_plain_fixed_refusal(tmp_path: Path, capsys: pyt
 
 @pytest.mark.parametrize("form", ["hardlink", "direct"])
 def test_private_inputs_never_reach_the_chunk_reader_or_its_consumers(tmp_path: Path, form: str) -> None:
-    from azure_tenant_audit.chunk_reader import EndpointEvidenceError, iter_endpoint_records
+    from azure_tenant_audit.chunk_reader import (
+        EndpointEvidenceError,
+        iter_endpoint_records,
+    )
     from azure_tenant_audit.normalize import build_normalized_snapshot
 
     root = tmp_path / "run"

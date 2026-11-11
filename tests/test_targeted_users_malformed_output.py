@@ -1,11 +1,10 @@
 """Malformed local-only metadata cannot carry proof values into shared output."""
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 
 from azure_tenant_audit.output_redaction import redact_output
-
 
 DIGEST = "ac1d" + "7" * 60
 PROOF = {"supplied": True, "count": 7, "hmac_sha256": DIGEST}

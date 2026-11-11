@@ -6,11 +6,10 @@ import argparse
 import importlib.util
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import requests
-
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 SOURCE = Path(__file__).with_name("seed-free-directory.py")

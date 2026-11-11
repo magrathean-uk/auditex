@@ -6,10 +6,9 @@ import json
 import shutil
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 SCRIPT_PATH = Path(__file__).resolve()
 TENANT_BOOTSTRAP_ROOT = SCRIPT_PATH.parents[1]
@@ -26,7 +25,7 @@ from azure_tenant_audit.cli import run_offline  # noqa: E402
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass(frozen=True)

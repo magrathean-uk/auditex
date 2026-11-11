@@ -10,7 +10,6 @@ from auditex.gate import gate_findings
 from azure_tenant_audit import cli
 from azure_tenant_audit.collectors.base import CollectorResult
 
-
 CANARY = "private-tenant.example: alice@private-tenant.example; sensitive failure detail"
 OPERATIONS = {"identity": "users", "exchange_policy": "transportConfig", "dns_posture": "spf_records"}
 ERROR_CLASSES = {"identity": "unauthenticated", "exchange_policy": "session_not_connected", "dns_posture": "dns_resolver_error"}

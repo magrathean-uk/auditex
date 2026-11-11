@@ -2,9 +2,9 @@
 from pathlib import Path
 
 import pytest
+from test_assessment_review import _auditex_bundle
 
 from azure_tenant_audit import contracts, evidence_db
-from test_assessment_review import _auditex_bundle
 
 
 def _bytes(root: Path) -> dict[str, bytes]:

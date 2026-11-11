@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import subprocess
-import pytest
 from types import SimpleNamespace
 
+import pytest
+
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
-from azure_tenant_audit.collectors.exchange_policy import EXCHANGE_ONLINE_SCOPE, ExchangePolicyCollector, _exchange_session
+from azure_tenant_audit.collectors.exchange_policy import (
+    EXCHANGE_ONLINE_SCOPE,
+    ExchangePolicyCollector,
+    _exchange_session,
+)
 
 
 class _Client:

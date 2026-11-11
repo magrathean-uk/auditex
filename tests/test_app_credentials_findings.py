@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
 
 def _iso(delta_days: int) -> str:
-    return (datetime.now(tz=timezone.utc) + timedelta(days=delta_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(tz=UTC) + timedelta(days=delta_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _snapshot_with_apps(apps: list[dict[str, object]]) -> dict[str, object]:

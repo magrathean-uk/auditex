@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from azure_tenant_audit.collectors.app_credentials import AppCredentialsCollector
 
 
 def _iso(delta_days: int) -> str:
-    return (datetime.now(tz=timezone.utc) + timedelta(days=delta_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(tz=UTC) + timedelta(days=delta_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class _FakeClient:

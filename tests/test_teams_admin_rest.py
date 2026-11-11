@@ -1,14 +1,14 @@
 """Offline transport contracts; real requests use only a loopback fake server."""
 import ast
 import base64
-from datetime import datetime, timedelta, timezone
-from email.utils import format_datetime
 import inspect
 import json
 import logging
 import socket
 import threading
 import time
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +17,10 @@ import requests
 
 from azure_tenant_audit.adapters import get_adapter, list_adapters
 from azure_tenant_audit.adapters import teams_admin_rest as rest
-from azure_tenant_audit.collectors.teams_policy import TEAMS_OPERATIONS, TeamsPolicyCollector
+from azure_tenant_audit.collectors.teams_policy import (
+    TEAMS_OPERATIONS,
+    TeamsPolicyCollector,
+)
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.run import build_capability_matrix_rows
 
@@ -194,7 +197,7 @@ def test_retry_once(monkeypatch, retry_after, expected):
 
 
 def test_retry_http_date():
-    date = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=20), usegmt=True)
+    date = format_datetime(datetime.now(UTC) + timedelta(seconds=20), usegmt=True)
     assert 18 <= rest._retry_after(date) <= 20
 
 
@@ -469,6 +472,7 @@ def test_size_cap_also_applies_to_error_bodies(monkeypatch, status):
 def test_decoded_gzip_size_is_capped(monkeypatch):
     import gzip
     from io import BytesIO
+
     from urllib3.response import HTTPResponse
 
     monkeypatch.setattr(rest, "TEAMS_MAX_RESPONSE_BYTES", 128)

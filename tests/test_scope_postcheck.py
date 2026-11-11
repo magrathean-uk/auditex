@@ -1,23 +1,24 @@
 """Live scope envelopes and historical row validation, using synthetic evidence only."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+import re
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-import re
 from unittest.mock import patch
 
 import jsonschema
 import pytest
+from test_model_serving import fake_projection
 
-from auditex.rule_assessment import assess_run
-from auditex.rule_assessment import policy_catalogue
+from auditex.rule_assessment import assess_run, policy_catalogue
 from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.scuba_scope import (
-    scope_catalogue, scope_entries, scope_summary,
+    scope_catalogue,
+    scope_entries,
+    scope_summary,
 )
-from test_model_serving import fake_projection
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())

@@ -11,13 +11,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from graph_fakes import (
+    COMPLIANCE_POLICY,
+    RING,
+    FakeGraph,
+    devices,
+    intune_lists,
+    load,
+    rule_statuses,
+    run_collectors,
+)
 
 from auditex.gate import gate_findings
 from auditex.reporting import enterprise_handoff
 from azure_tenant_audit.collection_gaps import list_truncations, section_gap_records
 from azure_tenant_audit.graph import GraphError
-
-from graph_fakes import COMPLIANCE_POLICY, RING, FakeGraph, devices, intune_lists, load, rule_statuses, run_collectors
 
 
 @pytest.mark.parametrize("probe_first", [False, True])
@@ -80,10 +88,11 @@ def test_no_teams_token_leaves_run_ok_and_customer_limitations_visible(monkeypat
 
 @pytest.mark.parametrize("probe_first", [False, True])
 def test_teams_token_runs_five_rest_reads_and_skips_commands_without_partial_run(monkeypatch, tmp_path, probe_first):
+    from test_teams_admin_rest import TOKEN, Response, command_reader, connect
+
     from azure_tenant_audit import cli
     from azure_tenant_audit.adapters import teams_admin_rest as rest
     from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
-    from test_teams_admin_rest import Response, TOKEN, command_reader, connect
 
     class CertificateGraph(FakeGraph):
         graph_endpoint = "https://graph.microsoft.com/v1.0"
@@ -355,9 +364,9 @@ def test_a_tenant_with_more_than_ten_profiles_keeps_its_update_ring_rules(monkey
 def test_default_exchange_failure_is_partial_exit_zero_with_unassessed_policies(
     monkeypatch, tmp_path, caplog, error_class, reason, preflight
 ):
-    from azure_tenant_audit import cli
     from auditex.reporting import render_enterprise_handoff_markdown
     from auditex.scuba_projection import project_run
+    from azure_tenant_audit import cli
 
     class RefusedAdapter:
         def run(self, command, **kwargs):
@@ -387,10 +396,10 @@ def test_default_exchange_failure_is_partial_exit_zero_with_unassessed_policies(
 
 
 def test_default_dns_unreachable_is_partial_exit_zero_with_unknown_records(monkeypatch, tmp_path, caplog):
-    from azure_tenant_audit import cli
-    from azure_tenant_audit.dns_lookup import DohError
     from auditex.reporting import render_enterprise_handoff_markdown
     from auditex.scuba_projection import project_run
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.dns_lookup import DohError
 
     class UnreachableResolver:
         def query(self, name, kind):
@@ -490,10 +499,10 @@ def test_dns_domain_read_refusal_is_a_named_non_fatal_gap(monkeypatch, tmp_path,
 @pytest.mark.parametrize("preflight", [False, True])
 @pytest.mark.parametrize("healthy", [True, False])
 def test_ipps_skip_keeps_healthy_app_run_ok_and_real_exchange_failure_partial(monkeypatch, tmp_path, preflight, healthy):
-    from azure_tenant_audit import cli
-    from azure_tenant_audit.collection_gaps import IPPS_SKIP_TEXT
     from auditex.explorer import _collector_rows
     from auditex.reporting import render_enterprise_handoff_markdown
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.collection_gaps import IPPS_SKIP_TEXT
 
     fake = FakeGraph(lists={"/domains": [{"id": "constructed.onmicrosoft.com", "isInitial": True}]})
     fake.app_token_for = lambda scope: "constructed-token"
@@ -562,6 +571,7 @@ def test_offline_notice_only_when_selected_and_no_console_exit_text_in_artifacts
 
 def test_explicit_delegated_exchange_is_selected_and_reports_auth_mode_reason(monkeypatch, tmp_path):
     from types import SimpleNamespace
+
     from azure_tenant_audit import cli
     from azure_tenant_audit.adapters import powershell_graph
     from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter

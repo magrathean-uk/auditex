@@ -15,7 +15,6 @@ from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 from azure_tenant_audit.output import AuditWriter
 from azure_tenant_audit.secret_hygiene import redact_output
 
-
 EMAIL = "recipient-canary+tag@mocktenant.test"
 UPN = "guest_canary_mocktenant.test#EXT#@mocktenant.onmicrosoft.com"
 GUID = "A17E23D4-5B69-47AB-8C01-23456789ABCD"
@@ -278,7 +277,12 @@ def test_exchange_module_error_snippet_is_private(monkeypatch, default, stream) 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_auth_and_toolchain_report_boundaries_mask_diagnostics(tmp_path, stream) -> None:
-    from auditex.auth_runtime import AuthRuntimeAdapters, ProductAuthRuntime, ToolchainRuntime, ToolchainRuntimeAdapters
+    from auditex.auth_runtime import (
+        AuthRuntimeAdapters,
+        ProductAuthRuntime,
+        ToolchainRuntime,
+        ToolchainRuntimeAdapters,
+    )
 
     def blocked(command):
         return {"status": "blocked", stream: DIAGNOSTIC + " detail" * 200}

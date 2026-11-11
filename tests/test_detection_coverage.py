@@ -9,13 +9,19 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.cli import run_offline
-from azure_tenant_audit.collectors.identity_protection import IdentityProtectionCollector
+from azure_tenant_audit.collectors.identity_protection import (
+    IdentityProtectionCollector,
+)
 from azure_tenant_audit.detection_coverage import (
     SIGNAL_CATALOG,
     build_detection_signals,
     summarize_detection_coverage,
 )
-from azure_tenant_audit.findings import apply_coverage_gaps_to_report_pack, build_findings, build_report_pack
+from azure_tenant_audit.findings import (
+    apply_coverage_gaps_to_report_pack,
+    build_findings,
+    build_report_pack,
+)
 from azure_tenant_audit.graph import GraphError
 from azure_tenant_audit.normalize import build_normalized_snapshot
 

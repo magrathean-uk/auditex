@@ -11,21 +11,6 @@ from typing import Any
 from urllib.parse import quote
 
 import pytest
-
-from azure_tenant_audit import privileged_roles as artefact
-from azure_tenant_audit.baselines import _licence_limited_collectors
-from azure_tenant_audit.collection_gaps import list_truncations, refusal_gap_records
-from azure_tenant_audit.collectors import _endpoint_reads
-from azure_tenant_audit.collectors import identity_governance as governance
-from azure_tenant_audit.config import CollectorConfig
-from azure_tenant_audit.contracts import _validate_record_key_uniqueness
-from azure_tenant_audit.diagnostics import build_diagnostics, load_permission_hints
-from azure_tenant_audit.graph import GraphError
-from azure_tenant_audit.normalize import build_normalized_snapshot
-from azure_tenant_audit.profiles import get_profile
-from azure_tenant_audit.run import build_capability_matrix_rows, build_coverage_ledger, build_live_run_plan
-from azure_tenant_audit.scope_catalog import build_m365_scope_catalog
-
 from pim_support import (
     ASSIGNMENT_FILTER,
     ASSIGNMENTS_PATH,
@@ -46,6 +31,24 @@ from pim_support import (
     snapshot,
     transient,
 )
+
+from azure_tenant_audit import privileged_roles as artefact
+from azure_tenant_audit.baselines import _licence_limited_collectors
+from azure_tenant_audit.collection_gaps import list_truncations, refusal_gap_records
+from azure_tenant_audit.collectors import _endpoint_reads
+from azure_tenant_audit.collectors import identity_governance as governance
+from azure_tenant_audit.config import CollectorConfig
+from azure_tenant_audit.contracts import _validate_record_key_uniqueness
+from azure_tenant_audit.diagnostics import build_diagnostics, load_permission_hints
+from azure_tenant_audit.graph import GraphError
+from azure_tenant_audit.normalize import build_normalized_snapshot
+from azure_tenant_audit.profiles import get_profile
+from azure_tenant_audit.run import (
+    build_capability_matrix_rows,
+    build_coverage_ledger,
+    build_live_run_plan,
+)
+from azure_tenant_audit.scope_catalog import build_m365_scope_catalog
 
 RULES_ENDPOINT = "/policies/roleManagementPolicies/{id}/rules"
 # What a rule may carry in the export shape; the projection rejects any other key.
@@ -473,7 +476,13 @@ def test_a_failed_role_definition_read_leaves_no_artefact() -> None:
 
 
 def test_the_artefact_is_what_the_projection_adapter_accepts(tmp_path: Path) -> None:
-    from auditex.scuba_projection import DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS, Bundle, _roles
+    from auditex.scuba_projection import (
+        DEFAULT_SCAN_MAX_BYTES,
+        DEFAULT_SCAN_MAX_CHUNKS,
+        DEFAULT_SCAN_MAX_ROWS,
+        Bundle,
+        _roles,
+    )
 
     normalized = snapshot(collect())
     (tmp_path / "normalized").mkdir()

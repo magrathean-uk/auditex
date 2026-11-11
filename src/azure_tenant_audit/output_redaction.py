@@ -8,14 +8,16 @@ import re
 import stat
 import unicodedata
 from collections import deque
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from .citations import build_citation_summary, dedupe_citations
 from .guarded_io import UnsafeRunFileError, current_context, guarded_operation
-from .secret_hygiene import BEARER_RE, JWT_RE, _OUTPUT_EMAIL_RE as OUTPUT_EMAIL_RE, _OUTPUT_GUID_RE as OUTPUT_GUID_RE
+from .secret_hygiene import _OUTPUT_EMAIL_RE as OUTPUT_EMAIL_RE
+from .secret_hygiene import _OUTPUT_GUID_RE as OUTPUT_GUID_RE
+from .secret_hygiene import BEARER_RE, JWT_RE
 
 # Keep the output-specific form local: diagnostic argv redaction is a separate boundary.
 INLINE_SECRET_RE = re.compile(
@@ -418,7 +420,7 @@ class _Found:
     persons: set[_Person] = field(default_factory=set)
     limit_hits: int = 0  # JSON-looking strings above ``_MAX_EMBEDDED_JSON_CHARS`` that were not parsed
 
-    def merge(self, other: "_Found") -> None:
+    def merge(self, other: _Found) -> None:
         self.names |= other.names
         self.persons |= other.persons
         self.ids |= other.ids
@@ -764,7 +766,7 @@ class _Scan:
         self.budget -= len(data)  # what was really read, not what was listed
         self.collect(parts, data)
 
-    def _enter(self, frames: list["_Frame"], descriptor: int, parts: tuple[str, ...], depth: int) -> None:
+    def _enter(self, frames: list[_Frame], descriptor: int, parts: tuple[str, ...], depth: int) -> None:
         """Push the directory ``descriptor`` (owned from here on) unless it is too deep or cannot be listed."""
         try:
             if depth > _MAX_SCAN_DEPTH:
@@ -1375,7 +1377,7 @@ def _names_as_persons(names: Iterable[str]) -> list[_Person]:
     return [(n, (n,), "", "", (), ()) for n in names if _usable(n)]
 
 
-def _context_index(context: "RedactionContext") -> _NameIndex:
+def _context_index(context: RedactionContext) -> _NameIndex:
     """The context's index, built once (from ``protected_names`` when the context was not built from a run)."""
     index = context._index
     if index is None:
@@ -1384,7 +1386,7 @@ def _context_index(context: "RedactionContext") -> _NameIndex:
     return index
 
 
-def unmatched_names_note(context: "RedactionContext") -> str:
+def unmatched_names_note(context: RedactionContext) -> str:
     """The fixed line a shareable HTML or Markdown report carries when some directory people's names could not be
     matched safely in free text (``RedactionContext.unmatched_names``); ``""`` otherwise. It never holds a name."""
     counts = context.unmatched_names
@@ -1588,7 +1590,7 @@ def _without_local_proof(record: Mapping[Any, Any]) -> Mapping[Any, Any]:
     if not any(norm in _LOCAL_PROOF_NORMS or norm == _OPERATOR_INPUTS_NORM for norm in norms):
         return record
     out: dict[Any, Any] = {}
-    for norm, (key, item) in zip(norms, record.items()):
+    for norm, (key, item) in zip(norms, record.items(), strict=False):
         if norm in _LOCAL_PROOF_NORMS:
             continue
         out[key] = _structured_rewrite(item, _shareable_operator_inputs) if norm == _OPERATOR_INPUTS_NORM else item

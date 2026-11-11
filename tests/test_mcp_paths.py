@@ -7,8 +7,20 @@ from typing import Any
 
 import pytest
 
-from auditex.mcp_paths import MCP_ROOT_ENV, McpPathError, confine_handler, confine_path, confine_value, mcp_root
-from auditex.mcp_registry import TOOL_REGISTRY, McpToolEntry, iter_tool_specs, register_fastmcp_tools
+from auditex.mcp_paths import (
+    MCP_ROOT_ENV,
+    McpPathError,
+    confine_handler,
+    confine_path,
+    confine_value,
+    mcp_root,
+)
+from auditex.mcp_registry import (
+    TOOL_REGISTRY,
+    McpToolEntry,
+    iter_tool_specs,
+    register_fastmcp_tools,
+)
 from auditex.mcp_server import tool_handlers
 
 FORBIDDEN_ARGUMENTS = {"token", "access_token", "client_secret", "bearer_token", "refresh_token", "secret", "password"}

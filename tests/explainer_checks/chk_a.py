@@ -4,7 +4,7 @@ Rules per verdict are in verdict_classifier's docstring. This module applies the
 not_assessed (every step), not_met (steps, with verbatim baseline text exempt), met and not_applicable (steps must be empty anyway; scanned if present).
 """
 from . import verdict_classifier as vc
-from .shared_reason import check_shared, FAULT_ENTRY, NOT_IMPLEMENTED_ENTRY
+from .shared_reason import FAULT_ENTRY, NOT_IMPLEMENTED_ENTRY, check_shared
 
 
 def _fail(code, text, detail=""):

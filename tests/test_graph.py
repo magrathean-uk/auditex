@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from support import fake_graph_client, graph_response
+
 from azure_tenant_audit.collectors.base import _classify_graph_error
 from azure_tenant_audit.graph import GraphError
-from support import fake_graph_client, graph_response
 
 
 def test_graph_error_includes_http_status_and_code(monkeypatch) -> None:

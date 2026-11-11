@@ -1,19 +1,23 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import jsonschema
 import pytest
 
-from auditex.rule_assessment import precheck_case
-from auditex.rule_assessment import assess_run
-from auditex.rule_assessment import build_case
-from azure_tenant_audit.scuba_assessment import validate_assessment
+from auditex.rule_assessment import assess_run, build_case, precheck_case
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
-from azure_tenant_audit.scuba_precheck import check_fields, check_gate, field_name, precheck_policy, rule_catalogue
+from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.scuba_precheck import (
+    check_fields,
+    check_gate,
+    field_name,
+    precheck_policy,
+    rule_catalogue,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SP = "MS.SHAREPOINT.3.1v1"

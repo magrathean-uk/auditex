@@ -107,9 +107,12 @@ def test_success_without_a_callback_strips_targets_and_records_no_output(child):
 
 def test_success_with_the_collector_transform_returns_a_bound_summary(child):
     from functools import partial
+
     from azure_tenant_audit.collectors import targeted_users_coverage as tuc
     from azure_tenant_audit.sensitive_users import SensitiveUsers
-    from azure_tenant_audit.value_rules.defender_targeted_users import SensitiveUsersBinding
+    from azure_tenant_audit.value_rules.defender_targeted_users import (
+        SensitiveUsersBinding,
+    )
     child(ROWS)
     transform = partial(tuc.sanitise_response, sensitive_users=SensitiveUsers(ADDRESSES),
                         binding=SensitiveUsersBinding(2, DIGEST), observed=True)
@@ -244,7 +247,9 @@ def test_other_commands_keep_their_existing_diagnostics(child):
 
 
 def test_sensitive_recognition_matches_the_boundary_module():
-    from azure_tenant_audit.collectors.targeted_users_coverage import is_sensitive_command
+    from azure_tenant_audit.collectors.targeted_users_coverage import (
+        is_sensitive_command,
+    )
     for script in (ANTI_PHISH, ANTI_PHISH.lower(), "Get-AntiPhishPolicy", ",@(get-antiphishpolicy | Select-Object Name)",
                    "Get-Foo | Select-Object TargetedUsersToProtect"):
         assert pg._sensitive(script) and is_sensitive_command(script)

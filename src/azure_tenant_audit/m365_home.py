@@ -18,8 +18,8 @@ by ``scripts/tenant-audit-login`` is found by the Python commands and the other 
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 M365_HOME_ENV_VAR = "AUDITEX_M365_HOME"
 XDG_DATA_HOME_ENV_VAR = "XDG_DATA_HOME"

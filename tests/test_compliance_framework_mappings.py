@@ -1,6 +1,8 @@
 """Verify findings carry compliance-framework mappings end-to-end."""
 from __future__ import annotations
 
+from datetime import UTC
+
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
@@ -73,9 +75,9 @@ def test_external_inbox_rule_has_t1114_attack_mapping() -> None:
 
 
 def test_app_credential_secret_expired_has_iso_27001_mapping() -> None:
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    expired_iso = (datetime.now(tz=timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    expired_iso = (datetime.now(tz=UTC) - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
     payloads = {
         "app_credentials": {
             "applicationCredentials": {

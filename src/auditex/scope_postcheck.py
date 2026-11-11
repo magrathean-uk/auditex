@@ -13,9 +13,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.scuba_scope import SECTION, ScopeEntry, ScopeOversize, scope_entries, scope_summary
+from azure_tenant_audit.scuba_scope import (
+    SECTION,
+    ScopeEntry,
+    ScopeOversize,
+    scope_entries,
+    scope_summary,
+)
 
-from .scuba_projection import Bundle, Unavailable, _EMAIL
+from .scuba_projection import _EMAIL, Bundle, Unavailable
 
 _COLLECTOR, _OPERATION = "conditional_access", "conditionalAccessPolicies"
 _REASONS = {"missing_artifact", "incomplete_shape", "oversize", "not_applicable_to_platform"}

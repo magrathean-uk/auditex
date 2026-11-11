@@ -19,9 +19,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
-
 from auditex.rules import build_rule_packs, list_rule_packs  # noqa: E402
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:

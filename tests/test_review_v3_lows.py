@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from gate_support import offline_run, read_json, rehash
+from scripted_collectors import REPO_ROOT, load, rule_statuses
 
 from auditex.gate import gate_findings
 from auditex.google_workspace.run import run_google_offline
@@ -18,14 +20,13 @@ from azure_tenant_audit.api_inventory import observe_audit_events
 from azure_tenant_audit.collection_gaps import SAMPLE_JUDGED_RULES
 from azure_tenant_audit.collectors import power_platform as power_platform_module
 from azure_tenant_audit.collectors.dns_posture import DnsPostureCollector
-from azure_tenant_audit.collectors.identity_protection import IdentityProtectionCollector
+from azure_tenant_audit.collectors.identity_protection import (
+    IdentityProtectionCollector,
+)
 from azure_tenant_audit.collectors.power_platform import PowerPlatformCollector
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.dns_lookup import DohClient, DohError, collect_domain_posture
 from azure_tenant_audit.power_platform import PowerPlatformError
-
-from gate_support import offline_run, read_json, rehash
-from scripted_collectors import REPO_ROOT, load, rule_statuses
 
 # ---- 13. DNS edge cases ------------------------------------------------------------------------------------------
 

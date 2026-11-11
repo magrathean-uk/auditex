@@ -29,20 +29,20 @@ Anything else is a product fault (or a spec fault) and fails the replay.
 """
 from __future__ import annotations
 
-from collections import Counter
-from copy import deepcopy
-from hashlib import sha256
 import json
 import lzma
 import os
-from pathlib import Path
 import re
+from collections import Counter
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 
 import pytest
 
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
-from azure_tenant_audit.value_rules import assess, as_pack_response, rule_policies
+from azure_tenant_audit.value_rules import as_pack_response, assess, rule_policies
 from azure_tenant_audit.value_rules.catalogue import cells_for, row_for
 from azure_tenant_audit.value_rules.record import checked
 

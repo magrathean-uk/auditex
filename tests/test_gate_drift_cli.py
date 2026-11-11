@@ -6,7 +6,6 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
-
 from gate_support import (
     SAMPLE_COLLECTORS,
     finding,

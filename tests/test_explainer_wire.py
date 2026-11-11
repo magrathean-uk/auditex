@@ -1,23 +1,25 @@
 """The template explainer's product boundary, validation and report integration."""
-from collections import Counter
-from copy import deepcopy
 import json
 import logging
-from pathlib import Path
 import time
+from collections import Counter
+from copy import deepcopy
+from pathlib import Path
 
 import jsonschema
 import pytest
 
 from auditex import rule_assessment
-from auditex.rule_assessment import precheck_case
-from auditex.rule_assessment import assess_run
-from auditex.rule_assessment import build_case
 from auditex.reporting import load_report_bundle, preview_report
+from auditex.rule_assessment import assess_run, build_case, precheck_case
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.explainer import ExplainerError
-from azure_tenant_audit.scuba_assessment import ASSESSMENT_SCHEMAS, validate_assessment, value_rule_verdict
 from azure_tenant_audit.output_redaction import RedactionContext
+from azure_tenant_audit.scuba_assessment import (
+    ASSESSMENT_SCHEMAS,
+    validate_assessment,
+    value_rule_verdict,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PBI = "MS.POWERBI.1.1v1"

@@ -5,28 +5,30 @@ import os
 import platform
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from azure_tenant_audit.auth_context import (
     inspect_token_claims,
     resolve_stored_auth_context,
 )
+from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.m365_home import m365_subprocess_kwargs
-from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.scope_catalog import build_m365_scope_catalog
 from azure_tenant_audit.secret_hygiene import (
     redact_output,
     sanitize_token_claims,
     secure_write_json,
-    token_freshness as safe_token_freshness,
     validate_token_claims,
 )
-
+from azure_tenant_audit.secret_hygiene import (
+    token_freshness as safe_token_freshness,
+)
 
 JsonCommand = Callable[[list[str]], dict[str, Any]]
 ReturncodeCommand = Callable[[list[str]], int]
@@ -136,7 +138,9 @@ def _default_exchange_module_status() -> dict[str, Any]:
 
 def _default_list_adapter_capabilities() -> list[dict[str, Any]]:
     try:
-        from azure_tenant_audit.adapters import list_adapters as _list_adapter_capabilities
+        from azure_tenant_audit.adapters import (
+            list_adapters as _list_adapter_capabilities,
+        )
 
         return _list_adapter_capabilities()
     except Exception:  # noqa: BLE001
@@ -433,8 +437,8 @@ def parse_utc(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def token_freshness(token_claims: dict[str, Any]) -> dict[str, Any]:

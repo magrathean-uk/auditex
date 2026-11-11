@@ -6,10 +6,18 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.baselines import build_baseline_alignment
-from azure_tenant_audit.collection_gaps import list_truncations, truncations_from_payloads
+from azure_tenant_audit.collection_gaps import (
+    list_truncations,
+    truncations_from_payloads,
+)
 from azure_tenant_audit.collectors import _endpoint_reads
 from azure_tenant_audit.collectors.intune import MANAGED_DEVICE_SELECT, IntuneCollector
-from azure_tenant_audit.graph import GraphClient, GraphError, graph_url, read_only_violation
+from azure_tenant_audit.graph import (
+    GraphClient,
+    GraphError,
+    graph_url,
+    read_only_violation,
+)
 from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.run import build_coverage_ledger
 
@@ -125,7 +133,7 @@ def test_a_failed_assignment_read_leaves_that_policy_out_without_making_the_coll
     class _OnePolicyDenied(_Client):
         def get_batch(self, requests):  # noqa: ANN001
             results = super().get_batch(requests)
-            for item, result in zip(requests, results):
+            for item, result in zip(requests, results, strict=False):
                 if item["path"].endswith("/p2/assignments"):
                     results[results.index(result)] = {"request": item, "status": 403, "body": {"error": {"code": "Forbidden", "message": "denied"}}}
             return results
@@ -410,7 +418,7 @@ def test_a_failed_assignment_read_leaves_every_other_intune_rule_assessed() -> N
                 {"request": item, "status": 403, "body": {"error": {"code": "Forbidden", "message": "denied"}}}
                 if item["path"].endswith("/p2/assignments")
                 else result
-                for item, result in zip(requests, results)
+                for item, result in zip(requests, results, strict=False)
             ]
 
     client = _OneDenied([_device(1)], policies=[{"id": "p1", "@odata.type": "#microsoft.graph.windows10CompliancePolicy"}, {"id": "p2", "@odata.type": "#microsoft.graph.windows10CompliancePolicy"}],

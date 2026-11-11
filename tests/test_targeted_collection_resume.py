@@ -6,10 +6,10 @@ the collect boundary the changed-list resume carries the stale evidence and the 
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import stat
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -212,7 +212,9 @@ def test_a_changed_list_that_cannot_be_read_again_keeps_other_evidence_without_p
 def test_a_carried_bundle_with_stale_literals_is_minimised_before_reuse(harness):
     from azure_tenant_audit.collectors.targeted_users_coverage import resume_payload
     from azure_tenant_audit.sensitive_users import SensitiveUsers
-    from azure_tenant_audit.value_rules.defender_targeted_users import SensitiveUsersBinding
+    from azure_tenant_audit.value_rules.defender_targeted_users import (
+        SensitiveUsersBinding,
+    )
     digest = "440e979a9184114e5d0376ee777b8c0ff444ca0db3a2242e01937331f494538a"
     binding = SensitiveUsersBinding(2, digest)
     users = SensitiveUsers(("alice@example.invalid", "bob@example.invalid"))

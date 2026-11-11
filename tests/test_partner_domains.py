@@ -17,8 +17,14 @@ import pytest
 
 from azure_tenant_audit import cli
 from azure_tenant_audit.partner_domains import (
-    BUNDLE_PATH, KEY_PATH, MAX_BYTES, PartnerDomains, PartnerDomainsError,
-    load_partner_domains, partner_domains_digest, verify_partner_domains,
+    BUNDLE_PATH,
+    KEY_PATH,
+    MAX_BYTES,
+    PartnerDomains,
+    PartnerDomainsError,
+    load_partner_domains,
+    partner_domains_digest,
+    verify_partner_domains,
 )
 
 CANARIES = ("partner-canary-a.example.invalid", "partner-canary-b.example.invalid")
@@ -192,7 +198,10 @@ def test_decoder_failures_are_sanitised(tmp_path, monkeypatch, failure):
 @pytest.mark.parametrize("equals", [False, True])
 def test_partner_domain_prefix_redaction(equals):
     from azure_tenant_audit.auth_runtime import scrub_command_line
-    from azure_tenant_audit.secret_hygiene import collect_sensitive_argv_values, redact_argv
+    from azure_tenant_audit.secret_hygiene import (
+        collect_sensitive_argv_values,
+        redact_argv,
+    )
 
     full = "--partner-domains"
     canary_path = "/constructed/" + CANARIES[0] + ".txt"
@@ -442,14 +451,16 @@ def test_operator_validation_diagnostics_hide_source_values_and_path(
 
 @pytest.mark.parametrize("entrypoint", ["engine", "product"])
 def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplog, entrypoint):
-    from azure_tenant_audit import output
     from auditex import cli as product_cli
     from auditex.explorer import write_explorer
     from auditex.exporters import BUILTIN_EXPORTERS, run_exporter
     from auditex.reporting import (
-        _copy_source_artifact, enterprise_handoff, verify_enterprise_handoff_pack,
+        _copy_source_artifact,
+        enterprise_handoff,
+        verify_enterprise_handoff_pack,
         write_enterprise_handoff_pack,
     )
+    from azure_tenant_audit import output
     from azure_tenant_audit.auth_runtime import scrub_command_line
     from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
     from azure_tenant_audit.secret_hygiene import redact_argv
@@ -791,7 +802,14 @@ def test_demo_never_loads_partner_domains(tmp_path, monkeypatch, capsys):
 def test_inputs_use_separate_keys_and_clear_independently(tmp_path, clear_first):
     from azure_tenant_audit.output import AuditWriter
     from azure_tenant_audit.sensitive_users import (
-        BUNDLE_PATH as USERS_PATH, KEY_PATH as USERS_KEY_PATH, SensitiveUsers, verify_sensitive_users,
+        BUNDLE_PATH as USERS_PATH,
+    )
+    from azure_tenant_audit.sensitive_users import (
+        KEY_PATH as USERS_KEY_PATH,
+    )
+    from azure_tenant_audit.sensitive_users import (
+        SensitiveUsers,
+        verify_sensitive_users,
     )
 
     writer = AuditWriter(tmp_path, "test", "both")
@@ -826,9 +844,14 @@ def test_inputs_use_separate_keys_and_clear_independently(tmp_path, clear_first)
 @pytest.mark.parametrize("member", ["partner-domains.key", "partner-domains.txt"])
 @pytest.mark.parametrize("reader", ["run", "standalone", "selected-alias"])
 def test_partner_pair_identity_is_refused_by_guarded_readers(tmp_path, monkeypatch, member, reader):
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
-    from azure_tenant_audit.run_files import read_run_file
     from support import RunBundleBuilder
+
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
+    from azure_tenant_audit.run_files import read_run_file
 
     run = RunBundleBuilder(tmp_path).summary_md().manifest(
         operator_inputs={"partner_domains": PartnerDomains(CANARIES).manifest(KEY_CANARY)},
@@ -865,8 +888,9 @@ def test_partner_pair_identity_is_refused_by_guarded_readers(tmp_path, monkeypat
 
 @pytest.mark.parametrize("damage", ["missing-key", "missing-list", "bad-hmac"])
 def test_partner_pair_must_match_its_manifest_before_admission(tmp_path, damage):
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError
     from support import RunBundleBuilder
+
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError
 
     metadata = PartnerDomains(CANARIES).manifest(KEY_CANARY)
     if damage == "bad-hmac":
@@ -884,6 +908,7 @@ def test_partner_pair_must_match_its_manifest_before_admission(tmp_path, damage)
 
 def test_clearing_users_keeps_partner_files_ignored_by_git(tmp_path):
     import subprocess
+
     from azure_tenant_audit.output import AuditWriter
     from azure_tenant_audit.sensitive_users import SensitiveUsers
 

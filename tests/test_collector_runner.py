@@ -4,7 +4,11 @@ from typing import Any
 
 import pytest
 
-from azure_tenant_audit.collector_runner import CollectorRunContext, CollectorRunHooks, CollectorRunner
+from azure_tenant_audit.collector_runner import (
+    CollectorRunContext,
+    CollectorRunHooks,
+    CollectorRunner,
+)
 from azure_tenant_audit.collectors.base import CollectorResult
 from azure_tenant_audit.run import collector_execution_order
 

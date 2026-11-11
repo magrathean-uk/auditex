@@ -9,15 +9,16 @@ and never run in offline mode because offline runs do not execute collectors.
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from ..collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
 from ..dns_lookup import (
     DEFAULT_DOH_ENDPOINT,
     CachingResolver,
+    DnsResolver,
     DohClient,
     DohError,
-    DnsResolver,
     collect_domain_posture,
     scuba_dkim_record,
     scuba_dmarc_record,
@@ -33,7 +34,6 @@ from ..exposure_lookup import (
 )
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error
-
 
 DEFAULT_DKIM_SELECTORS = ("selector1", "selector2")
 # Probed only when DEFAULT_DKIM_SELECTORS all miss. Covers common non-M365 origins
@@ -67,7 +67,7 @@ class DnsPostureCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient | None = context.get("client")
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
         resolver = CachingResolver(
             context.get("dns_resolver") or DohClient(
                 endpoint=context.get("doh_endpoint", DEFAULT_DOH_ENDPOINT)

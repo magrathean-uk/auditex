@@ -11,11 +11,11 @@ import. Constructed data only: no tenant, network, PowerShell or model.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import itertools
 import json
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -256,7 +256,7 @@ BEARING_OPERATIONS = {
     "double-encoded-row": lambda: {"status": "ok", "stderr": f"WARNING: {UNCONF_NAME}",
                                    "value": [{"id": "x", "Blob": {"b": json.dumps(json.dumps(_carrier()))}}]},
     "escaped-key": lambda: {"status": "ok", "reason": UNCONF_NAME,
-                            "value": [{"Blob": '{"\\u0054argetedUsersToProtect":["%s"]}' % UNCONF_EMAIL}]},
+                            "value": [{"Blob": f'{{"\\u0054argetedUsersToProtect":["{UNCONF_EMAIL}"]}}'}]},
     "keyless-encoded-stdout": lambda: {"error_class": "command_error", "message": CONFIGURED_NAME,
                                        "stdout": json.dumps(json.dumps(_carrier()))},
     "past-the-bounds": lambda: {"status": "ok", "value": [_deep()]},

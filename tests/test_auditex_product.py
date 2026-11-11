@@ -1,48 +1,50 @@
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
-from pathlib import Path
 import sys
 import types
-import argparse
+from pathlib import Path
 
 import pytest
+from support import RunBundleBuilder, make_contract_valid, write_json
 
 from auditex import cli as auditex_cli
 from auditex.mcp_server import (
-    build_google_command,
-    build_cli_command,
-    build_response_command,
-    build_probe_command,
-    compare_many_runs,
-    list_adapters,
-    list_blockers,
-    list_collectors,
-    list_available_exporters,
-    list_profiles,
-    preview_notification,
-    preview_report,
-    rules_inventory,
-    list_response_actions,
-    main as mcp_main,
     analyze_report,
+    api_inventory,
     auth_capability,
     auth_list,
     auth_status,
-    api_inventory,
+    build_cli_command,
+    build_google_command,
+    build_probe_command,
+    build_response_command,
+    compare_many_runs,
     contract_schema_inventory,
     enterprise_handoff,
+    list_adapters,
+    list_available_exporters,
+    list_blockers,
+    list_collectors,
+    list_profiles,
+    list_response_actions,
     permissions_ledger,
+    preview_notification,
+    preview_report,
     proof_table,
+    rules_inventory,
     summarize_run,
     tool_specs,
     verify_customer_pack,
 )
-from azure_tenant_audit.contracts import contract_schema_manifest
+from auditex.mcp_server import (
+    main as mcp_main,
+)
 from azure_tenant_audit.cli import build_parser, run_offline
+from azure_tenant_audit.contracts import contract_schema_manifest
 from azure_tenant_audit.profiles import get_profile, profile_choices
-from support import RunBundleBuilder, make_contract_valid, write_json
 
 
 def test_profile_choices_include_global_reader() -> None:
@@ -472,7 +474,10 @@ def test_mcp_probe_command_rejects_secret_and_token_arguments() -> None:
 
 
 def test_local_probe_command_preserves_auth_and_redacts_its_display() -> None:
-    from auditex.command_builders import ProbeCommandSpec, build_probe_command as build_local_probe_command
+    from auditex.command_builders import ProbeCommandSpec
+    from auditex.command_builders import (
+        build_probe_command as build_local_probe_command,
+    )
     from auditex.command_runner import redact_command
 
     secret = "constructed-probe-secret-canary"

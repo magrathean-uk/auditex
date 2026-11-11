@@ -5,18 +5,28 @@ verifier supplies the snapshot; nothing stubs verification. Synthetic data only.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from auditex.rule_assessment import canonical
-from auditex.scuba_projection import NOT_COLLECTED, Bundle, PrivateSnapshot, project_run, rule_policy_section
+from auditex.scuba_projection import (
+    NOT_COLLECTED,
+    Bundle,
+    PrivateSnapshot,
+    project_run,
+    rule_policy_section,
+)
 from azure_tenant_audit.sensitive_users import BUNDLE_PATH, KEY_PATH, SensitiveUsers
 from azure_tenant_audit.value_rules import assess
-from azure_tenant_audit.value_rules.defender_targeted_users import BINDING_KEY, COVERAGE_KEY, SensitiveUsersBinding
+from azure_tenant_audit.value_rules.defender_targeted_users import (
+    BINDING_KEY,
+    COVERAGE_KEY,
+    SensitiveUsersBinding,
+)
 
 SS21 = "MS.SECURITYSUITE.2.1v1"
 FIXTURES = json.loads(Path("tests/fixtures/targeted-users-coverage-v1.json").read_text())
@@ -36,6 +46,7 @@ PRIVATE_ROW = {
 def coverage_bundle(tmp_path, monkeypatch, rows, *, addresses=ADDRESSES, key=KEY, supply=True):
     """Writer-made private pair and manifest, plus healthy constructed Exchange operation envelopes."""
     import secrets
+
     from azure_tenant_audit.output import AuditWriter
 
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -204,8 +215,9 @@ def test_summary_is_stripped_before_shape_budget_and_redaction(tmp_path, monkeyp
 
 
 def test_assessment_case_bytes_and_new_files_never_carry_the_proof(tmp_path, monkeypatch, capsys, caplog):
-    from auditex.rule_assessment import assess_run
     from test_model_serving import case_texts
+
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
 
     caplog.set_level("DEBUG")

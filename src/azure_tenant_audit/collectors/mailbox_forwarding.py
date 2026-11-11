@@ -10,12 +10,12 @@ bodies come back with mailboxSettings and are dropped before they reach raw or n
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from ..data_minimisation import minimise_mailbox_settings
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error
-
 
 _USER_SELECT = "id,userPrincipalName,mail,accountEnabled,userType"
 _HIDE_FROM_USER_FOLDERS = {
@@ -39,7 +39,7 @@ class MailboxForwardingCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient | None = context.get("client")
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         payload: dict[str, Any] = {
             "messageRules": {"value": []},
@@ -93,7 +93,7 @@ class MailboxForwardingCollector(Collector):
         self,
         client: GraphClient | None,
         coverage: list[dict[str, Any]],
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None,
     ) -> list[dict[str, Any]]:
         start = time.perf_counter()
         users: list[dict[str, Any]] = []
@@ -142,7 +142,7 @@ class MailboxForwardingCollector(Collector):
         self,
         client: GraphClient | None,
         coverage: list[dict[str, Any]],
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None,
     ) -> set[str]:
         start = time.perf_counter()
         accepted: set[str] = set()
@@ -196,7 +196,7 @@ class MailboxForwardingCollector(Collector):
         client: GraphClient | None,
         user_id: str,
         *,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         start = time.perf_counter()
         rules: list[dict[str, Any]] = []

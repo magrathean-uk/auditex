@@ -1,23 +1,23 @@
 """Synthetic bundle tests; no tenant calls, shell providers or held-out data."""
 from __future__ import annotations
 
-from collections import Counter
-from copy import deepcopy
-from datetime import datetime, timezone
-from hashlib import sha256
 import json
 import lzma
 import os
+from collections import Counter
+from copy import deepcopy
+from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
 from auditex import scuba_adapters_aad as aad
 from auditex import scuba_projection as projection
-from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS
-from azure_tenant_audit.scuba_assessment import validate_explainer, value_rule_verdict
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS
 from azure_tenant_audit.run_files import UnsafeRunFileError
+from azure_tenant_audit.scuba_assessment import validate_explainer, value_rule_verdict
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/scuba-adapters-aad"
@@ -521,13 +521,14 @@ def test_ca_variant_changes_only_rules(run, monkeypatch, extra):
 ], ids=["conditional_access_policies", "SPO_tenant"])
 def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(
         run, monkeypatch, capsys, caplog, section, policy, cell, reason_code):
-    import auditex.rule_assessment as rule_assessment
     from test_model_serving import case_texts
+
+    import auditex.rule_assessment as rule_assessment
 
     class FixedDatetime(datetime):
         @classmethod
         def now(cls, tz=None):
-            return datetime(2026, 11, 5, 0, 0, tzinfo=timezone.utc)
+            return datetime(2026, 11, 5, 0, 0, tzinfo=UTC)
 
     monkeypatch.setattr(rule_assessment, "datetime", FixedDatetime)
     caplog.set_level("DEBUG")

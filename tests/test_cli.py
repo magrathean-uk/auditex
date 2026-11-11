@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -1368,7 +1368,8 @@ def test_non_app_default_run_omits_workloads_and_prints_one_selection_notice(tmp
 
 
 def test_required_preflight_skipped_licensing_keeps_existing_selected_contract(tmp_path, monkeypatch):
-    from graph_fakes import FakeGraph, run_collectors, load
+    from graph_fakes import FakeGraph, load, run_collectors
+
     from azure_tenant_audit.collectors.licensing import LicensingCollector
 
     refused = FakeGraph(errors={path: (403, "Forbidden") for path in ("/subscribedSkus", "/users", "/groups")})

@@ -4,11 +4,21 @@ import time
 from typing import Any
 
 from ..chunk_reader import iter_endpoint_records
-from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_INPUT_LIMITED, fanout_gap_row, section_total, section_was_cut
+from ..collection_gaps import (
+    REASON_FANOUT_LIMIT,
+    REASON_INPUT_LIMITED,
+    fanout_gap_row,
+    section_total,
+    section_was_cut,
+)
 from ..graph import GraphClient, GraphError
 from .base import (
-    Collector, CollectorResult, _InvalidCollectionPage, _classify_graph_error,
-    _validated_collection, run_graph_endpoints,
+    Collector,
+    CollectorResult,
+    _classify_graph_error,
+    _InvalidCollectionPage,
+    _validated_collection,
+    run_graph_endpoints,
 )
 
 _MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
@@ -214,7 +224,7 @@ class AppConsentCollector(Collector):
                 batch_results = None
 
         if batch_results is not None and len(batch_results) == len(fanout_specs):
-            for spec, result in zip(fanout_specs, batch_results):
+            for spec, result in zip(fanout_specs, batch_results, strict=False):
                 endpoint = spec["endpoint"]
                 target_list = spec["target_list"]
                 status = result.get("status") if isinstance(result, dict) else None

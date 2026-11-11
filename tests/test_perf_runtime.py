@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from azure_tenant_audit.perf_runtime import EndpointAccumulator, PageWindow, json_size_bytes, sqlite_bulk_pragmas
+from azure_tenant_audit.perf_runtime import (
+    EndpointAccumulator,
+    PageWindow,
+    json_size_bytes,
+    sqlite_bulk_pragmas,
+)
 
 
 def test_endpoint_accumulator_keeps_bounded_sample_and_counts_chunks() -> None:

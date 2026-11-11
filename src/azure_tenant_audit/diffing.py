@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections import Counter
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -108,7 +108,7 @@ def _collect_changed_paths(before: Any, after: Any, *, prefix: str = "") -> list
         if len(before) != len(after):
             return [prefix or "list"]
         paths: list[str] = []
-        for index, (left_item, right_item) in enumerate(zip(before, after)):
+        for index, (left_item, right_item) in enumerate(zip(before, after, strict=False)):
             child_prefix = f"{prefix}[{index}]" if prefix else f"[{index}]"
             paths.extend(_collect_changed_paths(left_item, right_item, prefix=child_prefix))
         return paths

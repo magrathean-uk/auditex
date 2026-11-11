@@ -8,8 +8,8 @@ flow stays unwired until root hooks ``sanitise_response`` and the adapter's call
 from __future__ import annotations
 
 import ast
-from copy import deepcopy
 import logging
+from copy import deepcopy
 from pathlib import Path
 
 import pytest

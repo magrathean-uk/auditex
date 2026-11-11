@@ -25,9 +25,9 @@ STOP_FIRST = {"the", "this", "that", "these", "those", "no", "an", "a", "it", "i
               "turn", "set", "review", "repeat", "add", "remove", "grant", "update", "re-run", "rerun", "use", "see", "note", "make", "keep", "wait", "once", "after", "before", "until", "ask", "give",
               "provide", "create", "delete", "configure", "choose", "save", "apply", "verify", "retry", "try", "start", "stop"}
 PROSE_SETTING = re.compile(r"\b(?:the|a|an)\s+((?:[a-z][a-z0-9'-]*\s+){1,3})(?:setting|settings|option|options|toggle|switch|flag|parameter|property|attribute|feature|control|rule)\b")
-GENERIC = {"shows", "show", "says", "said", "does", "did", "do", "than", "then", "also", "still", "already", "even", "least", "most", "less", "another", "rest", "remaining", "every", "how", "there", "here", "because", "since", "while", "when", "where", "this", "that", "same", "new", "existing", "other", "each", "every", "current", "default", "global", "custom", "your", "their", "tenant", "organisation", "organization",
+GENERIC = {"shows", "show", "says", "said", "does", "did", "do", "than", "then", "also", "still", "already", "even", "least", "most", "less", "another", "rest", "remaining", "every", "how", "there", "here", "because", "since", "while", "when", "where", "this", "that", "same", "new", "existing", "other", "each", "current", "default", "global", "custom", "your", "their", "tenant", "organisation", "organization",
            "relevant", "required", "specific", "affected", "following", "above", "below", "first", "last", "next", "previous", "single", "whole", "full", "main", "only", "such", "any",
-           "its", "of", "in", "on", "for", "to", "and", "or", "with", "by", "at", "as", "an", "a", "the", "is", "are", "was", "be", "has", "have", "which", "that", "whether", "if", "not",
+           "its", "of", "in", "on", "for", "to", "and", "or", "with", "by", "at", "as", "an", "a", "the", "is", "are", "was", "be", "has", "have", "which", "whether", "if", "not",
            "no", "all", "some", "both", "one", "two", "evidence", "policy", "requirement", "baseline", "microsoft", "listed", "shown", "named", "stated", "mentioned", "given", "noted"}
 CAPWORD = re.compile(r"[A-Z][A-Za-z0-9'-]*")
 

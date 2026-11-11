@@ -5,18 +5,34 @@ import os
 from pathlib import Path
 
 import pytest
+from support import RunBundleBuilder
 
 from auditex import cli, mcp_server
 from auditex.exporters import BUILTIN_EXPORTERS, run_exporter
 from auditex.mcp_registry import register_fastmcp_tools
-from auditex.reporting import _copy_source_artifact, preview_report, render_report, write_enterprise_handoff_pack
+from auditex.reporting import (
+    _copy_source_artifact,
+    preview_report,
+    render_report,
+    write_enterprise_handoff_pack,
+)
 from auditex.run_bundle import RunBundle
-from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
-from azure_tenant_audit.bundle_integrity import build_bundle_hash_manifest, verify_bundle_hashes
+from azure_tenant_audit.bundle_integrity import (
+    build_bundle_hash_manifest,
+    verify_bundle_hashes,
+)
+from azure_tenant_audit.guarded_io import (
+    GuardContext,
+    UnsafeRunFileError,
+    open_guarded_file,
+)
 from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE
-from azure_tenant_audit.sensitive_users import BUNDLE_PATH, KEY_PATH, SensitiveUsers, verify_sensitive_users
-from support import RunBundleBuilder
-
+from azure_tenant_audit.sensitive_users import (
+    BUNDLE_PATH,
+    KEY_PATH,
+    SensitiveUsers,
+    verify_sensitive_users,
+)
 
 KEY = ("KEY-CANARY-" + "x" * 21).encode("ascii")
 ADDRESSES = ("private-one" + "@example.invalid", "private-two" + "@example.invalid")

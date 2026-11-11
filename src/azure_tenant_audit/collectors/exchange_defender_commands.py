@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 RULE_SCOPE = (
     "SentTo", "SentToMemberOf", "RecipientDomainIs",
     "ExceptIfSentTo", "ExceptIfSentToMemberOf", "ExceptIfRecipientDomainIs",

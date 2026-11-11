@@ -5,8 +5,8 @@ the responsibility of the projection's existing shape gate.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
 import re
+from collections.abc import Callable
 from typing import Any
 
 from .scuba_projection import Bundle, _boolean, _fields, _nullable_text, _require, _text

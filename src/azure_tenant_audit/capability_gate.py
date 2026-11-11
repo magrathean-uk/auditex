@@ -4,7 +4,6 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
-
 BLOCKER_KINDS = (
     "none",
     "auth_scope",

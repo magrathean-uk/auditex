@@ -4,7 +4,6 @@ from zipfile import ZipFile
 
 import pytest
 
-
 spec = importlib.util.spec_from_file_location(
     "check_archive_wheel", Path(__file__).resolve().parents[1] / "scripts/check-archive-wheel.py"
 )

@@ -8,9 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from support import RunBundleBuilder
-
 
 # Keep a text scan as a second net alongside the AST scan below.
 _PRODUCT_IMPORT = re.compile(
@@ -216,7 +214,11 @@ def test_runtime_resources_resolve_from_non_repo_cwd(tmp_path: Path, monkeypatch
     monkeypatch.chdir(tmp_path)
 
     from azure_tenant_audit.contracts import contract_schema_manifest
-    from azure_tenant_audit.resources import open_text_resource, resolve_resource_path, shipped_resource_manifest
+    from azure_tenant_audit.resources import (
+        open_text_resource,
+        resolve_resource_path,
+        shipped_resource_manifest,
+    )
 
     config_path = resolve_resource_path("configs/collector-definitions.json")
     config_text = open_text_resource("configs/collector-definitions.json")
@@ -233,7 +235,10 @@ def test_runtime_resources_resolve_from_non_repo_cwd(tmp_path: Path, monkeypatch
 def test_shipped_content_truth_matches_packaging_manifest() -> None:
     import tomllib
 
-    from azure_tenant_audit.shipped_content import data_file_manifest, shipped_directories
+    from azure_tenant_audit.shipped_content import (
+        data_file_manifest,
+        shipped_directories,
+    )
 
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 

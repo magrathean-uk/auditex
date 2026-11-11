@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from auditex.setup_guide import build_setup_guide
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.diagnostics import load_permission_hints
-from auditex.setup_guide import build_setup_guide
 
 
 def test_m365_scope_catalog_merges_definition_and_hint_truth() -> None:
-    from azure_tenant_audit.scope_catalog import aggregate_catalog_rows, build_m365_scope_catalog
+    from azure_tenant_audit.scope_catalog import (
+        aggregate_catalog_rows,
+        build_m365_scope_catalog,
+    )
 
     config = CollectorConfig.from_path("configs/collector-definitions.json")
     hints = load_permission_hints(Path("configs/collector-permissions.json"))
@@ -30,7 +33,10 @@ def test_m365_scope_catalog_merges_definition_and_hint_truth() -> None:
 
 
 def test_google_scope_catalog_exposes_scope_risk_and_api_enablement() -> None:
-    from azure_tenant_audit.scope_catalog import aggregate_catalog_rows, build_google_scope_catalog
+    from azure_tenant_audit.scope_catalog import (
+        aggregate_catalog_rows,
+        build_google_scope_catalog,
+    )
 
     catalog = build_google_scope_catalog()
     gmail = catalog["google_gmail_settings"]
@@ -48,7 +54,10 @@ def test_google_scope_catalog_exposes_scope_risk_and_api_enablement() -> None:
 
 
 def test_m365_setup_guide_matches_scope_catalog_aggregate() -> None:
-    from azure_tenant_audit.scope_catalog import aggregate_catalog_rows, build_m365_scope_catalog
+    from azure_tenant_audit.scope_catalog import (
+        aggregate_catalog_rows,
+        build_m365_scope_catalog,
+    )
 
     payload = build_setup_guide(
         provider="m365",

@@ -7,6 +7,7 @@ source was blocked, truncated or not run. Every ``identity.global_admin_*`` rule
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -1034,9 +1035,9 @@ def test_the_licence_rule_is_partial_evidence_for_separate_admin_accounts() -> N
 
 
 def _days_ago(days: int) -> str:
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _guest_snapshot(*, signin: list[dict[str, Any]] | None, assignments: list[dict[str, Any]] | None = None, **identity: Any) -> dict[str, Any]:

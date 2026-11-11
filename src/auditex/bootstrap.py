@@ -4,12 +4,12 @@ import json
 import platform
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import auth as auditex_auth
 from .auth_runtime import ToolchainRuntime, ToolchainRuntimeAdapters
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP_SCRIPT = REPO_ROOT / "scripts" / "bootstrap-local-tools.sh"

@@ -94,7 +94,7 @@ PUNCT = {",", ";", ":", "(", ")"}
 HEDGES = {"mostly", "partially", "partly", "probably", "likely", "possibly", "perhaps", "appears", "appear", "appeared", "seems", "seem", "seemed", "may",
           "might", "could", "largely", "generally", "broadly", "somewhat", "arguably", "potentially", "presumably", "apparently", "almost", "nearly",
           "essentially", "effectively", "roughly", "reasonably", "tentatively", "hopefully", "supposedly", "ostensibly", "mainly", "predominantly",
-          "basically", "reportedly", "allegedly", "hedgeph", "unlikely", "ostensible", "mostly", "typically", "usually", "tends", "tend", "suggests",
+          "basically", "reportedly", "allegedly", "hedgeph", "unlikely", "ostensible", "typically", "usually", "tends", "tend", "suggests",
           "suggest", "suggesting", "indicates", "indicate", "looks"}
 HEDGE_PHRASES = [(re.compile(p), "hedgeph") for p in (r"\bto\s+some\s+extent\b", r"\bin\s+most\s+cases\b", r"\bmore\s+or\s+less\b", r"\bkind\s+of\b", r"\bsort\s+of\b",
                                                         r"\bto\s+a\s+(?:large\s+|certain\s+)?degree\b", r"\bfor\s+the\s+most\s+part\b", r"\bin\s+part\b")]
@@ -185,7 +185,7 @@ def analyse(text, exempt_texts=(), min_run=3):
         words = [t[0] for t in toks]
 
         def tok_at(char):
-            for i, t in enumerate(toks):
+            for i, t in enumerate(toks):  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
                 if t[1] <= char < t[2]:
                     return i
             return None
@@ -238,7 +238,7 @@ def analyse(text, exempt_texts=(), min_run=3):
         def content_dist(n, p):
             d = 0
             for k in range(n + 1, p + 1):
-                if words[k] not in FILLER and words[k] not in PUNCT:
+                if words[k] not in FILLER and words[k] not in PUNCT:  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
                     d += 1
             return d
         for p in preds:

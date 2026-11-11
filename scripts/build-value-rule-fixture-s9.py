@@ -5,13 +5,12 @@ Prints the manifest entry to stdout. No held-out rows are retained.
 """
 from __future__ import annotations
 
-from hashlib import sha256
 import importlib.util
 import json
-from pathlib import Path
 import sys
 import tempfile
-
+from hashlib import sha256
+from pathlib import Path
 
 POLICIES = frozenset("MS.AAD." + number for number in
                      ("3.3v2", "3.5v2", "5.2v1", "5.3v1", "5.5v1", "5.6v1", "5.7v1", "6.1v1"))

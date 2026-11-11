@@ -8,11 +8,20 @@ the policy parameters, or names from a closed list.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from azure_tenant_audit.scuba_precheck import gate_value
 
-from .record import BAD_SECTION_LIST, EMPTY_SECTION, ITEM_LABEL, ITEM_VALUE, _A, _marker, _rec
+from .record import (
+    _A,
+    BAD_SECTION_LIST,
+    EMPTY_SECTION,
+    ITEM_LABEL,
+    ITEM_VALUE,
+    _marker,
+    _rec,
+)
 
 __all__ = ["_marker", "_int", "_lst", "_list_state", "_flag", "_label", "_scan_bad_wins", "_scan_good_wins",
            "_shape", "_licence_cell", "_p2_gate", "_gate_slider", "_env_cell", "_accepted", "PRESET_RE", "BUILTIN",

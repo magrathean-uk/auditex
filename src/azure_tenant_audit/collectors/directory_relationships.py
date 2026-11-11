@@ -1,15 +1,14 @@
 """Read-only, bounded security-group links and application-registration owners."""
 from __future__ import annotations
 
-from itertools import islice
 import time
+from itertools import islice
 from typing import Any
 from uuid import UUID
 
 from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_OPERATOR_LIMIT, sampling
 from ..graph import GraphError
 from .base import Collector, CollectorResult, _classify_graph_error, context_limit
-
 
 DIRECTORY_FANOUT_LIMIT = 100
 RELATIONSHIP_ROW_LIMIT = 5000

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 
 @dataclass
@@ -67,7 +68,7 @@ class PageWindow:
     remaining: int
 
     @classmethod
-    def from_limit(cls, limit: int | None) -> "PageWindow":
+    def from_limit(cls, limit: int | None) -> PageWindow:
         if limit is None:
             return cls(requested_limit=-1, remaining=-1)
         normalized = max(int(limit), 0)
@@ -77,7 +78,7 @@ class PageWindow:
     def exhausted(self) -> bool:
         return self.remaining == 0
 
-    def take(self, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], "PageWindow"]:
+    def take(self, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], PageWindow]:
         if self.remaining < 0:
             return rows, self
         selected = rows[: self.remaining]

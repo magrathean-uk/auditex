@@ -27,17 +27,23 @@ from .collection_gaps import bounded_sample_gap
 from .cyber_essentials import CE_FRAMEWORK_KEY, build_cyber_essentials_section
 from .effective_admins import (
     SECTION as _ADMIN_SET_SECTION,
+)
+from .effective_admins import (
     STATE_COMPLETE as _ADMIN_SET_COMPLETE,
+)
+from .effective_admins import (
     SUMMARY_KIND as _ADMIN_SUMMARY_KIND,
 )
+from .external_sharing import FEDERATION_UNKNOWN, SETTING_RULES, setting_inputs_gap
 from .identity_controls import (
     CONTROL_ADMIN_MFA,
     CONTROL_EFFECTIVE_MFA,
     CONTROL_LEGACY_AUTH,
     CONTROL_USER_CONSENT,
+)
+from .identity_controls import (
     SECTION as _IDENTITY_CONTROL_SECTION,
 )
-from .external_sharing import FEDERATION_UNKNOWN, SETTING_RULES, setting_inputs_gap
 from .resources import resolve_resource_path
 from .waivers import has_matching_waiver, is_accepted_status
 
@@ -1258,8 +1264,8 @@ def build_baseline_alignment(
                 rules_by_control,
                 evaluate=lambda rule_id: _rule_evaluation(
                     rule_id,
-                    open_by_rule,
-                    accepted_by_rule,
+                    open_by_rule,  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
+                    accepted_by_rule,  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
                     complete,
                     normalized_snapshot,
                     not_applicable,

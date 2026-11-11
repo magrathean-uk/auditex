@@ -5,8 +5,8 @@ contain public baseline URLs. It deliberately sits outside explainer.schema.json
 """
 import json
 import re
-from string import Formatter
 import unicodedata
+from string import Formatter
 
 from . import textkit as tk
 from .generate import LIMITS, URL_RX

@@ -509,7 +509,12 @@ def test_the_graph_read_guard_refuses_a_non_get_request_at_run_time(method: str)
 
 @pytest.mark.parametrize("inner_method", ["POST", "PATCH", "DELETE", "put"])
 def test_the_graph_read_guard_refuses_a_batch_carrying_a_non_get_sub_request(inner_method: str) -> None:
-    from azure_tenant_audit.graph import GRAPH_BETA_ROOT, GRAPH_ROOT, READ_ONLY_VIOLATION, GraphError
+    from azure_tenant_audit.graph import (
+        GRAPH_BETA_ROOT,
+        GRAPH_ROOT,
+        READ_ONLY_VIOLATION,
+        GraphError,
+    )
 
     batch = {
         "requests": [

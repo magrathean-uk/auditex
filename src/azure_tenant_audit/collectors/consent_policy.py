@@ -3,8 +3,13 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ..collection_gaps import REASON_INPUT_LIMITED, fanout_gap_row, section_total, section_was_cut
-from ..graph import GraphClient, GraphError, NEXT_LINK_REFUSED, graph_host_url
+from ..collection_gaps import (
+    REASON_INPUT_LIMITED,
+    fanout_gap_row,
+    section_total,
+    section_was_cut,
+)
+from ..graph import NEXT_LINK_REFUSED, GraphClient, GraphError, graph_host_url
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
 _POLICY_LIMIT = 100

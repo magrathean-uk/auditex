@@ -9,8 +9,8 @@ drift in the pool, the engine, the template or the generators is detected withou
 """
 import copy
 import json
-import re
 import random
+import re
 from functools import lru_cache
 
 from azure_tenant_audit import explainer, value_rules

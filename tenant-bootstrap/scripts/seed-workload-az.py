@@ -6,20 +6,19 @@ import base64
 import importlib.util
 import json
 import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
 import uuid
-import shlex
-import shutil
-import re
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from random import Random
 from urllib.parse import quote
 
 import requests
-
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -76,7 +75,7 @@ def _safe_graph_filter_value(value: str) -> str:
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _truncate(value: str, limit: int = 8000) -> str:
@@ -566,8 +565,7 @@ class GraphClient:
             next_url = f"{GRAPH_ROOT}{next_url}"
         while next_url:
             body = self.request("GET", next_url, top=None)
-            for item in body.get("value", []):
-                yield item
+            yield from body.get("value", [])
             next_url = body.get("@odata.nextLink")
 
 
@@ -2048,7 +2046,7 @@ def seed_sample_data(client: GraphClient, logger: JsonlLogger, cfg: dict, group_
     }
 
     for offset in range(days):
-        day = (datetime.now(timezone.utc) - timedelta(days=days - offset - 1)).replace(microsecond=0).date().strftime("%Y-%m-%d")
+        day = (datetime.now(UTC) - timedelta(days=days - offset - 1)).replace(microsecond=0).date().strftime("%Y-%m-%d")
         subject = f"{rng.choice(subject_samples)} - {day}"
         sender = rng.choice(all_users_with_mailbox) if all_users_with_mailbox else rng.choice(all_users)
         to_user = rng.choice([u for u in all_users if u["id"] != sender["id"]] or all_users)

@@ -10,7 +10,7 @@ import json
 import sys
 import types
 from collections import OrderedDict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -28,9 +28,18 @@ from auditex.google_workspace.collectors import (
     GoogleGmailSettingsCollector,
     GooglePoliciesCollector,
 )
-from auditex.google_workspace.findings import _GOOGLE_FRAMEWORK_MAPPINGS, build_google_findings, google_rule_metadata
+from auditex.google_workspace.findings import (
+    _GOOGLE_FRAMEWORK_MAPPINGS,
+    build_google_findings,
+    google_rule_metadata,
+)
 from auditex.google_workspace.normalize import build_google_normalized_snapshot
-from auditex.google_workspace.run import GoogleRunConfig, build_google_capability_rows, run_google_live, run_google_offline
+from auditex.google_workspace.run import (
+    GoogleRunConfig,
+    build_google_capability_rows,
+    run_google_live,
+    run_google_offline,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 SAMPLE = REPO / "examples" / "google_workspace_sample.json"
@@ -48,11 +57,11 @@ NEW_RULES = {
 
 
 def _ago(days: int) -> str:
-    return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return (datetime.now(tz=UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def _ahead(days: int) -> str:
-    return (datetime.now(tz=timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return (datetime.now(tz=UTC) + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def _snapshot(
@@ -305,10 +314,10 @@ class _Credentials:
         self.subject = subject
         self.scopes = scopes
 
-    def with_subject(self, subject: str) -> "_Credentials":
+    def with_subject(self, subject: str) -> _Credentials:
         return _Credentials(subject, self.scopes)
 
-    def with_scopes(self, scopes: list[str]) -> "_Credentials":
+    def with_scopes(self, scopes: list[str]) -> _Credentials:
         return _Credentials(self.subject, tuple(scopes))
 
 
@@ -338,10 +347,10 @@ class _FakeGmailService:
     def __init__(self, owner: str) -> None:
         self.owner = owner
 
-    def users(self) -> "_FakeGmailService":
+    def users(self) -> _FakeGmailService:
         return self
 
-    def settings(self) -> "_FakeGmailService":
+    def settings(self) -> _FakeGmailService:
         return self
 
     def getAutoForwarding(self, **_k: Any) -> _Request:  # noqa: N802

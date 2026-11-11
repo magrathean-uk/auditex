@@ -7,11 +7,12 @@ attribution in the generated index and docs/provenance/explainer-baselines.md.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from copy import deepcopy
+from typing import Any
 
 BaselineIndex = dict[str, Any]
 Unit = dict[str, Any]

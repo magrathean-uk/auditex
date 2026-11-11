@@ -3,17 +3,16 @@ from __future__ import annotations
 
 import ast
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 import requests
 
 from azure_tenant_audit import auth_runtime, cli
 from azure_tenant_audit.secret_hygiene import redact_argv
-
 
 ROOT = Path(__file__).resolve().parents[1]
 CANARY = "constructed-canary-vendored-zz9"

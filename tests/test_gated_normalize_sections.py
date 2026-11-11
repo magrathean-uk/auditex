@@ -168,7 +168,11 @@ def test_gated_sections_absent_when_collector_payload_empty() -> None:
 def test_environment_index_labels_fall_back_to_name_then_id(tmp_path):
     import json
     from contextlib import closing
-    from azure_tenant_audit.evidence_db import build_run_evidence_index, open_index_read_only
+
+    from azure_tenant_audit.evidence_db import (
+        build_run_evidence_index,
+        open_index_read_only,
+    )
 
     snapshot = _snapshot({"power_platform": {"environments": {"value": [
         {"id": "constructed-env-1", "name": "constructed-environment", "displayName": "Constructed Person"},

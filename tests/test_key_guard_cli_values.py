@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
+from test_guarded_admission import KEY, private_run  # noqa: F401 - shared fixture
 
 from auditex import cli as product_cli
 from azure_tenant_audit import cli as engine_cli
-from test_guarded_admission import KEY, private_run  # noqa: F401 - shared fixture
 
 
 def _invoke(entry: str, argv: list[str]) -> int:
@@ -76,8 +76,9 @@ _ENGINE_FLAGS = {"--break-glass-accounts", "--config", "--env", "--out", "--part
 
 
 def test_cli_path_flag_inventory_covers_the_public_parsers() -> None:
-    from azure_tenant_audit.cli_guard import _PATH_FLAGS
     from test_cli_abbreviations import BUILDERS, _parsers
+
+    from azure_tenant_audit.cli_guard import _PATH_FLAGS
 
     declared = {option for builder in BUILDERS for parser in _parsers(builder())
                 for action in parser._actions for option in action.option_strings}
@@ -154,8 +155,9 @@ def test_registered_pair_special_inode_aliases_across_cli_flags(
     private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],  # noqa: F811 - shared pytest fixture injected by name
     member: str, form: str,
 ) -> None:
-    from azure_tenant_audit.guarded_io import GuardContext
     from support import RunBundleBuilder
+
+    from azure_tenant_audit.guarded_io import GuardContext
 
     source = private_run / "operator-inputs" / member
     safe_run = RunBundleBuilder(tmp_path, name="special-public-run").build()

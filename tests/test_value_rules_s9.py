@@ -1,27 +1,27 @@
 """Stage-9 AAD pilot vectors, rule-view shapes, privacy and pinned oracle."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from copy import deepcopy
-from hashlib import sha256
 import importlib.util
 import json
 import os
-from pathlib import Path
 import random
 import subprocess
+from collections import Counter, defaultdict
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 from time import perf_counter
 
 import pytest
+from test_value_rules_oracle import _outcome_v3, pinned  # noqa: F401 - shared pytest fixture
+from test_value_rules_vectors import STAGE9_POLICIES, _rows, _strip_names
 
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
-from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
+from azure_tenant_audit.value_rules import as_pack_response, assess, cells_for
 from azure_tenant_audit.value_rules.catalogue import row_for
 from azure_tenant_audit.value_rules.record import evidence_kind
-from test_value_rules_oracle import _outcome_v3, pinned  # noqa: F401 - shared pytest fixture
-from test_value_rules_vectors import _rows, _strip_names, STAGE9_POLICIES
 
 FIXTURE = Path(__file__).parent / "fixtures/value-rules/vectors-s9.jsonl.xz"
 MANIFEST = FIXTURE.with_name("manifest-s9.json")
@@ -253,7 +253,7 @@ def test_stage9_cells_against_pinned_opa(rows, tmp_path, pinned):  # noqa: F811 
 
 
 def _canary_sections(unusable=False):
-    from azure_tenant_audit.value_rules.aad_pilot import APP_SCOPES, ALL_APPS, G_LOW
+    from azure_tenant_audit.value_rules.aad_pilot import ALL_APPS, APP_SCOPES, G_LOW
 
     canary, display = "stage9.person@example.invalid", "Stage Nine Canary Display Name"
     context = {"State": "enabled", "IncludeTarget": {"Id": "all_users"},
@@ -302,9 +302,10 @@ def _canary_sections(unusable=False):
 
 @pytest.mark.parametrize("unusable", [False, True])
 def test_served_outputs_and_logs_do_not_contain_any_section_evidence(tmp_path, monkeypatch, caplog, unusable):
+    from test_model_serving import fake_projection
+
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import fake_projection
 
     sections, canary, display = _canary_sections(unusable)
     assert set(sections) == {name for policy in STAGE9_POLICIES for name in row_for(policy)["sections"]}
@@ -499,10 +500,11 @@ def test_domain_inheritance_10000_roots_and_10000_subdomains_within_five_seconds
 
 
 def test_rule_exceptions_use_existing_failure_handler(tmp_path, monkeypatch, caplog):
+    from test_model_serving import fake_projection
+
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit import value_rules
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import fake_projection
 
     sections, canary, display = _canary_sections()
     (tmp_path / "run-manifest.json").write_text('{"run_id":"stage9-exceptions"}')

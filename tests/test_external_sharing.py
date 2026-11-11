@@ -10,6 +10,8 @@ import copy
 from typing import Any
 
 import pytest
+from test_teams_admin_rest import CONSTRUCTED_ROW, Response, command_reader, connect
+from test_teams_admin_rest import Client as TeamsClient
 
 from azure_tenant_audit import external_sharing as sharing
 from azure_tenant_audit.baselines import build_baseline_alignment, rule_inputs_gap
@@ -17,7 +19,6 @@ from azure_tenant_audit.collectors.onedrive_posture import OneDrivePostureCollec
 from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
-from test_teams_admin_rest import CONSTRUCTED_ROW, Client as TeamsClient, Response, command_reader, connect
 
 ANYONE = "externalUserAndGuestSharing"
 

@@ -1,25 +1,25 @@
 """v3.9.1 FINAL privileged roles and Conditional Access, synthetic evidence only."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from copy import deepcopy
-from hashlib import sha256
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
+from collections import Counter, defaultdict
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 from time import monotonic
 
 import pytest
-
-from azure_tenant_audit.scuba_assessment import validate_assessment
-from azure_tenant_audit.collection_markers import NOT_COLLECTED
-from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
-from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
-from azure_tenant_audit.value_rules.catalogue import catalogue
 from test_value_rules_contract import assessment, assessment_for  # noqa: F401 - shared pytest fixture
 from test_value_rules_vectors import STAGE7_POLICIES, _grouped, _rows
+
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
+from azure_tenant_audit.value_rules import as_pack_response, assess, cells_for
+from azure_tenant_audit.value_rules.catalogue import catalogue
 
 FIXTURE = Path(__file__).parent / "fixtures/value-rules/vectors-s7.jsonl.xz"
 
@@ -232,8 +232,8 @@ def test_32_exemptions_use_v1_entry(rows_s7):
 
 def test_export_declared_exclusions_stay_not_collected(tmp_path):
     from auditex.rule_assessment import policy_catalogue
-    from auditex.scubagear_export import load_export, project_export
     from auditex.scuba_projection import rule_policy_section
+    from auditex.scubagear_export import load_export, project_export
     source = Path(__file__).parent / "fixtures/scubagear-export/mocktenant-provider-export.json"
     raw = json.loads(source.read_text())
     raw["scuba_config"]["CapExclusions"] = {"Applications": [], "Groups": [], "GuestUserTypes": [], "Users": ["mock"]}
@@ -253,8 +253,8 @@ def test_export_declared_exclusions_stay_not_collected(tmp_path):
 def test_export_aad91_declared_application_exemption_stays_unresolved(tmp_path, rows_s7):
     """Scope blocker: stage 2 omits 9.1 from its exclusion-reader policy set."""
     from auditex.rule_assessment import policy_catalogue
-    from auditex.scubagear_export import load_export, project_export
     from auditex.scuba_projection import rule_policy_section
+    from auditex.scubagear_export import load_export, project_export
     p = "MS.AAD.9.1v1"
     source = Path(__file__).parent / "fixtures/scubagear-export/mocktenant-provider-export.json"
     raw = json.loads(source.read_text())
@@ -395,7 +395,7 @@ def _canary_cases(policy, rows):
                     return {k: relink(v) for k, v in item.items()}
                 if isinstance(item, list):
                     return [relink(v) for v in item]
-                return CANARY_EMAIL if item == value else item
+                return CANARY_EMAIL if item == value else item  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
             mutated = relink(mutated)
         yield str(path), mutated
 
@@ -416,9 +416,10 @@ def test_every_read_field_has_canaries(policy, rows_s7, caplog):
 
 @pytest.mark.parametrize("policy", sorted(STAGE7_POLICIES))
 def test_canaries_never_persist_or_log(policy, rows_s7, tmp_path, monkeypatch, caplog):
+    from test_model_serving import fake_projection
+
     from auditex.rule_assessment import assess_run
     from auditex.scuba_projection import rule_policy_section
-    from test_model_serving import fake_projection
     caplog.set_level("DEBUG")
     (tmp_path / "run-manifest.json").write_text('{"run_id":"stage7"}')
     projection = fake_projection(tmp_path, {})
@@ -480,7 +481,7 @@ def test_builder_excludes_held_out_and_unknown_origins(tmp_path, rows_s7):
 
 
 def test_stratified_stage7_cells_against_pinned_rego(rows_s7, tmp_path):
-    from test_value_rules_oracle import OPA, SCUBA, REGO_SHA256, _outcome_v3
+    from test_value_rules_oracle import OPA, REGO_SHA256, SCUBA, _outcome_v3
     if not (OPA and OPA.is_file() and SCUBA and (SCUBA / "Rego").is_dir()):
         pytest.skip("set AUDITEX_TEST_OPA and AUDITEX_TEST_SCUBAGEAR for pinned offline replay")
     version = subprocess.run([str(OPA), "version"], capture_output=True, text=True, timeout=30)
@@ -530,7 +531,10 @@ def _straight_roles_cover(p, sections, inventory=None):
 @pytest.mark.parametrize("include", ["absent", None, [], ["known"], ["Role", "role", " Role ", "Role"],
     ["ROLE"], ["Role "], [None], [True], [[]], [{}], [str(i) for i in range(50)]])
 def test_roles_cover_matches_straightforward(roles, include):
-    from azure_tenant_audit.value_rules.conditional_access import _roles_cover, _role_inventory
+    from azure_tenant_audit.value_rules.conditional_access import (
+        _role_inventory,
+        _roles_cover,
+    )
     p = {"Conditions": {"Users": {} if include == "absent" else {"IncludeRoles": include}}}
     sections = {"privileged_roles": roles}
     expected = _straight_roles_cover(p, sections)

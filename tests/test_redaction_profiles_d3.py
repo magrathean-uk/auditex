@@ -7,9 +7,7 @@ import signal
 from pathlib import Path
 
 import pytest
-
 from test_reporting import _write_run
-
 
 GUID = "b0b0b0b0-1234-4567-8abc-0123456789ab"
 OWNER = "PRIVATE OWNER 726"
@@ -134,7 +132,11 @@ def test_d3_transient_failure_during_report_load_refuses_output(run: Path, monke
 
 
 def test_d3_snapshot_refuses_new_fifo(run: Path) -> None:
-    from azure_tenant_audit.output_redaction import ContextIncompleteError, assert_snapshot_stable, context_for_run
+    from azure_tenant_audit.output_redaction import (
+        ContextIncompleteError,
+        assert_snapshot_stable,
+        context_for_run,
+    )
 
     context = context_for_run(run)
     assert not context.incomplete
@@ -306,7 +308,11 @@ def test_d3_guid_that_matches_old_pseudonym_prefix_is_still_redacted(profile: st
 
 def test_d3_group_and_role_names_mask_a_person_name_inside_lists() -> None:
     # DEC-003 (D5): a person's full name is masked inside group and role names too; the rest of the name remains.
-    from azure_tenant_audit.output_redaction import RedactionContext, pseudonym, redact_output
+    from azure_tenant_audit.output_redaction import (
+        RedactionContext,
+        pseudonym,
+        redact_output,
+    )
 
     group = f"Team {NAME}"
     role = f"Operations {NAME}"
@@ -327,7 +333,10 @@ def test_d3_free_text_mapping_keys_are_redacted_too() -> None:
 
 
 def test_d3_missing_run_refuses_shareable_output(tmp_path: Path) -> None:
-    from azure_tenant_audit.output_redaction import ContextIncompleteError, redact_payload
+    from azure_tenant_audit.output_redaction import (
+        ContextIncompleteError,
+        redact_payload,
+    )
 
     with pytest.raises(ContextIncompleteError, match="incomplete"):
         redact_payload({"notes": NOTES}, run_dirs=[tmp_path / "missing"])

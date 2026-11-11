@@ -7,8 +7,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from azure_tenant_audit.secret_hygiene import collect_sensitive_argv_values, redact_argv, redact_output, redact_text
-
+from azure_tenant_audit.secret_hygiene import (
+    collect_sensitive_argv_values,
+    redact_argv,
+    redact_output,
+    redact_text,
+)
 
 SENSITIVE_ARGS = {
     "--sensitive-users",
@@ -79,7 +83,7 @@ def _redact_text(value: str | bytes, sensitive_values: set[str], operator_values
         marker = f"{prefix}{index}\x00"
         if original in text:
             # An operator address must not shield a suffix of another local part.
-            text = re.sub(r"(?<![\w.!#$%&'*+=?^`{|}~\\-])" + re.escape(original), lambda _: marker, text)
+            text = re.sub(r"(?<![\w.!#$%&'*+=?^`{|}~\\-])" + re.escape(original), lambda _: marker, text)  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
             replacements[marker] = original
     text = redact_output(text, sensitive_values, limit=None)
     for marker, original in replacements.items():

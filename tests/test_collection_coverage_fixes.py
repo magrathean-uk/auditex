@@ -20,7 +20,11 @@ from azure_tenant_audit.collection_gaps import (
     bounded_sample_gap,
     section_total,
 )
-from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
+from azure_tenant_audit.collector_runner import (
+    AuditWriterCollectorAdapter,
+    CollectorRunContext,
+    CollectorRunner,
+)
 from azure_tenant_audit.collectors.base import run_graph_endpoints
 from azure_tenant_audit.collectors.defender import DefenderCollector
 from azure_tenant_audit.collectors.dns_posture import DnsPostureCollector
@@ -521,7 +525,7 @@ def _unpaged_specs(tree: ast.AST) -> list[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Dict):
             continue
-        entries = {key.value: value for key, value in zip(node.keys, node.values) if isinstance(key, ast.Constant)}
+        entries = {key.value: value for key, value in zip(node.keys, node.values, strict=False) if isinstance(key, ast.Constant)}
         page = entries.get("page")
         if isinstance(page, ast.Constant) and page.value is False:
             endpoint = entries.get("endpoint")
@@ -555,7 +559,7 @@ def test_the_lists_that_were_unpaged_are_paged_specs() -> None:
         tree = ast.parse((REPO / "src" / "azure_tenant_audit" / "collectors" / f"{module}.py").read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Dict):
-                entries = {key.value: value for key, value in zip(node.keys, node.values) if isinstance(key, ast.Constant)}
+                entries = {key.value: value for key, value in zip(node.keys, node.values, strict=False) if isinstance(key, ast.Constant)}
                 endpoint = entries.get("endpoint")
                 if isinstance(endpoint, ast.Constant) and endpoint.value in {
                     "/security/secureScoreControlProfiles",
@@ -569,7 +573,9 @@ def test_the_lists_that_were_unpaged_are_paged_specs() -> None:
 
 
 def test_a_capability_gated_list_follows_its_next_link(tmp_path: Path) -> None:
-    from azure_tenant_audit.collectors._capability_gated import run_capability_gated_endpoints
+    from azure_tenant_audit.collectors._capability_gated import (
+        run_capability_gated_endpoints,
+    )
 
     class _Client:
         def get_json(self, path: str, params: Any = None, full_url: bool = False) -> dict[str, Any]:
@@ -586,7 +592,9 @@ def test_a_capability_gated_list_follows_its_next_link(tmp_path: Path) -> None:
 
 
 def test_a_capability_gated_list_that_cannot_page_is_a_gap_not_a_clean_read() -> None:
-    from azure_tenant_audit.collectors._capability_gated import run_capability_gated_endpoints
+    from azure_tenant_audit.collectors._capability_gated import (
+        run_capability_gated_endpoints,
+    )
 
     class _Client:
         def get_json(self, path: str, params: Any = None, full_url: bool = False) -> dict[str, Any]:

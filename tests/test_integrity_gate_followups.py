@@ -24,10 +24,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from gate_support import finding, offline_run, read_json, rehash, write_findings
 
 from auditex import cli as auditex_cli
 from auditex.compare import build_finding_delta, compare_runs
-from auditex.run_bundle import RunBundle
 from auditex.reporting import (
     BundleIntegrityError,
     enterprise_handoff,
@@ -35,14 +35,20 @@ from auditex.reporting import (
     verify_enterprise_handoff_pack,
     write_enterprise_handoff_pack,
 )
+from auditex.run_bundle import RunBundle
 from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundle_hashes
 from azure_tenant_audit.cli import run_offline
-from azure_tenant_audit.output_redaction import PROFILE_CUSTOMER_PACK, context_for_run, redact_output
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.evidence_db import load_run_index_summary
-from azure_tenant_audit.rule_parameters import effective_rule_parameters, rule_parameter_gap
-
-from gate_support import finding, offline_run, read_json, rehash, write_findings
+from azure_tenant_audit.output_redaction import (
+    PROFILE_CUSTOMER_PACK,
+    context_for_run,
+    redact_output,
+)
+from azure_tenant_audit.rule_parameters import (
+    effective_rule_parameters,
+    rule_parameter_gap,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEMO = REPO_ROOT / "examples" / "demo_tenant" / "demo_tenant.json"

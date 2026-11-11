@@ -8,12 +8,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from auditex.scuba_projection import (
+    Bundle,
+    Unavailable,
+    _annotation,
+    _blank,
+    _enum,
+    _nullable_text,
+    _require,
+    _strings,
+    _text,
+)
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS
 from azure_tenant_audit.resources import load_json_resource
-from auditex.scuba_projection import (
-    Bundle, Unavailable, _require, _strings, _text, _nullable_text,
-    _blank, _annotation, _enum,
-)
 
 
 def _pascal(value: Any) -> Any:
@@ -306,7 +313,7 @@ def _spo_rule(bundle: Bundle) -> Any:
     for key in ("RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays"):
         values = [raw[k] for k in (key, key[0].lower() + key[1:]) if k in raw]
         check = (lambda v: type(v) is bool) if key == "EmailAttestationRequired" else (
-            lambda v: type(v) is int and v >= (-1 if key == "RequireAnonymousLinksExpireInDays" else 0))
+            lambda v: type(v) is int and v >= (-1 if key == "RequireAnonymousLinksExpireInDays" else 0))  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
         if values and all(check(v) and v == values[0] for v in values):
             result[key] = values[0]
     _require("SharingCapability" in result, "SharingCapability", "missing_field")

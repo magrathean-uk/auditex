@@ -14,20 +14,31 @@ from typing import Any
 
 import pytest
 
+from auditex.reporting import (
+    BundleIntegrityError,
+    enterprise_handoff,
+    write_enterprise_handoff_pack,
+)
 from azure_tenant_audit import evidence_refs
-from azure_tenant_audit.autopilot import build_proof_table, enrich_findings_for_autopilot
-from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, build_bundle_hash_manifest, verify_bundle_hashes
+from azure_tenant_audit.autopilot import (
+    build_proof_table,
+    enrich_findings_for_autopilot,
+)
+from azure_tenant_audit.bundle_integrity import (
+    BUNDLE_HASHES_PATH,
+    build_bundle_hash_manifest,
+    verify_bundle_hashes,
+)
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.evidence_refs import (
     EvidenceIndex,
-    confined_file,
     confidence_for,
+    confined_file,
     resolve_json_pointer,
     seal_findings,
 )
 from azure_tenant_audit.findings import build_findings, build_report_pack
-from auditex.reporting import BundleIntegrityError, enterprise_handoff, write_enterprise_handoff_pack
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

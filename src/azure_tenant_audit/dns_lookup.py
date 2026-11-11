@@ -6,8 +6,9 @@ Used by the dns_posture collector to evaluate SPF, DKIM, DMARC, MTA-STS, TLS-RPT
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, NamedTuple, Protocol
+from typing import Any, NamedTuple, Protocol
 
 import requests
 
@@ -190,7 +191,7 @@ def scuba_dkim_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | No
         # SG-P:297-303: traditional DNS keeps TXT strings, not CNAME targets.
         # With NOERROR and no TXT, DoH fallback retains CNAME data and stops the walk.
         if answer.record_types:
-            records = [r for r, kind in zip(answer.records, answer.record_types) if kind != 5]
+            records = [r for r, kind in zip(answer.records, answer.record_types, strict=False) if kind != 5]
             if records:
                 answer = DnsAnswer(records, answer.outcome)
             elif answer.outcome == "nxdomain":

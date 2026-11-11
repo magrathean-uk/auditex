@@ -8,7 +8,6 @@ from pathlib import Path
 
 from azure_tenant_audit.collectors import REGISTRY
 
-
 _NORMALIZE_PATH = (
     Path(__file__).resolve().parent.parent
     / "src"

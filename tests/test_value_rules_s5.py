@@ -1,26 +1,30 @@
 """Stage 5: v3.9.1+A1 vectors, SS 1.1, strict integration and offline oracle."""
 from __future__ import annotations
 
+import importlib.util
+import json
+import lzma
+import os
+import subprocess
 from collections import Counter, defaultdict
 from copy import deepcopy
 from functools import cache
 from hashlib import sha256
-import importlib.util
 from itertools import combinations
-import json
-import lzma
-import os
 from pathlib import Path
-import subprocess
 from time import perf_counter
 
 import pytest
 
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
-from azure_tenant_audit.value_rules import assess, as_pack_response, rule_policies
+from azure_tenant_audit.value_rules import as_pack_response, assess, rule_policies
 from azure_tenant_audit.value_rules.catalogue import catalogue
 from azure_tenant_audit.value_rules.defender_cascade import policy_cascade
-from azure_tenant_audit.value_rules.defender_dlp import DLP_LOCATIONS, DLP_TYPES, dlp_rules
+from azure_tenant_audit.value_rules.defender_dlp import (
+    DLP_LOCATIONS,
+    DLP_TYPES,
+    dlp_rules,
+)
 from azure_tenant_audit.value_rules.defender_phish import phish_exists
 from azure_tenant_audit.value_rules.exo_open import exo_forwarding
 from azure_tenant_audit.value_rules.gates import closed_gate
@@ -355,9 +359,10 @@ def test_rule_view_canaries_never_leave_records_or_responses(policy, rows, capsy
     ("MS.SECURITYSUITE.3.3v1", "all_rules_block"),
     ("MS.SECURITYSUITE.3.4v1", "all_rules_notify")])
 def test_linked_success_canaries_never_persist(policy, cell, tmp_path, monkeypatch, capsys, caplog):
+    from test_model_serving import case_texts, fake_projection
+
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import case_texts, fake_projection
 
     caplog.set_level("DEBUG")
     if policy.startswith("MS.EXO."):
@@ -417,9 +422,10 @@ def test_dlp_join_preserves_raw_json_equality_and_duplicate_semantics():
 
 
 def test_validator_accepts_ss13_defender_licence_citation(tmp_path, monkeypatch):
+    from test_model_serving import fake_projection
+
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import fake_projection
 
     policy = "MS.SECURITYSUITE.1.3v1"
     (tmp_path / "run-manifest.json").write_text('{"run_id":"stage5"}')

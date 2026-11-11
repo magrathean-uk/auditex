@@ -22,8 +22,9 @@ def test_run_bundle_builder_writes_contract_shaped_artifacts(tmp_path: Path) -> 
 
 
 def test_fake_doctor_toolchain_installs_bootstrap_adapter(monkeypatch) -> None:
-    from auditex import bootstrap
     from support import FakeDoctorToolchain
+
+    from auditex import bootstrap
 
     toolchain = FakeDoctorToolchain(
         blocked_tools={"pwsh"},

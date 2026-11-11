@@ -1,22 +1,27 @@
 """Stage 4: v3.9.1 DNS, Safe Links and anti-spam rules; synthetic/offline only."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from copy import deepcopy
-from hashlib import sha256
 import importlib.util
-from itertools import combinations
 import json
 import lzma
 import os
-from pathlib import Path
 import subprocess
+from collections import Counter, defaultdict
+from copy import deepcopy
+from hashlib import sha256
+from itertools import combinations
+from pathlib import Path
 
 import pytest
 
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
-from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for, rule_policies
+from azure_tenant_audit.value_rules import (
+    as_pack_response,
+    assess,
+    cells_for,
+    rule_policies,
+)
 from azure_tenant_audit.value_rules.catalogue import catalogue
 from azure_tenant_audit.value_rules.defender_spam import KINDS as SPAM_KINDS
 from azure_tenant_audit.value_rules.dns import parse_dmarc, parse_uris
@@ -137,8 +142,8 @@ def test_prepared_anti_spam_rows_are_enabled_exactly_as_prepared():
 @pytest.mark.parametrize("policy", sorted(POLICIES))
 @pytest.mark.parametrize("missing_state", ["absent", "marked", "mixed"])
 def test_every_missing_section_combination_is_catalogued(policy, missing_state, vectors, monkeypatch):
-    from azure_tenant_audit.collection_markers import NOT_COLLECTED
     import azure_tenant_audit.value_rules.catalogue as loader
+    from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
     data = deepcopy(catalogue())
     monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
@@ -151,7 +156,7 @@ def test_every_missing_section_combination_is_catalogued(policy, missing_state, 
                  + ", ".join(missing) + "." for missing in missing_sets]
         assert rule["cells"]["section_not_collected"]["reason_texts"] == sorted(texts)
         base = next(row["sections"] for row in vectors[policy] if row["rule_verdict"] == "met")
-        for missing, text in zip(missing_sets, texts):
+        for missing, text in zip(missing_sets, texts, strict=False):
             sections = deepcopy(base)
             for index, name in enumerate(missing):
                 if missing_state == "marked" or missing_state == "mixed" and index % 2:
@@ -379,9 +384,10 @@ def test_rule_outputs_never_echo_evidence(policy, vectors):
     ("MS.EXO.4.4v1", "domain_noncompliant.agency_contact_missing", None),
 ])
 def test_served_answers_validate_and_persist_no_canaries(policy, cell, cited, vectors, tmp_path, monkeypatch, caplog):
+    from test_model_serving import fake_projection
+
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import fake_projection
 
     vector = next(row for row in vectors[policy] if row["rule_cell"] == cell
                   and (cited is None or row["rule_cited_sections"] == cited)

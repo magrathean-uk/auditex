@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from auditex.demo import DEMO_AS_OF
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.resources import shipped_resource_manifest
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "examples" / "demo_tenant" / "demo_tenant.json"

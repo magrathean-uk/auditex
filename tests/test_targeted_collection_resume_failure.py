@@ -14,11 +14,11 @@ imported, so on that base these tests fail on their assertions, not on an import
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import shutil
 import stat
 import sys
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any

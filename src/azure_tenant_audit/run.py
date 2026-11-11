@@ -5,13 +5,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .ai_context import build_privacy_block
 from .assurance import build_live_readiness_summary
-from .capability_gate import INTUNE_COLLECTORS, enrich_capability_row, intune_license_state
+from .capability_gate import (
+    INTUNE_COLLECTORS,
+    enrich_capability_row,
+    intune_license_state,
+)
 from .collection_gaps import NON_FATAL_COLLECTORS, collector_gap_reason, sample_only
 from .config import CollectorConfig, RunConfig
-from .ai_context import build_privacy_block
-from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .profiles import AuditProfile, get_profile
+from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .scope_catalog import build_m365_scope_catalog
 from .selection import select_collectors
 from .utils import parse_csv_list

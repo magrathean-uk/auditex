@@ -6,7 +6,12 @@ from typing import Any
 
 import pytest
 
-from auditex.auth_runtime import AuthRuntimeAdapters, ProductAuthRuntime, ToolchainRuntime, ToolchainRuntimeAdapters
+from auditex.auth_runtime import (
+    AuthRuntimeAdapters,
+    ProductAuthRuntime,
+    ToolchainRuntime,
+    ToolchainRuntimeAdapters,
+)
 
 
 def _encode_jwt_payload(payload: dict[str, object]) -> str:

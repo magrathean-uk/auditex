@@ -8,8 +8,7 @@ The policy rows for these kinds are enabled in configs/scuba-value-rules.json.
 from __future__ import annotations
 
 from .helpers import PRESET_RE, _accepted, _cover
-from .record import BAD_SECTION_LIST, _A, _rec
-
+from .record import _A, BAD_SECTION_LIST, _rec
 
 SPAM_SLOTS = ("SpamAction", "HighConfidenceSpamAction", "PhishSpamAction", "HighConfidencePhishAction")
 

@@ -1,10 +1,10 @@
 """Canonical regeneration and honest integration gates for the disjoint port."""
-from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 

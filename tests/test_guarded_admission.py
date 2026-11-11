@@ -1,19 +1,18 @@
 """Descriptor admission for registered runs and standalone inputs."""
 from __future__ import annotations
 
-import os
 import json
-from pathlib import Path
+import os
 import shutil
 import stat
 import threading
 import traceback
+from pathlib import Path
 
 import pytest
-
-from azure_tenant_audit.sensitive_users import SensitiveUsers
 from support import RunBundleBuilder
 
+from azure_tenant_audit.sensitive_users import SensitiveUsers
 
 KEY = b"admission-canary-012345678901234"
 ADDRESS = "private-admission@example.invalid"
@@ -34,7 +33,11 @@ def private_run(tmp_path: Path) -> Path:
 @pytest.mark.parametrize("member", ["sensitive-users.key", "sensitive-users.txt"])
 @pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink", "devfd"])
 def test_admission_refuses_registered_pair_and_aliases(private_run: Path, tmp_path: Path, member: str, alias: str) -> None:
-    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     source = private_run / "operator-inputs" / member
     with GuardContext() as context:
@@ -81,7 +84,11 @@ def test_group_or_world_writable_run_directories_are_refused(private_run: Path, 
 def test_admission_traceback_does_not_include_original_os_error(
     private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     target = tmp_path / "argument-path-canary"
     target.write_text("ordinary", encoding="utf-8")
@@ -108,7 +115,11 @@ def test_admission_traceback_does_not_include_original_os_error(
 def test_pinned_descriptor_failure_has_no_original_exception_or_argument(
     private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_pinned_binary
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_pinned_binary,
+    )
 
     target = tmp_path / "pinned-argument-canary"
     target.write_bytes(b"public")
@@ -137,7 +148,11 @@ def test_pinned_descriptor_failure_has_no_original_exception_or_argument(
 def test_writer_refuses_before_truncating_private_or_multilink_file(
     private_run: Path, tmp_path: Path, target_kind: str,
 ) -> None:
-    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_private_output
+    from azure_tenant_audit.run_files import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_private_output,
+    )
 
     key = private_run / "operator-inputs" / "sensitive-users.key"
     private_list = private_run / "operator-inputs" / "sensitive-users.txt"
@@ -166,7 +181,11 @@ def test_registered_run_does_not_block_an_independent_ordinary_file(private_run:
 
 
 def test_independent_copy_recovers_from_hardlinked_backup(private_run: Path, tmp_path: Path) -> None:
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     linked_backup = tmp_path / "linked-backup"
     recovered = tmp_path / "independent-copy"
@@ -187,7 +206,11 @@ def test_independent_copy_recovers_from_hardlinked_backup(private_run: Path, tmp
 def test_private_registration_and_input_admission_are_serialised(
     private_run: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     pair_opened, release_registration = threading.Event(), threading.Event()
     reader_started, reader_finished = threading.Event(), threading.Event()
@@ -245,7 +268,11 @@ def test_private_registration_and_input_admission_are_serialised(
 def test_whitespace_dot_and_unicode_alias_matrix(
     private_run: Path, tmp_path: Path, suffix: str, link: str, member: str,
 ) -> None:
-    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     source = private_run / "operator-inputs" / member
     alias = tmp_path / ("seemingly-public.json" + suffix)
@@ -292,7 +319,11 @@ def test_equal_inode_numbers_on_different_devices_are_not_the_same_file(
                     reason="set AUDITEX_TEST_SECOND_RUN to a constructed run on a different volume")
 def test_independent_private_pairs_are_registered_across_volumes(private_run: Path) -> None:
     """Bind an independently created synthetic run from a genuinely different device."""
-    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     second = Path(os.environ["AUDITEX_TEST_SECOND_RUN"])
     assert private_run.stat().st_dev != second.stat().st_dev
@@ -308,7 +339,11 @@ def test_independent_private_pairs_are_registered_across_volumes(private_run: Pa
 
 @pytest.mark.parametrize("kind", ["directory", "fifo", "hardlink", "oversize"])
 def test_standalone_inputs_refuse_unsafe_type_link_count_or_size(tmp_path: Path, kind: str) -> None:
-    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     target = tmp_path / "input"
     if kind == "directory":
@@ -330,7 +365,11 @@ def test_standalone_inputs_refuse_unsafe_type_link_count_or_size(tmp_path: Path,
 def test_wrong_owner_is_refused(
     private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_kind: str,
 ) -> None:
-    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     ordinary = tmp_path / "ordinary"
     ordinary.write_bytes(b"public")
@@ -374,7 +413,11 @@ def test_partial_or_unverified_pair_fails_closed(private_run: Path, damage: str)
 
 
 def test_case_variant_private_directory_without_manifest_fails_closed(private_run: Path) -> None:
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     alias = private_run / "Operator-Inputs/sensitive-users.key"
     if not alias.exists():
@@ -386,7 +429,11 @@ def test_case_variant_private_directory_without_manifest_fails_closed(private_ru
 
 
 def test_any_selected_file_in_run_with_unmanifested_pair_is_refused(private_run: Path) -> None:
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     (private_run / "run-manifest.json").unlink()
     with GuardContext() as context, pytest.raises(UnsafeRunFileError):
@@ -402,7 +449,11 @@ def test_nested_manifest_never_hides_enclosing_private_pair(
     private_run: Path, outer_manifest: bool, decoy_private_dir: bool, private_name: str, consumer: str,
 ) -> None:
     from azure_tenant_audit.evidence_refs import file_sha256
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     private = private_run / "operator-inputs"
     (private / "run-manifest.json").write_text("{}")
@@ -481,7 +532,11 @@ def test_bundle_hash_root_inside_private_directory_never_exposes_pair(
 def test_manifest_below_private_directory_is_not_a_trust_root(
     private_run: Path, nested: bool, consumer: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
     from azure_tenant_audit.run_files import read_run_file
 
     private = private_run / "operator-inputs"
@@ -532,7 +587,11 @@ def test_pair_under_ineligible_nested_run_is_never_admitted(
 ) -> None:
     from azure_tenant_audit.bundle_integrity import build_bundle_hash_manifest
     from azure_tenant_audit.evidence_refs import file_sha256
-    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.guarded_io import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
     from azure_tenant_audit.run_files import hash_run_file, read_run_file
 
     nested = RunBundleBuilder(private_run / "operator-inputs", name="nested").manifest(
@@ -625,7 +684,11 @@ def test_unrelated_operator_inputs_ancestor_does_not_capture_a_nested_run(tmp_pa
 
 
 def test_non_posix_without_descriptor_relative_open_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import (
+        GuardContext,
+        UnsafeRunFileError,
+        open_guarded_file,
+    )
 
     target = tmp_path / "ordinary"
     target.write_bytes(b"public")

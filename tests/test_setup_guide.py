@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shlex
+from pathlib import Path
 
 import pytest
 
-from azure_tenant_audit import cli as tenant_cli
 from auditex import cli as auditex_cli
 from auditex.mcp_registry import iter_tool_specs
 from auditex.mcp_server import setup_guide as mcp_setup_guide
 from auditex.setup_guide import build_setup_guide, render_setup_guide_markdown
+from azure_tenant_audit import cli as tenant_cli
 
 
 def test_google_setup_guide_outputs_dwd_scopes_and_readonly_claims() -> None:

@@ -37,7 +37,7 @@ class _FakeSMTP:
     """Minimal stand-in for ``smtplib.SMTP`` that records the EHLO →
     STARTTLS → EHLO → send_message dance the E3-hardened sink expects."""
 
-    instances: list["_FakeSMTP"] = []
+    instances: list[_FakeSMTP] = []
     advertise_starttls = True
     starttls_raises: BaseException | None = None
     login_calls: list[tuple[str, str]] = []
@@ -52,7 +52,7 @@ class _FakeSMTP:
         self.login_calls = []
         type(self).instances.append(self)
 
-    def __enter__(self) -> "_FakeSMTP":
+    def __enter__(self) -> _FakeSMTP:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -200,8 +200,9 @@ def test_smtp_sink_surfaces_tls_handshake_errors(
 ) -> None:
     """A TLS handshake error must propagate as ``status=failed`` with a
     clear reason — not crash the loop."""
-    import auditex.notify as notify_module
     import ssl as _ssl
+
+    import auditex.notify as notify_module
 
     _smtp_env(monkeypatch)
     _patch_fake_smtp(monkeypatch)

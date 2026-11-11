@@ -14,7 +14,10 @@ from azure_tenant_audit.baselines import (
     build_baseline_alignment,
     build_secure_score_reconciliation,
 )
-from azure_tenant_audit.contracts import _KNOWN_FRAMEWORK_KEYS, _validate_finding_framework_mappings
+from azure_tenant_audit.contracts import (
+    _KNOWN_FRAMEWORK_KEYS,
+    _validate_finding_framework_mappings,
+)
 from azure_tenant_audit.findings import build_findings, build_report_pack
 from azure_tenant_audit.normalize import build_normalized_snapshot
 

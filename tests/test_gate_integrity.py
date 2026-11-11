@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from gate_support import (
     _update_manifest,
     finding,
@@ -347,7 +346,11 @@ def test_the_stale_sync_window_is_recorded_from_the_command_line(tmp_path: Path)
 
 
 def test_compare_does_not_call_findings_resolved_when_a_run_fails_its_hash_manifest(pair: tuple[Path, Path]) -> None:
-    from auditex.compare import build_finding_delta, compare_runs, render_compare_markdown
+    from auditex.compare import (
+        build_finding_delta,
+        compare_runs,
+        render_compare_markdown,
+    )
 
     baseline, current = pair
     write_findings(baseline, [finding("f1", "high")])

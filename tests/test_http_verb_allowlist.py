@@ -515,8 +515,8 @@ class _Namespace:
 
     def _parameters(self, args: ast.arguments) -> None:
         positional = [*args.posonlyargs, *args.args]
-        defaults = {id(arg): value for arg, value in zip(reversed(positional), reversed(args.defaults))}
-        defaults.update({id(arg): value for arg, value in zip(args.kwonlyargs, args.kw_defaults) if value})
+        defaults = {id(arg): value for arg, value in zip(reversed(positional), reversed(args.defaults), strict=False)}
+        defaults.update({id(arg): value for arg, value in zip(args.kwonlyargs, args.kw_defaults, strict=False) if value})
         for arg in (*positional, *args.kwonlyargs):
             self.names.setdefault(arg.arg, []).append(("param", (arg, defaults.get(id(arg)))))
         for arg in (args.vararg, args.kwarg):

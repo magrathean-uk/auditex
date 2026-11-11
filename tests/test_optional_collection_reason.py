@@ -1,17 +1,22 @@
 """A6: run-only optional collection reasons, closed customer text and compatibility."""
-from hashlib import sha256
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
-from auditex.rule_assessment import precheck_case
-from auditex.rule_assessment import assess_run, assess_scubagear_export
-from auditex.rule_assessment import build_case, canonical, policy_catalogue
+from auditex.rule_assessment import (
+    assess_run,
+    assess_scubagear_export,
+    build_case,
+    canonical,
+    policy_catalogue,
+    precheck_case,
+)
 from auditex.scuba_projection import project_run
 from auditex.scubagear_export import load_export, project_export
-from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.scuba_precheck import optional_collection_entry
 
 CODE = "optional_collection_not_enabled"
@@ -242,5 +247,5 @@ def test_model_fixture_bytes_and_other_policy_outputs_unchanged(tmp_path):
         if pid in POLICIES:
             continue
         outputs = [precheck_case(c, value_rules=True, rule_projection=p.rule_sections)
-                   for c, p in zip(cases, (before, after))]
+                   for c, p in zip(cases, (before, after), strict=False)]
         assert canonical(outputs[0]) == canonical(outputs[1])

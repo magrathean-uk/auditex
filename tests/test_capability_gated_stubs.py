@@ -4,9 +4,9 @@ from typing import Any
 
 import pytest
 
-from azure_tenant_audit.collectors.sentinel_xdr import SentinelXdrCollector
-from azure_tenant_audit.collectors.defender_cloud_apps import DefenderCloudAppsCollector
 from azure_tenant_audit.collectors.copilot_governance import CopilotGovernanceCollector
+from azure_tenant_audit.collectors.defender_cloud_apps import DefenderCloudAppsCollector
+from azure_tenant_audit.collectors.sentinel_xdr import SentinelXdrCollector
 
 
 @pytest.mark.parametrize(

@@ -1,22 +1,22 @@
 """Integration gates; product v3.9.1 migration and report wiring remain explicit."""
-from copy import deepcopy
 import gzip
 import hashlib
 import json
-from pathlib import Path
 import shutil
 import socket
 import subprocess
 import sys
 import tomllib
 import zipfile
+from copy import deepcopy
+from pathlib import Path
 
 import jsonschema
 import pytest
 
 from azure_tenant_audit import explainer, resources
-from azure_tenant_audit.explainer.adapter import adapt_record
 from azure_tenant_audit.explainer import textkit
+from azure_tenant_audit.explainer.adapter import adapt_record
 from azure_tenant_audit.explainer.textkit import canonical, shared_exceptions
 from azure_tenant_audit.shipped_content import SHIPPED_CONTENT_AREAS
 
@@ -347,6 +347,7 @@ def test_renderer_failure_is_controlled_and_never_a_new_verdict(monkeypatch):
 def runtime_replay(tmp_path, *, with_twins):
     """Every generated base pair through the real pipeline: engine record, build_view, explain, the eight checks."""
     from time import perf_counter
+
     from explainer_checks import corpus
     from explainer_checks.support import integration_result
     start = perf_counter()
@@ -419,8 +420,8 @@ def test_runtime_replay_is_byte_identical_across_fresh_processes(tmp_path):
 
 def test_existing_report_writers_preserve_synthetic_identifiers(tmp_path, monkeypatch):
     """Local writers preserve these values; explainer output wiring remains separate."""
-    from azure_tenant_audit.output import AuditWriter
     from auditex import reporting
+    from azure_tenant_audit.output import AuditWriter
     payload = {"explainer": {"explanation": "SYNTHETIC_SECRET alice@example.com 01234567-89ab-cdef-0123-456789abcdef",
                              "remediation_steps": [], "evidence_refs": ["e0"]}}
     writer = AuditWriter.__new__(AuditWriter)

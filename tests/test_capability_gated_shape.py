@@ -13,7 +13,6 @@ import pytest
 
 from azure_tenant_audit.collectors import REGISTRY
 
-
 _CANONICAL_COVERAGE_KEYS = {
     "collector",
     "type",

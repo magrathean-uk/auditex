@@ -1,9 +1,8 @@
 import gzip
 import importlib.util
 import io
-from pathlib import Path
 import tarfile
-
+from pathlib import Path
 
 spec = importlib.util.spec_from_file_location('repro', Path(__file__).parents[1] / 'scripts/check-reproducible-build.py')
 repro = importlib.util.module_from_spec(spec)

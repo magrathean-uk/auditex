@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -215,7 +215,7 @@ def test_depth_bound() -> None:
     payloads["identity"]["groups"]["value"].extend({"id": group_id, "displayName": group_id} for group_id in chain)
     members = payloads["identity"]["roleAssignableGroupMembers"]["value"]
     members.append({"groupId": "g-ra", "members": [{"@odata.type": "#microsoft.graph.group", "id": chain[0]}]})
-    for parent, child in zip(chain, chain[1:]):
+    for parent, child in zip(chain, chain[1:], strict=False):
         members.append({"groupId": parent, "members": [{"@odata.type": "#microsoft.graph.group", "id": child}]})
     payloads["identity"]["users"]["value"].append(_user("u-deep", "deep@contoso.example"))
     members.append({"groupId": chain[-1], "members": [{"@odata.type": "#microsoft.graph.user", "id": "u-deep"}]})
@@ -368,7 +368,7 @@ def test_unusable_app_secret_does_not_create_a_credential_foothold(start: str, e
         }
     }
     snapshot = _snapshot(payloads)
-    now = datetime(2026, 10, 18, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 18, tzinfo=UTC)
     graph = build_attack_graph(snapshot, now=now)
 
     assert not any(edge.edge == "credential" and edge.target == "app:app-obj" for edge in graph.edges)
@@ -386,7 +386,7 @@ def test_expired_secret_does_not_hide_an_independently_current_long_lived_secret
             {"start_date_time": "2026-01-01T00:00:00Z", "end_date_time": "2030-01-01T00:00:00Z"},
         ],
     }]}
-    path = _path_from(analyze_attack_graph(snapshot, now=datetime(2026, 10, 18, tzinfo=timezone.utc)), "Payroll Export")
+    path = _path_from(analyze_attack_graph(snapshot, now=datetime(2026, 10, 18, tzinfo=UTC)), "Payroll Export")
 
     assert path is not None and path["foothold"] == "long_lived_secret"
     assert path["execution_verified"] is False

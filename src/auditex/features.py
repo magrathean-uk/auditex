@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
-
 RESPONSE_ENABLE_ENV = "AUDITEX_ENABLE_RESPONSE"
 
 

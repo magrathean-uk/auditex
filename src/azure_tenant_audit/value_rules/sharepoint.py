@@ -7,7 +7,7 @@ an unusable companion field. Text interpolations use catalogue names only.
 from __future__ import annotations
 
 from .helpers import _int
-from .record import BAD_SECTION_LIST, EMPTY_SECTION, ITEM_VALUE, _A, _rec
+from .record import _A, BAD_SECTION_LIST, EMPTY_SECTION, ITEM_VALUE, _rec
 
 SPO = "SPO_tenant"
 SLIDER_NAMES = {0: "Only people in your organization", 1: "New and existing guests",

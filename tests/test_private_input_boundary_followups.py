@@ -8,7 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from azure_tenant_audit.bundle_integrity import build_bundle_hash_manifest, verify_bundle_hashes
+from azure_tenant_audit.bundle_integrity import (
+    build_bundle_hash_manifest,
+    verify_bundle_hashes,
+)
 
 HEX = "0123456789abcdef01234567"
 CANARY = b"synthetic-canary-list-bytes.example.invalid\n"
@@ -126,7 +129,10 @@ def test_existing_manifest_row_for_a_private_input_is_refused_and_never_packed(t
 
 
 def test_new_manifest_with_reason_only_exclusions_and_ordinary_run_verifies_and_packs(tmp_path):
-    from auditex.reporting import verify_enterprise_handoff_pack, write_enterprise_handoff_pack
+    from auditex.reporting import (
+        verify_enterprise_handoff_pack,
+        write_enterprise_handoff_pack,
+    )
 
     run = _real_run(tmp_path)
     for name in (f".sensitive-users.txt.{HEX}.tmp", ".partner-domains.key.4242.tmp"):

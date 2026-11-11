@@ -1,13 +1,21 @@
 """Classify every discovered writer and verify the routed call sites."""
 from __future__ import annotations
+
 import ast
 import importlib.util
 import re
 from pathlib import Path
 
-from auditex.output_writers import MCP_TOOL_INVENTORY, SINK_INVENTORY, WRITER_INVENTORY, SinkEntry, sink_entry
-from azure_tenant_audit.output_redaction import PROFILES
 from sink_expansions import WILDCARD_EXPANSIONS
+
+from auditex.output_writers import (
+    MCP_TOOL_INVENTORY,
+    SINK_INVENTORY,
+    WRITER_INVENTORY,
+    SinkEntry,
+    sink_entry,
+)
+from azure_tenant_audit.output_redaction import PROFILES
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -171,9 +179,9 @@ def _is_wildcard(entry: SinkEntry) -> bool:
 
 
 def _unreviewed_wildcard_matches(
-    functions: "set[tuple[str, str]] | list[tuple[str, str]]",
-    inventory: "tuple[SinkEntry, ...]" = SINK_INVENTORY,
-    expansions: "dict[str, tuple[str, ...]]" = WILDCARD_EXPANSIONS,
+    functions: set[tuple[str, str]] | list[tuple[str, str]],
+    inventory: tuple[SinkEntry, ...] = SINK_INVENTORY,
+    expansions: dict[str, tuple[str, ...]] = WILDCARD_EXPANSIONS,
 ) -> list[str]:
     """Scanned functions classified only by a wildcard that nobody has listed in the frozen expansion (S9)."""
     unreviewed = []
@@ -270,7 +278,7 @@ def test_profiled_report_routes_choose_their_audience() -> None:
     for name in ("preview_report", "render_report"):
         function = _functions("auditex.reporting")[name]
         assert isinstance(function, ast.FunctionDef)
-        defaults = dict(zip((arg.arg for arg in function.args.kwonlyargs), function.args.kw_defaults))
+        defaults = dict(zip((arg.arg for arg in function.args.kwonlyargs), function.args.kw_defaults, strict=False))
         assert "profile" in defaults and defaults["profile"] is None
 
 

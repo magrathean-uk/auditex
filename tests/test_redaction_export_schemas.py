@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from gate_support import offline_run
 from test_sarif_oscal_exports import _schema_errors, oscal_validator, sarif_validator  # noqa: F401
 

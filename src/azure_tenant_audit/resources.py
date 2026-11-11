@@ -10,7 +10,6 @@ from typing import Any
 
 from .shipped_content import SHIPPED_CONTENT_AREAS, shipped_directories
 
-
 RESOURCE_ROOT_ENV = "AUDITEX_RESOURCE_ROOT"
 
 

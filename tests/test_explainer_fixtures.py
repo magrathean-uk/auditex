@@ -9,8 +9,8 @@ import hashlib
 from pathlib import Path
 
 import pytest
-
-from explainer_checks import corpus, fixture_rules as rules, pool
+from explainer_checks import corpus, pool
+from explainer_checks import fixture_rules as rules
 
 ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / "tests/fixtures/explainer"

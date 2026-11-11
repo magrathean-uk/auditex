@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from azure_tenant_audit.normalize import build_ai_safe_summary, build_normalized_snapshot
+from azure_tenant_audit.normalize import (
+    build_ai_safe_summary,
+    build_normalized_snapshot,
+)
 
 
 def test_build_normalized_snapshot_extracts_core_objects() -> None:

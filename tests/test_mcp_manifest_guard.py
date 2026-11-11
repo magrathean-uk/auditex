@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 
 _SOURCE = Path(__file__).resolve().parents[1] / "src"
 _CANARY = "OUTSIDE-RUN-CANARY-7cf620"
@@ -217,7 +216,11 @@ def test_reference_run_salt_does_not_read_the_manifest(tmp_path: Path) -> None:
 @pytest.mark.parametrize("relative", ("users.json", "snapshot.json", "coverage_ledger.json"))
 @pytest.mark.parametrize("kind", ("symlink", "hardlink"))
 def test_shareable_normalized_read_and_snapshot_refuse_links(tmp_path: Path, relative: str, kind: str) -> None:
-    from azure_tenant_audit.output_redaction import ContextIncompleteError, read_normalized_sections, snapshot_run
+    from azure_tenant_audit.output_redaction import (
+        ContextIncompleteError,
+        read_normalized_sections,
+        snapshot_run,
+    )
 
     normalized = tmp_path / "run" / "normalized"
     normalized.mkdir(parents=True)
@@ -239,7 +242,11 @@ def test_shareable_normalized_read_and_snapshot_refuse_links(tmp_path: Path, rel
 @pytest.mark.parametrize("kind", ("dangling", "inside"))
 @pytest.mark.parametrize("nested", (False, True))
 def test_shareable_output_ignores_non_json_symlinks(tmp_path: Path, kind: str, nested: bool) -> None:
-    from azure_tenant_audit.output_redaction import context_for_run, redact_output, snapshot_run
+    from azure_tenant_audit.output_redaction import (
+        context_for_run,
+        redact_output,
+        snapshot_run,
+    )
 
     normalized = tmp_path / "run" / "normalized"
     directory = normalized / "nested" if nested else normalized
@@ -255,7 +262,12 @@ def test_shareable_output_ignores_non_json_symlinks(tmp_path: Path, kind: str, n
 @pytest.mark.parametrize("nested", (False, True))
 @pytest.mark.parametrize("kind", ("symlink", "hardlink"))
 def test_shareable_scanner_refuses_json_links(tmp_path: Path, nested: bool, kind: str) -> None:
-    from azure_tenant_audit.output_redaction import ContextIncompleteError, context_for_run, redact_output, snapshot_run
+    from azure_tenant_audit.output_redaction import (
+        ContextIncompleteError,
+        context_for_run,
+        redact_output,
+        snapshot_run,
+    )
 
     normalized = tmp_path / "run" / "normalized"
     directory = normalized / "nested" if nested else normalized
@@ -361,6 +373,7 @@ def test_guard_fallback_rejects_symlinked_parent(tmp_path: Path, monkeypatch: py
 def test_closed_wal_mode_index_is_read_without_changing_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import sqlite3
     from contextlib import closing
+
     from azure_tenant_audit.contracts import _validate_evidence_db
     from azure_tenant_audit.evidence_db import load_run_index_summary
 

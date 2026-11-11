@@ -16,7 +16,10 @@ from auditex.scuba_projection import (
     _fields,
     _licence_refused,
 )
-from azure_tenant_audit.value_rules.defender_targeted_users import COVERAGE_KEY, bound_coverage
+from azure_tenant_audit.value_rules.defender_targeted_users import (
+    COVERAGE_KEY,
+    bound_coverage,
+)
 
 
 def _listing_adapter(operation: str, keys: tuple[str, ...]):

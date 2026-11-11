@@ -12,7 +12,6 @@ from collections.abc import Callable
 from string import Formatter
 from typing import Any
 
-
 RESOURCE_PATH = "configs/explainer-what-to-collect.json"
 _VERDICTS = {"met", "not_met", "not_assessed", "not_applicable"}
 # Public section names pinned to v3.9.1, never taken from tenant evidence.

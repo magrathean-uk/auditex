@@ -1,8 +1,8 @@
 """Sensitive wire envelopes must be admitted before generic normalisation can disguise their shape."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +12,6 @@ from azure_tenant_audit.collectors import targeted_users_coverage as tuc
 from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
 from azure_tenant_audit.sensitive_users import SensitiveUsers
 from azure_tenant_audit.value_rules.defender_targeted_users import SensitiveUsersBinding
-
 
 ADDRESS = "alice@configured-wire.invalid"
 CANARY = "zq-canary@unlisted-canary.invalid"

@@ -9,9 +9,8 @@ candidate as raw output text. Observed results are recomputed by running the eig
 import json
 
 from . import corpus
-from .support import corpus_resources
 from .driver import failing, run_pair
-from .support import FIXTURES, read_json
+from .support import FIXTURES, corpus_resources, read_json
 
 PATH = FIXTURES / "redteam" / "candidates.json"
 IDS = {f"W{n:02d}" for n in range(1, 41)} | {f"B{n:02d}" for n in range(1, 11)}

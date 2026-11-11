@@ -6,9 +6,9 @@ The shared table also describes historical row metadata accepted by the validato
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-import json
 from typing import Any
 
 from .resources import open_text_resource

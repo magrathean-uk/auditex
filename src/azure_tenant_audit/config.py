@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
 
 from .selection import select_collectors
 
@@ -13,11 +13,11 @@ class AuthConfig:
     tenant_id: str
     client_id: str | None
     auth_mode: str = "app"
-    client_secret: Optional[str] = None
-    access_token: Optional[str] = None
+    client_secret: str | None = None
+    access_token: str | None = None
     authority: str = "https://login.microsoftonline.com/"
     graph_scope: str = "https://graph.microsoft.com/.default"
-    interactive_scopes: Optional[list[str]] = None
+    interactive_scopes: list[str] | None = None
     timeout_seconds: int = 60
     throttle_mode: str = "safe"
 
@@ -26,19 +26,19 @@ class AuthConfig:
 class RunConfig:
     tenant_name: str
     output_dir: Path
-    collectors: Optional[list[str]] = None
-    excluded_collectors: Optional[list[str]] = None
+    collectors: list[str] | None = None
+    excluded_collectors: list[str] | None = None
     include_exchange: bool = False
     offline: bool = False
-    sample_path: Optional[Path] = None
-    run_name: Optional[str] = None
-    top_items: Optional[int] = None
+    sample_path: Path | None = None
+    run_name: str | None = None
+    top_items: int | None = None
     page_size: int = 100
     auditor_profile: str = "auto"
     default_collectors: tuple[str, ...] = ()
     plane: str = "inventory"
-    since: Optional[str] = None
-    until: Optional[str] = None
+    since: str | None = None
+    until: str | None = None
 
     def selected_collectors(self, available: Iterable[str]) -> list[str]:
         return select_collectors(
@@ -57,7 +57,7 @@ class CollectorDefinition:
     enabled: bool
     required_permissions: list[str]
     query_plan: list[str]
-    command_collectors: Optional[list[dict]] = None
+    command_collectors: list[dict] | None = None
 
 
 @dataclass
@@ -66,7 +66,7 @@ class CollectorConfig:
     default_order: list[str]
 
     @classmethod
-    def from_path(cls, path: str | Path) -> "CollectorConfig":
+    def from_path(cls, path: str | Path) -> CollectorConfig:
         from .resources import read_selected_resource
         payload = json.loads(read_selected_resource(path, default="configs/collector-definitions.json", field="config"))
         collectors = {

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-
 AuthMode = Literal["delegated", "app"]
 FlowName = Literal["gr-audit", "ga-setup-app", "app-audit"]
 

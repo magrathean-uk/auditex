@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .collectors import SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPED_COLLECTORS
@@ -790,7 +790,7 @@ def _parse_google_time(value: Any) -> datetime | None:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _stale_google_login(value: Any, *, days: int = 365, now: datetime | None = None) -> bool:
@@ -800,7 +800,7 @@ def _stale_google_login(value: Any, *, days: int = 365, now: datetime | None = N
     parsed = _parse_google_time(text)
     if parsed is None:
         return False
-    return parsed < (now or datetime.now(tz=timezone.utc)) - timedelta(days=days)
+    return parsed < (now or datetime.now(tz=UTC)) - timedelta(days=days)
 
 
 def _stale_google_timestamp(value: Any, *, days: int = DEFAULT_STALE_DEVICE_DAYS, now: datetime | None = None) -> bool:
@@ -1033,7 +1033,7 @@ def build_google_findings(
 ) -> list[dict[str, Any]]:
     diagnostics = diagnostics or []
     snapshot = normalized_snapshot.get("snapshot") or {}
-    now = now or datetime.now(tz=timezone.utc)
+    now = now or datetime.now(tz=UTC)
     internal_domains, internal_domains_status = _internal_domain_state(snapshot)
     issues = _SurfaceIssues()
     findings: list[dict[str, Any]] = []

@@ -71,17 +71,24 @@ No mailbox enumeration or message/file content reads are added:
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..adapters import get_adapter
 from ..adapters.powershell_graph import PowerShellGraphAdapter
 from ..collection_gaps import (
-    IPPS_SKIP_TEXT, REASON_IPPS_SESSION_NOT_OPENED, SECTION_SCOPED,
-    REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS,
+    IPPS_SKIP_TEXT,
+    REASON_FANOUT_LIMIT,
+    REASON_IPPS_SESSION_NOT_OPENED,
+    SECTION_SCOPED,
+    TRUNCATION_ERROR_CLASS,
 )
 from .base import Collector, CollectorResult
-from .exchange_defender_commands import DEFENDER_COMMANDS, minimise_recipients, reclassify_licence_refusals
-
+from .exchange_defender_commands import (
+    DEFENDER_COMMANDS,
+    minimise_recipients,
+    reclassify_licence_refusals,
+)
 
 EXCHANGE_ONLINE_SCOPE = "https://outlook.office365.com/.default"
 
@@ -159,7 +166,7 @@ class ExchangePolicyCollector(Collector):
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
         adapter = get_adapter("powershell_graph")
         payload: dict[str, Any] = {}
         coverage: list[dict[str, Any]] = []

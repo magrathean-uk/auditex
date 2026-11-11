@@ -5,7 +5,6 @@ from pathlib import Path
 
 from auditex.cli import main
 
-
 TENANT = "11111111-1111-4111-8111-111111111111"
 
 

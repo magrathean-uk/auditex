@@ -34,8 +34,11 @@ from auditex.reporting import (
 from azure_tenant_audit.api_inventory import with_observed_ledger
 from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundle_hashes
 from azure_tenant_audit.cli import run_offline
+from azure_tenant_audit.data_handling import (
+    build_data_handling_summary,
+    classify_auth_scope,
+)
 from azure_tenant_audit.guarded_io import UnsafeRunFileError
-from azure_tenant_audit.data_handling import build_data_handling_summary, classify_auth_scope
 from azure_tenant_audit.private_io import copy_private_file, write_private_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

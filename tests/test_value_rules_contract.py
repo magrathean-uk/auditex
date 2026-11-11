@@ -1,19 +1,22 @@
 """A1/A2 shared contract: exact variants, additive assessments and unchanged offline answers."""
+import json
+import os
 from collections import Counter
 from copy import deepcopy
 from hashlib import sha256
-import json
-import os
 from pathlib import Path
 
 import pytest
 
-from auditex.rule_assessment import precheck_case
-from auditex.rule_assessment import assess_run
-from auditex.rule_assessment import canonical, policy_catalogue
+from auditex.rule_assessment import (
+    assess_run,
+    canonical,
+    policy_catalogue,
+    precheck_case,
+)
 from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
-from azure_tenant_audit.value_rules import assess, as_pack_response
+from azure_tenant_audit.value_rules import as_pack_response, assess
 from azure_tenant_audit.value_rules import catalogue as loader
 from azure_tenant_audit.value_rules.record import _rec, checked
 

@@ -9,9 +9,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from test_reporting import _write_run
 
 from azure_tenant_audit import output_redaction as redaction
-from test_reporting import _write_run
 
 
 def _sparse_run(root: Path, sizes: tuple[int, ...]) -> None:
@@ -83,7 +83,7 @@ def _message(exc: pytest.ExceptionInfo[redaction.ContextIncompleteError], root: 
 def test_scan_accepts_exact_file_and_aggregate_limits(tmp_path: Path) -> None:
     root = tmp_path / "run"
     _sparse_run(root, (100, 50))
-    for path, size in zip(sorted((root / "normalized").iterdir()), (100, 50)):
+    for path, size in zip(sorted((root / "normalized").iterdir()), (100, 50), strict=False):
         path.write_bytes(b'{"pad":"' + b'x' * (size - 10) + b'"}')
     assert len(redaction.snapshot_run(root)) == 2
     assert len(redaction.read_normalized_sections(root)) == 2

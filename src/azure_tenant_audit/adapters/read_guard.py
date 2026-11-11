@@ -39,7 +39,6 @@ from pathlib import PurePath
 
 from ..secret_hygiene import redact_text
 
-
 M365_READ_VERBS = frozenset({"list", "get", "status"})
 M365_REPORT_PREFIX = ("outlook", "report")
 # Options the shipped read commands use. Anything else after the command words is refused, so a token
@@ -200,7 +199,7 @@ class VettedCommand(str):
         vetted_text: str,
         source_adapter: str,
         command_words: tuple[str, ...] = (),
-    ) -> "VettedCommand":
+    ) -> VettedCommand:
         item = super().__new__(cls, value)
         item.vetted_text = vetted_text
         item.source_adapter = source_adapter

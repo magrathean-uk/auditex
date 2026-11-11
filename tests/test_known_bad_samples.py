@@ -6,7 +6,6 @@ from pathlib import Path
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.resources import shipped_resource_manifest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

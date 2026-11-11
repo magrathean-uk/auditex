@@ -12,13 +12,13 @@ adapter's callback acceptance; the controls are green before and after.
 """
 from __future__ import annotations
 
-from copy import deepcopy
-from functools import partial
 import json
-from pathlib import Path
 import re
 import stat
 import sys
+from copy import deepcopy
+from functools import partial
+from pathlib import Path
 
 import pytest
 
@@ -26,7 +26,10 @@ from azure_tenant_audit import cli
 from azure_tenant_audit.adapters import powershell_graph as pg
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 from azure_tenant_audit.collectors import targeted_users_coverage as tuc
-from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector, _run_anti_phish
+from azure_tenant_audit.collectors.exchange_policy import (
+    ExchangePolicyCollector,
+    _run_anti_phish,
+)
 from azure_tenant_audit.sensitive_users import SensitiveUsers
 from azure_tenant_audit.value_rules.defender_targeted_users import SensitiveUsersBinding
 

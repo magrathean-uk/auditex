@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -74,7 +74,7 @@ def _timestamp(value: Any) -> str | None:
         raise ValueError("assessment timestamp must be ISO 8601") from exc
     if parsed.tzinfo is None:
         raise ValueError("assessment timestamp must include a timezone")
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _pairs(pairs: list[tuple[str, Any]]) -> dict:

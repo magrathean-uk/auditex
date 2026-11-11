@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import re
 import shutil
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..secret_hygiene import redact_command_string
 from .base import Adapter, AdapterMetadata
 from .powershell_graph import PowerShellGraphAdapter
 from .read_guard import CommandRefused, VettedCommand, check_command, refusal_response
-
 
 # October's resource schema refresh replaces a PIM API that stops returning
 # data on 2026-10-28. This is a minimum compatibility gate, not an installer or
@@ -39,7 +39,7 @@ class M365DSCAdapter(Adapter):
         self,
         *,
         powershell: PowerShellGraphAdapter | None = None,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
         """Read local module metadata without importing or connecting to a tenant."""
         powershell = powershell or PowerShellGraphAdapter()
@@ -82,7 +82,7 @@ class M365DSCAdapter(Adapter):
     def run(
         self,
         command: str,
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
         safe_command = redact_command_string(command)
         try:

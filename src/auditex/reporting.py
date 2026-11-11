@@ -7,6 +7,7 @@ import json
 import os
 import re
 from collections.abc import Iterable, Mapping
+from datetime import UTC
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,12 @@ from azure_tenant_audit.bundle_integrity import (
     listed_artifact_paths,
 )
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
+from azure_tenant_audit.guarded_io import (
+    current_context,
+    guard_session,
+    guarded_operation,
+    open_pinned_binary,
+)
 from azure_tenant_audit.output_redaction import (
     PROFILE_CUSTOMER_PACK,
     PROFILE_EXPLAINER,
@@ -39,10 +46,18 @@ from azure_tenant_audit.output_redaction import (
     snapshot_run,
     unmatched_names_note,
 )
-from azure_tenant_audit.private_io import harden_tree, make_private_dirs, write_private_bytes, write_private_text
-from azure_tenant_audit.guarded_io import current_context, guard_session, guarded_operation, open_pinned_binary
+from azure_tenant_audit.private_io import (
+    harden_tree,
+    make_private_dirs,
+    write_private_bytes,
+    write_private_text,
+)
 from azure_tenant_audit.resources import resolve_resource_path
-from azure_tenant_audit.run_files import UnsafeRunFileError, hash_run_file, read_run_file
+from azure_tenant_audit.run_files import (
+    UnsafeRunFileError,
+    hash_run_file,
+    read_run_file,
+)
 from azure_tenant_audit.waivers import accepted_risk_summary
 
 from .run_bundle import RunBundle, summarize_recomputed_validation
@@ -574,8 +589,12 @@ def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[
 
 def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Read the optional assessment through the existing run-file guard and fail closed on damage."""
-    from azure_tenant_audit.scuba_assessment import (MODEL_ASSESSMENT_PATH, derive_explainer, validate_assessment,
-                                                     value_rule_verdict)
+    from azure_tenant_audit.scuba_assessment import (
+        MODEL_ASSESSMENT_PATH,
+        derive_explainer,
+        validate_assessment,
+        value_rule_verdict,
+    )
     from azure_tenant_audit.strict_json import reject_json_constant, strict_pairs
 
     try:
@@ -3629,7 +3648,7 @@ def render_sarif(
 
 def _oscal_timestamp(value: Any) -> str | None:
     """An ISO 8601 time as the OSCAL ``date-time-with-timezone`` the schema expects, or ``None``."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     text = _text(value).strip()
     if not text:
@@ -3639,8 +3658,8 @@ def _oscal_timestamp(value: Any) -> str | None:
     except ValueError:
         return None
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _oscal_token(value: str) -> str:
@@ -3699,7 +3718,7 @@ def render_oscal(
     to the export time, and says so in the result's ``auditex.collection_time_basis`` property.
     """
     import uuid as _uuid
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     findings_rows = [dict(item) for item in (findings or []) if isinstance(item, Mapping)]
     summary_dict = _mapping(summary)
@@ -3707,7 +3726,7 @@ def render_oscal(
     platform = _provider_platform(summary_dict, manifest_dict)
     platform_label = _provider_label(platform)
 
-    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     collected = _oscal_timestamp(manifest_dict.get("created_utc") or summary_dict.get("created_utc"))
     time_basis = "run_manifest_created_utc" if collected else "export_time"
     collected = collected or now

@@ -8,8 +8,7 @@ from __future__ import annotations
 import re
 
 from .helpers import _list_state
-from .record import ITEM_LABEL, _A, _rec
-
+from .record import _A, ITEM_LABEL, _rec
 
 _DMARC_V = re.compile(r"^[vV]\s*=\s*DMARC1\s*(?:;|$)")
 

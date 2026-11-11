@@ -11,11 +11,11 @@ bounded-run seam, which sits before every privacy step the adapter takes.
 """
 from __future__ import annotations
 
+import json
+import re
 from copy import deepcopy
 from functools import partial
-import json
 from pathlib import Path
-import re
 from types import SimpleNamespace
 
 import pytest
@@ -80,7 +80,7 @@ NESTED_CARRIERS = {
     "identity-deep-underscore": ("Identity", {"inner": [{"Targeted_Users_To_Protect": [MALFORMED]}]}),
     "action-encoded-json": ("TargetedUserProtectionAction", json.dumps({"TargetedUsersToProtect": [UNCONF_EMAIL]})),
     "name-double-encoded": ("Name", json.dumps(json.dumps({"TargetedUsersToProtect": [UNCONF_NAME, CONFIGURED[1]]}))),
-    "name-escaped-key": ("Name", '{"\\u0054argetedUsersToProtect":["%s"]}' % UNCONF_EMAIL),
+    "name-escaped-key": ("Name", f'{{"\\u0054argetedUsersToProtect":["{UNCONF_EMAIL}"]}}'),
     "domains-encoded-item": ("TargetedDomainsToProtect",
                              ["partner.example.invalid", json.dumps({"TargetedUsersToProtect": [UNCONF_DOMAIN]})]),
 }
@@ -116,10 +116,10 @@ SAMPLE_LAYOUTS = {
         "blob": json.dumps(json.dumps({"TargetedUsersToProtect": [UNCONF_EMAIL]})),
         "detail": f"failed for {UNCONF_NAME}"}]}}}},
     "escaped-key-in-other-envelope": lambda: {"exchange_policy": {"transportConfig": {
-        **deepcopy(TRANSPORT), "stderr": '{"\\u0054argetedUsersToProtect":["%s"]}' % UNCONF_EMAIL,
+        **deepcopy(TRANSPORT), "stderr": f'{{"\\u0054argetedUsersToProtect":["{UNCONF_EMAIL}"]}}',
         "error": f"failed for {UNCONF_NAME}"}}},
     "malformed-truncated-json": lambda: {"exchange_policy": {"atpPolicyForO365": {
-        "status": "ok", "value": [], "stdout": '{"TargetedUsersToProtect": ["%s", "Zebul' % UNCONF_EMAIL}}},
+        "status": "ok", "value": [], "stdout": f'{{"TargetedUsersToProtect": ["{UNCONF_EMAIL}", "Zebul'}}},
     "error-envelope-recognised": lambda: {"exchange_policy": {"antiPhishPolicies": {
         "error": f"command_failed:1 {UNCONF_NAME}", "error_class": "command_error", "return_code": 1,
         "stdout": json.dumps([{"TargetedUsersToProtect": [UNCONF_EMAIL]}]), "stderr": UNCONF_DOMAIN,

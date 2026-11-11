@@ -4,32 +4,46 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from . import auth as auditex_auth
-from .bootstrap import print_doctor_report, run_setup
-from .features import response_disabled_message, response_enabled
-from .guided import build_guided_parser, run_guided
-from .rules import list_rule_inventory, list_rule_packs
-from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.cli_guard import RunArgumentRefusal, guarded_cli, parse_guarded
-from azure_tenant_audit.guarded_io import guard_session, open_private_output
 from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.guarded_io import guard_session, open_private_output
 from azure_tenant_audit.output_redaction import (
-    PROFILE_LOCAL, PROFILE_SHAREABLE, ContextIncompleteError, Snapshot, assert_snapshot_stable, context_for_run,
-    redact_output, snapshot_run,
+    PROFILE_LOCAL,
+    PROFILE_SHAREABLE,
+    ContextIncompleteError,
+    Snapshot,
+    assert_snapshot_stable,
+    context_for_run,
+    redact_output,
+    snapshot_run,
 )
 from azure_tenant_audit.private_io import make_private_dirs, write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 from azure_tenant_audit.versioning import package_version_line
-from .google_workspace.run import GoogleRunConfig, google_doctor, run_google_live, run_google_offline, run_google_probe
 
-from .mcp_server import list_blockers_raw as list_blockers, summarize_run_raw as summarize_run
+from . import auth as auditex_auth
+from .bootstrap import print_doctor_report, run_setup
+from .features import response_disabled_message, response_enabled
+from .google_workspace.run import (
+    GoogleRunConfig,
+    google_doctor,
+    run_google_live,
+    run_google_offline,
+    run_google_probe,
+)
+from .guided import build_guided_parser, run_guided
+from .mcp_server import list_blockers_raw as list_blockers
+from .mcp_server import summarize_run_raw as summarize_run
+from .rules import list_rule_inventory, list_rule_packs
+from .setup_guide import build_setup_guide, render_setup_guide_markdown
 
 REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
 

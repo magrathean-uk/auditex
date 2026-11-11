@@ -5,12 +5,12 @@ helper, so parity is against the old code, not the new code against itself.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import lzma
-from pathlib import Path
 import random
 import zlib
+from copy import deepcopy
+from pathlib import Path
 
 import jsonschema
 import pytest

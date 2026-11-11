@@ -5,19 +5,19 @@ No global identity registry is persisted between operations.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
-from contextvars import ContextVar, Token
-from functools import wraps
 import gc
 import hmac
 import io
 import json
 import os
-from pathlib import Path
 import stat
 import sys
 import threading
-from typing import Iterator
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
+from functools import wraps
+from pathlib import Path
 
 _ORIGINAL_OPEN = os.open
 _CURRENT: ContextVar[GuardContext | None] = ContextVar("auditex_guard_context", default=None)
@@ -269,8 +269,14 @@ class GuardContext:
                 operator = payload.get("operator_inputs", {})
                 if not isinstance(operator, dict):
                     raise UnsafeRunFileError("manifest")
-                from .partner_domains import parse_partner_domains, partner_domains_digest
-                from .sensitive_users import parse_sensitive_users, sensitive_users_digest
+                from .partner_domains import (
+                    parse_partner_domains,
+                    partner_domains_digest,
+                )
+                from .sensitive_users import (
+                    parse_sensitive_users,
+                    sensitive_users_digest,
+                )
                 verified: dict[str, tuple[str, ...] | None] = {}
                 keys: dict[str, bytes | None] = {}
                 for kind, pair in pairs.items():

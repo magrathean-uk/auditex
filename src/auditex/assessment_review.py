@@ -5,11 +5,11 @@ not a ground-truth label, proof of equivalent tests, or a new tenant assessment.
 """
 from __future__ import annotations
 
+import json
+import os
 from collections import defaultdict
 from hashlib import sha256
 from itertools import combinations
-import json
-import os
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -17,7 +17,6 @@ from uuid import UUID
 from azure_tenant_audit.run_files import read_run_file
 
 from .external_assessments import validate_assessment
-
 
 SCHEMA_VERSION = "2026-10-18"
 _DECISIVE_STATUSES = {"pass", "fail"}
@@ -118,7 +117,10 @@ def _external_assessment(path: Path, position: int) -> dict[str, Any]:
 
 
 def _auditex_assessment(run_dir: Path) -> dict[str, Any]:
-    from azure_tenant_audit.contracts import ROOT_REQUIRED_ARTIFACTS, build_validation_report
+    from azure_tenant_audit.contracts import (
+        ROOT_REQUIRED_ARTIFACTS,
+        build_validation_report,
+    )
 
     if not run_dir.is_dir():
         raise ValueError(f"Auditex run directory not found: {run_dir}")

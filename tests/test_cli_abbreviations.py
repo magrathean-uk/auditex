@@ -11,14 +11,21 @@ from auditex import cli as product_cli
 from auditex import mcp_server, rule_assessment
 from auditex.command_runner import SENSITIVE_ARGS
 from auditex.demo import build_demo_parser
-from auditex.google_workspace.run import _SENSITIVE_COMMAND_FLAGS, scrub_google_command_line
+from auditex.google_workspace.run import (
+    _SENSITIVE_COMMAND_FLAGS,
+    scrub_google_command_line,
+)
 from auditex.guided import build_guided_parser
-from auditex.mcp_server import _build_mcp_parser, main as mcp_main
+from auditex.mcp_server import _build_mcp_parser
+from auditex.mcp_server import main as mcp_main
 from azure_tenant_audit import cli as engine_cli
 from azure_tenant_audit.auth_runtime import SENSITIVE_CLI_ARGS
 from azure_tenant_audit.response import RESPONSE_SENSITIVE_ARGS
-from azure_tenant_audit.secret_hygiene import SENSITIVE_ARG_FLAGS, collect_sensitive_argv_values, redact_argv
-
+from azure_tenant_audit.secret_hygiene import (
+    SENSITIVE_ARG_FLAGS,
+    collect_sensitive_argv_values,
+    redact_argv,
+)
 
 SENSITIVE_FLAGS = sorted(SENSITIVE_ARG_FLAGS | SENSITIVE_CLI_ARGS | SENSITIVE_ARGS | RESPONSE_SENSITIVE_ARGS | _SENSITIVE_COMMAND_FLAGS)
 BUILDERS = [

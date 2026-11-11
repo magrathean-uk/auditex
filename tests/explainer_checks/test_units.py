@@ -1,20 +1,22 @@
 """Inherited 75 checker cases, plus strict contract negative controls."""
 import copy
 import json
+
 import pytest
+
 from .chk_b import check_b
 from .chk_c import check_c
 from .chk_d import check_d
-from .chk_e import check_e, nav_targets, paraphrase_eval, verbatim_cover, tok_key
+from .chk_e import check_e, nav_targets, paraphrase_eval, tok_key, verbatim_cover
 from .chk_e2 import check_e2
 from .chk_e3 import check_e3
 from .chk_s import Output, check_s
 from .context import Context
-from .specifics import extract, identifiers
 from .corpus import base_pairs as local_pairs
-from .support import local_resources, wordlist
 from .driver import run_pair
 from .fault_fixtures import fault_pair
+from .specifics import extract, identifiers
+from .support import local_resources, wordlist
 
 
 def out(o):
@@ -301,8 +303,9 @@ def test_ordinary_not_assessed_keeps_missing_evidence_rules():
 
 def test_independent_baseline_own_text_and_all_xref_ranges():
     import re
+
     from . import baseline_text
-    from .support import raw_baselines, read_json, LOCAL
+    from .support import LOCAL, raw_baselines, read_json
     raw = {name: text for name, text in raw_baselines().items() if re.search(r'^#{2,4}\s+MS\.', text, re.M)}
     assert raw, "the pinned raw baseline fixtures are required"
     parsed = baseline_text.load(raw)["policies"]
@@ -355,6 +358,7 @@ def test_resource_injection_and_cache_do_not_hide_edited_evidence():
 
 def test_wordlist_and_data_hashes():
     import hashlib
+
     from .support import LOCAL, read_bytes, read_json
     manifest = read_json(LOCAL / "manifest.json")
     for filename, expected in manifest["files"].items():
@@ -363,6 +367,7 @@ def test_wordlist_and_data_hashes():
 
 def test_independent_baselines_are_the_pinned_raw_sources():
     import hashlib
+
     from .support import LOCAL, raw_baselines, read_json
     expected = read_json(LOCAL / "source-pins.json")["baseline_sha256"]
     files = raw_baselines()

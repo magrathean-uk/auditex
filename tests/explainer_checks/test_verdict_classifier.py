@@ -1,8 +1,10 @@
 """The 115 inherited classifier rows and seven focused controls, ported from S/C."""
 import pytest
+
 from . import verdict_classifier as vc
 from .chk_a import check_a
 from .chk_s import Output
+
 
 class Stub:
     def __init__(self, verdict, requirement="", reason_text=""):

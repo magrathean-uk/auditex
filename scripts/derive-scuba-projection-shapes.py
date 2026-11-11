@@ -28,9 +28,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
-
 from auditex.rule_assessment import canonical, policy_catalogue  # noqa: E402
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 from azure_tenant_audit.collection_markers import NOT_COLLECTED  # noqa: E402
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS  # noqa: E402
 

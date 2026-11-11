@@ -1,39 +1,63 @@
 """Internal ScubaGear export adapter: parsing, projection, proof and surface checks."""
 from __future__ import annotations
 
-from copy import deepcopy
-from hashlib import sha256
 import ast
 import importlib.util
 import inspect
 import json
 import os
-from pathlib import Path
 import random
 import re
 import subprocess
 import sys
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 
 import pytest
 
 from auditex import rule_assessment
 from auditex.rule_assessment import assess_scubagear_export, canonical, policy_catalogue
 from auditex.scuba_projection import (
-    DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS,
-    PACK_ENUM_DOMAINS, PACK_SHAPE_DIGESTS, SCUBA_CAP_EXCLUSION_POLICIES,
-    SCUBA_ROLE_EXCLUSION_POLICIES, _json, _seen_shape, policy_section, rule_policy_section,
+    DEFAULT_MAX_CHARS,
+    DEFAULT_MAX_ITEMS,
+    PACK_ENUM_DOMAINS,
+    PACK_SHAPE_DIGESTS,
+    SCUBA_CAP_EXCLUSION_POLICIES,
+    SCUBA_ROLE_EXCLUSION_POLICIES,
+    Unavailable,
+    _json,
+    _seen_shape,
+    policy_section,
+    rule_policy_section,
 )
 from auditex.scubagear_export import (
-    CA_RESTRICTION_NAMES, NOT_ASSESSED_REASONS, SECTION_LEDGERS, UNMAPPABLE_REGO_POLICIES, VERDICT_MAP,
-    build_baseline, canonicalise_privileged_users, load_export, project_export, prune_section,
-    qualifier_check, redaction_salt, resolve_output_directory,
+    CA_RESTRICTION_NAMES,
+    NOT_ASSESSED_REASONS,
+    SECTION_LEDGERS,
+    UNMAPPABLE_REGO_POLICIES,
+    VERDICT_MAP,
+    build_baseline,
+    canonicalise_privileged_users,
+    load_export,
+    project_export,
+    prune_section,
+    qualifier_check,
+    redaction_salt,
+    resolve_output_directory,
 )
 from auditex.scubagear_prune_proof import (
-    GATE_DIGEST, PINNED_REVISION, PRUNE_PROOF, PRUNE_REASONS, PROOF_VERSION, REGO_SHA256,
-    shape_paths, verdict_of,
+    GATE_DIGEST,
+    PINNED_REVISION,
+    PROOF_VERSION,
+    PRUNE_PROOF,
+    PRUNE_REASONS,
+    REGO_SHA256,
+    shape_paths,
+    verdict_of,
 )
-from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_assessment
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/scubagear-export"
@@ -413,7 +437,7 @@ def test_canonicaliser_rejects_partial_and_unseen_shapes(mutation):
         users[first]["AppId"] = "mock"
     converted, applied, object_ids = canonicalise_privileged_users(users)
     assert not applied and object_ids is None and converted == users
-    with pytest.raises(Exception):
+    with pytest.raises(Unavailable):
         _seen_shape("privileged_users", converted)
 
 
@@ -641,7 +665,7 @@ def test_scubaresults_other_labels_and_testresults_criticalities():
         assert baseline == {ids[0]: "not_assessed"} and reasons == {ids[0]: "other"}
     rows = [{"PolicyId": pid, "RequirementMet": False, "Criticality": criticality,
              "Commandlet": ["Get-Mock"]} for pid, criticality in zip(ids, (
-                 "Should", "Shall", "Should/Not-Implemented", "Shall/3rd Party"))]
+                 "Should", "Shall", "Should/Not-Implemented", "Shall/3rd Party"), strict=False)]
     baseline, reasons, _ = build_baseline(rows, raw, kind="testresults")
     assert [baseline[pid] for pid in ids] == ["fail", "fail", "not_assessed", "not_assessed"]
     assert reasons == {ids[2]: "not_implemented", ids[3]: "third_party"}
@@ -656,11 +680,11 @@ def test_warning_and_fail_comparisons_have_identical_semantics():
     scuba_rows = {"AAD": [{"Controls": [{"Control ID": ids[0], "Result": "Warning"},
                                          {"Control ID": ids[1], "Result": "Fail"}]}]}
     test_rows = [{"PolicyId": pid, "RequirementMet": False, "Criticality": criticality,
-                  "Commandlet": ["Get-Mock"]} for pid, criticality in zip(ids[2:], ("Should", "Shall"))]
+                  "Commandlet": ["Get-Mock"]} for pid, criticality in zip(ids[2:], ("Should", "Shall"), strict=False)]
     baseline = {**build_baseline(scuba_rows, raw, kind="scubaresults")[0],
                 **build_baseline(test_rows, raw, kind="testresults")[0]}
     assert set(baseline) == set(ids) and set(baseline.values()) == {"fail"}
-    assert len({_json(_comparison(pid, row, baseline)) for pid, row in zip(ids, records)}) == 1
+    assert len({_json(_comparison(pid, row, baseline)) for pid, row in zip(ids, records, strict=False)}) == 1
 
 
 def test_warning_and_na_switches_are_independent_and_keep_ledger_failures():
@@ -731,7 +755,7 @@ def test_pruning_proof_shape_and_witness_roundtrip():
             injected = deepcopy(witness)
             _inject_extra(injected)
             if injected != witness:
-                with pytest.raises(Exception):
+                with pytest.raises(Unavailable):
                     _seen_shape(section, injected)
             assert prune_section(section, injected)[0] == witness
             _seen_shape(section, prune_section(section, injected)[0])
@@ -1096,7 +1120,7 @@ def test_replacing_every_privileged_guid_keeps_unrelated_prompt_bytes(tmp_path):
     raw = json.loads(PROVIDER.read_text())
     original = _assess(tmp_path / "original-guid")[2]
     replaced = {}
-    for index, (old, entry) in enumerate(raw["privileged_users"].items(), 1):
+    for index, (_old, entry) in enumerate(raw["privileged_users"].items(), 1):
         new = f"3f2504e0-4f89-41d3-9a0c-{index:012x}"
         replaced[new] = {**entry, "id": new}
     raw["privileged_users"] = replaced
@@ -1254,7 +1278,7 @@ def _spec_paths(node, base=""):
         return paths
     if not isinstance(node, ast.Dict):
         return paths
-    for key, child in zip(node.keys, node.values):
+    for key, child in zip(node.keys, node.values, strict=False):
         if key is None:
             assert isinstance(child, ast.DictComp)
             assert len(child.generators) == 1 and isinstance(child.generators[0].iter, ast.Tuple)
@@ -1479,8 +1503,8 @@ def test_existing_empty_output_dir_becomes_private_and_validation_fails_without_
 
 
 def test_assessment_validation_failure_creates_no_directory(tmp_path, monkeypatch):
-    import azure_tenant_audit.scuba_assessment as assessment
     import auditex.rule_assessment as rules
+    import azure_tenant_audit.scuba_assessment as assessment
     target = tmp_path / "invalid-assessment"
     def reject(_result):
         raise ValueError("synthetic validation failure")
@@ -1827,8 +1851,7 @@ def test_export_environment_is_retained_only_when_recognised(tmp_path, environme
 def test_noncommercial_export_case_bytes_and_prechecks_match_committed_behaviour(
         tmp_path, monkeypatch, source, environment, redact):
     from auditex import scubagear_export
-    from auditex.rule_assessment import precheck_case
-    from auditex.rule_assessment import build_case
+    from auditex.rule_assessment import build_case, precheck_case
     from azure_tenant_audit.value_rules.catalogue import row_for
 
     monkeypatch.delenv('AUDITEX_DISABLE_VALUE_RULES', raising=False)

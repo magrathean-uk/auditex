@@ -15,7 +15,9 @@ import pytest
 
 from azure_tenant_audit.collectors import identity_governance as governance_module
 from azure_tenant_audit.collectors import onedrive_posture as onedrive_module
-from azure_tenant_audit.collectors.identity_governance import IdentityGovernanceCollector
+from azure_tenant_audit.collectors.identity_governance import (
+    IdentityGovernanceCollector,
+)
 from azure_tenant_audit.collectors.onedrive_posture import OneDrivePostureCollector
 
 CANARY = "inline-only-canary-site.example.invalid"

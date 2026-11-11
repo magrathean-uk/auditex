@@ -10,7 +10,6 @@ from typing import Any
 
 from .scuba_projection import Bundle, Unavailable, _plans, _require
 
-
 POWERBI_PLAN = re.compile(r"(POWER_BI|BI_AZURE_P_?[0-9]|PBI_PREMIUM|FABRIC)", re.I)
 # ScubaGear's sentinel has not been confirmed against a never-configured tenant.
 NEVER_CONFIRMED_NULL_SENTINEL = False

@@ -1,12 +1,12 @@
 """Internal run-proof fields never change literal ScubaGear export inputs."""
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
+from test_scubagear_export import PROVIDER
 
 from auditex.rule_assessment import policy_catalogue
 from auditex.scubagear_export import load_export, project_export
-from test_scubagear_export import PROVIDER
 
 
 @pytest.mark.parametrize("state", ["known", "unusable", "not_collected"])

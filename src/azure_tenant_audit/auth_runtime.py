@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from . import auth_context
 from .graph import GraphClient
 from .secret_hygiene import redact_argv, redact_output, sanitize_token_claims
-
 
 SENSITIVE_CLI_ARGS = {
     "--client-secret", "--access-token", "--sensitive-users", "--partner-domains",
@@ -22,7 +22,7 @@ def scrub_command_line(command_line: list[str]) -> list[str]:
 
 def acquire_azure_cli_access_token(
     tenant_id: str | None,
-    log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+    log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
 ) -> str:
     command = [
         "az",
@@ -99,7 +99,7 @@ def acquire_azure_cli_access_token(
 
 def capture_signed_in_context(
     client: GraphClient,
-    log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+    log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
 ) -> dict[str, Any]:
     try:
         me = client.get_json("/me")

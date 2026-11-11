@@ -1,14 +1,14 @@
 """Synthetic C1 bundles and offline vector round trips; no tenant calls."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from hashlib import sha256
 import builtins
 import io
 import json
 import lzma
-from pathlib import Path
 import socket
+from collections import Counter, defaultdict
+from hashlib import sha256
+from pathlib import Path
 
 import pytest
 
@@ -17,7 +17,6 @@ from auditex.scuba_projection import project_run
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 from azure_tenant_audit.value_rules import assess
-
 
 FIXTURES = Path(__file__).parent / "fixtures"
 RAW = json.loads((FIXTURES / "powerplat/raw-cases.json").read_text())

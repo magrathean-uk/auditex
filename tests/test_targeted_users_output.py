@@ -5,9 +5,9 @@ HMAC by exact digest. Local outputs and the local manifest are unchanged.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import pytest

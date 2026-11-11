@@ -14,11 +14,11 @@ from typing import Any
 
 import pytest
 
+from auditex.google_workspace import findings as google_findings
+from auditex.google_workspace.run import run_google_offline
 from azure_tenant_audit import findings as m365_findings
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.findings import _finalize_finding, build_findings
-from auditex.google_workspace import findings as google_findings
-from auditex.google_workspace.run import run_google_offline
 
 REPO = Path(__file__).resolve().parents[1]
 TEMPLATES = json.loads((REPO / "configs" / "finding-templates.json").read_text(encoding="utf-8"))

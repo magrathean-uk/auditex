@@ -6,7 +6,11 @@ from typing import Any
 
 from .ai_context import build_ai_context, build_privacy_block, build_validation_report
 from .api_inventory import build_api_call_inventory
-from .assurance import build_coverage_gap_summary, build_live_readiness_summary, build_surface_coverage_map
+from .assurance import (
+    build_coverage_gap_summary,
+    build_live_readiness_summary,
+    build_surface_coverage_map,
+)
 from .autopilot import build_audit_autopilot_plan
 from .bundle_integrity import BUNDLE_HASHES_PATH, build_bundle_hash_manifest
 from .citations import build_citation_summary, dedupe_citations
@@ -15,10 +19,9 @@ from .data_handling import build_data_handling_summary
 from .evidence_db import build_run_evidence_index
 from .evidence_refs import seal_findings
 from .output import AuditWriter
+from .run_files import unbounded_writer_reads
 from .scope_catalog import build_google_scope_catalog, load_m365_scope_catalog
 from .tenant_identity import canonical_tenant_uuid, resolve_tenant_identity
-from .run_files import unbounded_writer_reads
-
 
 logger = logging.getLogger(__name__)
 

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from hashlib import sha256
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
-from auditex.assessment_review import compare_external_assessments
 from auditex import mcp_server
-
+from auditex.assessment_review import compare_external_assessments
 
 TENANT = "11111111-1111-4111-8111-111111111111"
 OTHER_TENANT = "22222222-2222-4222-8222-222222222222"
@@ -171,8 +170,9 @@ def test_operator_attribution_and_missing_timestamp_are_disclosed(tmp_path: Path
 
 
 def _auditex_bundle(tmp_path: Path) -> Path:
-    from azure_tenant_audit.finalize import finalize_bundle_contract
     from test_finalize_idempotent import _prepare_bundle_for_finalize
+
+    from azure_tenant_audit.finalize import finalize_bundle_contract
 
     writer, kwargs = _prepare_bundle_for_finalize(tmp_path)
     kwargs["bundle_metadata"]["tenant_id"] = TENANT
@@ -310,8 +310,8 @@ def test_legacy_bundle_without_baselines_reports_comparison_gap(tmp_path: Path) 
 
 
 def test_mcp_review_helpers_delegate_in_memory(monkeypatch, tmp_path: Path) -> None:
-    import auditex.external_assessments as external
     import auditex.assessment_review as review
+    import auditex.external_assessments as external
 
     calls = []
     monkeypatch.setattr(external, "import_assessment", lambda source, path, tenant_id=None: calls.append((source, path, tenant_id)) or {"normalized": True})

@@ -5,12 +5,14 @@ import json
 import re
 from pathlib import Path
 
-from azure_tenant_audit.cli import run_offline
-
 from auditex.cli import main as auditex_main
 from auditex.demo import FALLBACK_SAMPLE, DemoOptions, run_demo
 from auditex.explorer import build_explorer_data, render_explorer_html, write_explorer
-from auditex.reporting import verify_enterprise_handoff_pack, write_enterprise_handoff_pack
+from auditex.reporting import (
+    verify_enterprise_handoff_pack,
+    write_enterprise_handoff_pack,
+)
+from azure_tenant_audit.cli import run_offline
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KNOWN_BAD = REPO_ROOT / "examples" / "sample_audit_bundle" / "known_bad_result.json"

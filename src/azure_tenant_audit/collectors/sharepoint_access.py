@@ -150,7 +150,7 @@ class SharePointAccessCollector(Collector):
                 batch_results = None
 
         if batch_results is not None and len(batch_results) == len(fanout_specs):
-            for spec, result in zip(fanout_specs, batch_results):
+            for spec, result in zip(fanout_specs, batch_results, strict=False):
                 endpoint = spec["endpoint"]
                 site = spec["site"]
                 site_id = spec["site_id"]

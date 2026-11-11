@@ -11,10 +11,11 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, TextIO
+from typing import Any, TextIO
 
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.resources import resolve_resource_path
@@ -29,7 +30,7 @@ DEMO_TENANT_NAME = "halcyon"
 DEMO_RUN_NAME = "demo"
 # The demo tenant is a fixed snapshot taken in early October 2026. Judging its devices as of that day (stale sync,
 # operating-system end of life) keeps the story, and its score, the same on every run instead of drifting with the clock.
-DEMO_AS_OF = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+DEMO_AS_OF = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
 SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
 _SEVERITY_COLOURS = {"critical": "1;31", "high": "31", "medium": "33", "low": "36", "info": "37"}
 

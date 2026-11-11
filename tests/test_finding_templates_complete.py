@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-
 _REPO = Path(__file__).resolve().parent.parent
 _FINDINGS_SRC = (_REPO / "src" / "azure_tenant_audit" / "findings.py").read_text(
     encoding="utf-8"

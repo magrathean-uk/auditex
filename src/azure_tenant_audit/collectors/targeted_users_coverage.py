@@ -12,21 +12,26 @@ input, keeps a list reference or raises value-bearing text.
 """
 from __future__ import annotations
 
-from functools import lru_cache
 import hmac
 import json
 import math
 import re
 from collections.abc import Mapping
+from functools import lru_cache
 from typing import Any
 
 from ..collection_gaps import REASON_UNKNOWN, TRUNCATION_REASONS
 from ..sensitive_users import SensitiveUsers
 from ..value_rules.defender_targeted_users import (
-    COVERAGE_KEY, MAX_INPUT_COUNT, SensitiveUsersBinding, membership, minimal_coverage, validate_coverage_shape,
+    COVERAGE_KEY,
+    MAX_INPUT_COUNT,
+    SensitiveUsersBinding,
+    membership,
+    minimal_coverage,
+    validate_coverage_shape,
 )
-from .exchange_defender_commands import ANTI_PHISH_POLICY_FIELDS
 from .anti_phish_admission import ADMITTED, FAILED, admit_response, subtree_healthy
+from .exchange_defender_commands import ANTI_PHISH_POLICY_FIELDS
 
 COLLECTOR = "exchange_policy"
 OPERATION = "antiPhishPolicies"

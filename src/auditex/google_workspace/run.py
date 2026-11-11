@@ -8,18 +8,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.assurance import build_live_readiness_summary
 from azure_tenant_audit.ai_context import build_privacy_block
+from azure_tenant_audit.assurance import build_live_readiness_summary
 from azure_tenant_audit.capability_gate import enrich_capability_row
-from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
-from azure_tenant_audit.offline_replay import absent_section_rows, replay_collector_status, replay_coverage_rows, replay_source
+from azure_tenant_audit.collector_runner import (
+    AuditWriterCollectorAdapter,
+    CollectorRunContext,
+    CollectorRunner,
+)
+from azure_tenant_audit.offline_replay import (
+    absent_section_rows,
+    replay_collector_status,
+    replay_coverage_rows,
+    replay_source,
+)
 from azure_tenant_audit.output import AuditWriter
-from azure_tenant_audit.provider_runtime import ProviderFinalizePlan, write_provider_bundle
+from azure_tenant_audit.provider_runtime import (
+    ProviderFinalizePlan,
+    write_provider_bundle,
+)
 from azure_tenant_audit.resources import resolve_resource_path
-from azure_tenant_audit.secret_hygiene import redact_argv
-from azure_tenant_audit.run import build_coverage_ledger
-from azure_tenant_audit.utils import parse_csv_list
 from azure_tenant_audit.rule_parameters import google_rule_parameters
+from azure_tenant_audit.run import build_coverage_ledger
+from azure_tenant_audit.secret_hygiene import redact_argv
+from azure_tenant_audit.utils import parse_csv_list
 from azure_tenant_audit.waivers import WaiverFileError, apply_waivers, load_waivers
 
 from .auth import (
@@ -30,8 +42,7 @@ from .auth import (
     read_service_account_summary,
     safe_auth_summary,
 )
-from .client import GoogleWorkspaceClient
-from .client import classify_google_error
+from .client import GoogleWorkspaceClient, classify_google_error
 from .collectors import (
     COLLECTOR_SECTIONS,
     DEFAULT_ORDER,
@@ -41,9 +52,12 @@ from .collectors import (
     SUBJECT_SCOPE_USER,
     SUBJECT_SCOPED_COLLECTORS,
 )
-from .findings import DEFAULT_STALE_DEVICE_DAYS, DEFAULT_STALE_USER_DAYS, build_google_findings
+from .findings import (
+    DEFAULT_STALE_DEVICE_DAYS,
+    DEFAULT_STALE_USER_DAYS,
+    build_google_findings,
+)
 from .normalize import build_google_normalized_snapshot
-
 
 LOG = logging.getLogger("auditex.google_workspace")
 _OFFLINE_SAMPLE_METADATA_KEYS = frozenset({"_fixture_provenance"})

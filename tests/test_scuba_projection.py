@@ -1,24 +1,28 @@
 """Projection contract tests use synthetic evidence only; no tenant or web calls."""
 from __future__ import annotations
 
-from copy import deepcopy
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import socket
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 
 import jsonschema
 import pytest
 
 from auditex.cli import main
-from auditex.rule_assessment import policy_catalogue, precheck_case
-from auditex.rule_assessment import assess_run
-from auditex.rule_assessment import build_case, canonical
+from auditex.rule_assessment import (
+    assess_run,
+    build_case,
+    canonical,
+    policy_catalogue,
+    precheck_case,
+)
 from auditex.scuba_projection import project_run
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.collectors.identity import IdentityCollector
 from azure_tenant_audit.scuba_assessment import validate_assessment
-from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
 ROOT = Path(__file__).resolve().parents[1]
 TENANT = '11111111-1111-4111-8111-111111111111'
@@ -121,7 +125,7 @@ def assert_structure(actual, expected):
             assert_structure(actual[key], expected[key])
     elif isinstance(expected, list):
         assert len(actual) == len(expected)
-        for a, b in zip(actual, expected):
+        for a, b in zip(actual, expected, strict=False):
             assert_structure(a, b)
 
 
@@ -322,7 +326,7 @@ PACK_SHAPES = json.loads((ROOT / 'tests/fixtures/scuba-projection-shapes-v7.json
 
 @pytest.mark.parametrize('section', sorted(PACK_SHAPES['sections']))
 def test_forward_golden_complete_section_matches_one_real_pack_shape(complete_bundle, section):
-    from auditex.scuba_projection import _shape, _seen_shape
+    from auditex.scuba_projection import _seen_shape, _shape
     p = project_run(complete_bundle, redact=False)
     if p[section] == NOT_COLLECTED:
         assert section not in EXPECTED
@@ -332,7 +336,7 @@ def test_forward_golden_complete_section_matches_one_real_pack_shape(complete_bu
 
 
 def test_runtime_shapes_and_enum_domains_match_complete_pack_goldens():
-    from auditex.scuba_projection import PACK_SHAPE_DIGESTS, PACK_ENUM_DOMAINS
+    from auditex.scuba_projection import PACK_ENUM_DOMAINS, PACK_SHAPE_DIGESTS
     for section, hashes in PACK_SHAPE_DIGESTS.items():
         assert hashes == sorted(sha256(canonical(v).encode()).hexdigest()
                                 for v in PACK_SHAPES['sections'][section])
@@ -771,9 +775,10 @@ def test_strict_chunk_json_rejects_duplicate_keys(complete_bundle):
 
 
 def test_chunk_iteration_stops_at_scan_row_and_byte_bounds(complete_bundle, monkeypatch):
-    import auditex.scuba_projection as projection
-    from contextlib import contextmanager
     import io
+    from contextlib import contextmanager
+
+    import auditex.scuba_projection as projection
     class Guarded(io.BytesIO):
         def fileno(self):
             return 0
@@ -1160,9 +1165,10 @@ def test_failed_collector_envelope_overrides_populated_endpoint(complete_bundle,
 
 
 def test_chunk_whitespace_and_chunk_count_are_scan_bounded(complete_bundle, monkeypatch):
-    import auditex.scuba_projection as projection
     import io
     from contextlib import contextmanager
+
+    import auditex.scuba_projection as projection
     data = io.BytesIO(b'\n' * 100000 + b'{"servicePlans":[]}\n')
     original = projection._open_chunk
     class Guarded:
@@ -1309,7 +1315,7 @@ def many_users(root, count=500, admins=3, chunked=False):
 
 @pytest.mark.parametrize('chunked', [False, True])
 def test_privileged_users_projects_from_a_large_user_list_within_the_default_budget(complete_bundle, monkeypatch, chunked):
-    from auditex.scuba_projection import Bundle, DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS
+    from auditex.scuba_projection import DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, Bundle
     admin_ids = many_users(complete_bundle, chunked=chunked)
     original = Bundle.operation
     def guarded(self, collector, name):
@@ -1548,7 +1554,11 @@ def test_scan_fields_and_detail_validate_in_both_validators(complete_bundle):
 
 def test_scan_flags_reach_the_projection_and_defaults_match(complete_bundle, monkeypatch, capsys):
     import auditex.rule_assessment as serving
-    from auditex.scuba_projection import DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS
+    from auditex.scuba_projection import (
+        DEFAULT_SCAN_MAX_BYTES,
+        DEFAULT_SCAN_MAX_CHUNKS,
+        DEFAULT_SCAN_MAX_ROWS,
+    )
     seen = []
     def spy(*args, **kwargs):
         seen.append(kwargs)
@@ -1888,7 +1898,7 @@ def test_scuba_config_default_shape_per_family(complete_bundle):
     expected.update({pid: {'M365Environment': 'commercial'} for pid in CONFIG_READERS if pid.startswith('MS.TEAMS.')})
     expected.update({pid: NOT_COLLECTED for pid in CONFIG_READERS if pid.startswith('MS.SECURITYSUITE.')})
     assert {pid: case_config(p, pid) for pid in CONFIG_READERS} == expected
-    for pid, view in expected.items():
+    for _pid, view in expected.items():
         if view != NOT_COLLECTED:
             _seen_shape('scuba_config', view)
     entry = p.report['sections']['scuba_config']
@@ -2629,6 +2639,7 @@ def test_collector_error_vocabulary_covers_every_class_the_engine_writes():
     # Every error class literal under src/azure_tenant_audit: classifier returns, ``error_class`` dict values and keyword
     # arguments, and names ending in error_class. A new one must be added to COLLECTOR_ERROR_CLASSES or it reads unclassified.
     import ast
+
     from azure_tenant_audit.scuba_assessment import COLLECTOR_ERROR_CLASSES
 
     def literals(node):
@@ -2649,7 +2660,7 @@ def test_collector_error_vocabulary_covers_every_class_the_engine_writes():
                 values = set().union(*(literals(r.value.elts[0]) for r in ast.walk(node)
                                        if isinstance(r, ast.Return) and isinstance(r.value, ast.Tuple)))
             elif isinstance(node, ast.Dict):
-                values = set().union(*(literals(v) for k, v in zip(node.keys, node.values)
+                values = set().union(*(literals(v) for k, v in zip(node.keys, node.values, strict=False)
                                        if isinstance(k, ast.Constant) and k.value == 'error_class'))
             elif isinstance(node, ast.keyword) and node.arg and node.arg.endswith('error_class'):
                 values = literals(node.value)

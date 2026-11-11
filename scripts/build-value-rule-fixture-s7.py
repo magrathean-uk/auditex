@@ -5,13 +5,13 @@ Writes manifest-s7.json beside the fixture; no machine paths are embedded.
 """
 from __future__ import annotations
 
-from collections import Counter
-from hashlib import sha256
 import importlib.util
 import json
 import lzma
-from pathlib import Path
 import sys
+from collections import Counter
+from hashlib import sha256
+from pathlib import Path
 
 POLICIES = frozenset({
     *(f"MS.AAD.7.{n}v1" for n in range(4, 10)),

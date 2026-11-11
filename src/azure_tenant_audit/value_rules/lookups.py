@@ -6,10 +6,18 @@ SS 4.1 are code (spec section 2).
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from .helpers import _env_cell, _flag, _label, _list_state, _scan_bad_wins, _scan_good_wins
-from .record import BAD_SECTION_LIST, EMPTY_SECTION, ITEM_LABEL, ITEM_VALUE, _A, _rec
+from .helpers import (
+    _env_cell,
+    _flag,
+    _label,
+    _list_state,
+    _scan_bad_wins,
+    _scan_good_wins,
+)
+from .record import _A, BAD_SECTION_LIST, EMPTY_SECTION, ITEM_LABEL, ITEM_VALUE, _rec
 
 
 # ---- violation evaluators: per object 'bad', 'clear' or 'unusable' ----

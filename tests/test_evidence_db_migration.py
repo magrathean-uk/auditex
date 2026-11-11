@@ -21,13 +21,12 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from azure_tenant_audit.evidence_db import build_run_evidence_index
-from azure_tenant_audit.finalize import finalize_bundle_contract
-
 # Re-use the bundle prep from C1 — same shape, same offline sample, no
 # duplicated boilerplate.
 from test_finalize_idempotent import _prepare_bundle_for_finalize
 
+from azure_tenant_audit.evidence_db import build_run_evidence_index
+from azure_tenant_audit.finalize import finalize_bundle_contract
 
 # Tables the rebuild must produce, paired with the columns those tables
 # must have (column NAME only — types/constraints are exercised by the

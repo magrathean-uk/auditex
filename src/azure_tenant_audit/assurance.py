@@ -4,9 +4,14 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
-from .collection_gaps import collector_gap_reason, list_truncations, section_gap_records, section_gap_summary, truncation_summary
+from .collection_gaps import (
+    collector_gap_reason,
+    list_truncations,
+    section_gap_records,
+    section_gap_summary,
+    truncation_summary,
+)
 from .evidence_gates import build_evidence_gate_summary
-
 
 _GOOGLE_SURFACES = {
     "google_directory": ("identity",),

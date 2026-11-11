@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import tracemalloc
+from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -14,7 +14,11 @@ from azure_tenant_audit.collectors.base import run_graph_endpoints
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.graph import GraphError
-from azure_tenant_audit.normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
+from azure_tenant_audit.normalize import (
+    build_ai_safe_summary,
+    build_normalization_diagnostics,
+    build_normalized_snapshot,
+)
 from azure_tenant_audit.perf_runtime import EndpointAccumulator
 
 

@@ -1,25 +1,25 @@
 """Stage-8 Power Platform vectors, rule-view shapes, privacy and pinned oracle."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from copy import deepcopy
-from hashlib import sha256
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
+from collections import Counter, defaultdict
+from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 
 import pytest
+from test_value_rules_oracle import _outcome_v3, pinned  # noqa: F401 - shared pytest fixture
+from test_value_rules_vectors import STAGE8_POLICIES, _rows, _strip_names
 
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
-from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
+from azure_tenant_audit.value_rules import as_pack_response, assess, cells_for
 from azure_tenant_audit.value_rules.catalogue import row_for
 from azure_tenant_audit.value_rules.record import checked
-from test_value_rules_oracle import _outcome_v3, pinned  # noqa: F401 - shared pytest fixture
-from test_value_rules_vectors import _rows, _strip_names, STAGE8_POLICIES
 
 FIXTURE = Path(__file__).parent / "fixtures/value-rules/vectors-s8.jsonl.xz"
 MANIFEST = FIXTURE.with_name("manifest-s8.json")
@@ -144,9 +144,10 @@ def test_uncollected_markers_precede_rule_values(policy):
                                                          ("null", "section_not_a_list")])
 def test_served_outputs_and_logs_do_not_contain_rule_view_evidence(
         tmp_path, monkeypatch, caplog, coverage_shape, coverage_cell):
+    from test_model_serving import fake_projection
+
     from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import fake_projection
 
     canary, display_name = "s8.person@example.invalid", "Stage Eight Canary Display Name"
     sections = {"tenant_id": canary,

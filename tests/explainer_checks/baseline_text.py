@@ -83,7 +83,7 @@ def load(read_text):
             if cur_item is not None:
                 t = plain(cur_item)
                 if t:
-                    lines.append((t, False))
+                    lines.append((t, False))  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
                 cur_item = None
         for line in instr.get(pid, []):
             st = line.strip()

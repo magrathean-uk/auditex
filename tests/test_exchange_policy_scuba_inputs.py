@@ -1,17 +1,17 @@
 """Exchange SCuBA inputs from synthetic cmdlet responses; no tenant or PowerShell."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.adapters.read_guard import check_command
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
 from azure_tenant_audit.detection_coverage import build_detection_signals
-from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -145,7 +145,7 @@ def test_collector_output_reaches_rule_and_model_views(monkeypatch, tmp_path):
 
 def test_old_select_lists_withhold_both_views(tmp_path):
     manifest(tmp_path)
-    for section, (name, row) in SECTIONS.items():
+    for _section, (name, row) in SECTIONS.items():
         operation(tmp_path, name, [{key: value for key, value in row.items() if key not in {"Name", "Identity"}}])
     projection = project_run(tmp_path, redact=False)
     for section in SECTIONS:

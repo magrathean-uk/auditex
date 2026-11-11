@@ -1,8 +1,8 @@
 """Offline Defender / EOP collector contract; no PowerShell or tenant connection."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -12,7 +12,6 @@ from azure_tenant_audit.adapters.read_guard import check_command
 from azure_tenant_audit.collectors import exchange_defender_commands as defender
 from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
 from azure_tenant_audit.secret_hygiene import redact_command_string
-
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW_OPERATIONS = (
@@ -115,7 +114,7 @@ def test_defender_rule_recipient_lists_are_minimised_before_entering_payload(mon
     nulls = {key: None for key in RECIPIENT_KEYS}
     scalars = {key: planted for key in RECIPIENT_KEYS}
     objects = {key: {"Address": planted} for key in RECIPIENT_KEYS}
-    empty = dict(zip(RECIPIENT_KEYS, ([], "", {}, None)))
+    empty = dict(zip(RECIPIENT_KEYS, ([], "", {}, None), strict=False))
     result, _ = _run(monkeypatch, **{operation: {"value": [row, nulls, scalars, objects, empty, "malformed-row"]}})
     assert planted not in json.dumps(result.payload)
     command = dict(ExchangePolicyCollector.command_collectors)[operation]

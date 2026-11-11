@@ -25,10 +25,15 @@ from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.private_io import write_private_text
-from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guarded_operation, read_guarded_bytes
 from azure_tenant_audit.collection_gaps import SECTION_GAP_REASON_TEXT
 from azure_tenant_audit.evidence_gates import collectors_with_successful_reads
+from azure_tenant_audit.guarded_io import (
+    UnsafeRunFileError,
+    current_context,
+    guarded_operation,
+    read_guarded_bytes,
+)
+from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.resources import load_json_resource, resolve_resource_path
 
 from .run_bundle import RunBundle

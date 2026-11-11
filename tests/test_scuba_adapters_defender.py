@@ -1,19 +1,23 @@
 """Offline run-path contract for Defender's in-memory rule evidence."""
 from __future__ import annotations
 
+import importlib
+import json
 from collections import Counter
 from copy import deepcopy
 from hashlib import sha256
-import importlib
-import json
 from pathlib import Path
 
 import pytest
 
 from auditex.rule_assessment import canonical
 from auditex.scuba_adapters_defender import ADAPTERS, DEFENDER_ADAPTERS, SECTION_KEYS
-from auditex.scuba_projection import Bundle, NOT_COLLECTED, PACK_SHAPE_DIGESTS, project_run
-
+from auditex.scuba_projection import (
+    NOT_COLLECTED,
+    PACK_SHAPE_DIGESTS,
+    Bundle,
+    project_run,
+)
 
 SCOPE = (
     "SentTo", "SentToMemberOf", "RecipientDomainIs",
@@ -397,7 +401,10 @@ def test_adapter_copies_nested_values_and_drops_unselected_fields(tmp_path, monk
 
 def test_anti_phish_adapter_keeps_settings_binds_the_summary_and_never_the_target_list(tmp_path, monkeypatch):
     from auditex.scuba_projection import PrivateSnapshot
-    from azure_tenant_audit.value_rules.defender_targeted_users import COVERAGE_KEY, SensitiveUsersBinding
+    from azure_tenant_audit.value_rules.defender_targeted_users import (
+        COVERAGE_KEY,
+        SensitiveUsersBinding,
+    )
 
     leak = "target-leak@example.invalid"
     digest = "ab" * 32

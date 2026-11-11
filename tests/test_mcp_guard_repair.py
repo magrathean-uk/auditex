@@ -250,8 +250,8 @@ def test_verifier_reports_unsafe_listed_artifact(tmp_path: Path, kind: str) -> N
 def test_verifier_streams_files_above_reader_limits(
     tmp_path: Path, small_limits: None, monkeypatch: pytest.MonkeyPatch, relative: str,
 ) -> None:
-    from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
     from azure_tenant_audit import run_files
+    from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
 
     monkeypatch.setattr(run_files, "MAX_RUN_FILE_BYTES", 256)
     artifact = tmp_path / relative

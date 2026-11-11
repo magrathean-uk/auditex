@@ -15,7 +15,11 @@ from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
 from .provider_registry import provider_collectors
 from .resources import list_resource_files, resolve_resource_path
 from .run_files import UnsafeRunFileError, read_run_file, unbounded_writer_reads
-from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
+from .tenant_identity import (
+    IDENTITY_FIELDS,
+    decode_identity_metadata,
+    reconcile_tenant_identity,
+)
 from .waivers import has_matching_waiver, is_accepted_status
 
 CONTRACT_VERSION = "2026-11-08"

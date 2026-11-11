@@ -6,20 +6,31 @@ no pack/vector rows are imported.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
-from azure_tenant_audit.collectors.app_consent import AppConsentCollector, RISKY_RESOURCE_APP_IDS
+from azure_tenant_audit.collectors.app_consent import (
+    RISKY_RESOURCE_APP_IDS,
+    AppConsentCollector,
+)
 from azure_tenant_audit.collectors.auth_methods import AuthMethodsCollector
 from azure_tenant_audit.collectors.consent_policy import ConsentPolicyCollector
 from azure_tenant_audit.collectors.identity import IdentityCollector
 from azure_tenant_audit.config import AuthConfig
-from azure_tenant_audit.graph import GraphClient, GraphError, graph_url, read_only_violation
-from azure_tenant_audit.scuba_assessment import COLLECTOR_ERROR_CLASSES, collector_error_class
+from azure_tenant_audit.graph import (
+    GraphClient,
+    GraphError,
+    graph_url,
+    read_only_violation,
+)
+from azure_tenant_audit.scuba_assessment import (
+    COLLECTOR_ERROR_CLASSES,
+    collector_error_class,
+)
 from azure_tenant_audit.secret_hygiene import SENSITIVE_KEY_RE
 
 SETTINGS = "https://graph.microsoft.com/beta/settings"

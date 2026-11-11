@@ -2,16 +2,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import subprocess
 import sys
 import sysconfig
+from pathlib import Path
 
 import pytest
-
 from test_guarded_admission import ADDRESS, KEY, private_run  # noqa: F401 - shared fixture
 from test_secret_cli_matrix import _pythons
-
 
 _CHILD = r'''
 import sys

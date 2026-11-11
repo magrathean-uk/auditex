@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import pytest
 
-from azure_tenant_audit.collectors.base import _classify_graph_error, run_graph_endpoints
-from azure_tenant_audit.config import AuthConfig
-from azure_tenant_audit.graph import GRAPH_ROOT, INCOMPLETE_EVIDENCE, GraphClient, GraphError
 from azure_tenant_audit.chunk_reader import iter_endpoint_records
 from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter
+from azure_tenant_audit.collectors.base import (
+    _classify_graph_error,
+    run_graph_endpoints,
+)
+from azure_tenant_audit.config import AuthConfig
+from azure_tenant_audit.graph import (
+    GRAPH_ROOT,
+    INCOMPLETE_EVIDENCE,
+    GraphClient,
+    GraphError,
+)
 from azure_tenant_audit.output import AuditWriter
 
 

@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-from collections import Counter
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
-import re
 from typing import Any
 
-from . import break_glass
-from . import endpoint_posture
-from . import exchange_protection
-from . import external_sharing
+from . import break_glass, endpoint_posture, exchange_protection, external_sharing
 from . import privileged_roles as privileged_roles_artifact
 from .chunk_reader import iter_endpoint_records
 from .collection_gaps import (
@@ -32,19 +28,20 @@ from .detection_coverage import build_detection_signals
 from .directory_relationships import normalize_directory_relationships
 from .effective_admins import (
     SECTION as EFFECTIVE_ADMIN_SECTION,
+)
+from .effective_admins import (
     AdminSetEvidence,
-    admin_scope as build_admin_scope,
     build_effective_admin_set,
 )
+from .effective_admins import (
+    admin_scope as build_admin_scope,
+)
 from .friendly_names import build_friendly_name_catalog
-from .value_rules.defender_targeted_users import shaped_coverage
 from .identity_controls import (
     EVIDENCE_ABSENT,
     EVIDENCE_BLOCKED,
     EVIDENCE_COLLECTED,
     EVIDENCE_TRUNCATED,
-    KIND as IDENTITY_CONTROL_KIND,
-    SECTION as IDENTITY_CONTROL_SECTION,
     Evidence,
     compact_targeting,
     evaluate_administrator_mfa,
@@ -53,7 +50,13 @@ from .identity_controls import (
     evaluate_user_consent,
     policy_targeting,
 )
-
+from .identity_controls import (
+    KIND as IDENTITY_CONTROL_KIND,
+)
+from .identity_controls import (
+    SECTION as IDENTITY_CONTROL_SECTION,
+)
+from .value_rules.defender_targeted_users import shaped_coverage
 
 # Detection coverage is assessed for Microsoft 365 runs that collected any of these surfaces.
 _DETECTION_SOURCE_COLLECTORS = (
@@ -1216,7 +1219,7 @@ def _authorization_policy_fields(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_identity_control_verdicts(
-    sources: "_NormalizationSources",
+    sources: _NormalizationSources,
     collector_payloads: dict[str, dict[str, Any]],
     *,
     users: list[dict[str, Any]],
@@ -1301,7 +1304,7 @@ def _build_identity_control_verdicts(
 
 
 def _build_effective_admin_records(
-    sources: "_NormalizationSources",
+    sources: _NormalizationSources,
     collector_payloads: dict[str, dict[str, Any]],
     result_rows: list[dict[str, Any]],
     *,
@@ -3009,7 +3012,7 @@ def build_normalized_snapshot(
     if effective_admin_records:
         records_by_section[EFFECTIVE_ADMIN_SECTION] = effective_admin_records
 
-    for key, value in graph_summary.items():
+    for _key, value in graph_summary.items():
         if value:
             # Make graph summary available in snapshot-level counts without inventing a separate section.
             pass

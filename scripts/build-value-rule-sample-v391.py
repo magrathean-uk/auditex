@@ -14,11 +14,11 @@ fields the replay compares.
 """
 from __future__ import annotations
 
-from hashlib import sha256
 import json
 import lzma
-from pathlib import Path
 import sys
+from hashlib import sha256
+from pathlib import Path
 
 KEEP = ("policy", "sections", "criticality", "rule_verdict", "rule_cell", "rule_reason_code", "rule_reason_text",
         "rule_cited_sections", "gold_verdict", "gold_response", "disagreement", "divergence_id", "vector_id",

@@ -2,16 +2,27 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator, Mapping
-from datetime import datetime, timezone
+from collections.abc import Iterable, Iterator, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from azure_tenant_audit.baselines import rule_inputs_gap, rule_judged_on_inputs, unmet_rule_collectors
-from azure_tenant_audit.bundle_integrity import integrity_failed, manifest_digest_problem, normalize_digest
+from azure_tenant_audit.baselines import (
+    rule_inputs_gap,
+    rule_judged_on_inputs,
+    unmet_rule_collectors,
+)
+from azure_tenant_audit.bundle_integrity import (
+    integrity_failed,
+    manifest_digest_problem,
+    normalize_digest,
+)
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
-from azure_tenant_audit.rule_parameters import recorded_rule_parameters, rule_parameter_gap
+from azure_tenant_audit.rule_parameters import (
+    recorded_rule_parameters,
+    rule_parameter_gap,
+)
 from azure_tenant_audit.run_files import read_run_file
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
@@ -26,12 +37,12 @@ def _parse_utc(value: Any) -> datetime | None:
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
         try:
-            parsed = datetime.strptime(value, "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
+            parsed = datetime.strptime(value, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
         except ValueError:
             return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _run_metadata(run_dir: Path, expected_digest: str | None = None) -> dict[str, Any]:
@@ -68,7 +79,7 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     tenant_ids = [
         (canonical_tenant_uuid(run.get("tenant_id")) or run.get("tenant_id"))
         if platform == "m365" else (run.get("tenant_id") if run.get("tenant_id") != "my_customer" else None)
-        for run, platform in zip(runs, platforms)
+        for run, platform in zip(runs, platforms, strict=False)
     ]
     tenant_names = [run.get("tenant_name") for run in runs]
     identities = [run.get("tenant_identity") or {} for run in runs]
@@ -86,7 +97,7 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     }
     if any(identity.get("status") == "conflict" for identity in identities):
         return {**context, "gate": "tenant_identity_conflict", "identity_basis": "conflict", "identity_verified": False}
-    established_uuids = {canonical_tenant_uuid(value) for value, platform in zip(tenant_ids, platforms) if platform == "m365"}
+    established_uuids = {canonical_tenant_uuid(value) for value, platform in zip(tenant_ids, platforms, strict=False) if platform == "m365"}
     established_uuids.discard(None)
     if same_platform and len(established_uuids) > 1:
         return {**context, "gate": "tenant_id_mismatch", "identity_basis": "conflicting_tenant_ids", "identity_verified": False}
@@ -106,7 +117,7 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     # A display name is only a legacy fallback when known immutable IDs do not
     # contradict each other. Different tenants can have the same display name.
     known_tenant_ids = {tenant_id for tenant_id in tenant_ids if tenant_id}
-    domains = [str(run.get("workspace_domain") or identity.get("domain") or "").lower() for run, identity in zip(runs, identities)]
+    domains = [str(run.get("workspace_domain") or identity.get("domain") or "").lower() for run, identity in zip(runs, identities, strict=False)]
     if len(known_tenant_ids) <= 1:
         if len({domain for domain in domains if domain}) > 1:
             return {**context, "identity_basis": "different_domain_aliases"}
@@ -130,7 +141,7 @@ def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         list(runs),
         key=lambda item: (
             item.get("_created_at") is None,
-            item.get("_created_at") or datetime.max.replace(tzinfo=timezone.utc),
+            item.get("_created_at") or datetime.max.replace(tzinfo=UTC),
             str(item.get("run_id") or item.get("path") or ""),
         ),
     )
@@ -215,7 +226,7 @@ def compare_run_directories(
     """
     paths = [Path(run_dir) for run_dir in run_dirs]
     digests = _expected_digests(paths, expect_manifest_sha256)
-    runs = [_run_metadata(path, digest) for path, digest in zip(paths, digests)]
+    runs = [_run_metadata(path, digest) for path, digest in zip(paths, digests, strict=False)]
     ordered_runs = _sort_runs(runs)
     compare_context = _tenant_gate(ordered_runs)
     ordered_runs_public = [_public_run(run) for run in ordered_runs]
@@ -230,7 +241,7 @@ def compare_run_directories(
         )
 
     adjacent_diffs: list[dict[str, Any]] = []
-    for left_run, right_run in zip(ordered_runs, ordered_runs[1:]):
+    for left_run, right_run in zip(ordered_runs, ordered_runs[1:], strict=False):
         adjacent_diffs.append(
             _compare_pair(left_run, right_run, compare_context, allow_cross_tenant=allow_cross_tenant, classic=classic)
         )

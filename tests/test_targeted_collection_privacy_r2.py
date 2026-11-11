@@ -12,10 +12,10 @@ on an import. Constructed data only: no tenant, network, PowerShell or model.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -94,7 +94,7 @@ ANCESTORS = {
         "value": [{"Identity": "T", "Blob": {"b": json.dumps(json.dumps(_target()))}}]}}},
     "known-op-escaped-key-below-mapping": lambda: {"exchange_policy": {"transportConfig": {
         "status": "ok", "reason": f"{UNCONF_NAME}",
-        "value": [{"Identity": "T", "Blob": {"b": '{"\\u0054argetedUsersToProtect":["%s"]}' % UNCONF_EMAIL}}]}}},
+        "value": [{"Identity": "T", "Blob": {"b": f'{{"\\u0054argetedUsersToProtect":["{UNCONF_EMAIL}"]}}'}}]}}},
     "other-collector-op": lambda: {"legacy_export": {
         "someOp": {"error": f"failed for {UNCONF_NAME}", "value": [_target()]},
         "otherOp": {"status": "ok", "value": [{"id": "x-1", "note": "Ordinary unrelated text"}]}}},

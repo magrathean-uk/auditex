@@ -94,7 +94,7 @@ def confine_value(value: Any, *, argument: str = "path", root: Path | None = Non
     return confine_path(value, argument=argument, root=root)
 
 
-def confine_handler(entry: "McpToolEntry", handler: Callable[..., Any]) -> Callable[..., Any]:
+def confine_handler(entry: McpToolEntry, handler: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a tool handler so its declared path arguments are confined before it runs.
 
     ``entry.name_args`` (tenant and run names) are validated as plain names. ``entry.path_args`` are always confined, defaults included. ``entry.resource_args`` name inputs

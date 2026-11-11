@@ -7,7 +7,6 @@ providers and receives an empty mapping; explicit caller registries still work.
 from collections.abc import Callable, Mapping
 from typing import Any
 
-
 _loaders: dict[str, Callable[[], Mapping[str, Any]]] = {}
 
 

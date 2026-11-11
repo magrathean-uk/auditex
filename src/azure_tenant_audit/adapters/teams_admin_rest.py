@@ -2,19 +2,18 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 import json
 import math
 import socket
 import time
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from threading import Event, Thread
 from urllib.parse import urlsplit
 
 import requests
 
 from .base import Adapter, AdapterMetadata
-
 
 TEAMS_ADMIN_SCOPE = "48ac35b8-9aa8-4d74-927d-1f4a14a0b239/.default"
 TEAMS_ADMIN_BASE = {
@@ -214,7 +213,7 @@ def _retry_after(value):
         seconds = float(value)
     except (TypeError, ValueError):
         try:
-            seconds = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+            seconds = (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
         except (TypeError, ValueError, OverflowError):
             seconds = 1.0
     return min(60.0, max(0.0, seconds)) if math.isfinite(seconds) else 1.0

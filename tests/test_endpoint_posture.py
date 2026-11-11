@@ -1,7 +1,7 @@
 """Parsing and thresholds behind the device, update and anti-malware rules (no tenant, no clock)."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -9,7 +9,7 @@ import pytest
 from azure_tenant_audit import endpoint_posture as ep
 from azure_tenant_audit.secret_hygiene import SENSITIVE_KEY_RE
 
-NOW = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
 
 
 def _ago(days: float) -> str:
@@ -28,9 +28,9 @@ def test_booleans_are_read_from_booleans_and_their_text_and_nothing_else(value: 
 
 
 def test_timestamps_are_utc_and_unparseable_ones_are_none() -> None:
-    assert ep.parse_timestamp("2026-10-01T10:00:00Z") == datetime(2026, 10, 1, 10, tzinfo=timezone.utc)
-    assert ep.parse_timestamp("2026-10-01T10:00:00+01:00") == datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
-    assert ep.parse_timestamp("2026-10-01T10:00:00") == datetime(2026, 10, 1, 10, tzinfo=timezone.utc)
+    assert ep.parse_timestamp("2026-10-01T10:00:00Z") == datetime(2026, 10, 1, 10, tzinfo=UTC)
+    assert ep.parse_timestamp("2026-10-01T10:00:00+01:00") == datetime(2026, 10, 1, 9, tzinfo=UTC)
+    assert ep.parse_timestamp("2026-10-01T10:00:00") == datetime(2026, 10, 1, 10, tzinfo=UTC)
     assert [ep.parse_timestamp(value) for value in ("", "yesterday", None, 5)] == [None] * 4
 
 

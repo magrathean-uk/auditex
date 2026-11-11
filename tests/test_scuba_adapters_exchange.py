@@ -1,12 +1,12 @@
 """Synthetic Exchange adapter checks; no tenant access or network calls."""
 from __future__ import annotations
 
+import json
+import sys
 from collections import Counter
 from copy import deepcopy
-import json
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 import pytest
 

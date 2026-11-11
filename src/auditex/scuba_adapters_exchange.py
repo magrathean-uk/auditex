@@ -4,7 +4,13 @@ from __future__ import annotations
 from typing import Any
 
 from auditex.scuba_projection import (
-    Bundle, Unavailable, _boolean, _fields, _nullable_text, _strings, _text,
+    Bundle,
+    Unavailable,
+    _boolean,
+    _fields,
+    _nullable_text,
+    _strings,
+    _text,
 )
 
 

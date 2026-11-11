@@ -13,8 +13,15 @@ from auditex.explorer import _baselines as explorer_baselines
 from auditex.google_workspace import findings as google_findings
 from auditex.rules import list_rule_packs
 from azure_tenant_audit import baselines
-from azure_tenant_audit.baselines import BASELINE_FRAMEWORK_KEYS, build_baseline_alignment
-from azure_tenant_audit.contracts import _KNOWN_FRAMEWORK_KEYS, _validate_finding_framework_mappings, _walk_sensitive_ai_safe
+from azure_tenant_audit.baselines import (
+    BASELINE_FRAMEWORK_KEYS,
+    build_baseline_alignment,
+)
+from azure_tenant_audit.contracts import (
+    _KNOWN_FRAMEWORK_KEYS,
+    _validate_finding_framework_mappings,
+    _walk_sensitive_ai_safe,
+)
 from azure_tenant_audit.cyber_essentials import (
     CE_FRAMEWORK_KEY,
     REQUIREMENT_STATUSES,

@@ -13,7 +13,10 @@ from typing import Any
 import pytest
 
 from azure_tenant_audit.collection_gaps import SECTION_SCOPED, section_gap_records
-from azure_tenant_audit.collectors._endpoint_reads import collector_partial, protection_state_fanout
+from azure_tenant_audit.collectors._endpoint_reads import (
+    collector_partial,
+    protection_state_fanout,
+)
 
 CANARY = "inline-only-device-canary"
 PRIVATE = "private-operator-canary@example.invalid"

@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 
 import pytest
+from support import RunBundleBuilder, make_contract_valid
 
 from auditex import cli as auditex_cli
 from auditex import guided
 from auditex.guided import build_guided_parser
-from support import RunBundleBuilder, make_contract_valid
 
 
 def _bundle(base, name: str = "run-a") -> str:
@@ -779,10 +779,11 @@ def test_guided_run_reuses_saved_local_app_state(monkeypatch, tmp_path) -> None:
 
 
 def test_guided_no_exchange_excludes_policy_even_from_explicit_list(monkeypatch, tmp_path):
+    from pathlib import Path
+
     from azure_tenant_audit import cli as tenant_cli
     from azure_tenant_audit.config import CollectorConfig
     from azure_tenant_audit.run import build_live_run_plan
-    from pathlib import Path
 
     seen = []
     monkeypatch.setattr(guided, "_saved_value", lambda *args: None)
@@ -813,6 +814,7 @@ def test_guided_no_exchange_excludes_policy_even_from_explicit_list(monkeypatch,
                                       ['--collectors', 'identity,exchange']])
 def test_guided_auth_mode_selection(monkeypatch, tmp_path, flow, include_exchange, non_interactive, selection):
     from pathlib import Path
+
     from azure_tenant_audit import cli as tenant_cli
     from azure_tenant_audit.config import CollectorConfig
     from azure_tenant_audit.run import build_live_run_plan

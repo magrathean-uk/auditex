@@ -7,7 +7,7 @@ Only closed rule/config names can enter the constant reason templates.
 from __future__ import annotations
 
 from .helpers import _p2_gate
-from .record import BAD_SECTION_LIST, EMPTY_SECTION, ITEM_VALUE, ITEM_LABEL, _A, _rec
+from .record import _A, BAD_SECTION_LIST, EMPTY_SECTION, ITEM_LABEL, ITEM_VALUE, _rec
 
 
 def _roles_cfg(sections, key):

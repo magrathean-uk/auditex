@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 POLICIES = {"MS.EXO.3.1v1", "MS.EXO.4.1v1", "MS.EXO.4.2v1", "MS.EXO.4.3v1", "MS.EXO.4.4v1",
             "MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1", "MS.SECURITYSUITE.7.1v1",

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ..adapters import get_adapter
 from ..collection_gaps import (
-    REASON_TEAMS_POWERSHELL_NOT_SUPPORTED, REASON_TEAMS_TOKEN_UNAVAILABLE,
-    SECTION_GAP_REASON_TEXT, SECTION_SCOPED,
+    REASON_TEAMS_POWERSHELL_NOT_SUPPORTED,
+    REASON_TEAMS_TOKEN_UNAVAILABLE,
+    SECTION_GAP_REASON_TEXT,
+    SECTION_SCOPED,
 )
 from .base import Collector, CollectorResult
-
 
 TEAMS_OPERATIONS: tuple[str, ...] = (
     "tenantFederationConfiguration",
@@ -60,11 +62,14 @@ class TeamsPolicyCollector(Collector):
         from urllib.parse import urlsplit
 
         from ..adapters.teams_admin_rest import (
-            TEAMS_ADMIN_BASE, TEAMS_ADMIN_SCOPE, TEAMS_READ_PATHS, certificate_token,
+            TEAMS_ADMIN_BASE,
+            TEAMS_ADMIN_SCOPE,
+            TEAMS_READ_PATHS,
+            certificate_token,
         )
         from ..graph import GRAPH_ROOT, GraphClient
 
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
+        log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
         client = context.get("client")
         manifest = context.get("manifest") or {}
         environment = context.get("environment") or context.get("m365_environment") or manifest.get("environment")

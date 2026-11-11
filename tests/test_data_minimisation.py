@@ -5,10 +5,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from auditex.google_workspace.client import GoogleWorkspaceClient, minimise_gmail_settings
+from auditex.google_workspace.client import (
+    GoogleWorkspaceClient,
+    minimise_gmail_settings,
+)
 from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
 from auditex.google_workspace.normalize import build_google_normalized_snapshot
-from azure_tenant_audit.collectors.mailbox_forwarding import MailboxForwardingCollector, minimise_mailbox_settings
+from azure_tenant_audit.collectors.mailbox_forwarding import (
+    MailboxForwardingCollector,
+    minimise_mailbox_settings,
+)
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
 VACATION_BODY = "I am away until the 3rd. Call Dana on 07700 900123 about the Acme merger."
@@ -81,7 +87,7 @@ class _GmailSettings:
 
 
 class _Gmail:
-    def users(self) -> "_Gmail":
+    def users(self) -> _Gmail:
         return self
 
     def settings(self) -> _GmailSettings:
@@ -382,7 +388,10 @@ def test_writer_strips_the_text_from_every_data_file_it_writes(tmp_path: Path) -
 
 
 def test_custom_profile_payload_is_stripped_wherever_it_is_written() -> None:
-    from azure_tenant_audit.data_minimisation import minimise_device_configurations, minimise_user_text
+    from azure_tenant_audit.data_minimisation import (
+        minimise_device_configurations,
+        minimise_user_text,
+    )
 
     record = {"id": "cp", "@odata.type": "#microsoft.graph.macOSCustomConfiguration", "payloadFileName": "a.mobileconfig", "payload": "c2VjcmV0"}
     for result in (minimise_device_configurations({"value": [record]})["value"][0], minimise_user_text({"value": [record]})["value"][0]):

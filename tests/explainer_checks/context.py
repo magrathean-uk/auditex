@@ -19,9 +19,10 @@ import re
 from collections import OrderedDict
 
 from . import baseline_text
+from .shared_reason import FAULT_ENTRY, NOT_IMPLEMENTED_ENTRY, SHARED_CODES
 from .specifics import extract, identifiers
 from .textnorm import norm, sentence_split
-from .shared_reason import FAULT_ENTRY, NOT_IMPLEMENTED_ENTRY, SHARED_CODES
+
 
 class Resources:
     """Explicit, read-only checker inputs. No checkout or system-dictionary discovery.

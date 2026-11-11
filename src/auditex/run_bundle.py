@@ -6,9 +6,16 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.run_files import UnsafeRunFileError, open_run_file, read_run_file
 from azure_tenant_audit.guarded_io import guarded_operation
-from azure_tenant_audit.tenant_identity import IDENTITY_FIELDS, reconcile_tenant_identity
+from azure_tenant_audit.run_files import (
+    UnsafeRunFileError,
+    open_run_file,
+    read_run_file,
+)
+from azure_tenant_audit.tenant_identity import (
+    IDENTITY_FIELDS,
+    reconcile_tenant_identity,
+)
 
 
 def _read_json(run_dir: Path, path: Path, fallback: Any, *, field: str = "run-file") -> Any:

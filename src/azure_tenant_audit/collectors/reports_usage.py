@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import csv
-from io import StringIO
 import time
+from io import StringIO
 from typing import Any
 
 from ..collection_gaps import REASON_OPERATOR_LIMIT, sampling
 from ..graph import GraphClient
-from .base import Collector, CollectorResult, _classify_graph_error, context_limit, limit_rows, record_truncation
+from .base import (
+    Collector,
+    CollectorResult,
+    _classify_graph_error,
+    context_limit,
+    limit_rows,
+    record_truncation,
+)
 
 
 def _parse_csv_rows(content: str) -> list[dict[str, str]]:

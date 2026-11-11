@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from azure_tenant_audit.capability_gate import capability_blocker_summary, classify_capability_blocker
+from azure_tenant_audit.capability_gate import (
+    capability_blocker_summary,
+    classify_capability_blocker,
+)
 
 
 def test_capability_gate_classifies_scope_role_license_service_tool_and_policy() -> None:
