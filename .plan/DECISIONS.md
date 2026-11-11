@@ -118,3 +118,12 @@
 - why: Codex capacity left this week covers reviews, not authoring; waiting would idle the release path for three days.
 - consequences: the two task lines are amended; REV-M05-T01, whose only required change was this lane conflict, is refreshed against the amended line. Routing only: no acceptance bar, scope or product behaviour changes.
 - approver: auto (routing by capacity, the orchestrator's remit)
+
+## DEC-013 Explainer acceptance bar
+- date: 2026-11-11
+- status: approved
+- decision: a trained explainer model is accepted only when all five rules hold on the clean held-out set (bar file sha256 ee64099a4b745e49668ad21147977cf639f6d17eec0542f58970f3103fcbe4fc, frozen checks 3241cf2ccd79...): (1) floor: on every seed no output states the verdict, a value, the policy or the references wrongly or leaves out a required template step, and at least 99 per cent pass every frozen check; (2) wins: the judge compares each output with the template in both orders, only a win in both orders is a win, everything else is a tie worth half, and every seed's preference band sits wholly above 72.9 per cent (the top of the band mechanical fuller text reaches); (3) judge flags only screen: at most 14.3 per cent of outputs flagged per seed; (4) G reads 24 outputs from the frame frozen in the bar (3 seeds, 4 verdict states, one judge win and one not) with the four-question rubric; pass when none has a factual error and at least 22 are right on all four; (5) at least three seeds per configuration, figures as mean with minimum and maximum.
+- options: the plan's default bar with a judge preference whose lower band is above 50 per cent (rejected: mechanical fuller text clears it at 55.7 to 72.9 and the judge's preference for clean fuller text is weak) | the five-rule bar (chosen; G: "Approve the bar")
+- why: the calibration showed the judge is reliable on planted defects in near-identical text and weak at ranking fuller text, so acceptance rests on the frozen checks, both-order wins above the mechanical band, and a human read.
+- consequences: if no model's band clears 72.9 per cent the question returns to G; the orchestrator does not loosen the rule. Not validatable before a trained model exists: reachability of rule 2, the seed spread, the human read. Before any M03 scoring the held-out inputs are re-expressed in the product's collected form or scores are reported per verdict state (through the 1.4.0 rules only 209 of 501 rows keep their sealed label).
+- approver: G

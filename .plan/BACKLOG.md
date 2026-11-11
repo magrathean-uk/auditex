@@ -2,7 +2,7 @@
 <!-- Triaged ideas and unscheduled tasks. Promotion into a milestone is a change-control event. -->
 
 ## Now
-- none
+- Before any M03 scoring: re-express the clean held-out inputs in the product's collected form, or report scores per verdict state (through the 1.4.0 value rules only 209 of 501 rows keep their sealed label; DEC-013, M02-T05). Promote into M02 as a task by plan amendment.
 
 ## Next
 - Product integration of a model explainer, only after G's build pick in M03: the options M03-T04 lists (the template stays the default and the fallback; no model verdict; local only).
