@@ -146,3 +146,8 @@ Asked after three review rounds of the keyed-pseudonym design by both providers.
 - A run with no key (made by 1.4.0 or earlier): "Temporary key (Recommended)": it is masked with a key held in memory until
   `auditex report prepare-key` is run once on it.
 - An `--as-of <date>` option for offline runs: "Yes, add it (Recommended)".
+
+## Reproduction gate (G, 11 Nov 2026)
+
+Asked after the v10 reproduction failed by the DEC-009 rule (four runs: 393, 393, 387, 372 of 435; bar 400; recorded 403), with the recommendation to accept the pipeline as qualified, record that 403 is not reproduced, and require three seeds per configuration. G's answer: "Accept, move on". Recorded as DEC-011.
+Still listed for G, not answered: DEC-003, DEC-007 and DEC-010 (logged by the orchestrator).

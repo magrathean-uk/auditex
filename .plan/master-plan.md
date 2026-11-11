@@ -38,7 +38,7 @@ Track A, product release 1.5.0:
   fresh, match the gated hashes. No PyPI.
 Track B, explainer model research on Isambard-AI (outside the repository):
 - A runbook with the system's checked facts, a standalone trainer that imports nothing from the product, and a v10
-  reproduction scoring at least 400 of 435 strict with at most 5 applicability errors.
+  reproduction scoring at least 400 of 435 strict with at most 5 applicability errors. (Not met: mean 386 of 435 over four runs; G accepted the pipeline as qualified, DEC-011.)
 - A clean held-out set with zero twins under one written definition, sealed outside git.
 - A judging method for free text calibrated on planted defects, and an acceptance bar recorded before large runs.
 - Bases compared with a noise band and picked by the EU-first rule; one judged build scored once on the held-out
@@ -95,7 +95,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | id | name | weight | % | status |
 |---|---|---|---|---|
 | M00 | foundation | 8 | 77 | active |
-| M01 | airr-bring-up | 15 | 63 | planned |
+| M01 | airr-bring-up | 15 | 75 | planned |
 | M02 | explainer-data-and-judging | 15 | 29 | planned |
 | M03 | explainer-training | 17 | 0 | planned |
 | M04 | d5-keyed-pseudonyms | 18 | 13 | planned |

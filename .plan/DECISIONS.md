@@ -100,3 +100,12 @@
 - why: the live run needs the Agent 365 removal, the refusal handling and the Teams version pin; the shared sign-in is a convenience. New session code is the riskiest part of a kit that writes to a tenant that cannot be reset.
 - consequences: on the live run G signs in once per script and service, as with the accepted kit. The opener's code and its reviews stay in the 7p folder; bringing it back is its own task with its own gate, only if G asks.
 - approver: orchestrator under the announced fallback; G-level, listed for G
+
+## DEC-011 The training pipeline is accepted although v10's score did not reproduce
+- date: 2026-11-11
+- status: approved
+- decision: M01-T05 failed by the DEC-009 rule: four runs of the unchanged v10 recipe on the system scored 393, 393, 387 and 372 of 435 quantised (mean 386.25, sample sd 9.91; run 4 with 14 applicability errors) against a bar of 400 and the recorded 403. The archived v10 checkpoint scores 402 through the same scorer on a byte-identical pack, and effective batch, step count and training loss match the recorded run, so data, scorer and training dynamics are sound. G accepts the pipeline as qualified and moves on. The recorded 403 is recorded as not reproduced. From here on every model score the plan reports comes from at least three seeds per configuration, read against the measured seed spread; a single run decides nothing.
+- options: accept and move on (chosen; G: "Accept, move on") | a bounded investigation first (about 24 GPU-hours; unlikely to change the next step, because only one run exists from the earlier system)
+- why: the model's job in this plan is explanation text, and rules decide every verdict; the reproduction was a pipeline qualification, and its real finding is the size of the run-to-run spread.
+- consequences: the M01 done item for the reproduction is amended to "measured and accepted"; M03's three-seed rule now covers every reported score; any public statement about v10's accuracy must quote the spread (372 to 393 in four fresh runs), not the single 403; the Hugging Face upload stays parked. DEC-009's four-run reading stands as the rule this was judged by.
+- approver: G
