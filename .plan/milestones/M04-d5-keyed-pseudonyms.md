@@ -1,7 +1,7 @@
 ---
 id: M04
 name: d5-keyed-pseudonyms
-weight: 18
+weight: 16
 status: planned
 ---
 # M04 d5-keyed-pseudonyms

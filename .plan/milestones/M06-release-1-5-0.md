@@ -1,7 +1,7 @@
 ---
 id: M06
 name: release-1-5-0
-weight: 15
+weight: 13
 status: planned
 ---
 # M06 release-1-5-0

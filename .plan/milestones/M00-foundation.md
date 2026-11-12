@@ -1,7 +1,7 @@
 ---
 id: M00
 name: foundation
-weight: 8
+weight: 7
 status: done
 ---
 # M00 foundation

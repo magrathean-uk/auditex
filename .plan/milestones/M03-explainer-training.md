@@ -1,7 +1,7 @@
 ---
 id: M03
 name: explainer-training
-weight: 17
+weight: 15
 status: planned
 ---
 # M03 explainer-training
@@ -30,11 +30,11 @@ G has looked at the budget against the allocation balance before any M03 run; th
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
-- Preconditions: M01-T05, M02-T03 and M02-T05 done; the bar's DEC entry and the "AIRR budget look" DEC entry exist.
+- Preconditions: M01-T05, M02-T03, M02-T05 and M02-T06 done (held-out form or per-state scoring fixed, DEC-013); the bar's DEC entry and the "AIRR budget look" DEC entry exist.
 - Candidates: Ministral 3 8B, Ministral 3 14B, Gemma 4 31B and Qwen3.8-27B, plus Qwen 4 if open weights under an open licence are on the Qwen organisation's hub when the task starts (checked and stated). Snapshots are fetched straight onto Isambard-AI at pinned revisions.
 - Same data, same recipe family and the same judging method for every base; at least three seeds each; selection on validation only. Ranks by the bar's measures with the noise band; EU-first decides between bases inside the band. Validation predictions and judgements are saved with `SHA256SUMS`.
 - Writes `base-comparison: complete`, `base-pick: <base and revision>` and `gpu-hours: basecmp <used>` under `### Findings`.
-- verify: `grep -qx 'base-comparison: complete' .plan/work/M03-T01/result.md && "$AIRR_KIT/bin/kit-check" score runs/base-comparison --result .plan/work/M03-T01/result.md`
+- verify: `grep -qE '^heldout-form: (collected|per-state)$' .plan/work/M02-T06/result.md && grep -qx 'base-comparison: complete' .plan/work/M03-T01/result.md && "$AIRR_KIT/bin/kit-check" score runs/base-comparison --result .plan/work/M03-T01/result.md`
 - files: `runs/base-comparison/**` and `runs/usage/M03-T01/**` in the AIRR kit folder; `.plan/work/M03-T01/result.md`
 
 ### M03-T02 Run the large training runs on the chosen base
@@ -46,11 +46,11 @@ G has looked at the budget against the allocation balance before any M03 run; th
 - files: `runs/large/**` and `runs/usage/M03-T02/**` in the AIRR kit folder; `.plan/work/M03-T02/result.md`
 
 ### M03-T03 Build, hash and judge the final explainer build
-- Precondition: M03-T02 done.
+- Preconditions: M03-T02 and M02-T06 done; scored on the set and with the reporting M02-T06 fixed (`heldout-form: collected` uses its resealed set, `per-state` reports every bar figure per verdict state).
 - Quantises the selected checkpoint (Q5_K_M and one higher-precision variant) with a parity check against the unquantised adapter, records sha256 for each file, and scores the build once on the clean held-out set with the deterministic checks and the judge, against the bar and against the template explainer; outputs and judgements are saved with `SHA256SUMS`.
 - Drafts a build card that names the base, data, method and scores and names no infrastructure; the build stays on project storage, and any copy off the system follows the storage routing (no telling first, G's download ruling).
 - Writes `build-bar: pass` or `build-bar: fail`, `build-sha256: <64 hex>` and `gpu-hours: build <used>` under `### Findings`.
-- verify: `grep -qE '^build-bar: (pass|fail)$' .plan/work/M03-T03/result.md && "$AIRR_KIT/bin/kit-check" score builds --result .plan/work/M03-T03/result.md`
+- verify: `grep -qE '^heldout-form: (collected|per-state)$' .plan/work/M02-T06/result.md && grep -qE '^build-bar: (pass|fail)$' .plan/work/M03-T03/result.md && "$AIRR_KIT/bin/kit-check" score builds --result .plan/work/M03-T03/result.md`
 - files: `builds/**` and `runs/usage/M03-T03/**` in the AIRR kit folder; `.plan/work/M03-T03/result.md`
 
 ### M03-T04 Write the recommendation and the product-integration options
