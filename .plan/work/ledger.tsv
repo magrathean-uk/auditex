@@ -401,3 +401,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T19:59:14Z	REV-M07-T10-codex	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	357		done	4636a4d
 2026-11-11T20:02:38Z	REV-M07-T10-opus	sol	claude-1	claude-opus-5-5	xhigh	readonly	0	560	3.4821	done	4636a4d
 2026-11-11T22:24:05Z	M00-T04	luna	claude-3	claude-haiku-5-5	medium	readonly	0	3234	0.0308	done	f9a272c
+2026-11-12T10:30:07Z	RETRO-M00	luna	claude-2	claude-haiku-5-5	medium	inplace	0	121	0.0315	done	main
