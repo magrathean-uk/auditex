@@ -136,3 +136,21 @@
 - why: without it the kit cannot seed the trial tenant; DEC-008 approved one change round only, so a second is G's call.
 - consequences: phase D stays paused until 7r is accepted; earliest the morning of 13 Nov. Nothing else enters the round.
 - approver: G
+
+## DEC-015 M00 close and the M04-T02 dispatch: three mechanical calls
+- date: 2026-11-12
+- status: approved
+- decision: (1) the plan v4 close of M00 is tagged `v4-M00` (local), because the local tag `M00` already exists from plan v2 (8 Nov 2026) and tags are not moved; later plan v4 milestone tags take the same prefix. (2) M04-T02 (one data file, no behaviour change, tag `mechanical`) runs on terra as `risk:low`: its verify is the gate and it gets no review. Codex is above the quota threshold and Codex 2 is kept for tier A reviews until the reset on 14 Nov (DEC-012). (3) The dispatcher refused M04-T02 on the round cap ("4 in all"): the four rounds it counted are plan v3's task of the same id (`task/M04-T02-read-boundary-limits`, 9 Nov 2026, merged in 1.4.0); the plan v4 task has had no author round. It is dispatched with `--rounds-ok` naming this entry.
+- options: move the old `M00` tag (rejected: tags are not rewritten) | an other-vendor review of a baseline file (rejected: spends the tier A review quota on a file the verify already checks) | renumber the task (rejected: a plan change for a counter artefact)
+- why: none of the three changes scope, an acceptance bar or a gate; the round rule exists to stop repair loops and no repair has happened.
+- consequences: plan v4 tasks whose ids plan v3 also used (M04, M05, M06 ids) will meet the same refusal; each needs the same flag until the plan skill counts rounds from the current plan tag (reported to G for the plan-skill owner).
+- approver: auto
+
+## DEC-016 M04-T02: the baseline is recorded on main, with one test assertion changed
+- date: 2026-11-12
+- status: acted on; reported to G, who may reverse it
+- decision: M04-T02's criteria contradicted each other. They ask for the HTML peak baseline to be recorded on the current `main` and for `tests/test_html_peak_harness.py` to pass with no other change, but that test requires the committed baseline to show unmasked names, and `main` has masked every name in the shareable report since 1.4.0 (first author run: blocked, 0 unmasked hits; EXP-peakbase). The task keeps the plan's intent, a baseline on the current `main`, and its files line gains the test for one assertion: the baseline must carry person names (`person_names > 0`) instead of unmasked hits. Both files belong to one module (misc-scripts).
+- options: keep the old baseline of 8 Nov, recorded before masking (peak 607,862,784 bytes; M04 limit 699,042,201) | record on `main` as the plan says (first measurement 650,166,272 bytes; M04 limit about 747,691,212) (chosen)
+- why: the M04 limit is there to bound what the keyed scheme adds, so it is measured from the code just before that change; the old figure would charge M04 for the 7 percent that 1.4.0's masking already added. Another test still proves the workload carries names (`test_require_masked_fails_on_local_report`).
+- consequences: the M04 peak limit is about 48.6 MB higher than under the old baseline. The "no workload person name" half of that done item already holds on `main` and acts as a regression guard. The task is no longer `risk:low`: it gets one review, by another Claude account because both Codex seats are held back (DEC-012).
+- approver: auto; listed for G

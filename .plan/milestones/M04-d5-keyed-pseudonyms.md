@@ -41,9 +41,9 @@ Pseudonyms in shareable output come from a private per-run key instead of the ru
 
 ### M04-T02 Record the pre-change HTML peak baseline and confirm the digests
 - Precondition: M00 done (M00-T05 made the digest comparison pass). Before any M04 code change, records `benchmarks/html-peak-baseline.json` on the frozen workload with the shareable profile, on the current `main`, and confirms the contract-smoke outputs match the recorded digests without refreshing them.
-- No other change; `make contract-smoke`, the digest comparison and `tests/test_html_peak_harness.py` pass.
+- One other change (DEC-016): `test_committed_baseline_carries_names` asserts `baseline["person_names"] > 0` in place of `unmasked_name_hits > 0` and keeps its `records == 90000` and `profile == "shareable"` asserts, because `main` already masks every name in the shareable report and a baseline recorded on it has no unmasked hit. Nothing else changes; `make contract-smoke`, the digest comparison and `tests/test_html_peak_harness.py` pass.
 - verify: `.venv/bin/python -m pytest tests/test_html_peak_harness.py tests/test_compare_run_outputs.py && make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract`
-- files: `benchmarks/html-peak-baseline.json`
+- files: `benchmarks/html-peak-baseline.json`, `tests/test_html_peak_harness.py` (that one assertion only)
 
 ### M04-T03 Implement keyed per-run pseudonyms and the contract change
 - Preconditions: DEC-004 approves the M04-T01 design; M04-T02 merged.
