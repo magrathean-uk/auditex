@@ -179,7 +179,7 @@ def test_complete_result_is_redacted_with_explainer_profile(monkeypatch):
     run_path = "/private/tenant-run"
     text = f"{address} {guid} password={credential} {run_path}/evidence"
     fake = {"explanation": text, "remediation_steps": [text], "evidence_refs": ["e0"]}
-    context = RedactionContext(salt="wire-test", run_paths=(run_path,))
+    context = RedactionContext(key=b"wire-test".ljust(32, b"\0"), run_paths=(run_path,))
     real_redact = rule_assessment.redact_output
     calls = []
     def redact_spy(value, *, profile, context):
@@ -319,6 +319,7 @@ def test_legacy_assessment_still_validates_before_and_after_upgrade(tmp_path, mo
     (tmp_path / "run-manifest.json").write_text('{"run_id":"legacy"}')
     result = assess_run(tmp_path, policies=[PBI])
     result["schema_version"] = "2026-10-29"
+    result["projection"]["redaction"]["strategy"] = "run-salted-sha256-v1"  # what writers of that version wrote
     result.pop("scope_post_check", None)
     result["totals"].pop("scope_narrowed", None)
     validate_assessment(result)

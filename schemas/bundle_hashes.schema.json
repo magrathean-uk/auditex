@@ -30,7 +30,7 @@
         "required": ["path", "reason"],
         "properties": {
           "path": { "type": "string" },
-          "reason": { "enum": ["append_only_log", "sqlite_sidecar", "os_metadata"] }
+          "reason": { "enum": ["append_only_log", "sqlite_sidecar", "os_metadata", "redacted_operator_input"] }
         }
       }
     }

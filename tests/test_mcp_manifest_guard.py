@@ -24,9 +24,6 @@ try:
     if sys.argv[2] == "projection_salt":
         from auditex.scuba_projection import project_run
         result = project_run(*json.loads(sys.argv[3]))
-    elif sys.argv[2] == "reference_run_salt":
-        from azure_tenant_audit.output_redaction import run_salt
-        result = run_salt(*json.loads(sys.argv[3]))
     else:
         os.environ["AUDITEX_MCP_ROOT"] = tempfile.gettempdir()
         entry = next(item for item in TOOL_REGISTRY if item.name == sys.argv[2])
@@ -200,17 +197,6 @@ def test_projection_salt_rejects_unsafe_manifest(tmp_path: Path, kind: str) -> N
     _plant_bad_file(tmp_path / "run-manifest.json", kind)
     outcome = _call_tool("projection_salt", str(tmp_path))
     assert outcome.get("error") == "UnsafeRunFileError", outcome
-
-
-def test_reference_run_salt_does_not_read_the_manifest(tmp_path: Path) -> None:
-    import hashlib
-
-    for kind in ("fifo", "symlink", "directory", "oversize"):
-        run = tmp_path / kind
-        run.mkdir()
-        _plant_bad_file(run / "run-manifest.json", kind)
-        outcome = _call_tool("reference_run_salt", str(run))
-        assert outcome == {"result": hashlib.sha256(os.path.realpath(run).encode()).hexdigest()}
 
 
 @pytest.mark.parametrize("relative", ("users.json", "snapshot.json", "coverage_ledger.json"))

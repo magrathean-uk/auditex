@@ -317,8 +317,9 @@ def test_d3_group_and_role_names_mask_a_person_name_inside_lists() -> None:
     group = f"Team {NAME}"
     role = f"Operations {NAME}"
     payload = {"groups": [{"display_name": group, "email": ADDRESS}], "roles": [role]}
-    result = redact_output(payload, context=RedactionContext(protected_names=frozenset({NAME})))
-    masked = "User " + pseudonym("", NAME)
+    context = RedactionContext(protected_names=frozenset({NAME}))
+    result = redact_output(payload, context=context)
+    masked = "User " + pseudonym(context.key, NAME)
     assert result["groups"][0]["display_name"] == f"Team {masked}"
     assert result["roles"] == [f"Operations {masked}"]
     assert ADDRESS not in result["groups"][0]["email"]

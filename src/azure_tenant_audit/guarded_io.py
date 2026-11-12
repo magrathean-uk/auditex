@@ -5,14 +5,17 @@ No global identity registry is persisted between operations.
 """
 from __future__ import annotations
 
+import errno
 import gc
 import hmac
 import io
 import json
 import os
+import re
 import stat
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -43,6 +46,61 @@ class UnsafeRunFileError(OSError):
         self.field = field if field in _FIELDS else "run-file"
         self.reason = reason
         super().__init__(f"Refusing {self.field}: unsafe input.")
+
+
+# The run's private pseudonym key (``output_redaction.PSEUDONYM_KEY_PATH`` names the same file): 32 random bytes in
+# ``operator-inputs/pseudonym.key``. The guard registers it as a private input, so no ordinary guarded read, hash,
+# copy, stdin admission or output destination accepts it; only ``GuardContext.pseudonym_key`` returns its bytes.
+PRIVATE_DIRECTORY = "operator-inputs"
+PSEUDONYM_KEY_NAME = "pseudonym.key"
+_PSEUDONYM_KEY_BYTES = 32
+# A creator's temporary (``.pseudonym.key.<24 hex>.tmp``) becomes the key's inode when it is renamed.
+_PSEUDONYM_TEMPORARY = re.compile(r"\.pseudonym\.key\.[0-9a-f]{24}\.tmp")
+_LOCK_WAIT_SECONDS = 2.0
+_LOCK_STEP_SECONDS = 0.05
+# Lock errors that mean "try again"; every other ``flock`` error means storage without locking (``nolock``).
+_LOCK_RETRY = frozenset({errno.EWOULDBLOCK, errno.EAGAIN, errno.EINTR})
+# Answers of file systems that cannot flush a directory; ignored (the durability limit in the output contract).
+_SYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP, errno.EOPNOTSUPP})
+_PSEUDONYM_KEY_MESSAGES = {
+    "damaged": (
+        "Refusing private input: operator-inputs/pseudonym.key is damaged (it must hold exactly 32 bytes). "
+        "Restore it from a copy of the run; removing it starts a new pseudonym series."
+    ),
+    "busy": "Refusing private input: another process is creating operator-inputs/pseudonym.key; try again.",
+    "permissions": (
+        "Refusing private input: operator-inputs/pseudonym.key or its folder can be used by other accounts; "
+        "restrict the file to 0600 and the folder to 0700."
+    ),
+    "unwritable": "Refusing private input: operator-inputs/pseudonym.key could not be written.",
+    "nolock": (
+        "Refusing private input: the run's storage does not support locking, so operator-inputs/pseudonym.key "
+        "cannot be created there; copy the run to local storage and run auditex report prepare-key."
+    ),
+}
+
+
+class PseudonymKeyError(UnsafeRunFileError):
+    """The run's pseudonym key cannot be used or created; ``reason`` is one of ``damaged``, ``busy``,
+    ``permissions``, ``unwritable`` or ``nolock``. The message is fixed per reason: never a path or key bytes."""
+
+    def __init__(self, reason: str) -> None:
+        if reason not in _PSEUDONYM_KEY_MESSAGES:
+            raise ValueError("unknown pseudonym key refusal")
+        super().__init__("private input", reason=reason)
+        self.args = (_PSEUDONYM_KEY_MESSAGES[reason],)
+
+    def __reduce__(self):
+        return type(self), (self.reason,)
+
+
+def _sync_directory(fd: int) -> None:
+    """Flush a directory where the storage supports it (``_SYNC_UNSUPPORTED`` answers are ignored)."""
+    try:
+        os.fsync(fd)
+    except OSError as exc:
+        if exc.errno not in _SYNC_UNSUPPORTED:
+            raise
 
 
 def _supported() -> bool:
@@ -103,6 +161,15 @@ class GuardContext:
         self._verified_partner: dict[str, tuple[str, ...] | None] = {}
         self._partner_private_keys: dict[str, bytes] = {}
         self._pinned: dict[str, tuple[int, tuple[int, int, int, int, int]]] = {}
+        # Per bound run: its pinned ``operator-inputs`` descriptor (``None`` when absent), the registered identity of
+        # its pseudonym key, and the key this context resolved first (``None``: keyless), kept for the whole operation.
+        self._private_dirs: dict[str, int | None] = {}
+        self._pseudonym_keys: dict[str, tuple[int, int] | None] = {}
+        self._pseudonym_bytes: dict[str, bytes | None] = {}
+        # Per bound run: the ``run_id`` its pinned manifest records (``None`` when it is missing, null, not a string or
+        # empty), and the temporary key of such a run for this context only (``output_redaction``; DEC-024).
+        self._run_ids: dict[str, str | None] = {}
+        self._operation_keys: dict[str, bytes] = {}
         self._token: Token | None = None
         self._cwd_path = os.getcwd()
         self._root_fd: int | None = None
@@ -146,6 +213,11 @@ class GuardContext:
         self._verified_partner.clear()
         self._partner_private_keys.clear()
         self._pinned.clear()
+        self._private_dirs.clear()
+        self._pseudonym_keys.clear()
+        self._pseudonym_bytes.clear()
+        self._run_ids.clear()
+        self._operation_keys.clear()
         self._identities.clear()
         self._root_fd = self._cwd_fd = None
 
@@ -203,6 +275,9 @@ class GuardContext:
             raise UnsafeRunFileError(field, reason="owner")
         if info.st_nlink != 1:
             raise UnsafeRunFileError(field, reason="hardlink")
+        if not private_verifier:
+            # A key (or a key temporary) another process created after the bind is registered before the comparison.
+            self._sync_pseudonym_keys()
         if not private_verifier and _identity(info) in self._identities:
             raise UnsafeRunFileError(field, reason="private")
         if max_bytes is not None and info.st_size > max_bytes:
@@ -220,6 +295,7 @@ class GuardContext:
                 if not self._eligible_run_root(path):
                     raise UnsafeRunFileError("run")
                 if path in self._runs:
+                    self._sync_pseudonym_keys()
                     return self._runs[path]
                 root = self._directory(run_dir)
                 owned.append(root)
@@ -255,12 +331,22 @@ class GuardContext:
                     if (pair[0] is None) != (pair[1] is None):
                         raise UnsafeRunFileError("private input")
                     pairs[kind] = pair
+                key_identity = None
+                if private_dir is not None:
+                    key_fd = self._open_private_key(private_dir)
+                    if key_fd is not None:
+                        owned.append(key_fd)
+                        key_info = os.fstat(key_fd)
+                        self._check_file(key_info, "private input", None, private_verifier=True)
+                        key_identity = _identity(key_info)
                 manifest = os.open("run-manifest.json", _FILE_FLAGS, dir_fd=root)
                 owned.append(manifest)
                 manifest_info = os.fstat(manifest)
                 manifest_limit = min(_MAX_MANIFEST, manifest_max_bytes) if manifest_max_bytes is not None else _MAX_MANIFEST
                 self._check_file(manifest_info, "manifest", manifest_limit)
                 pair_ids = {_identity(os.fstat(fd)) for pair in pairs.values() for fd in pair if fd is not None}
+                if key_identity is not None:
+                    pair_ids.add(key_identity)
                 if _identity(manifest_info) in pair_ids:
                     raise UnsafeRunFileError("manifest", reason="private")
                 payload = json.loads(_read_bounded(manifest, manifest_limit).decode("utf-8"))
@@ -313,6 +399,10 @@ class GuardContext:
                 owned.clear()
                 self._runs[path] = root
                 self._manifests[path] = manifest
+                self._private_dirs[path] = private_dir
+                self._pseudonym_keys[path] = key_identity
+                run_id = payload.get("run_id")
+                self._run_ids[path] = run_id if isinstance(run_id, str) and run_id else None
                 self._verified[path] = verified["sensitive_users"]
                 self._verified_partner[path] = verified["partner_domains"]
                 for kind, registry in (("sensitive_users", self._private_keys),
@@ -372,7 +462,290 @@ class GuardContext:
             self._private_keys.pop(path, None)
             self._verified_partner.pop(path, None)
             self._partner_private_keys.pop(path, None)
+            self._private_dirs.pop(path, None)
+            self._pseudonym_keys.pop(path, None)
+            self._pseudonym_bytes.pop(path, None)
+            self._run_ids.pop(path, None)
+            self._operation_keys.pop(path, None)
             self.bind_run(run_dir)
+
+    # -- the run's pseudonym key (design M04-T01 sections 3.4-3.6) ---------------------------------------------------
+
+    @staticmethod
+    def _open_private_key(folder: int) -> int | None:
+        """Open ``pseudonym.key`` below a private folder; ``None`` when absent. A link is refused as ``type`` and any
+        other open failure as ``open``; the caller judges type, owner and links with ``_check_file``."""
+        try:
+            return os.open(PSEUDONYM_KEY_NAME, _FILE_FLAGS, dir_fd=folder)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            reason = "type" if exc.errno in (errno.ELOOP, errno.EMLINK) else "open"
+            raise UnsafeRunFileError("private input", reason=reason) from None
+
+    def _private_folder(self, path: str) -> int | None:
+        """The bound run's pinned ``operator-inputs`` descriptor, opened relative to the pinned run descriptor when it
+        appeared after the bind; ``None`` while it is absent. Call with the lock held and the run bound."""
+        folder = self._private_dirs.get(path)
+        if folder is not None:
+            return folder
+        try:
+            folder = os.open(PRIVATE_DIRECTORY, _DIR_FLAGS, dir_fd=self._runs[path])
+        except FileNotFoundError:
+            return None
+        except OSError:
+            raise UnsafeRunFileError("private input", reason="type") from None
+        try:
+            if not _safe_directory(os.fstat(folder)):
+                raise UnsafeRunFileError("private input", reason="owner")
+        except BaseException:
+            os.close(folder)
+            raise
+        self._fds.append(folder)
+        self._private_dirs[path] = folder
+        return folder
+
+    def _sync_pseudonym_keys(self) -> None:
+        """Register every bound run's key, and every key temporary, that this context has not seen yet: another
+        process may create them after the bind. Temporaries are listed before the published name is looked up, so a
+        rename during the listing still leaves the inode under the name looked up last."""
+        with self._lock:
+            for path in tuple(self._runs):
+                folder = self._private_folder(path)
+                if folder is None:
+                    continue
+                for name in os.listdir(folder):
+                    if not _PSEUDONYM_TEMPORARY.fullmatch(name):
+                        continue
+                    try:
+                        info = os.stat(name, dir_fd=folder, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    if stat.S_ISREG(info.st_mode):
+                        self._identities.add(_identity(info))
+                try:
+                    named = os.stat(PSEUDONYM_KEY_NAME, dir_fd=folder, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if not stat.S_ISREG(named.st_mode) or _identity(named) in self._identities:
+                    continue  # a non-regular name is refused as ``type`` by every open of it
+                fd = self._open_private_key(folder)
+                if fd is None:
+                    continue
+                try:
+                    info = os.fstat(fd)
+                    if _identity(info) != _identity(named):
+                        raise UnsafeRunFileError("private input", reason="changed")
+                    self._check_file(info, "private input", None, private_verifier=True)
+                except BaseException:
+                    os.close(fd)
+                    raise
+                self._fds.append(fd)
+                self._identities.add(_identity(info))
+                self._pseudonym_keys[path] = _identity(info)
+
+    def run_identity(self, run_dir: str | Path) -> tuple[int, int, str] | None:
+        """Device and inode of the bound run's pinned descriptor, and the ``run_id`` its pinned manifest records: a
+        folder whose inode is reused by another run (another ``run_id``) is never taken for the first one. ``None``
+        when the manifest records no usable run id (missing, null, not a string or empty): such a run has no identity
+        another run could not share, so nothing may be kept for it beyond this context."""
+        with self._lock:
+            device, inode = _identity(os.fstat(self.bind_run(run_dir)))
+            run_id = self._run_ids[self._absolute(run_dir)]
+            return None if run_id is None else (device, inode, run_id)
+
+    def pseudonym_key(self, run_dir: str | Path) -> bytes | None:
+        """The run's pseudonym key, or ``None`` for a keyless run. The first answer for a run is kept for the whole
+        context (one command or tool call), so one output never mixes two keys. Takes no lock: a published key is
+        complete and final. Raises ``PseudonymKeyError`` (``permissions``, ``damaged``) or the guard's refusal."""
+        with self._lock:
+            self.bind_run(run_dir)
+            path = self._absolute(run_dir)
+            if path not in self._pseudonym_bytes:
+                folder = self._private_folder(path)
+                self._pseudonym_bytes[path] = None if folder is None else self._read_pseudonym_key(path, folder)
+            return self._pseudonym_bytes[path]
+
+    def _read_pseudonym_key(self, path: str, folder: int) -> bytes | None:
+        try:
+            named = os.stat(PSEUDONYM_KEY_NAME, dir_fd=folder, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        if stat.S_ISREG(named.st_mode) and (named.st_mode | os.fstat(folder).st_mode) & 0o077:
+            raise PseudonymKeyError("permissions")
+        fd = self._open_private_key(folder)
+        if fd is None:
+            return None
+        try:
+            info = os.fstat(fd)
+            self._check_file(info, "private input", None, private_verifier=True)
+            if info.st_size != _PSEUDONYM_KEY_BYTES:
+                raise PseudonymKeyError("damaged")
+            key = os.pread(fd, _PSEUDONYM_KEY_BYTES + 1, 0)
+            after = os.fstat(fd)
+            if len(key) != _PSEUDONYM_KEY_BYTES or after.st_size != _PSEUDONYM_KEY_BYTES:
+                raise PseudonymKeyError("damaged")
+            if _identity(after) != _identity(named):
+                raise UnsafeRunFileError("private input", reason="changed")
+        except BaseException:
+            os.close(fd)
+            raise
+        identity = _identity(info)
+        if identity in self._identities:
+            os.close(fd)
+        else:
+            self._fds.append(fd)
+            self._identities.add(identity)
+        self._pseudonym_keys[path] = identity
+        return key
+
+    @staticmethod
+    def _lock_run(fd: int) -> None:
+        """Take the creator's exclusive lock; ``busy`` after the wait, ``nolock`` for every other lock error."""
+        import fcntl
+
+        deadline = time.monotonic() + _LOCK_WAIT_SECONDS
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except OSError as exc:
+                if exc.errno not in _LOCK_RETRY:
+                    raise PseudonymKeyError("nolock") from None
+            if time.monotonic() >= deadline:
+                raise PseudonymKeyError("busy")
+            time.sleep(_LOCK_STEP_SECONDS)
+
+    @staticmethod
+    def _remove_temporary(folder: int, name: str, identity: tuple[int, int]) -> None:
+        """Remove this creator's own temporary by name, only while the name still holds its identity."""
+        try:
+            if _identity(os.stat(name, dir_fd=folder, follow_symlinks=False)) == identity:
+                os.unlink(name, dir_fd=folder)
+        except OSError:
+            pass
+
+    def _write_temporary(self, folder: int, name: str, data: bytes, *, private: bool) -> tuple[str, tuple[int, int]]:
+        """Write ``data`` to a new ``.<name>.<24 hex>.tmp`` (0600) and flush it; a private one is registered before
+        its bytes are written. On failure the temporary is removed and the error raised."""
+        from .private_io import _write_all
+
+        temporary = f".{name}.{os.urandom(12).hex()}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        fd = os.open(temporary, flags, 0o600, dir_fd=folder)
+        identity = (-1, -1)
+        try:
+            identity = _identity(os.fstat(fd))
+            if private:
+                self._identities.add(identity)
+            os.fchmod(fd, 0o600)
+            _write_all(fd, data)
+            os.fsync(fd)
+        except BaseException:
+            os.close(fd)
+            self._remove_temporary(folder, temporary, identity)
+            raise
+        os.close(fd)
+        return temporary, identity
+
+    def _publish_gitignore(self, folder: int) -> None:
+        """Keep a plain ``.gitignore`` holding exactly ``*``; replace any other content through a temporary."""
+        try:
+            fd = os.open(".gitignore", _FILE_FLAGS, dir_fd=folder)
+        except FileNotFoundError:
+            fd = None
+        except OSError as exc:
+            reason = "type" if exc.errno in (errno.ELOOP, errno.EMLINK) else "open"
+            raise UnsafeRunFileError("private input", reason=reason) from None
+        if fd is not None:
+            try:
+                self._check_file(os.fstat(fd), "private input", None, private_verifier=True)
+                if os.read(fd, 64) == b"*\n":
+                    return
+            finally:
+                os.close(fd)
+        temporary, identity = self._write_temporary(folder, ".gitignore", b"*\n", private=False)
+        try:
+            os.replace(temporary, ".gitignore", src_dir_fd=folder, dst_dir_fd=folder)
+        except BaseException:
+            self._remove_temporary(folder, temporary, identity)
+            raise
+
+    def create_pseudonym_key(self, run_dir: str | Path, key: bytes) -> tuple[bytes, bool]:
+        """Publish ``key`` as the run's pseudonym key unless one is there (design 3.4); return the published key as
+        read back and whether this call created it. Only under an exclusive lock on a creator-owned descriptor of the
+        run folder: storage without locking gets nothing (``nolock``, before anything is written)."""
+        if not isinstance(key, bytes) or len(key) != _PSEUDONYM_KEY_BYTES:
+            raise ValueError("pseudonym key must be 32 bytes")
+        with self._lock:
+            root = self.bind_run(run_dir)  # refuses a folder without a run manifest
+            path = self._absolute(run_dir)
+            held: list[int] = []
+            try:
+                lock_fd = self._directory(run_dir)
+                held.append(lock_fd)
+                if _identity(os.fstat(lock_fd)) != _identity(os.fstat(root)):
+                    raise UnsafeRunFileError("run", reason="changed")
+                self._lock_run(lock_fd)
+                try:
+                    os.mkdir(PRIVATE_DIRECTORY, 0o700, dir_fd=lock_fd)
+                    created_folder = True
+                except FileExistsError:
+                    created_folder = False
+                folder = os.open(PRIVATE_DIRECTORY, _DIR_FLAGS, dir_fd=lock_fd)
+                held.append(folder)
+                if created_folder:
+                    _sync_directory(lock_fd)
+                folder_info = os.fstat(folder)
+                if not _safe_directory(folder_info) or folder_info.st_mode & 0o077:
+                    raise PseudonymKeyError("permissions")
+                try:
+                    os.stat(PSEUDONYM_KEY_NAME, dir_fd=folder, follow_symlinks=False)
+                    present = True
+                except FileNotFoundError:
+                    present = False
+                if present:
+                    # Another creator finished while this one waited: judge it as the reader does.
+                    existing = self._read_pseudonym_key(path, folder)
+                    if existing is None:
+                        raise PseudonymKeyError("unwritable")
+                    self._pseudonym_bytes[path] = existing
+                    return existing, False
+                self._publish_gitignore(folder)
+                temporary, identity = self._write_temporary(folder, PSEUDONYM_KEY_NAME, key, private=True)
+                try:
+                    os.rename(temporary, PSEUDONYM_KEY_NAME, src_dir_fd=folder, dst_dir_fd=folder)
+                except BaseException:
+                    self._remove_temporary(folder, temporary, identity)
+                    raise
+                _sync_directory(folder)
+                published = self._open_private_key(folder)
+                if published is None:
+                    raise PseudonymKeyError("unwritable")
+                held.append(published)
+                info = os.fstat(published)
+                if _identity(info) != identity:
+                    raise PseudonymKeyError("unwritable")
+                self._check_file(info, "private input", _PSEUDONYM_KEY_BYTES, private_verifier=True)
+                data = os.pread(published, _PSEUDONYM_KEY_BYTES + 1, 0)
+                if len(data) != _PSEUDONYM_KEY_BYTES:
+                    raise PseudonymKeyError("unwritable")
+                held.remove(published)
+                self._fds.append(published)
+                self._identities.add(identity)
+                self._pseudonym_keys[path] = identity
+                self._pseudonym_bytes[path] = data
+                return data, True
+            except UnsafeRunFileError:
+                raise
+            except OSError:
+                raise PseudonymKeyError("unwritable") from None
+            finally:
+                for fd in reversed(held):  # closing the creator's run descriptor releases the lock
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
 
     def discover_run(self, path: str | Path, *, manifest_max_bytes: int | None = None) -> None:
         """Bind a run containing a selected path when its private directory is identifiable."""
@@ -396,7 +769,8 @@ class GuardContext:
             found = False
             try:
                 descriptor = self._directory(directory)
-                for name in ("sensitive-users.txt", "sensitive-users.key", "partner-domains.txt", "partner-domains.key"):
+                for name in ("sensitive-users.txt", "sensitive-users.key", "partner-domains.txt", "partner-domains.key",
+                             PSEUDONYM_KEY_NAME):
                     try:
                         os.stat(name, dir_fd=descriptor, follow_symlinks=False)
                         found = True
@@ -549,6 +923,22 @@ def _prime_stdin_binary_buffer() -> bool:
     return not peeked or after < before
 
 
+def _descriptor_path(fd: int) -> str | None:
+    """The path the platform reports for an open descriptor (``F_GETPATH`` on Darwin, ``/proc`` on Linux), or
+    ``None`` where it reports none."""
+    try:
+        import fcntl
+
+        getpath = getattr(fcntl, "F_GETPATH", None)
+        if getpath is not None:
+            found = os.fsdecode(fcntl.fcntl(fd, getpath, bytes(1024)).split(b"\0", 1)[0])
+        else:
+            found = os.readlink(f"/proc/self/fd/{fd}")
+    except (OSError, ValueError, ImportError):
+        return None
+    return found if found.startswith("/") else None
+
+
 def admit_stdin(context: GuardContext) -> None:
     """Admit descriptor zero before reading it, refusing unverifiable regular-file buffers."""
     failed = False
@@ -558,6 +948,14 @@ def admit_stdin(context: GuardContext) -> None:
                 raise OSError("stdin wrapper provenance unavailable")
             info = os.fstat(0)
             identity = _identity(info)
+            if stat.S_ISREG(info.st_mode):
+                # The shell opened the file before this process started, so discovery runs now, after that open
+                # and before admission (DEC-024): a run's key is refused even when the command bound no run.
+                selected = _descriptor_path(0)
+                if selected is None:
+                    raise OSError("stdin path unavailable")
+                context.discover_run(selected)
+            context._sync_pseudonym_keys()
             if context._stdin_identity is not None and context._stdin_identity != identity:
                 raise OSError("stdin changed")
             if context._stdin_identity is None and not _stdin_text_buffer_is_empty():
@@ -632,6 +1030,9 @@ def open_guarded_file(path: str | Path, *, field: str, context: GuardContext,
             context.discover_run(path)
             parent, name = context._parent(path)
             fd = os.open(name, _FILE_FLAGS, dir_fd=parent)
+            # A run whose private folder appeared after the first discovery is bound now, so a key published
+            # between discovery and the open is registered before the comparison and never admitted.
+            context.discover_run(path)
             context._check_file(os.fstat(fd), field, max_bytes)
     except FileNotFoundError:
         missing = True
@@ -778,6 +1179,7 @@ def open_private_output(path: str | Path, *, field: str, context: GuardContext,
                     fd = os.open(name, flags, dir_fd=parent)
                 except FileNotFoundError:
                     fd = os.open(name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent)
+            context.discover_run(path)  # a key published since the first discovery is registered (open_guarded_file)
             context._check_file(os.fstat(fd), field, None)
             if not existing_only:
                 os.fchmod(fd, 0o600)
@@ -816,6 +1218,7 @@ def remove_guarded_output(path: str | Path, *, field: str = "output") -> bool:
                 if not _safe_directory(os.fstat(parent)):
                     raise UnsafeRunFileError(field)
                 fd = os.open(name, _FILE_FLAGS, dir_fd=parent)
+                context.discover_run(path)  # a key published since the first discovery is registered (open_guarded_file)
                 context._check_file(os.fstat(fd), field, None)
                 os.unlink(name, dir_fd=parent)
         except FileNotFoundError:
@@ -847,9 +1250,10 @@ def remove_guarded_tree(path: str | Path, *, field: str = "output-dir") -> None:
                     raise UnsafeRunFileError(field)
                 root = os.open(name, _DIR_FLAGS, dir_fd=parent)
                 held.append(root)
+                context.discover_run(path)  # a key published since the first discovery is registered (open_guarded_file)
                 removals: list[tuple[int, str, bool]] = []
 
-                def clear(directory: int, depth: int) -> None:
+                def clear(directory: int, below: Path, depth: int) -> None:
                     if depth > 32 or not _safe_directory(os.fstat(directory)):
                         raise UnsafeRunFileError(field)
                     for entry in os.listdir(directory):
@@ -857,15 +1261,18 @@ def remove_guarded_tree(path: str | Path, *, field: str = "output-dir") -> None:
                         if stat.S_ISDIR(info.st_mode):
                             child = os.open(entry, _DIR_FLAGS, dir_fd=directory)
                             held.append(child)
-                            clear(child, depth + 1)
+                            clear(child, below / entry, depth + 1)
                             removals.append((directory, entry, True))
                         else:
                             child = os.open(entry, _FILE_FLAGS, dir_fd=directory)
                             held.append(child)
+                            # Discovery after each open (DEC-024): the upward discovery above never sees a run nested
+                            # inside the tree, so each file binds its own run before admission and a key refuses.
+                            context.discover_run(below / entry)
                             context._check_file(os.fstat(child), field, None)
                             removals.append((directory, entry, False))
 
-                clear(root, 0)
+                clear(root, Path(context._absolute(path)), 0)
                 for directory, entry, is_directory in removals:
                     if is_directory:
                         os.rmdir(entry, dir_fd=directory)

@@ -5,7 +5,7 @@ from hashlib import sha256
 from types import ModuleType
 
 import pytest
-from test_scuba_projection import EXPECTED, complete_bundle  # noqa: F401 - shared pytest fixture
+from test_scuba_projection import EXPECTED, complete_bundle, seed_key  # noqa: F401 - shared pytest fixture
 
 from auditex import scuba_projection
 from auditex.rule_assessment import canonical
@@ -24,10 +24,13 @@ def test_empty_area_modules_leave_projection_unchanged(complete_bundle, monkeypa
     # with each redaction mode. Hash canonical([dict(result), report, views, rule_sections,
     # rule_views]). This freezes the hook-disabled output, including private rule inputs,
     # without depending on Git history or comparing the implementation with itself.
+    # Re-pinned for keyed pseudonyms (DEC-021): the fixture run is seeded with the test key; against the
+    # previous pins only redaction.strategy and the redacted DisplayName pseudonym moved.
     expected = {
-        False: 'c6fb3e1976f02e018beed37452f9c60ec64d486b84c2dcd3a69af98a320e69c6',
-        True: 'c21cf938c6a67ba6fe585cd6d38156a94534d73f6ae0624a6560123e0504732f',
+        False: 'ac75cad604044262ba1f5c45fc2e1bb3e8fa6a9458bbb45b0b36b0e45c8424d2',
+        True: 'a31ea37b7e011e5961d4ca5619165b648dd76fccc867a529b8c86255e4d5e32b',
     }
+    seed_key(complete_bundle)
     monkeypatch.setattr(scuba_projection, "AREA_ADAPTER_MODULES", ())
     after = scuba_projection.project_run(complete_bundle, redact=redact)
 

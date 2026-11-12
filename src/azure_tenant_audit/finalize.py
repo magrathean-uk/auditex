@@ -19,6 +19,7 @@ from .data_handling import build_data_handling_summary
 from .evidence_db import build_run_evidence_index
 from .evidence_refs import seal_findings
 from .output import AuditWriter
+from .output_redaction import PseudonymKeyError, ensure_pseudonym_key
 from .run_files import unbounded_writer_reads
 from .scope_catalog import build_google_scope_catalog, load_m365_scope_catalog
 from .tenant_identity import canonical_tenant_uuid, resolve_tenant_identity
@@ -345,6 +346,18 @@ def finalize_bundle_contract(
     # build_run_evidence_index is idempotent (DROP TABLE / CREATE TABLE on each
     # call) so this second pass is safe and keeps re-finalise byte-stable.
     build_run_evidence_index(writer.run_dir)
+    # The run's private pseudonym key, after every digested artefact and before the hash manifest names it under
+    # ``excluded``. A re-finalised or resumed run keeps its key. Storage without locking seals the run keyless.
+    try:
+        ensure_pseudonym_key(writer.run_dir)
+    except PseudonymKeyError as exc:
+        if exc.reason != "nolock":
+            raise
+        writer.log_event(
+            "pseudonym_key.unavailable",
+            "Run sealed without a pseudonym key: the storage does not support locking",
+            {"reason": "nolock"},
+        )
     _write_bundle_hash_manifest(writer)
 
     return {

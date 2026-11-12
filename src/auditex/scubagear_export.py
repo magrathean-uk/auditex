@@ -4,6 +4,7 @@ No tenant connection, command execution or public CLI surface lives here.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import math
 import re
@@ -125,7 +126,7 @@ class LoadedExport:
 
 
 def _canonical_export(value: Any) -> str:
-    """Canonicalise the entire parsed export for an in-memory salt input."""
+    """Canonicalise the entire parsed export for the in-memory pseudonym key."""
     if isinstance(value, _Pairs):
         return "P[" + ",".join(json.dumps(key, ensure_ascii=False) + ":[" + ",".join(sorted(
             _canonical_export(item) for item in value.duplicates.get(key, [value[key]]))) + "]"
@@ -310,13 +311,15 @@ def load_results(path: str | Path) -> tuple[Any, str]:
         raise ValueError(_INVALID) from None
 
 
-def redaction_salt(users: Any, object_ids: list[str] | None = None, whole_digest: str | None = None) -> str:
+def redaction_key(users: Any, object_ids: list[str] | None = None, whole_digest: str | None = None) -> bytes:
+    """The export's 32-byte pseudonym key, derived in memory from the whole export (an export has no run folder):
+    only a holder of the export, who already holds every name, can derive it. Never written."""
     if isinstance(users, dict) and users and all(isinstance(entry, dict) for entry in users.values()):
         basis = {"entries": sorted(_json(entry) for entry in users.values()), "object_ids": object_ids}
     else:
         basis = None
     return sha256(_json({"purpose": "scubagear-adapter-redaction-v1", "privileged_users": basis,
-                         "whole_export": whole_digest}).encode()).hexdigest()
+                         "whole_export": whole_digest}).encode()).digest()
 
 
 # Canonicalisation is the only evidence reshaping in this adapter. All checks apply to every entry before any conversion.
@@ -338,8 +341,8 @@ def canonicalise_privileged_users(value: Any, whole_digest: str | None = None) -
         entries.append({"DisplayName": entry["DisplayName"],
                         "OnPremisesImmutableId": entry["OnPremisesImmutableId"], "roles": sorted(entry["roles"])})
     object_ids = sorted(lowered)
-    salt = redaction_salt({str(index): entry for index, entry in enumerate(entries)}, object_ids, whole_digest)
-    entries.sort(key=lambda entry: sha256((salt + "\0" + _json(entry)).encode()).hexdigest())
+    key = redaction_key({str(index): entry for index, entry in enumerate(entries)}, object_ids, whole_digest)
+    entries.sort(key=lambda entry: hmac.digest(key, _json(entry).encode(), "sha256"))
     return {f"User{index}": entry for index, entry in enumerate(entries, 1)}, True, object_ids
 
 
@@ -651,9 +654,9 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
                 if section in pruning:
                     pruning[section]["outcome"] = "projected"
         users = projection.get("privileged_users")
-        salt = redaction_salt(users if users != NOT_COLLECTED else None,
-                              object_ids if users != NOT_COLLECTED else None, loaded.whole_digest)
-        redaction = _redact(projection, salt, redact)
+        key = redaction_key(users if users != NOT_COLLECTED else None,
+                            object_ids if users != NOT_COLLECTED else None, loaded.whole_digest)
+        redaction = _redact(projection, key, redact)
         for section, value in projection.items():
             if value != NOT_COLLECTED and _oversize(annotate_enum_names(section, value), max_items, max_chars):
                 projection[section] = dict(NOT_COLLECTED)

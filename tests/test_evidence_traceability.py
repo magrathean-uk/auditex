@@ -668,7 +668,8 @@ def test_finalize_writes_a_hash_for_every_artifact(demo_bundle: Path) -> None:
     assert manifest["created_utc"] == _json(demo_bundle / "run-manifest.json")["created_utc"]
     assert manifest["artifact_count"] == len(listed)
     excluded = {row["path"] for row in manifest["excluded"]}
-    assert excluded == {"audit-log.jsonl", "audit-command-log.jsonl", "audit-debug.log"}
+    assert excluded == {"audit-log.jsonl", "audit-command-log.jsonl", "audit-debug.log",
+                        "operator-inputs/.gitignore", "operator-inputs/pseudonym.key"}
     assert set(listed) == _all_files(demo_bundle) - excluded - {BUNDLE_HASHES_PATH}
     for relative, row in listed.items():
         data = (demo_bundle / relative).read_bytes()

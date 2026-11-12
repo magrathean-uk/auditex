@@ -77,6 +77,10 @@ def open_run_file(run_dir: str | Path, relative: str | Path, *, max_bytes: int |
                         raise UnsafeRunFileError(field, reason="type")
                 descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=parent)
             descriptors.append(descriptor)
+            # Discovery again after the open (DEC-024): a run whose private folder appeared since the first discovery,
+            # including one nested below ``run_dir`` or one whose key folder is ``run_dir``, is bound now, so a key
+            # published between discovery and the open is registered before the comparison and never admitted.
+            context.discover_run(root / path, manifest_max_bytes=max_bytes)
             context._check_file(os.fstat(descriptor), field, max_bytes)
         except FileNotFoundError:
             missing = True

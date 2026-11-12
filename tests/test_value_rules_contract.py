@@ -254,8 +254,11 @@ def test_legacy_schema_and_model_non_rule_fixture_bytes(tmp_path, monkeypatch):
         case, **{**kw, "value_rules": False}))
     (tmp_path / "run-manifest.json").write_text('{"run_id":"synthetic-contract"}')
     result = assess_run(tmp_path, policies=["MS.POWERBI.1.1v1"])
+    fresh = result["projection"]["redaction"]["strategy"]
     for version in ("2026-10-29", "2026-11-05"):
         result["schema_version"] = version
+        # Writers of the 2026-10-29 schema wrote run-salted-sha256-v1; the current schema keeps the fresh label.
+        result["projection"]["redaction"]["strategy"] = "run-salted-sha256-v1" if version == "2026-10-29" else fresh
         validate_assessment(result)
     rows = []
     for line in (ROOT / "tests/fixtures/model-serving-cases.jsonl").read_text().splitlines():

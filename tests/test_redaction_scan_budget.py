@@ -37,7 +37,7 @@ def test_shareable_preview_preserves_local_structure_after_redaction(tmp_path: P
     shareable = preview_report(**options, profile="shareable")
     local_sections = json.loads(local["content"])["sections"]
     expected = redaction.settle_citations(redaction.redact_output(local_sections, context=redaction.context_for_run(root)))
-    assert json.loads(shareable["content"]) == {"sections": expected}
+    assert json.loads(shareable["content"]) == {"sections": expected, "pseudonym_notice": redaction.TEMPORARY_KEY_NOTICE}
     assert "private content" not in shareable["content"]
     assert expected["executive_summary"]["ordinary_count"] == 42
 
@@ -317,7 +317,7 @@ def _d5_people(count: int) -> list[tuple]:
 
 
 def _d5_matcher(people: list[tuple]) -> redaction._NameMatcher:
-    return redaction._NameMatcher(redaction._build_index(people, frozenset()).table, "salt")
+    return redaction._NameMatcher(redaction._build_index(people, frozenset()).table, bytes(32))
 
 
 _D5_TEXT = ("The audit found that the shared mailbox for finance forwards to an external address; review owner, "

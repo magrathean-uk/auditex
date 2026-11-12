@@ -77,7 +77,7 @@ def test_offline_validation_does_not_copy_operator_inputs(
     assert manifest["rule_parameters"]["stale_sync_days"] == 14
     assert manifest["rule_parameters"]["stale_guest_days"] == 90
     assert manifest["rule_parameters"]["stale_account_days"] == 90
-    assert not (manifests[0].parent / "operator-inputs").exists()
+    assert sorted(path.name for path in (manifests[0].parent / "operator-inputs").iterdir()) == [".gitignore", "pseudonym.key"]
     for value in ("alice@example.org", "partner.example.net", "emergency@example.org"):
         assert value not in json.dumps(result)
     assert os.environ["AUDITEX_SENSITIVE_USERS_FILE"] == operator_inputs["AUDITEX_SENSITIVE_USERS_FILE"]

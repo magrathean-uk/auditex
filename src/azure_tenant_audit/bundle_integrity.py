@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from .evidence_refs import HASH_ALGORITHM
+from .output_redaction import PSEUDONYM_KEY_PATH
 from .partner_domains import BUNDLE_PATH as PARTNER_DOMAINS_PATH
 from .partner_domains import KEY_PATH as PARTNER_DOMAINS_KEY_PATH
 from .run_files import hash_run_file, read_run_file
@@ -52,7 +53,7 @@ _SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 EVIDENCE_DB_SIDECARS = tuple(f"{EVIDENCE_DB_PATH}{suffix}" for suffix in _SIDECAR_SUFFIXES)
 _IGNORED_NAMES = frozenset({".DS_Store"})
 _PRIVATE_OPERATOR_INPUTS = frozenset({
-    BUNDLE_PATH, KEY_PATH, PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH, "operator-inputs/.gitignore",
+    BUNDLE_PATH, KEY_PATH, PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH, PSEUDONYM_KEY_PATH, "operator-inputs/.gitignore",
 })
 _LIST_LIMIT = 100
 # Leftover temporary files of the private operator-input writers (a crash can skip their cleanup). They hold
@@ -61,7 +62,7 @@ _LIST_LIMIT = 100
 # not a private-writer form. Only these exact names (``fullmatch``, so a trailing newline does not qualify)
 # directly under ``operator-inputs`` qualify; any other file there is still hashed or reported unlisted.
 _PRIVATE_TEMPORARY = re.compile(
-    r"\.(?:sensitive-users\.txt|sensitive-users\.key|partner-domains\.txt|partner-domains\.key|\.gitignore)"
+    r"\.(?:sensitive-users\.txt|sensitive-users\.key|partner-domains\.txt|partner-domains\.key|pseudonym\.key|\.gitignore)"
     r"\.(?:[0-9a-f]{24}|[0-9]{1,10})\.tmp"
 )
 

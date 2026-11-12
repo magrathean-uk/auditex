@@ -1,6 +1,7 @@
 """Projection contract tests use synthetic evidence only; no tenant or web calls."""
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import socket
@@ -60,6 +61,20 @@ EXPECTED = {
     **{k: ([{'domain': 'example.invalid', 'compliant': True, 'message': 'SPF record found.'}] if k == 'spf_records' else [{'domain': 'example.invalid', 'rdata': ['v=TEST;']}])
        for k in ('dmarc_records', 'spf_records', 'dkim_records')},
 }
+
+
+SEED_KEY = bytes(range(32))
+
+
+def seed_key(root, key=SEED_KEY):
+    """Replace the run's pseudonym key by plain file I/O, as the contract smoke seeds its sample runs."""
+    folder = Path(root) / 'operator-inputs'
+    folder.mkdir(mode=0o700, exist_ok=True)
+    path = folder / 'pseudonym.key'
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    os.write(fd, key)
+    os.close(fd)
 
 
 def write(root, path, payload):
@@ -248,15 +263,14 @@ def test_projection_is_read_only_and_has_no_network(complete_bundle, monkeypatch
 
 
 def test_default_redaction_is_stable_per_run_and_changes_between_runs(complete_bundle):
+    seed_key(complete_bundle)
     a = project_run(complete_bundle)
     assert a == project_run(complete_bundle)
     assert PERSON not in canonical(a) and 'sensitive.local' not in canonical(a)
     assert '***@example.invalid' in canonical(a)
     assert 'Global Administrator' in canonical(a) and 'Require MFA' in canonical(a)
     original = a['privileged_users']['User1']['DisplayName']
-    manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
-    manifest['run_id'] = 'another-run'
-    write(complete_bundle, 'run-manifest.json', manifest)
+    seed_key(complete_bundle, bytes(range(1, 33)))  # another run's key
     assert project_run(complete_bundle)['privileged_users']['User1']['DisplayName'] != original
 
 
@@ -446,6 +460,7 @@ def test_legacy_assessments_continue_to_validate(complete_bundle, monkeypatch, v
     payload = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     assert payload['policies'][0]['rule_precheck']['class'] != 'value_rule'
     payload['schema_version'] = version
+    payload['projection']['redaction']['strategy'] = 'run-salted-sha256-v1'  # what writers of that version wrote
     if version == '2026-10-28':
         del payload['projection'], payload['scope_post_check'], payload['totals']['scope_narrowed']
         payload.pop('serving', None)
@@ -818,10 +833,12 @@ def test_chunk_iteration_stops_at_scan_row_and_byte_bounds(complete_bundle, monk
     assert data.calls == 1 and data.tell() == 401
 
 
-def test_redaction_salt_is_absent_and_rejected_by_both_validators(complete_bundle):
+@pytest.mark.parametrize('member', ['salt', 'key'])
+def test_redaction_salt_is_absent_and_rejected_by_both_validators(complete_bundle, member):
     result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
-    assert 'salt' not in result['projection']['redaction']
-    result['projection']['redaction']['salt'] = 'a' * 64
+    assert result['projection']['redaction']['strategy'] == 'keyed-hmac-sha256-v1'
+    assert 'salt' not in result['projection']['redaction'] and 'key' not in result['projection']['redaction']
+    result['projection']['redaction'][member] = 'a' * 64
     with pytest.raises(ValueError):
         validate_assessment(result)
     with pytest.raises(jsonschema.ValidationError):
@@ -1138,17 +1155,19 @@ def test_chunk_row_depth_bound_is_exactly_64_containers(complete_bundle):
     assert projection.report['sections']['service_plans']['detail']['field'] == 'chunk_files'
 
 
-def test_normal_manifest_salt_and_output_are_unchanged(complete_bundle, monkeypatch):
+def test_seeded_key_pseudonym_and_output_are_unchanged(complete_bundle, monkeypatch):
     # Hermetic: the frozen output hash covers the built-in adapters only; area adapter modules have their own tests.
     monkeypatch.setattr('auditex.scuba_projection.AREA_ADAPTER_MODULES', ())
+    seed_key(complete_bundle)
     projection = project_run(complete_bundle)
-    manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
-    salt = sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
-    assert salt == 'fed5fb19ba49484bd4e1106e433bfbb4192030f0ff496f2474fb051a39fca1b6'
-    pseudonym = 'User ' + sha256((salt + '\0' + PERSON).encode()).hexdigest()[:16]
+    pseudonym = 'User ' + hmac.digest(SEED_KEY, PERSON.encode(), 'sha256').hex()[:16]
+    assert pseudonym == 'User 2ece4e6269be8dcd'
     assert pseudonym in json.dumps(projection['privileged_users'])
+    assert (complete_bundle / 'operator-inputs/pseudonym.key').read_bytes() == SEED_KEY  # used as is, unchanged
     # sharing_policy is no longer withheld unconditionally: without a sharingPolicy operation it is missing_artifact.
-    assert sha256(canonical([dict(projection), projection.report, projection.views]).encode()).hexdigest() == '3050ddbe748d9ae332422c070b1ed1d5cfd5b8a4640913e5087060e40dcf56af'
+    # Re-pinned for the keyed scheme: with the run-salted pseudonym and label restored in memory the same projection
+    # digests to 3050ddbe...dcf56af, the 1.4.0 pin, so only the pseudonyms and the strategy label changed.
+    assert sha256(canonical([dict(projection), projection.report, projection.views]).encode()).hexdigest() == 'f2dc468d797c7e20ae00a6c4a634a16051ed1914fc2385e0fefef891023456d2'
 
 
 @pytest.mark.parametrize('metadata', [{'error': 'Forbidden'}, {'collection_status': 'not_collected'}, {'status': 'failed'}])
@@ -2086,9 +2105,11 @@ def test_run_rule_reads_unredacted_canary_without_persisting_it(complete_bundle,
 
 
 def test_unaffected_run_case_hashes_match_pre_rule_view_fixture(complete_bundle):
-    # The retired prompt was [constant system message, canonical(case)]; this digest over the same 102 case bytes
-    # was taken on the last head that still produced the prompt, where the prompt digest was a57bba64...2047.
+    # The retired prompt was [constant system message, canonical(case)]; the digest over the same 102 case bytes was
+    # 15ce23ca...e32d62 on the last head that still produced the prompt (prompt digest a57bba64...2047). Re-pinned under
+    # a seeded key: with the run-salted pseudonym restored in memory these cases digest to 15ce23ca...e32d62 again.
     from auditex.rule_assessment import policy_catalogue
+    seed_key(complete_bundle)
     projection = project_run(complete_bundle)
     hashes = {}
     for policy_id in policy_catalogue()['policies']:
@@ -2096,7 +2117,7 @@ def test_unaffected_run_case_hashes_match_pre_rule_view_fixture(complete_bundle)
         hashes[policy_id] = sha256(canonical(case).encode()).hexdigest()
     assert len(hashes) == 102
     assert sha256(canonical(hashes).encode()).hexdigest() == (
-        '15ce23ca6bd3b8b83bc198e113f7814d7041aa7c4743ad0da68f64f308e32d62')
+        'b7e6a648f6550448b1b548db4cd20f620da798229435936349976288f3e84477')
 
 
 @pytest.mark.parametrize('kwargs,environment,basis', [

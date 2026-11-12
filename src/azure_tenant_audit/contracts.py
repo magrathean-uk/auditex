@@ -22,7 +22,7 @@ from .tenant_identity import (
 )
 from .waivers import has_matching_waiver, is_accepted_status
 
-CONTRACT_VERSION = "2026-11-08"
+CONTRACT_VERSION = "2026-11-11"
 # The contract version from which every evidence reference must resolve. It is fixed: a bundle finalized
 # under 2026-10-22 must keep failing on an unresolved reference after later contract bumps, so the legacy
 # cut-off is tied to the version a bundle was finalized under and never to the current CONTRACT_VERSION.

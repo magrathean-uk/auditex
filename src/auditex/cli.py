@@ -23,6 +23,7 @@ from azure_tenant_audit.output_redaction import (
     context_for_run,
     redact_output,
     snapshot_run,
+    temporary_key_note,
 )
 from azure_tenant_audit.private_io import make_private_dirs, write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
@@ -582,6 +583,14 @@ def _build_report_parser() -> argparse.ArgumentParser:
         help="Earlier run of the same tenant to embed for Before / after (repeatable; oldest is compared with newest).",
     )
     explorer.add_argument("--output", default=None, help="HTML file to write (default: <run-dir>/reports/explorer.html).")
+    prepare_key_text = (
+        "Create the private pseudonym key of a keyless run (made by 1.4.0 or earlier, copied without "
+        "operator-inputs/, or sealed on storage without locking), so its pseudonyms stay stable across sessions. "
+        "Prints created or present."
+    )
+    prepare_key = subparsers.add_parser("prepare-key", allow_abbrev=False, help=prepare_key_text,
+                                        description=prepare_key_text)
+    prepare_key.add_argument("run_dir", help="Completed run directory.")
     return parser
 
 
@@ -614,12 +623,19 @@ def _redacted_report_payload(
     payload: Any, renderer: Callable[[Any], str] | None, format_name: str, run_dir: str | None
 ) -> str:
     """Redact the payload as structure first, then render it; the markup-safe text pass only runs over the
-    already redacted Markdown (it repeats the redaction, idempotently, and skips the inline secret pattern)."""
+    already redacted Markdown (it repeats the redaction, idempotently, and skips the inline secret pattern).
+    Output made with a temporary key (a keyless run) says so: a top-level ``pseudonym_notice`` in JSON, a closing
+    line in Markdown (``output_redaction.temporary_key_note``)."""
     context = context_for_run(run_dir) if run_dir else None
     safe = redact_output(payload, profile=PROFILE_SHAREABLE, context=context)
+    note = temporary_key_note(context) if context else ""
     if format_name == "md" and renderer is not None:
         content = redact_output(renderer(safe), profile=PROFILE_SHAREABLE, context=context, markup=True)
+        if note:
+            content = content.rstrip("\n") + "\n\n" + note + "\n"
     else:
+        if note and isinstance(safe, dict):
+            safe = {**safe, "pseudonym_notice": note}
         content = json.dumps(safe, indent=2) + "\n"
     if run_dir and context:
         assert_snapshot_stable(run_dir, context.snapshot)
@@ -1078,6 +1094,20 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "report":
         parser = _build_report_parser()
         args = parse_guarded(parser, argv[1:])
+        if args.report_command == "prepare-key":
+            # The only command besides collection that writes a pseudonym key; refusals exit 2 through guarded_cli.
+            from azure_tenant_audit.guarded_io import guard_session
+            from azure_tenant_audit.output_redaction import (
+                new_pseudonym_key,
+                read_pseudonym_key,
+            )
+
+            with guard_session() as context:
+                created = False
+                if read_pseudonym_key(args.run_dir) is None:
+                    _, created = context.create_pseudonym_key(args.run_dir, new_pseudonym_key())
+            print("created" if created else "present")
+            return 0
         if args.report_command in {"analyze", "api-calls", "permissions", "proof-table", "handoff"}:
             before = snapshot_run(args.run_dir)
         if args.report_command == "analyze":

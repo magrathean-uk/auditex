@@ -290,6 +290,8 @@ def _payload_text(payload: dict[str, Any], sink: str) -> str:
     action_plan = payload.get("action_plan") or []
     if action_plan:
         lines.append(f"Top action: {action_plan[0].get('title') or action_plan[0].get('id')}")
+    if payload.get("pseudonym_notice"):
+        lines.append(str(payload["pseudonym_notice"]))
     return "\n".join(lines)
 
 
@@ -656,7 +658,7 @@ def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[
     payload = {**payload, "run_fingerprint": _run_fingerprint(payload)}
     # Every sink leaves the machine, and so does the envelope this function returns (the preview reaches MCP
     # clients). The payload, the citations (built from the real paths) and every service response pass the shared
-    # output redaction with the run's salt and path spellings; the citation summary is re-derived from the
+    # output redaction with the run's pseudonym key and path spellings; the citation summary is re-derived from the
     # redacted list. Nothing unredacted is handed to a sink or returned.
     envelope = _redact_envelope(
         {
@@ -670,6 +672,9 @@ def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[
     )
     # Compare after redaction and before any network send or preview is returned.
     assert_snapshot_stable(run_dir, before)
+    if envelope.get("pseudonym_notice"):
+        # A keyless run: the notification itself says its pseudonyms come from a temporary key.
+        envelope["payload"] = {**envelope["payload"], "pseudonym_notice": envelope["pseudonym_notice"]}
     payload = envelope["payload"]
     base = envelope
     if dry_run:

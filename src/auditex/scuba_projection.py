@@ -19,6 +19,13 @@ from azure_tenant_audit.chunk_reader import _open_chunk
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
 from azure_tenant_audit.guarded_io import guarded_operation
+from azure_tenant_audit.output_redaction import (
+    PSEUDONYM_STRATEGY,
+    new_pseudonym_key,
+    pseudonym,
+    read_pseudonym_key,
+    session_pseudonym_key,
+)
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.run_files import (
     MAX_RUN_FILE_BYTES,
@@ -1534,10 +1541,8 @@ def _oversize(value: Any, max_items: int, max_chars: int) -> bool:
 _EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 
 
-def _redact(projection: Projection, salt: str, enabled: bool) -> dict[str, Any]:
+def _redact(projection: Projection, key: bytes, enabled: bool) -> dict[str, Any]:
     counts = {"user_display_names": 0, "email_addresses": 0, "immutable_ids": 0}
-    def pseudonym(text: str) -> str:
-        return sha256((salt + "\0" + text).encode()).hexdigest()[:16]
     def emails(value: Any) -> Any:
         if isinstance(value, str):
             def mask(match: re.Match) -> str:
@@ -1553,17 +1558,26 @@ def _redact(projection: Projection, salt: str, enabled: bool) -> dict[str, Any]:
         users = projection.get("privileged_users", {})
         if users != NOT_COLLECTED:
             for item in users.values():
-                item["DisplayName"] = "User " + pseudonym(item["DisplayName"])
+                item["DisplayName"] = "User " + pseudonym(key, item["DisplayName"])
                 counts["user_display_names"] += 1
                 if item["OnPremisesImmutableId"] is not None:
-                    item["OnPremisesImmutableId"] = "Id " + pseudonym(item["OnPremisesImmutableId"])
+                    item["OnPremisesImmutableId"] = "Id " + pseudonym(key, item["OnPremisesImmutableId"])
                     counts["immutable_ids"] += 1
-        for key in projection:
-            projection[key] = emails(projection[key])
+        for name in projection:
+            projection[name] = emails(projection[name])
         for views in getattr(projection, "views", {}).values():
-            for key in views:
-                views[key] = emails(views[key])
-    return {"enabled": enabled, "strategy": "run-salted-sha256-v1", **counts}
+            for name in views:
+                views[name] = emails(views[name])
+    return {"enabled": enabled, "strategy": PSEUDONYM_STRATEGY, **counts}
+
+
+def _projection_key(run_dir: str | Path, is_run: bool) -> bytes:
+    """The run's private key; for a keyless run its temporary session key; for a folder whose manifest could not be
+    read a fresh key. Never creates a key, never writes. Outside the bundle readers, so a key refusal propagates."""
+    if not is_run:
+        return new_pseudonym_key()
+    key = read_pseudonym_key(run_dir)
+    return key if key is not None else session_pseudonym_key(run_dir)
 
 
 @guarded_operation
@@ -1571,9 +1585,9 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                 max_items: int = DEFAULT_MAX_ITEMS, max_chars: int = DEFAULT_MAX_CHARS,
                 scan_max_rows: int = DEFAULT_SCAN_MAX_ROWS, scan_max_bytes: int = DEFAULT_SCAN_MAX_BYTES,
                 scan_max_chunks: int = DEFAULT_SCAN_MAX_CHUNKS) -> Projection:
-    """Read a bundle without writes; manifest digest supplies a stable per-run salt.
+    """Read a bundle without writes; the run's private pseudonym key masks privileged users (``redact``).
 
-    The salt stays in memory and is never persisted. ``max_items`` and ``max_chars`` budget the projected
+    The key is only read, never created (a keyless run uses its temporary session key). ``max_items`` and ``max_chars`` budget the projected
     section itself, before and after redaction and enum annotation, including nested lists and user
     dictionaries; they do not limit how much source a section is built from. The scan bounds do that: a
     source read that exhausts one withholds the section as ``oversize`` (detail kind ``scan_bound``).
@@ -1584,19 +1598,20 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
         raise ValueError("Projection bounds must be positive integers")
     bundle = Bundle(Path(os.path.abspath(run_dir)), scan_max_rows, scan_max_bytes, scan_max_chunks)
     manifest_error: Unavailable | None = None
+    manifest_read = True
     try:
         manifest = bundle.read("run-manifest.json")
         _require(isinstance(manifest, dict))
-        # The redaction salt is the digest of the canonical manifest; one that cannot be serialised (``1e999``, a lone
-        # surrogate) is unusable, so it takes the same path as an unparseable manifest rather than raising later.
+        # A manifest that cannot be serialised (``1e999``, a lone surrogate) is unusable, so it takes the same path as
+        # an unparseable manifest rather than raising later.
         try:
-            salt = sha256(_json(manifest).encode()).hexdigest()
+            _json(manifest).encode()
         except (ValueError, UnicodeError, TypeError, RecursionError):
             raise Unavailable() from None
     except Unavailable as exc:
         manifest_error = None if exc.reason == "missing_artifact" else exc
         manifest = {}
-        salt = sha256(_json(manifest).encode()).hexdigest()
+        manifest_read = False
     bundle.manifest = manifest
     from azure_tenant_audit.scuba_precheck import optional_collection_entry
     optional = optional_collection_entry()
@@ -1753,7 +1768,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                         result.rule_sections[section] = dict(NOT_COLLECTED)
                 except (ValueError, TypeError, KeyError, OverflowError):
                     pass
-    redaction = _redact(result, salt, redact)
+    redaction = _redact(result, _projection_key(run_dir, manifest_read) if redact else new_pseudonym_key(), redact)
     for section, value in result.items():
         if value != NOT_COLLECTED and _oversize(annotate_enum_names(section, value), max_items, max_chars):
             result[section] = dict(NOT_COLLECTED)

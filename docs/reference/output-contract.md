@@ -1,6 +1,6 @@
 # Auditex Output Contract
 
-Contract version: `2026-11-08` (1.3.0). It keeps everything `2026-10-22` made traceable and adds, additively, the items listed under "Contract history", and it removes the text-derived Google Workspace fields listed there. Consumers that ignore unknown keys are unaffected by the additions; a consumer that read a removed field must stop. `REFS_MUST_RESOLVE_SINCE` stays `2026-10-22`, so the legacy-bundle cut-off does not move.
+Contract version: `2026-11-11` (1.5.0). It keeps everything `2026-10-22` made traceable and adds, additively, the items listed under "Contract history", and it removes the text-derived Google Workspace fields listed there. Consumers that ignore unknown keys are unaffected by the additions; a consumer that read a removed field must stop. `REFS_MUST_RESOLVE_SINCE` stays `2026-10-22`, so the legacy-bundle cut-off does not move.
 
 ## Local sensitive-user operator input (additive)
 
@@ -228,11 +228,102 @@ absence of either input leaves only its own policy unconfigured. Unsafe or
 inconsistent private material still refuses run admission. Neither list enters
 projection views, the shape gate, assessment cases or assessment/report output.
 
+## Private pseudonym key (additive)
+
+Every run sealed by 1.5.0 on storage with locking holds a private pseudonym key,
+`operator-inputs/pseudonym.key`: 32 random bytes, the file 0600 in a 0700
+`operator-inputs/` folder, beside `operator-inputs/.gitignore` holding `*`.
+Collection creates it when it seals the run, after every digested artefact and
+just before `bundle-hashes.json`, which names it under `excluded` with reason
+`redacted_operator_input` and no checksum or byte length. The key is in no other
+artefact: not in `run-manifest.json`, `summary.json`, `validation.json`,
+`ai_context.json`, the evidence index, a report, preview, customer pack, export,
+notification, MCP output, log or error message. A customer pack never copies
+`operator-inputs/`. A re-finalised or resumed run keeps its key, and nothing in
+Auditex removes, shortens or replaces a published key.
+
+Pseudonyms (D5 person-name masking, privileged-user display names and immutable
+ids in projections) are `HMAC-SHA256(key, text)` cut to 16 lower-case hex digits,
+keeping their prefixes (`User `, `Id `, `Guid `, `user-`); the strategy label is
+`keyed-hmac-sha256-v1`. Without the key, knowing the run folder, its manifest or
+any other run metadata reproduces no pseudonym. The key protects people who hold
+outputs; anyone who can run Auditex against the run folder can still mask a name
+of their choosing with the run's key, and that caller can already read the
+evidence beside it. A person keeps one pseudonym in every output derived from the
+run, across re-renders and after the run folder moves; a copy with
+`operator-inputs/` shares the key. Outputs built from several runs (MCP
+`auditex_diff_runs` and `auditex_compare_runs`, and every other comparison, diff
+or drift output that masks names) use the first-listed run's key for every run's
+names, so they line up with that run's own reports; listing the runs in the
+other order uses the other key. Output with no run uses a fresh random key for
+that output only.
+
+A keyless run is one made by 1.4.0 or earlier, one copied without
+operator-inputs/, or one sealed on storage without locking. Auditex never writes
+into it while reading: reports, previews, customer packs, notifications, `assess`
+and every MCP tool mask it with a temporary key held in memory, one per run (its
+folder and the `run_id` its manifest records) per process, so the files of one
+customer pack and the calls of one MCP server session agree, and another command
+or a restarted server gives different pseudonyms. A run whose manifest records
+no usable `run_id` (missing, null, not a string or empty) gets a key for one
+command or tool call only, so no other run ever shares it. Such output says so in one
+fixed line (`pseudonym_notice` at the top level of JSON reports, results and
+customer-pack files, `pack-manifest.json` and the redacted copies under
+`source-artifacts/` included, and of MCP run-tool results, a closing line in
+Markdown and HTML reports, customer-pack Markdown (`README.md` included) and
+notification text, a closing CSV row whose `id` is `pseudonym_notice`, the SARIF
+run property `auditex.pseudonym_notice` and the OSCAL metadata `remarks`; the
+pack's `checksums.sha256` and its byte-for-byte copy of `bundle-hashes.json`,
+which hold no pseudonym, carry none): its pseudonyms are not stable across
+sessions until
+`auditex report prepare-key RUN_DIR` is run once. That command creates the key,
+prints `created` (or `present` when the run already has one) and exits 0; it is
+the only command besides collection that writes a key and is not offered over
+MCP. A key that appears later is used from the next command or tool call on;
+one command or tool call keeps the key it resolved first for each run.
+
+The key is created only under an exclusive lock on the run folder, through a
+temporary file (`.pseudonym.key.<24 hex>.tmp`, registered as private before its
+bytes are written and named in `bundle-hashes.json` like the key if a crash
+leaves one) that is flushed and then renamed into place. Storage without locking
+(every lock error except would-block, try-again and interrupted; Linux network
+storage answers this way, because NFS emulates the lock with one that needs a
+file open for writing) never gets a key: collection seals the run keyless and
+logs `pseudonym_key.unavailable` with reason `nolock` in `audit-log.jsonl`, and
+`prepare-key` refuses there until the run is copied to local storage. Between
+machines on network storage, locks depend on the server's lock service. The run
+folder is flushed after `operator-inputs/` is created and `operator-inputs/`
+after the key is published, where the storage supports it. Where a folder cannot
+be flushed (storage that cannot flush a folder, a flush that fails after the
+key was published, the moment between publication and the flush, and macOS,
+where a flush does not empty the disk's own cache), a power loss soon after
+creation can lose the key's folder entry; outputs made before the loss then do
+not match the key created next.
+
+A key that is not exactly 32 bytes (`damaged`), or a key or folder with any group
+or other permission bit (`permissions`), refuses every derivation of that run,
+local reports with policy explanations included, until the operator restores,
+restricts (0600 and 0700) or removes it; Auditex never repairs or widens it, and
+removing it starts a new pseudonym series. A link, FIFO, folder, hard link or
+file of another owner at the key's name is refused like any private input. The
+guard refuses the key, by name, case alias, link, standard input or output
+destination, wherever an ordinary input is admitted. CLI refusals exit 2 with a
+fixed message that names `operator-inputs/pseudonym.key` and never a path or
+key bytes.
+
+Pseudonyms in outputs rendered by 1.4.0 or earlier came from the run path and do
+not match those of 1.5.0; re-render and re-share where that matters. 1.4.0 reads
+a 1.5.0 run (the key is outside the folders it reads) but rejects its
+`model_assessment.json`, so a 1.4.0 render of a 1.5.0 run omits policy
+explanations.
+
 ## Contract history
 
 The optional `operator_inputs.sensitive_users`, `operator_inputs.partner_domains`
 and `redacted_artifacts` manifest keys and the private-input integrity exclusions
 above are additive under this version.
+
+Version `2026-11-11` (1.5.0). Pseudonyms come from a private per-run key: the run key `operator-inputs/pseudonym.key`, made at collection, excluded from the hash manifest and never copied (see "Private pseudonym key"); keyless runs (made by 1.4.0 or earlier, copied without operator-inputs/, or sealed on storage without locking) use a temporary key held in memory, say so in their output, and get a key from the new `auditex report prepare-key`. The projection label is `keyed-hmac-sha256-v1`; `schemas/model_assessment.schema.json` accepts it and `run-salted-sha256-v1` in place (its `schema_version` stays `2026-11-05`), and writers emit only the new label. `schemas/bundle_hashes.schema.json` lists `redacted_operator_input` among the `excluded` reasons, which writers of `2026-10-22` already wrote. Pseudonyms made by 1.4.0 or earlier do not match; 1.4.0 rejects a 1.5.0 assessment.
 
 Version `2026-11-08` (1.3.0). Removed, from the Gmail settings, Alert Center and group-settings text exclusions (live output only; offline fixtures follow): the length and presence fields derived from text the collector no longer requests, for example the vacation message and signature lengths. Presence stays only where a non-text field reports it, and no value rule read a removed field. Added since 1.2.4 (new in this version): the skip reasons `teams_token_unavailable` and `teams_powershell_not_supported` on section gaps with `status: skipped`, and the preservation of `status: skipped` on the coverage rows of an offline replay (added in 3e8c1bd); and, from the PIM role policy reads of `identity_governance` (see "PIM role policy reads"), the normalized artefact `normalized/privileged_roles.json`, the `governance_objects` record kinds `role_management_policy_assignment` and `role_management_policy_rule`, the coverage rows `roleManagementPolicyAssignments`, `roleManagementPolicyRules` and `roleManagementPolicyRulesFanout`, and the `collection_gaps` reasons `endpoint_unavailable` and `artefact_withheld` (with its `reasons` field).
 
@@ -610,14 +701,19 @@ The required `projection` envelope is separate from the assessment-case evidence
   tier-1 adapters remain `not_collected` with `missing_artifact`, even if other
   Auditex summary artefacts exist for that surface. No summary count is treated as
   a ProviderExport object. Non-M365 bundles use `not_applicable_to_platform`.
-- `redaction`: `enabled`, strategy `run-salted-sha256-v1`, and counts
-  `user_display_names`, `email_addresses`, `immutable_ids`. The salt is the SHA-256
-  of canonical manifest JSON, stable for the same saved run. User display names
-  become `User <salted hash>`; non-null immutable IDs become `Id <salted hash>`.
+- `redaction`: `enabled`, strategy `keyed-hmac-sha256-v1` (assessments written by
+  1.4.0 or earlier carry `run-salted-sha256-v1`, which still validates), and counts
+  `user_display_names`, `email_addresses`, `immutable_ids`. The key is the run's
+  private `operator-inputs/pseudonym.key` (see "Private pseudonym key"), read only
+  while `redact` is on and never created by projection; a keyless run uses its
+  temporary key. User display names become `User <pseudonym>`; non-null immutable
+  IDs become `Id <pseudonym>`, each the run key's pseudonym of the value.
   No identity-to-pseudonym table is persisted. E-mail local parts anywhere in
   projected string values become `***`, retaining the domain. GUID principal IDs,
-  role and policy names remain available. The salt stays in memory only and is
-  rejected by the envelope schema and validator; counters never enter assessment cases. Hashes support
+  role and policy names remain available. No key or salt is written: the envelope
+  schema and validator reject either member; counters never enter assessment cases.
+  ScubaGear exports have no run folder: their key is derived in memory from the whole
+  export, so only a holder of the export can derive it. Pseudonyms support
   pseudonymisation, not anonymisation or a disclosure guarantee.
 - `bounds`: the projection budget `max_items` (default 40) and `max_chars` (default
   12,000 canonical JSON characters), and the scan bounds `scan_max_rows` (default
@@ -909,7 +1005,7 @@ What the finding builders cite, so that every reference resolves in a bundle the
 
 `bundle-hashes.json` is the last file finalization writes (schema: `schemas/bundle_hashes.schema.json`). It holds `schema_version`, `algorithm` (`sha256`), `run_id`, `created_utc` (the run manifest's), `artifact_count`, `artifacts` (`path`, `sha256`, `bytes` for every non-excluded file under the run directory, sorted by path) and `excluded`. The append-only logs (`audit-log.jsonl`, `audit-command-log.jsonl`, `audit-debug.log`) and operating-system metadata change after finalization by design, so they are named under `excluded` with a `reason` and not hashed. The manifest does not hash itself. `index/evidence.sqlite` is closed before it is hashed, so the file holds the whole index and not a stub with the data in a `-wal` sidecar, and no sidecar exists to hash. A SQLite sidecar (`index/evidence.sqlite-wal`, `-shm`, `-journal`) that turns up afterwards is an unlisted file the check refuses (`unexpected`, below): SQLite would replay a `-wal` file over the hashed index, so it could change what every consumer reads while the hashed file stays as it was. The `sqlite_sidecar` value of `excluded[].reason` is no longer written; older manifests may carry it. Its path is fixed; `run-manifest.json` lists it under `artifacts`.
 
-Exactly five `operator-inputs/` paths, the private lists `operator-inputs/sensitive-users.txt` and `operator-inputs/partner-domains.txt`, their separate keys `operator-inputs/sensitive-users.key` and `operator-inputs/partner-domains.key`, and the local `operator-inputs/.gitignore`, appear only in `excluded` with reason `redacted_operator_input`, without `sha256` or `bytes`; any other file under that directory is hashed at finalisation or reported as unlisted afterwards. This also applies to the customer pack copy of the hash manifest.
+Exactly six `operator-inputs/` paths, the private lists `operator-inputs/sensitive-users.txt` and `operator-inputs/partner-domains.txt`, their separate keys `operator-inputs/sensitive-users.key` and `operator-inputs/partner-domains.key`, the run's pseudonym key `operator-inputs/pseudonym.key` and the local `operator-inputs/.gitignore`, together with a private writer's leftover temporary of one of them (such as `.pseudonym.key.<24 hex>.tmp`), appear only in `excluded` with reason `redacted_operator_input`, without `sha256` or `bytes`; any other file under that directory is hashed at finalisation or reported as unlisted afterwards. This also applies to the customer pack copy of the hash manifest.
 
 Consumers read the index read-only (`azure_tenant_audit.evidence_db.open_index_read_only`: SQLite `mode=ro&immutable=1`, which writes nothing, creates no sidecar, opens on read-only media and ignores a `-wal` file). When `bundle-hashes.json` lists the index and a sidecar stands beside it, `load_run_index_summary` returns nothing (callers fall back to the manifest) and the read-only validation copies the hashed file alone. An index no hash manifest covers (a bundle from before it existed) is still read with its sidecar, because its data may still sit there.
 

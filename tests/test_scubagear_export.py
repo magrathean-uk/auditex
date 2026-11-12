@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import hmac
 import importlib.util
 import inspect
 import json
@@ -43,7 +44,7 @@ from auditex.scubagear_export import (
     project_export,
     prune_section,
     qualifier_check,
-    redaction_salt,
+    redaction_key,
     resolve_output_directory,
 )
 from auditex.scubagear_prune_proof import (
@@ -275,7 +276,7 @@ def test_non_string_ca_state_withholds_only_ca(tmp_path):
         assert projection.report["sections"]["dkim_config"]["status"] == "projected"
 
 
-def test_whole_export_salt_is_canonical_and_file_hash_is_bytes(tmp_path):
+def test_whole_export_key_is_canonical_and_file_hash_is_bytes(tmp_path):
     raw = json.loads(PROVIDER.read_text())
     source = _save(tmp_path, raw, "first.json")
     loaded = load_export(source)
@@ -287,8 +288,8 @@ def test_whole_export_salt_is_canonical_and_file_hash_is_bytes(tmp_path):
     reordered = _save(tmp_path, shuffled, "reordered.json")
     assert load_export(reordered).whole_digest == loaded.whole_digest
     assert load_export(reordered).sha256 != loaded.sha256
-    a, _, a_rows = _assess(tmp_path / "salt-a", source)
-    b, _, b_rows = _assess(tmp_path / "salt-b", alternate)
+    a, _, a_rows = _assess(tmp_path / "key-a", source)
+    b, _, b_rows = _assess(tmp_path / "key-b", alternate)
     a_cases = {row["policy_id"]: row["case_sha256"] for row in a_rows}
     b_cases = {row["policy_id"]: row["case_sha256"] for row in b_rows}
     assert len(a_cases) == len(b_cases) == 102
@@ -296,7 +297,7 @@ def test_whole_export_salt_is_canonical_and_file_hash_is_bytes(tmp_path):
     assert a_cases != b_cases
 
 
-def test_distinct_fixture_exports_have_distinct_salts_and_pseudonyms(tmp_path):
+def test_distinct_fixture_exports_have_distinct_keys_and_pseudonyms(tmp_path):
     assert load_export(PROVIDER).whole_digest != load_export(REAL).whole_digest
     clean = _assess(tmp_path / "clean", PROVIDER)[2]
     real = _assess(tmp_path / "real", REAL)[2]
@@ -441,14 +442,15 @@ def test_canonicaliser_rejects_partial_and_unseen_shapes(mutation):
         _seen_shape("privileged_users", converted)
 
 
-def test_canonicaliser_salt_determinism_and_gate(tmp_path):
+def test_canonicaliser_key_determinism_and_gate(tmp_path):
     original = json.loads(PROVIDER.read_text())
     users = original["privileged_users"]
     converted, applied, ids = canonicalise_privileged_users(users)
     assert applied and len(converted) == len(users) and len(ids) == len(users)
     _seen_shape("privileged_users", converted)
     assert len(PACK_SHAPE_DIGESTS) == 16 and sum(map(len, PACK_SHAPE_DIGESTS.values())) == 410
-    expected_salt = redaction_salt(converted, ids)
+    expected_key = redaction_key(converted, ids)
+    assert isinstance(expected_key, bytes) and len(expected_key) == 32
     randomizer = random.Random(20261104)
     for _ in range(20):
         shuffled = list(users.items())
@@ -459,23 +461,23 @@ def test_canonicaliser_salt_determinism_and_gate(tmp_path):
             randomizer.shuffle(entry["roles"])
         actual, yes, object_ids = canonicalise_privileged_users(value)
         assert yes and actual == converted and object_ids == ids
-        assert redaction_salt(actual, object_ids) == expected_salt
+        assert redaction_key(actual, object_ids) == expected_key
     numbered = {f"User{i}": deepcopy(v) for i, v in enumerate(reversed(list(converted.values())), 1)}
     assert canonicalise_privileged_users(numbered) == (numbered, False, None)
-    assert redaction_salt(numbered) == redaction_salt(converted)
-    assert redaction_salt(converted, ids) != redaction_salt(numbered)
+    assert redaction_key(numbered) == redaction_key(converted)
+    assert redaction_key(converted, ids) != redaction_key(numbered)
     changed = deepcopy(users)
     key = next(iter(changed))
     changed[key]["DisplayName"] += " changed"
-    assert redaction_salt(*_salt_inputs(changed)) != expected_salt
+    assert redaction_key(*_key_inputs(changed)) != expected_key
     changed = deepcopy(users)
     new = "00000000-0000-4000-8000-000000000099"
     changed[new] = changed.pop(key)
     changed[new]["id"] = new
-    assert redaction_salt(*_salt_inputs(changed)) != expected_salt
+    assert redaction_key(*_key_inputs(changed)) != expected_key
 
 
-def test_redaction_salt_blocks_output_only_name_dictionary(tmp_path):
+def test_redaction_key_blocks_output_only_name_dictionary(tmp_path):
     raw = json.loads(PROVIDER.read_text())
     raw["privileged_users"] = dict(list(raw["privileged_users"].items())[:2])
     raw.pop("privileged_roles")
@@ -498,8 +500,8 @@ def test_redaction_salt_blocks_output_only_name_dictionary(tmp_path):
         basis = {"purpose": "scubagear-adapter-redaction-v1",
                  "privileged_users": {"entries": sorted(_json(entry) for entry in entries), "object_ids": object_ids},
                  "whole_export": whole_digest}
-        salt = sha256(_json(basis).encode()).hexdigest()
-        return {"User " + sha256((salt + "\0" + name).encode()).hexdigest()[:16] for name in (a, b)}
+        key = sha256(_json(basis).encode()).digest()
+        return {"User " + hmac.digest(key, name.encode(), "sha256").hex()[:16] for name in (a, b)}
     assert guesses(*names) != pseudonyms
     assert all(guesses(a, b) != pseudonyms for a in candidates for b in candidates if a != b)
     known_ids = sorted(raw["privileged_users"])
@@ -530,7 +532,7 @@ def test_user_entries_guard_withholds_mixed_missing_immutable(tmp_path):
     assert all(name not in written for name in names)
 
 
-def _salt_inputs(users):
+def _key_inputs(users):
     converted, _, ids = canonicalise_privileged_users(users)
     return converted, ids
 
@@ -1970,9 +1972,11 @@ def test_rule_exception_text_never_reaches_export_artifacts_or_stderr(tmp_path, 
 
 @pytest.mark.parametrize('source,expected', [
     # Digests over the case bytes (the retired prompt's user message), taken on the last head that still produced
-    # the prompt, where the prompt digests were c8e526c5...2ef14 and 12b87659...534cdb.
-    (PROVIDER, '493b343581a8f1cf181df356c6b2d0e504c43988502151453b5323188dfaa0ba'),
-    (REAL, 'cf65845c4668e91d9eeaf5d82f18ea54057aa800f6442b9b0b4772d6634d5f64'),
+    # the prompt, where the prompt digests were c8e526c5...2ef14 and 12b87659...534cdb: 493b3435...dfaa0ba and
+    # cf65845c...d5f64. Re-pinned for the keyed scheme; with the hex salt, SHA-256 pseudonyms and order restored in
+    # memory the same cases digest to those two values again, so only the pseudonyms and their order changed.
+    (PROVIDER, '593db40151e85de12f6db9ec96323442671e40e8c02df45007e6ecc603541379'),
+    (REAL, 'aa2e845362ec401073f32ddc9154a7b688b7360b6a12f8b6b04b10b1b3905db8'),
 ])
 def test_unaffected_export_case_hashes_match_pre_rule_view_fixture(tmp_path, source, expected):
     changed_by_m5 = {'MS.SECURITYSUITE.2.1v1', 'MS.SECURITYSUITE.2.3v1', 'MS.SECURITYSUITE.3.2v1'}

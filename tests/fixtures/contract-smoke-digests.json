@@ -1,5 +1,5 @@
 {
-  "commit": "6c8c3c5663a9333cc24033568ac596f14494e19c",
+  "commit": "d7cd81913505df0d429f42a7f0434c996a39b75f",
   "runs": {
     "ci-admin-set": {
       "findings/findings.json": "ad95f9f0a63e1632941c2889d7502334c8ced04763c14f0e1b4162a88f5cb28b",
@@ -46,8 +46,8 @@
     "ci-projection-demo": {
       "explainer:policy_explanations": "0970f78d57a7a4ea474dda116b65ee716ec0c5bb3a080baa169b730a820b9063",
       "findings/findings.json": "5a1ff965684894e9d1c27a10ecdb7b342dfd9a2e7a27dacd90da8550e345b1df",
-      "model_assessment.json": "96875f4557ca20aa9416dd72b60646a4466357084b291b4d4235544b858d0454",
-      "projection:project_run.report": "67cd5a443592660b4558726c8b684d42bcc4e7f6b1491c7604e96bd367981295",
+      "model_assessment.json": "a5b8710cf9c390fdf3f17cc02d387c74934f9ef1849919288c313d0e7cb66fb0",
+      "projection:project_run.report": "6e9353cb06271671f35df26cbc54f3b3c72b03392e8fb328550065636993cc75",
       "reports/action-plan.json": "cf9556d733009f5f5db69f1efb6c079306dd2acf280af66bff25f727c0985f9c",
       "reports/report-pack.json": "c2c5ca31fa1f57a43a58187e5af7e38cf7b931c4f07748697da6c62eeba6128e",
       "summary.json": "2a130d7e75bb460ba3aa9ef4d6a514bb8aaadf9d1ebff0c462fbc2681bf4bcbe",

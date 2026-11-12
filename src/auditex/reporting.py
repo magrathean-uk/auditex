@@ -34,6 +34,7 @@ from azure_tenant_audit.output_redaction import (
     PROFILES,
     PUBLIC_ADDRESSES,
     REASON_CHANGED,
+    TEMPORARY_KEY_NOTICE,
     ContextIncompleteError,
     RedactionContext,
     assert_snapshot_stable,
@@ -44,6 +45,7 @@ from azure_tenant_audit.output_redaction import (
     scrub_run_paths,
     settle_citations,
     snapshot_run,
+    temporary_key_note,
     unmatched_names_note,
 )
 from azure_tenant_audit.private_io import (
@@ -1767,8 +1769,8 @@ def _plain_run_file(run_path: Path, relative: str) -> tuple[Path | None, str | N
 # The one source artifact that records where the operator ran the audit. It is copied with those paths made
 # pack-relative, and says so (``transformed``), so ``verify-pack`` can still tie it to ``bundle-hashes.json``.
 _PACK_RELATIVE_PATHS = "pack_relative_paths"
-# Every other JSON source artifact is a redacted derivative of the run's own file (customer-pack profile, the pack's
-# salt, paths made pack-relative): the private original stays in the run, the pack carries the derivative, and the row
+# Every other JSON source artifact is a redacted derivative of the run's own file (customer-pack profile, the run's
+# pseudonym key, paths made pack-relative): the private original stays in the run, the pack carries the derivative, and the row
 # records the digest of the original (``source_sha256``, the one ``bundle-hashes.json`` lists) and of the copy.
 _REDACTED_DERIVATIVE = "customer_pack_redaction"
 # The hash manifest is the one artifact that cannot be derived: its bytes are what the run was verified against. It is
@@ -1824,8 +1826,11 @@ def _copy_source_artifact(
     file must not (the report pack keeps GUIDs and names so its references resolve inside the run; that is a private
     working property). A transformed row has ``source_sha256``, the digest of the run's own file (the one
     ``bundle-hashes.json`` lists), and ``sha256``, the digest of the copy. The hash manifest is copied verbatim only
-    when redaction would not change it, else it is left out (``skipped_reason``).
+    when redaction would not change it, else it is left out (``skipped_reason``). With a temporary key (a keyless
+    run) every redacted JSON object copy gains the top-level ``pseudonym_notice``; the verbatim hash manifest holds no
+    pseudonym and stays byte for byte, as ``verify-pack`` requires.
     """
+    temporary = context is not None and context.temporary_key
     relative_path = Path(relative)
     if (relative_path.is_absolute() or relative_path.drive or ".." in relative_path.parts or "\\" in relative):
         return {"source_path": "<refused>", "purpose": purpose, "present": False,
@@ -1861,6 +1866,8 @@ def _copy_source_artifact(
         manifest_copy = _settle_citations(
             redact_output(_pack_relative_run_manifest(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=context)
         )
+        if temporary:
+            manifest_copy = {**manifest_copy, "pseudonym_notice": TEMPORARY_KEY_NOTICE}
         write_private_text(destination, json.dumps(manifest_copy, indent=2, ensure_ascii=False) + "\n")
     elif isinstance(payload, (Mapping, list)):
         local_free = _pack_payload(payload, run_path) if isinstance(payload, Mapping) else _pack_safe(payload, run_path)
@@ -1875,6 +1882,8 @@ def _copy_source_artifact(
         else:
             row["source_sha256"] = hashlib.sha256(source_bytes).hexdigest()
             row["transformed"] = _REDACTED_DERIVATIVE
+            if temporary and isinstance(derived, Mapping):
+                derived = {**derived, "pseudonym_notice": TEMPORARY_KEY_NOTICE}
             write_private_text(destination, json.dumps(derived, indent=2, ensure_ascii=False) + "\n")
     else:
         # Not JSON the product can parse and redact as structure: nothing is copied (a customer file is never raw).
@@ -2093,13 +2102,15 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
             recomputed,
         )
     # Everything the pack carries is pack-relative, free of the operator's local paths and passes the shared
-    # output redaction (customer-pack profile) with the run's own salt, so references stay consistent.
+    # output redaction (customer-pack profile) with the run's pseudonym key, so references stay consistent.
     _prepare_pack_directory(target_dir)
 
     def pack_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-        return _settle_citations(
+        settled = _settle_citations(
             redact_output(_pack_payload(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=redaction)
         )
+        # A keyless run's pack says in each file that its pseudonyms come from a temporary key.
+        return {**settled, "pseudonym_notice": TEMPORARY_KEY_NOTICE} if redaction.temporary_key else settled
 
     handoff_payload = pack_payload(handoff_payload)
     integrity = _mapping(handoff_payload.get("integrity"))
@@ -2113,6 +2124,8 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     )
 
     def generated_row(name: str, content: str) -> dict[str, Any]:
+        if name.endswith(".md") and name != "report.md":  # the report carries its own notice (preview_report)
+            content = _with_temporary_key_notice(content, "md", redaction)
         row = _write_text_artifact(target_dir / name, content, redaction)
         row["path"] = name
         return row
@@ -2162,7 +2175,9 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         "generated_files": generated,
         "source_artifacts": source_artifacts,
     }
-    readme = _write_text_artifact(target_dir / "README.md", _render_pack_readme(manifest), redaction)
+    readme = _write_text_artifact(
+        target_dir / "README.md", _with_temporary_key_notice(_render_pack_readme(manifest), "md", redaction), redaction
+    )
     readme["path"] = "README.md"
     manifest["generated_files"].append(readme)
     checksum = _write_checksums(
@@ -2175,13 +2190,15 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     manifest["pack_manifest_path"] = "pack-manifest.json"
     assert_snapshot_stable(run_path, redaction.snapshot)
     safe_manifest = _settle_citations(redact_output(manifest, profile=PROFILE_CUSTOMER_PACK, context=redaction))
-    write_private_text(manifest_path, _json(safe_manifest) + "\n")
+    notice = {"pseudonym_notice": TEMPORARY_KEY_NOTICE} if redaction.temporary_key else {}
+    write_private_text(manifest_path, _json({**safe_manifest, **notice}) + "\n")
     harden_tree(target_dir)
-    return redact_output(
+    result = redact_output(
         {**safe_manifest, "pack_dir": str(target_dir), "pack_manifest_path": str(manifest_path)},
         profile=PROFILE_CUSTOMER_PACK,
         context=redaction,
     )
+    return {**result, **notice}
 
 
 def _bundle_hash_rows(path: Path, *, root: Path | None = None) -> dict[str, str] | None:
@@ -3906,6 +3923,36 @@ def _with_unmatched_names_note(content: str, format_name: str, context: Redactio
     return content[:cut] + paragraph + content[cut:] if cut != -1 else content + paragraph
 
 
+def _with_temporary_key_notice(content: str, format_name: str, context: RedactionContext) -> str:
+    """A report made with a temporary key (a keyless run) says so in its own content, in a place its format keeps
+    valid (``output_redaction.temporary_key_note``): a closing Markdown line or HTML paragraph, a closing CSV row
+    whose ``id`` is ``pseudonym_notice``, a top-level ``pseudonym_notice`` in JSON, the SARIF run's
+    ``auditex.pseudonym_notice`` property and the OSCAL metadata ``remarks``. A report made with the run's private
+    key is returned unchanged."""
+    note = temporary_key_note(context)
+    if not note:
+        return content
+    if format_name == "md":
+        return content.rstrip("\n") + "\n\n" + note + "\n"
+    if format_name == "html":
+        paragraph = f'<p class="pseudonym-key-note">{html.escape(note)}</p>\n'
+        cut = content.rfind("</body>")
+        return content[:cut] + paragraph + content[cut:] if cut != -1 else content + paragraph
+    if format_name == "csv":
+        buffer = StringIO()
+        csv.writer(buffer).writerow(["pseudonym_notice", note, *([""] * (len(_CSV_COLUMNS) - 2))])
+        return content + buffer.getvalue()
+    document = json.loads(content)
+    if format_name == "sarif":
+        for run in document.get("runs") or []:
+            run.setdefault("properties", {})["auditex.pseudonym_notice"] = note
+    elif format_name == "oscal":
+        document["assessment-results"]["metadata"]["remarks"] = note
+    else:
+        document["pseudonym_notice"] = note
+    return _json(document) + ("\n" if content.endswith("\n") else "")
+
+
 def preview_report(
     *,
     run_dir: str,
@@ -3962,14 +4009,19 @@ def preview_report(
         {"citations": redact_output(citations, profile=profile, context=redaction), "citation_summary": None}
     )
     content = _final_pass(
-        _with_unmatched_names_note(renderers[format_name](safe_sections), format_name, redaction), format_name, redaction, profile
+        _with_temporary_key_notice(
+            _with_unmatched_names_note(renderers[format_name](safe_sections), format_name, redaction), format_name, redaction
+        ),
+        format_name,
+        redaction,
+        profile,
     )
     # What was read to build the sections, what discovery read and what is on disk now must be the same files:
     # a run changed while the report was built is refused, never published half old, half new.
     if before != redaction.snapshot:
         raise ContextIncompleteError((("<run>", REASON_CHANGED),))
     assert_snapshot_stable(run_path, redaction.snapshot)
-    return {
+    result = {
         "format": format_name,
         "content": content,
         "sections": list(selected.keys()),
@@ -3977,6 +4029,9 @@ def preview_report(
         "citation_summary": safe_citations["citation_summary"],
         "evidence_missing": evidence_missing,
     }
+    if redaction.temporary_key:
+        result["pseudonym_notice"] = TEMPORARY_KEY_NOTICE
+    return result
 
 
 def render_report(
@@ -3998,4 +4053,7 @@ def render_report(
     target = Path(output_path) if output_path else _default_output_path(Path(run_dir), format_name)
     # A rendered report holds the same tenant metadata as the bundle: 0600 in a 0700 directory whatever the umask.
     write_private_text(target, preview["content"])
-    return {"format": format_name, "output_path": str(target), "sections": preview["sections"]}
+    result = {"format": format_name, "output_path": str(target), "sections": preview["sections"]}
+    if "pseudonym_notice" in preview:
+        result["pseudonym_notice"] = preview["pseudonym_notice"]
+    return result

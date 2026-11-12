@@ -226,6 +226,7 @@ def test_legacy_bundles_validate(tmp_path, monkeypatch):
     manifest(tmp_path, selected_collectors=["power_bi", "power_platform"])
     result = answer(tmp_path)
     result["schema_version"] = "2026-10-29"
+    result["projection"]["redaction"]["strategy"] = "run-salted-sha256-v1"  # what writers of that version wrote
     validate_assessment(result)
 
 

@@ -1,11 +1,13 @@
 """Structured redaction and bounded identity discovery for shareable output."""
 from __future__ import annotations
 
-import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import stat
+import threading
 import unicodedata
 from collections import deque
 from collections.abc import Callable, Collection, Iterable, Mapping
@@ -14,7 +16,15 @@ from pathlib import Path
 from typing import Any
 
 from .citations import build_citation_summary, dedupe_citations
-from .guarded_io import UnsafeRunFileError, current_context, guarded_operation
+from .guarded_io import (
+    PRIVATE_DIRECTORY,
+    PSEUDONYM_KEY_NAME,
+    PseudonymKeyError,  # noqa: F401 - re-exported: the key refusal of this module's key functions
+    UnsafeRunFileError,
+    current_context,
+    guard_session,
+    guarded_operation,
+)
 from .secret_hygiene import _OUTPUT_EMAIL_RE as OUTPUT_EMAIL_RE
 from .secret_hygiene import _OUTPUT_GUID_RE as OUTPUT_GUID_RE
 from .secret_hygiene import BEARER_RE, JWT_RE
@@ -37,6 +47,18 @@ TEXT_PLACEHOLDER = "<redacted-text>"
 
 # Values nested deeper than this (mappings, lists and JSON embedded in strings together) are refused.
 MAX_DEPTH = 100
+
+# Keyed pseudonyms: HMAC-SHA256 under a 32-byte key, cut to 16 hex digits. A run's key is the private file below;
+# collection creates it when it seals the run, ``auditex report prepare-key`` creates it for a keyless run.
+PSEUDONYM_KEY_PATH = f"{PRIVATE_DIRECTORY}/{PSEUDONYM_KEY_NAME}"
+PSEUDONYM_KEY_BYTES = 32
+PSEUDONYM_STRATEGY = "keyed-hmac-sha256-v1"
+# The fixed line an output made with a temporary key carries (a keyless run: made by 1.4.0 or earlier, copied
+# without ``operator-inputs/``, or sealed on storage without locking).
+TEMPORARY_KEY_NOTICE = (
+    "Pseudonyms: this run has no private pseudonym key yet, so the pseudonyms in this output come from a temporary "
+    "key and are not stable across sessions; run `auditex report prepare-key RUN_DIR` once to make them stable."
+)
 
 
 class RedactionError(ValueError):
@@ -240,15 +262,16 @@ _SECRET_NORMS = frozenset(_norm(key) for key in _SECRET_KEYS)
 class RedactionContext:
     """Per-output inputs: everything that is not in the value itself.
 
-    ``salt`` is the run salt (see ``run_salt``); with an empty salt the pseudonyms are still deterministic but
-    carry no run separation. ``run_paths`` are the spellings of the operator's run directory to remove.
+    ``key`` is the 32-byte pseudonym key (``pseudonym``): the run's private key, a temporary key for a keyless run
+    (``temporary_key``) or, by default, a fresh random key for output with no run. It never appears in ``repr``.
+    ``run_paths`` are the spellings of the operator's run directory to remove.
     ``protected_names`` and ``protected_ids`` are privileged-user display names and immutable ids the caller
     already knows (``context_for_run`` reads them from the run's ``normalized/`` records, so they hold whichever
     sections the output selects; any found inside the value are added automatically). ``vocabulary`` is
     controlled vocabulary (role and group names) that a user's name must never rewrite.
     """
 
-    salt: str = ""
+    key: bytes = field(default_factory=lambda: new_pseudonym_key(), repr=False)
     run_paths: tuple[str, ...] = ()
     protected_names: frozenset[str] = frozenset()
     protected_ids: frozenset[str] = frozenset()
@@ -270,16 +293,86 @@ class RedactionContext:
     # D5: the person-name index (``_NameIndex``), built once per context and shared by every call on it. ``None`` is
     # built on first use from ``protected_names`` and ``vocabulary``.
     _index: Any = field(default=None, compare=False, hash=False, repr=False)
+    # The key is a temporary one for a keyless run: outputs say their pseudonyms are not stable across sessions.
+    temporary_key: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, bytes) or len(self.key) != PSEUDONYM_KEY_BYTES:
+            raise ValueError("A redaction context needs a 32-byte pseudonym key.")
 
 
-def pseudonym(salt: str, text: str) -> str:
-    """The projection's pseudonym: the first 16 hex digits of ``sha256(salt NUL text)``."""
-    return hashlib.sha256((salt + "\0" + text).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+def new_pseudonym_key() -> bytes:
+    """A fresh random pseudonym key."""
+    return secrets.token_bytes(PSEUDONYM_KEY_BYTES)
 
 
-def run_salt(run_dir: str | Path) -> str:
-    """Derive a stable per-run salt without opening another run artifact."""
-    return hashlib.sha256(os.path.realpath(run_dir).encode("utf-8", "surrogatepass")).hexdigest()
+def pseudonym(key: bytes, text: str) -> str:
+    """The pseudonym of ``text``: the first 16 lower-case hex digits of HMAC-SHA256 under the 32-byte ``key``."""
+    if not isinstance(key, bytes) or len(key) != PSEUDONYM_KEY_BYTES:
+        raise ValueError("A pseudonym key must be 32 bytes.")
+    return hmac.digest(key, text.encode("utf-8", "surrogatepass"), "sha256").hex()[:16]
+
+
+def read_pseudonym_key(run_dir: str | Path) -> bytes | None:
+    """The run's private key, or ``None`` when the run has none (a keyless run). Never writes. Raises
+    ``PseudonymKeyError`` for a damaged key or one other accounts can use, and the guard's refusal for a key that is
+    not a plain private file. The first answer for a run is kept for the whole guard context."""
+    with guard_session() as context:
+        return context.pseudonym_key(run_dir)
+
+
+def ensure_pseudonym_key(run_dir: str | Path) -> bytes:
+    """The run's private key, creating it when the run has none (collection, ``auditex report prepare-key``)."""
+    return _ensure_pseudonym_key(run_dir)[0]
+
+
+def _ensure_pseudonym_key(run_dir: str | Path) -> tuple[bytes, bool]:
+    with guard_session() as context:
+        key = context.pseudonym_key(run_dir)
+        if key is not None:
+            return key, False
+        return context.create_pseudonym_key(run_dir, new_pseudonym_key())
+
+
+_SESSION_KEYS: dict[tuple[int, int, str], bytes] = {}
+_SESSION_LOCK = threading.Lock()
+
+
+def session_pseudonym_key(run_dir: str | Path) -> bytes:
+    """The temporary key of a keyless run: one random key per run (folder device and inode, and the manifest's
+    ``run_id``) per process, held in memory only, so the files of one customer pack and the calls of one MCP session
+    agree, and a later run that reuses a deleted run folder's inode under another ``run_id`` never shares its key.
+    A run whose manifest records no usable ``run_id`` (missing, null, not a string or empty) gets a key for the
+    current guard context only, kept nowhere for the process, so no other run can ever share it (DEC-024)."""
+    with guard_session() as context:
+        identity = context.run_identity(run_dir)
+        if identity is None:
+            with context._lock:
+                path = context._absolute(run_dir)
+                key = context._operation_keys.get(path)
+                if key is None:
+                    key = context._operation_keys[path] = new_pseudonym_key()
+                return key
+    with _SESSION_LOCK:
+        key = _SESSION_KEYS.get(identity)
+        if key is None:
+            key = _SESSION_KEYS[identity] = new_pseudonym_key()
+        return key
+
+
+def _run_pseudonym_key(run_dir: str | Path) -> tuple[bytes, bool]:
+    """The key for output derived from ``run_dir``, and whether it is temporary: the run's key file; for a keyless
+    run its session key; for a folder that is not a run (no manifest and no private folder) a fresh key."""
+    with guard_session() as context:
+        absolute = Path(context._absolute(run_dir))
+        if not (context._eligible_run_root(absolute) and (
+                str(absolute) in context._runs or os.path.lexists(absolute / PRIVATE_DIRECTORY)
+                or os.path.lexists(absolute / "run-manifest.json"))):
+            return new_pseudonym_key(), False
+        key = context.pseudonym_key(run_dir)
+        if key is not None:
+            return key, False
+        return session_pseudonym_key(run_dir), True
 
 
 def run_path_roots(run_dir: str | Path) -> tuple[str, ...]:
@@ -1013,9 +1106,15 @@ def _reason_strings(files: tuple[tuple[str, str], ...], omitted: int) -> tuple[s
 
 
 def context_for_run(run_dir: str | Path) -> RedactionContext:
-    """The context for outputs derived from one run: its salt, its path spellings, its administrators' names and
-    immutable ids (from every ``normalized/`` record, whichever sections the output selects) and role vocabulary."""
+    """The context for outputs derived from one run: its pseudonym key, its path spellings, its administrators' names
+    and immutable ids (from every ``normalized/`` record, whichever sections the output selects) and role vocabulary.
+
+    The key is read only when discovery is complete (an incomplete context is refused and its fresh key never used):
+    the run's private key, or for a keyless run a temporary key held in memory (``session_pseudonym_key``)."""
     context, persons = _run_context(run_dir)
+    if not context.incomplete:
+        key, temporary = _run_pseudonym_key(run_dir)
+        context = replace(context, key=key, temporary_key=temporary)
     return _with_index(context, persons)
 
 
@@ -1047,7 +1146,6 @@ def _run_context(run_dir: str | Path) -> tuple[RedactionContext, frozenset[_Pers
         "incomplete_files": files,
         "incomplete_omitted": omitted,
         "scan_size_exceeded": _size_budget_exceeded(discovery.problems),
-        "salt": run_salt(run_path),
         "run_paths": run_path_roots(run_path),
         "protected_names": names,
         "protected_ids": ids,
@@ -1059,8 +1157,9 @@ def _run_context(run_dir: str | Path) -> tuple[RedactionContext, frozenset[_Pers
 def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path] = ()) -> RedactionContext:
     """One context for an output built from several runs (a diff, a comparison) or from other local paths.
 
-    The first run supplies the salt (a comparison has one); names, ids, vocabulary and path spellings of every
-    run are protected, and ``paths`` are further directories whose spellings are scrubbed (a customer pack).
+    The first run supplies the pseudonym key (a comparison has one, so a person in both runs keeps the pseudonym of
+    the first run's own reports); no other run's key is read or created. Names, ids, vocabulary and path spellings of
+    every run are protected, and ``paths`` are further directories whose spellings are scrubbed (a customer pack).
     """
     roots: set[str] = set()
     names: set[str] = set()
@@ -1070,7 +1169,7 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
     omitted = 0
     incomplete = False
     size_limit = False
-    salt = ""
+    first_run: str | Path | None = None
     snapshot: list[tuple[str, tuple[int, int, int, int, int]]] = []
     persons: set[_Person] = set()
     any_run = False
@@ -1083,7 +1182,7 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
         size_limit = size_limit or context.scan_size_exceeded
         files.extend((f"run {index + 1}: {label}", reason) for label, reason in context.incomplete_files)
         omitted += context.incomplete_omitted
-        salt = salt if index else context.salt
+        first_run = first_run if index else run_dir
         roots.update(context.run_paths)
         names.update(context.protected_names)
         ids.update(context.protected_ids)
@@ -1092,8 +1191,12 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
         roots.update(run_path_roots(path))
     kept = tuple(files[:_MAX_REASONS])
     omitted += max(0, len(files) - _MAX_REASONS)
+    key, temporary = new_pseudonym_key(), False
+    if first_run is not None and not incomplete:
+        key, temporary = _run_pseudonym_key(first_run)
     merged = RedactionContext(
-        salt=salt,
+        key=key,
+        temporary_key=temporary,
         run_paths=tuple(sorted(roots, key=lambda r: (-len(r), r))),
         protected_names=frozenset(names),
         protected_ids=frozenset(ids),
@@ -1404,14 +1507,14 @@ class _NameMatcher:
     """The bounded D5 pass over one string (see the section comment). ``probes`` counts dictionary probes and
     ``widest`` the largest token window held, for the scan-budget tests."""
 
-    __slots__ = ("table", "overlay", "skip", "salt", "probes", "widest")
+    __slots__ = ("table", "overlay", "skip", "key", "probes", "widest")
 
-    def __init__(self, table: dict[str, str], salt: str, overlay: dict[str, str] | None = None,
+    def __init__(self, table: dict[str, str], key: bytes, overlay: dict[str, str] | None = None,
                  skip: frozenset[str] = frozenset()) -> None:
         self.table = table
         self.overlay = overlay or {}
         self.skip = skip
-        self.salt = salt
+        self.key = key
         self.probes = 0
         self.widest = 0
 
@@ -1478,7 +1581,7 @@ class _NameMatcher:
         return "".join(pieces)
 
     def _replacement(self, text: str, start: int, stop: int, canonical: str) -> str:
-        digest = pseudonym(self.salt, canonical)
+        digest = pseudonym(self.key, canonical)
         return (_D5_ID_PREFIX if _id_context(text, start, stop) else _USER_PREFIX) + digest
 
 
@@ -1600,7 +1703,7 @@ def _without_local_proof(record: Mapping[Any, Any]) -> Mapping[Any, Any]:
 class _Redactor:
     def __init__(self, context: RedactionContext, value: Any, markup: bool) -> None:
         self.markup = markup
-        self.salt = context.salt
+        self.key = context.key
         self.roots = context.run_paths
         self.depth = 0
         self.blank = 0  # > 0 while walking the value of a free-text key whose strings are replaced
@@ -1633,7 +1736,7 @@ class _Redactor:
                 if combined != current:
                     overlay[phrase] = combined
         del found, persons  # this frame's last references to the value's discovery sets
-        self.matcher = _NameMatcher(base.table, self.salt, overlay, value_vocabulary)
+        self.matcher = _NameMatcher(base.table, self.key, overlay, value_vocabulary)
         # Immutable ids are protected by value, whatever their shape and case (``planted_immutable_id`` is as much an id
         # as a base64 one); the pseudonym is that of the id as discovered, so every spelling gets the same one. The only
         # boundary is a word character (so ``key=ID``, ``/users/ID/`` and ``a-ID`` are all caught); the only floor is
@@ -1723,10 +1826,10 @@ class _Redactor:
     def _mask_guid(self, match: re.Match[str]) -> str:
         label = match["label"] or ""
         guid = match[0][len(label):].lower()
-        return label + "Guid " + pseudonym(self.salt, guid)
+        return label + "Guid " + pseudonym(self.key, guid)
 
     def _identifier(self, match: re.Match[str]) -> str:
-        return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.salt, self.id_canonical.get(match["hit"].lower(), match["hit"]))
+        return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.key, self.id_canonical.get(match["hit"].lower(), match["hit"]))
 
     # -- structure ----------------------------------------------------------------------------------------
     def walk(self, value: Any, controlled: bool = False) -> Any:
@@ -1755,7 +1858,7 @@ class _Redactor:
         for key, item in record.items():
             norm = _norm(key)
             if isinstance(item, str) and item and norm in _D5_NAME_FIELDS:
-                parts[key] = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.salt, canonical)
+                parts[key] = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.key, canonical)
             elif isinstance(item, str) and item and norm in _D5_NAME_PART_FIELDS:
                 parts[key] = TEXT_PLACEHOLDER
             else:
@@ -1778,9 +1881,9 @@ class _Redactor:
                 elif self.blank:
                     item = TEXT_PLACEHOLDER
                 elif norm in _IDENTITY_KEYS:
-                    item = item if _PSEUDONYM_RE.match(item) else _IMMUTABLE_PREFIX + pseudonym(self.salt, item)
+                    item = item if _PSEUDONYM_RE.match(item) else _IMMUTABLE_PREFIX + pseudonym(self.key, item)
                 elif person is not None and norm in _D5_NAME_FIELDS:
-                    item = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.salt, person[0])
+                    item = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.key, person[0])
                 elif person is not None and norm in _D5_NAME_PART_FIELDS:
                     item = TEXT_PLACEHOLDER
                 elif group and norm == "displayname":
@@ -1839,8 +1942,8 @@ def redact_output(
 
     ``profile`` is a name from ``PROFILES``. An unknown name raises ``KeyError``
     (a typo must not silently publish). A value nested deeper than ``MAX_DEPTH`` raises ``RedactionDepthError``.
-    ``context`` carries the run salt, run paths and known names; omit it for text with no run (pseudonyms are
-    then unsalted).
+    ``context`` carries the pseudonym key, run paths and known names; omit it for text with no run (pseudonyms are
+    then made under a fresh random key, consistent only within this call).
     """
     if profile not in PROFILES:
         raise KeyError(profile)
@@ -1902,10 +2005,21 @@ def redact_payload(
     markup: bool = False,
 ) -> Any:
     """The complete payload a tool or command returns, redacted with the context of the runs it was built from
-    and with its citation summary re-derived. For return values that can leave the machine (MCP tools, notifications)."""
+    and with its citation summary re-derived. For return values that can leave the machine (MCP tools, notifications).
+
+    A mapping made with a temporary key (the first run is keyless) gains ``pseudonym_notice``
+    (``TEMPORARY_KEY_NOTICE``): its pseudonyms are not stable across sessions until ``auditex report prepare-key``."""
     dirs = list(run_dirs)
     context = context_for_runs(dirs, paths)
     redacted = redact_output(value, profile=profile, context=context, markup=markup)
     if dirs and profile != PROFILE_LOCAL:
         assert_runs_stable(dirs, context)  # the files discovery read are the files there still are
-    return settle_citations(redacted)
+    settled = settle_citations(redacted)
+    if context.temporary_key and profile != PROFILE_LOCAL and isinstance(settled, Mapping):
+        settled = {**settled, "pseudonym_notice": TEMPORARY_KEY_NOTICE}
+    return settled
+
+
+def temporary_key_note(context: RedactionContext) -> str:
+    """``TEMPORARY_KEY_NOTICE`` when ``context`` uses a temporary key (a keyless run), ``""`` otherwise."""
+    return TEMPORARY_KEY_NOTICE if context.temporary_key else ""

@@ -563,6 +563,8 @@ MUTATIONS = {
 @pytest.mark.parametrize("condition", ["conditions.locations", "grantControls.operator"])
 def test_schema_and_validators_accept_the_marked_result(marked, version, claim_status, condition):
     marked["schema_version"] = version
+    if version == "2026-10-29":
+        marked["projection"]["redaction"]["strategy"] = "run-salted-sha256-v1"  # what writers of that version wrote
     marked["policies"][0]["post_check"]["conditions"] = [condition]
     marked["policies"][0]["claims"][0]["status"] = claim_status
     marked["policies"][0]["comparison"]["model_status"] = "pass" if claim_status == "confirmed" else None

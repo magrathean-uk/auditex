@@ -366,7 +366,10 @@
             },
             "strategy": {
               "type": "string",
-              "const": "run-salted-sha256-v1"
+              "enum": [
+                "keyed-hmac-sha256-v1",
+                "run-salted-sha256-v1"
+              ]
             },
             "user_display_names": {
               "type": "integer",

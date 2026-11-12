@@ -93,7 +93,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     # -- routed through the redaction ---------------------------------------------------------------------------
     SinkEntry("auditex.reporting:render_report", "profiled", "local report by default; built-in exporters select shareable", "auditex.reporting:preview_report"),
     SinkEntry("auditex.reporting:_write_text_artifact", "routed", "every generated customer-pack file", "auditex.reporting:_write_text_artifact"),
-    SinkEntry("auditex.reporting:_copy_source_artifact", "routed", "every source artifact is a redacted derivative (run-manifest.json made pack-relative, the other JSON files under customer_pack with the run salt); the hash manifest is copied only when redaction leaves it unchanged; operator-inputs/ is never copied", "auditex.reporting:_copy_source_artifact"),
+    SinkEntry("auditex.reporting:_copy_source_artifact", "routed", "every source artifact is a redacted derivative (run-manifest.json made pack-relative, the other JSON files under customer_pack with the run's pseudonym key, and with a keyless run's temporary key each gains the pseudonym_notice); the hash manifest is copied only when redaction leaves it unchanged; operator-inputs/ is never copied", "auditex.reporting:_copy_source_artifact"),
     SinkEntry("auditex.reporting:write_enterprise_handoff_pack", "routed", "pack manifest", "auditex.reporting:write_enterprise_handoff_pack"),
     SinkEntry("auditex.cli:_emit_report_payload", "routed", "report payload files and stdout", "auditex.cli:_emit_report_payload"),
     SinkEntry("auditex.notify:_send_webhook", "routed", "webhook body: the payload is the redacted envelope", _NOTIFY_VIA),
@@ -129,6 +129,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("azure_tenant_audit.exposure_lookup:*", "private", "public HTTPS fetch of the audited domain's own policy files"),
     SinkEntry("azure_tenant_audit.graph:*", "private", "read-only Microsoft Graph requests and token exchange (credentials stay in the request)"),
     SinkEntry("azure_tenant_audit.guarded_io:_stdin_text_buffer_is_empty", "private", "local pipe containing only a fixed buffer-probe value"),
+    SinkEntry("azure_tenant_audit.guarded_io:GuardContext._write_temporary", "private", "the pseudonym key creator (GuardContext.create_pseudonym_key): the run's private key and its .gitignore, through 0600 temporaries in operator-inputs/"),
     SinkEntry("azure_tenant_audit.guarded_io:open_private_output", "private", "admitted private output descriptors; producer notice appends preserve an existing log mode"),
     SinkEntry("azure_tenant_audit.output:*", "private", "run bundle working files and the private audit log"),
     SinkEntry("azure_tenant_audit.perf_runtime:*", "private", "local timing metrics, no tenant evidence"),

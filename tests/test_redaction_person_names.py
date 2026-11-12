@@ -10,16 +10,18 @@ from test_reporting import _write_run
 
 from azure_tenant_audit import output_redaction as redaction
 from azure_tenant_audit.output_redaction import (
+    PSEUDONYM_KEY_PATH,
     RedactionContext,
+    ensure_pseudonym_key,
     pseudonym,
     redact_output,
-    run_salt,
 )
 
 NAME = "Priya Kovalenko"
 UPN = "priya.kovalenko@contoso.example"
 SHAREABLE_PROFILES = ("shareable", "customer_pack", "explainer")
 TOKENS = ("priya", "kovalenko")
+KEY = bytes(range(32))
 
 
 def _no_tokens(text: str) -> bool:
@@ -37,7 +39,13 @@ def _run(root: Path, users: list[dict], narrative: str = f"Mailbox of {NAME} was
     payload["executive_summary"]["narrative"] = narrative
     report.write_text(json.dumps(payload))
     (root / "normalized" / "users.json").write_text(json.dumps({"kind": "users", "records": users}))
+    ensure_pseudonym_key(root)  # as collection does when it seals a run
     return root
+
+
+def _key(root: Path) -> bytes:
+    """The run's private key, read as plain bytes (the pseudonyms of every output derived from the run)."""
+    return (root / PSEUDONYM_KEY_PATH).read_bytes()
 
 
 @pytest.fixture
@@ -45,20 +53,20 @@ def run(tmp_path: Path) -> Path:
     return _run(tmp_path / "run", [_user()])
 
 
-def _context(*users: dict, salt: str = "s", vocabulary: frozenset[str] = frozenset()) -> RedactionContext:
+def _context(*users: dict, key: bytes = KEY, vocabulary: frozenset[str] = frozenset()) -> RedactionContext:
     """A context whose index holds ``users``, as ``context_for_run`` builds it from a run."""
     found = redaction._Found()
     redaction._collect({"records": list(users)}, found, names=True)
     index = redaction._build_index(found.persons, redaction._vocabulary_phrases(vocabulary))
-    return RedactionContext(salt=salt, vocabulary=vocabulary, unmatched_names=index.counts(), _index=index)
+    return RedactionContext(key=key, vocabulary=vocabulary, unmatched_names=index.counts(), _index=index)
 
 
-def _prose(salt: str = "s", name: str = NAME) -> str:
-    return "User " + pseudonym(salt, name)
+def _prose(key: bytes = KEY, name: str = NAME) -> str:
+    return "User " + pseudonym(key, name)
 
 
-def _id(salt: str = "s", name: str = NAME) -> str:
-    return "user-" + pseudonym(salt, name)
+def _id(key: bytes = KEY, name: str = NAME) -> str:
+    return "user-" + pseudonym(key, name)
 
 
 # 1. narrative text in another section, every non-local profile; local keeps it
@@ -71,7 +79,7 @@ def test_non_privileged_user_name_in_another_section_is_masked(run: Path, profil
     for fmt in ("json", "md", "html"):
         content = preview_report(run_dir=str(run), format_name=fmt, include_sections=["executive_summary"], profile=profile)["content"]
         assert _no_tokens(content), (fmt, content)
-        assert _prose(run_salt(run)) in content
+        assert _prose(_key(run)) in content
 
 
 def test_local_profile_keeps_the_name(run: Path) -> None:
@@ -95,7 +103,7 @@ def test_local_profile_keeps_the_name(run: Path) -> None:
     ],
 )
 def test_person_shapes_are_discovered(record: dict) -> None:
-    result = redact_output({"who": record, "text": f"changed by {NAME}"}, context=RedactionContext(salt="s"))
+    result = redact_output({"who": record, "text": f"changed by {NAME}"}, context=RedactionContext(key=KEY))
     assert result["text"] == f"changed by {_prose()}"
     assert _no_tokens(json.dumps(result))
 
@@ -142,8 +150,8 @@ def test_id_form_has_no_whitespace_and_url_stays_one_token() -> None:
 def test_prose_pseudonym_equals_structured_display_name(run: Path) -> None:
     context = redaction.context_for_run(run)
     out = redact_output({"user": _user(), "text": f"{NAME} signed in"}, context=context)
-    assert out["user"]["display_name"] == _prose(run_salt(run))
-    assert out["text"] == f"{_prose(run_salt(run))} signed in"
+    assert out["user"]["display_name"] == _prose(_key(run))
+    assert out["text"] == f"{_prose(_key(run))} signed in"
 
 
 # 5. variants and boundaries
@@ -208,7 +216,7 @@ def test_guard_from_a_run_counts_role_and_group_names(tmp_path: Path) -> None:
     (root / "normalized" / "groups.json").write_text(json.dumps({"records": [{"principalType": "Group", "displayName": "Ops Crew"}]}))
     context = redaction.context_for_run(root)
     assert context.unmatched_names == (("vocabulary", 1),)
-    assert redact_output("Ops Crew and Priya Kovalenko", context=context) == f"Ops Crew and {_prose(run_salt(root))}"
+    assert redact_output("Ops Crew and Priya Kovalenko", context=context) == f"Ops Crew and {_prose(_key(root))}"
 
 
 def test_value_level_group_name_is_checked_at_lookup() -> None:
@@ -348,12 +356,12 @@ def test_codex_item_2_a_privileged_person_is_one_entry_through_context_for_run(t
     full_root = _run(tmp_path / "full", [admin("Bodil Ostergaard"), _user("Bodil Ostergaard", "bo@contoso.example")])
     full = redaction.context_for_run(full_root)
     assert full.unmatched_names == ()
-    assert redact_output("Bodil Ostergaard", context=full) == _prose(run_salt(full_root), "Bodil Ostergaard")
+    assert redact_output("Bodil Ostergaard", context=full) == _prose(_key(full_root), "Bodil Ostergaard")
     both = redaction.context_for_runs([tmp_path / "short", full_root])
     assert both.unmatched_names == (("too_short", 1),)
     # A context not built from a run still indexes the names it was given.
     given = RedactionContext(protected_names=frozenset({"Bodil Ostergaard"}))
-    assert redact_output("Bodil Ostergaard", context=given) == _prose("", "Bodil Ostergaard")
+    assert redact_output("Bodil Ostergaard", context=given) == _prose(given.key, "Bodil Ostergaard")
 
 
 def test_codex_item_1_key_saturation_keeps_the_required_forms_and_reports_limit() -> None:
@@ -491,7 +499,7 @@ def test_notification_payload_masks_names(run: Path, monkeypatch: pytest.MonkeyP
     result = notify_module.send_notification(run_dir=str(run), sink="teams", dry_run=True)
     body = json.dumps(result)
     assert _no_tokens(body)
-    assert _prose(run_salt(run)) in body and _id(run_salt(run)) in body
+    assert _prose(_key(run)) in body and _id(_key(run)) in body
 
 
 def test_mcp_report_payload_masks_names(run: Path) -> None:
@@ -509,28 +517,33 @@ def test_pseudonyms_are_deterministic_per_run_path(tmp_path: Path) -> None:
     second = _run(tmp_path / "b", [_user()])
     text = f"{NAME} here"
     one = redact_output(text, context=redaction.context_for_run(first))
-    assert one == redact_output(text, context=redaction.context_for_run(first)) == f"{_prose(run_salt(first))} here"
+    assert one == redact_output(text, context=redaction.context_for_run(first)) == f"{_prose(_key(first))} here"
     assert one != redact_output(text, context=redaction.context_for_run(second))
 
 
-def test_two_run_context_masks_names_from_both_runs_with_the_first_salt(tmp_path: Path) -> None:
+def test_two_run_context_masks_names_from_both_runs_with_the_first_key(tmp_path: Path) -> None:
     first = _run(tmp_path / "a", [_user()])
     second = _run(tmp_path / "b", [_user("Kemi Rotax", "kemi.rotax@contoso.example")])
     context = redaction.context_for_runs([first, second])
     out = redact_output(f"{NAME} and Kemi Rotax", context=context)
-    salt = run_salt(first)
-    assert out == f"{_prose(salt)} and {_prose(salt, 'Kemi Rotax')}"
+    key = _key(first)
+    assert out == f"{_prose(key)} and {_prose(key, 'Kemi Rotax')}"
     payload = redaction.redact_payload({"text": "kemi.rotax"}, run_dirs=[first, second])
-    assert payload == {"text": _id(salt, "Kemi Rotax")}
+    assert payload == {"text": _id(key, "Kemi Rotax")}
 
 
 # 16. no run
 
 
 def test_context_without_run_masks_persons_found_in_the_value() -> None:
-    out = redact_output({"user": _user(), "note": f"{NAME} owns it"})
-    assert out["note"] == f"{_prose('')} owns it"
-    assert out["user"]["display_name"] == _prose("")
+    context = RedactionContext()
+    out = redact_output({"user": _user(), "note": f"{NAME} owns it"}, context=context)
+    assert out["note"] == f"{_prose(context.key)} owns it"
+    assert out["user"]["display_name"] == _prose(context.key)
+    # Without a context the key is a fresh random one: consistent within the call, never recomputable.
+    bare = redact_output({"user": _user(), "note": f"{NAME} owns it"})
+    assert re.fullmatch(r"User [0-9a-f]{16} owns it", bare["note"])
+    assert bare["note"] == f"{bare['user']['display_name']} owns it" != out["note"]
 
 
 # 17. failure paths keep D3 behaviour

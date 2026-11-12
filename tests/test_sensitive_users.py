@@ -442,6 +442,7 @@ def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplo
         excluded = [row for row in hashes["excluded"] if row["path"].startswith("operator-inputs/")]
         assert sorted(excluded, key=lambda row: row["path"]) == [
             {"path": "operator-inputs/.gitignore", "reason": "redacted_operator_input"},
+            {"path": "operator-inputs/pseudonym.key", "reason": "redacted_operator_input"},
             {"path": KEY_PATH, "reason": "redacted_operator_input"},
             {"path": BUNDLE_PATH, "reason": "redacted_operator_input"},
         ]
@@ -481,7 +482,8 @@ def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplo
     # Scan every bundle byte (including SQLite, coverage, events and audit logs), pack,
     # export and explorer. Only the source and the explicitly private copy may contain a canary.
     for artifact in tmp_path.rglob("*"):
-        if artifact.is_file() and artifact != key_file:
+        # The run's pseudonym key is drawn from the same patched generator, so it holds the canary too.
+        if artifact.is_file() and artifact not in (key_file, run / "operator-inputs/pseudonym.key"):
             data = artifact.read_bytes()
             assert KEY_CANARY not in data, artifact.relative_to(tmp_path)
             assert KEY_CANARY.hex().encode() not in data, artifact.relative_to(tmp_path)

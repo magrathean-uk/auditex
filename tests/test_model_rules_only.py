@@ -240,6 +240,7 @@ def test_historical_model_records_keep_their_recorded_schema(tmp_path, version, 
     row = historical_row(case, sample_answer())
     result.update(schema_version=version, policies=[row], totals=_totals([row]),
                   endpoint_host=recorded[0], model_name=recorded[1])
+    result['projection']['redaction']['strategy'] = 'run-salted-sha256-v1'  # what writers of these versions wrote
     filename = 'model_assessment-' + version + '.schema.json'
     schema = json.loads((ROOT / 'schemas' / filename).read_text())
     def resolved(node):
