@@ -219,3 +219,12 @@
 - consequences: the criteria and the files line of M04-T03 are amended in the milestone file. A2 (the CSV notice row) stays G's design choice.
 - approver: G ("Yes, one repair", in this chat on 12 Nov 2026), after the same ruling was relayed by his team-manager chat
 
+## DEC-024 M04-T03: one more author run that closes the class, with run_files.py allowed
+- date: 2026-11-12
+- status: approved
+- decision: on head 1f0348d the Codex 2 re-check required changes and the Opus privacy re-check approved (B1 and the rename closed for both). Codex's two blocking points: the key-read race is still open through a read rooted at the key folder, which goes through `src/azure_tenant_audit/run_files.py`, a file the task's verify command barred; and keyless runs with a missing or empty run id share one memory-key index. Because a second review round found another instance of the same race, the approach changes: one more bounded author run lists every guarded entry point in a table and closes each one, `run_files.py` may change for the re-discovery only, and a missing run id refuses or gets a non-reusable identity. Then the two bounded re-checks (a fourth Codex 2 run, ceiling 88 percent as DEC-022) and the executing check; merge only on all three.
+- options: park M04-T03 until G is back (offered) | carry both points into M04-T04 (not offered: the merge needs both providers' approval of the exact head) | one more run that closes the class (chosen)
+- why: the release should not carry a path to the key; fixing instances one at a time has cost two rounds.
+- consequences: the verify command no longer bars `run_files.py`, and the files line and criteria of M04-T03 are amended. If either re-check or the executing check fails after this run, the task stops again and returns to G.
+- approver: G ("Yes, one more", in this chat on 12 Nov 2026)
+
