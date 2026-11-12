@@ -226,5 +226,14 @@
 - options: park M04-T03 until G is back (offered) | carry both points into M04-T04 (not offered: the merge needs both providers' approval of the exact head) | one more run that closes the class (chosen)
 - why: the release should not carry a path to the key; fixing instances one at a time has cost two rounds.
 - consequences: the verify command no longer bars `run_files.py`, and the files line and criteria of M04-T03 are amended. If either re-check or the executing check fails after this run, the task stops again and returns to G.
-- approver: G ("Yes, one more", in this chat on 12 Nov 2026)
+- approver: G ("Yes, one more", in this chat on 12 Nov 2026; the same question put by his team-manager chat got "Yes, one run"). The manager chat recommended a fresh author: every dispatch is a new worker context with no memory of earlier runs, and this one was told to build the entry-point table from the code, so the run already out (claude-1) was not restarted.
+
+## DEC-025 M03 is scored on the collected-form held-out set
+- date: 2026-11-12
+- status: approved
+- decision: M02-T06 takes its first choice. The clean held-out inputs are re-expressed in the form the product collects; the prototype kept 228 of the 501 sealed rows (209 unchanged, 19 by value-preserving transforms the pinned rules reproduce), 78 of 102 policies and 122 of 188 cells, with every verdict state still present, and dropped 273 (126 because the product does not collect that section). M03 is scored on that set. The kit's twins check may change in three bounded ways so a derived set can be checked truthfully: a coverage reason for a cell whose sealed rows were all dropped by re-expression, the measures task id read from the folder, and cap-trim drops with their own reason. The M02-T02 seal stays untouched.
+- options: A, the collected form with a reviewed change to the twins check (chosen; the orchestrator's recommendation) | B, keep the sealed 501 in export form and report every bar figure per verdict state (rejected: 291 of 501 rows are inputs the released rules mark not assessed, a form the product never hands the explainer)
+- why: the bar should judge the explainer on what the product will really feed it.
+- consequences: every M03 report states the coverage lost (24 policies, 66 cells). The M02 kit review confirms the DEC-013 bar is still usable on the smaller set with three seeds; if the wins rule becomes unreachable it returns to G, as DEC-013 says. The 126 "section not collected" drops go to the backlog as a product collection gap. The twins check was accepted on a fixed bar (DEC-003): its change is reviewed with the set by the other vendor (REV-M02-kit). M02-T06 never runs while M02-T03 does (its files line).
+- approver: G ("A, collected form", in this chat on 12 Nov 2026)
 

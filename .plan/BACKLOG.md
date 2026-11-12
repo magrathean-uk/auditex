@@ -6,6 +6,7 @@
 - Kit, inherited from 7q and kept out of round 7r by DEC-014 (REV-M07-T11-codex item 2, REV-M07-T11-opus item 2): only Graph creates are sent with SDK retries off; updates, deletes and three POSTs (assignLicense, members/$ref, the rollback's PIM adminRemove) go out with the default three retries. A later kit round applies the retry-off proof to every write; until then LIMITS states it.
 
 ## Next
+- Product collection gap found by M02-T06 (DEC-025): 126 of the 501 sealed held-out rows cannot be expressed in collected form because the product does not collect that section; 24 policies have no collected-form row at all. List the sections (`.plan/work/M02-T06/notes.md`) and decide which the collector should gather.
 - Product integration of a model explainer, only after G's build pick in M03: the options M03-T04 lists (the template stays the default and the fallback; no model verdict; local only).
 - Hugging Face upload of a build that passed its bar, only on G's yes (publishing; the card names no infrastructure).
 - The 7 entries in `configs/explainer-baselines.json` (109) that the template (102 policies) does not use: diff the keys and keep, document or bring for the deletion gate (INV4-explainer, inferred).
