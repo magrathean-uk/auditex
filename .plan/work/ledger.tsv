@@ -404,3 +404,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-12T10:30:07Z	RETRO-M00	luna	claude-2	claude-haiku-5-5	medium	inplace	0	121	0.0315	done	main
 2026-11-12T10:35:36Z	M04-T02	terra	claude-3	claude-sonnet-5-5	low	branch	2	244	0.2580	blocked	task/M04-T02-html-peak-baseline
 2026-11-12T10:36:45Z	EXP-peakbase	terra	claude-3	claude-sonnet-5-5	medium	readonly	0	34	0.1752	done	0d603c8
+2026-11-12T10:39:31Z	M04-T02	terra	claude-1	claude-sonnet-5-5	low	branch	0	115	0.2082	done	task/M04-T02-html-peak-baseline
+2026-11-12T10:42:17Z	REV-M04-T02	terra	claude-5	claude-sonnet-5-5	high	readonly	1	165	0.3392	partial	task/M04-T02-html-peak-baseline

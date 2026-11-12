@@ -24,7 +24,7 @@ Pseudonyms in shareable output come from a private per-run key instead of the ru
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M04-T01 | Design the keyed per-run pseudonym scheme | sol | M | - | done |
-| M04-T02 | Record the pre-change HTML peak baseline and confirm the digests | codex | S | mechanical | todo |
+| M04-T02 | Record the pre-change HTML peak baseline and confirm the digests | codex | S | mechanical | done |
 | M04-T03 | Implement keyed per-run pseudonyms and the contract change | codex | L | cross-cutting | todo |
 | M04-T04 | Mask middle initials, titles and name-equal mapping keys | codex | M | - | todo |
 | M04-T05 | Document the keyed scheme and the masking boundary | terra | S | - | todo |
