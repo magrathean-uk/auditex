@@ -1,0 +1,1 @@
+--task CHK-M04-T04 --role terra --account claude-3 --readonly --sha task/M04-T04-name-masking --timeout 2700 --max-turns 100 --budget 10 --brief .plan/work/CHK-M04-T04/brief-src.md

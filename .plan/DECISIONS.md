@@ -255,3 +255,12 @@
 - consequences: path text changes only; no bar, count or check is loosened. For REV-M02-kit to weigh, from the worker's leakage probe: the nearest training neighbour copies the decisive value for 147 of the 221 kept rows (67 per cent) against 216 of 501 (43 per cent) for the sealed set.
 - approver: auto; listed for G
 
+
+## DEC-028 M04-T04: one last narrow repair for the remaining B1 variant
+- date: 2026-11-12
+- status: acted on
+- decision: after one review, one repair and one re-check, one blocking defect remained (a name with a middle initial stays readable when a recorded key runs on past the initial, such as the person's own admin sign-in name). One more repair, limited to that variant with the reviewer's fix and its two tests. Acceptance is a rerun of the reviewer's own probes on the new head; no third review round. If any probe still shows a readable name, M04-T04 parks for G and a Codex author after the 14 Nov reset. No merge before the Codex review.
+- options: park now for a Codex author after the reset | one more narrow repair accepted on the reviewer's probes (chosen)
+- why: a readable name in shareable output is the defect the task exists to remove, the fix is specified, and nothing merges before the other vendor has looked.
+- consequences: this is the last round on M04-T04 without G.
+- approver: reported (G's team-manager chat, 12 Nov 2026, under G's "You lead" and "You herd, go!"; G had not answered the choice in the orchestrator chat)

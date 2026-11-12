@@ -447,3 +447,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-12T21:05:15Z	REV-M04-T04-privacy	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	736	3.0621	done	task/M04-T04-name-masking
 2026-11-12T21:33:07Z	M04-T04	sol	claude-4	claude-opus-5-5	xhigh	branch	0	1652	4.6323	done	task/M04-T04-name-masking
 2026-11-12T21:39:39Z	REV-M04-T04-privacy	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	373	2.3579	done	task/M04-T04-name-masking
+2026-11-12T22:34:10Z	M04-T04	sol	claude-4	claude-opus-5-5	xhigh	branch	0	956	3.1885	done	task/M04-T04-name-masking
+2026-11-12T22:37:37Z	CHK-M04-T04	terra	claude-3	claude-sonnet-5-5	medium	readonly	0	177	0.5294	done	task/M04-T04-name-masking

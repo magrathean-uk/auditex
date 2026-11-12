@@ -1,15 +1,24 @@
 ## RESULT M04-T04
 status: done
-summary: Repair round on 4132208. B1: a phrase that took an initial on another key's path makes one more probe without that initial, and its window shrinks by one, so a start still costs at most 6 probes. B2: product field names are never renamed as whole mapping keys; the list is a generated constant `_D5_FIELD_NAMES`, a person with such a key is counted as `vocabulary` in the note, and a test regenerates the list. A1: forms without titles or middle initials are added only where no recorded spelling holds the phrase, in the index and the per-value overlay. A2: a comma resets a title run. A3: the plain and initials texts are bounded separately again. A4 is listed as limits in .plan/work/M04-T04/notes.md.
-changes: src/azure_tenant_audit/output_redaction.py, tests/test_redaction_person_names.py, tests/test_redaction_scan_budget.py (commits 540123d, b2a69ae)
-verification: PYTHONPATH=<worktree>/src .venv/bin/python -m pytest on tests/test_redaction_person_names.py, test_redaction_scan_budget.py, test_redaction_profiles_d3.py and test_redaction_keyed_pseudonyms.py at b2a69ae: pass (279 passed). 13 neighbouring redaction suites: pass (3459 passed, 22 skipped). make lint: pass ("All checks passed!"). benchmarks/html_peak.py --records 3000 --profile shareable --require-masked: pass (exit 0, unmasked_name_hits 0, peak RSS +0.9%). Negative cases on a scratch copy of src, each fails as intended, for example "AssertionError: assert 'Report by Jo...Smith, today.' == 'Report by Us...d0ea7, today.'" (B1), "AssertionError: Ab X Cd Ef Gh Ij / assert 7 <= 6" (probe cap), "missing: breakglass" (drift), "assert () == (('vocabulary', 4),)" (note); all eight are in evidence.md. Digest gate (make contract-smoke plus compare-run-outputs): not run, hostload deferred it (2 slots busy). Not run per the brief: make test and html_peak at 90,000.
-risks: Drift test coupling: a new key under src/, schemas/ or configs/ fails test_every_product_field_name_is_exempt_from_whole_key_masking until _D5_FIELD_NAMES in output_redaction.py is regenerated, an edit outside other tasks' files. The constant adds about 590 generated lines. The example user "Emergency Access" (identity_controls_result.json) is now counted as `vocabulary`; the note appears only in shareable md and html previews, which contract-smoke does not render, but the digest gate is unverified until the M04 close.
+summary: B1 variant fixed in _NameMatcher.mask. Where a phrase that took an initial is only a prefix of a longer key (john a smith of john.a.smith.adm), the form without the initials is held. It is probed after the walk, longest first, only where no longer hit was found and only while the start has probes left. At most 6 probes per start, window at most 6.
+Review item B1-variant: fixed with the reviewer's two tests, but not in the reviewer's literal form (cap minus one, commit 90ee78b). That form regressed against b2a69ae: "Ana M. de la Cruz Silva" fully readable, and "John A. Smith Jones" split into John Smith's pseudonym plus "Jones". The deferred form (0adcc49) keeps the b2a69ae walk unchanged, and a regression test pins both cases.
+Nothing else changed: exempt list, advisories and note wording untouched; budget tests only added to.
+changes: src/azure_tenant_audit/output_redaction.py, tests/test_redaction_person_names.py, tests/test_redaction_scan_budget.py (commits 90ee78b, 0adcc49)
+verification: PYTHONPATH=<worktree>/src .venv/bin/python -m pytest on the four focused files at 0adcc49: pass (284 passed)
+Reviewer probes from evidence.md and evidence-2.md (.plan/work/M04-T04/probes-b1-variant.py): 67 of 67 mask at 0adcc49, 43 of 67 at b2a69ae
+Differential b2a69ae vs 0adcc49 over the documented-limit and over-masking texts: 104 same, 0 differ
+Adversarial budget at 26x40 people: at most 6 probes per start, widest at most 6, peak 2.00 probes per token, linear from 1k to 16k repetitions
+Negative on b2a69ae: new tests fail ("Report by John A. Smith, today." left readable; "AssertionError: Ab X Cd")
+Negative on 90ee78b: regression and budget tests fail ("by Ana M. de...la Cruz Silva" left readable)
+Negative without the probes-left guard: budget test fails ("AssertionError: Ab X Cd Ef Gh Zz")
+make lint: pass
+not run (the brief excludes them): make test, html_peak 90,000-record benchmark
+risks: The fix is a deferred form of the reviewer's fallback, not their literal form; the Codex review should check it against the reasons in evidence-3.md.
+Residual, also readable at b2a69ae: when the walk uses all six probes on the longer path, the held form is not tried, so "John A. B. Smith wrote" next to john.a.smith.x<n> sign-in names stays readable.
+html_peak benchmark not run on this head.
 questions_for_g: none
 ### Findings
-B1: fixed, test_initial_on_another_keys_path_still_masks_the_name (john.a.jones sign-in name, and a recorded John A. Jones) plus test_d5_initial_fallback_keeps_probes_per_start_at_most_six (at most 6 probes per start, window at most 6)
-B2: fixed, test_product_field_keys_are_kept_when_a_person_has_that_name (Break Glass, Emergency Access, Data Protection, Display Name: keys kept, note vocabulary 4, overlay person too) plus drift test test_every_product_field_name_is_exempt_from_whole_key_masking (schemas, configs and src keys and module constants, hex digests left out)
-A1: fixed, test_a_derived_form_never_takes_another_persons_recorded_spelling (John Smith and Jane Doe cases, index both orders, overlay both ways)
-A2: fixed, test_a_comma_never_joins_a_title_to_a_name; the sentence-stop case and a capitalised Miss or Rev used as a word are listed as limits in notes.md
-A3: fixed, test_d5_probe_count_is_independent_of_directory_size bounds _D5_TEXT and _D5_INITIALS_TEXT separately; the whole-key budget row was tightened (a product field name now costs 0 probes)
-A4: not acted on per the brief; its cases are listed in notes.md as limits for M04-T05
-focused-tests: 279 passed (94 to 104 person names after the repair, budget plus 1 test, d3 and keyed pseudonyms unchanged), 0 failed
+B1-variant: fixed tests/test_redaction_person_names.py::test_initial_on_a_key_that_runs_on_past_the_name_still_masks_it (own UPN john.a.smith.adm, recorded John A. Smith-Jones), ::test_a_longer_name_with_an_initial_still_wins_over_the_form_without_it, tests/test_redaction_scan_budget.py::test_d5_initial_fallback_on_a_running_key_stays_at_six_probes
+probes: 67 of 67 mask
+focused-tests: 284 passed (person_names 107, scan_budget 26, profiles_d3 61, keyed_pseudonyms 90)
+evidence: .plan/work/M04-T04/evidence-3.md, probes-b1-variant.py/.out, probes-regression.py
