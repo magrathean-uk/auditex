@@ -2,6 +2,7 @@
 <!-- Triaged ideas and unscheduled tasks. Promotion into a milestone is a change-control event. -->
 
 ## Now
+- Kit advisories from the 7r re-confirmation (both ship at 510f26e348fd), for a later kit round: (1) REV-M07-T11-codex A1: when `Get-MgRequestContext` throws in the read-back the helper returns a reason and the restore only warns, so that exception does not latch the refusal (`populate/_common.ps1:2038`, `:2105`); let it reach the outer latch and add a restore-failure case. (2) REV-M07-T11-opus: the "GRAPH SESSION REFUSED" match at `_common.ps1:1239` is not anchored, so a pre-send refusal inside a create action classifies as ambiguous; also require the "raised after the create request was sent" suffix. Both err on the safe side.
 - Kit, inherited from 7q and kept out of round 7r by DEC-014 (REV-M07-T11-codex item 2, REV-M07-T11-opus item 2): only Graph creates are sent with SDK retries off; updates, deletes and three POSTs (assignLicense, members/$ref, the rollback's PIM adminRemove) go out with the default three retries. A later kit round applies the retry-off proof to every write; until then LIMITS states it.
 
 ## Next

@@ -34,7 +34,7 @@ The trial tenant is seeded only from a kit round that passed its tier A gate (co
 | M07-T06 | Kit round 7p from the live facts (DEC-008) | sol | L | risk:high | done |
 | M07-T10 | Kit round 7q: round 7p without the shared sign-in (DEC-010) | sol | M | risk:high | done |
 | M07-T11 | Kit round 7r: the Graph request-context defect (DEC-014) | sol | M | risk:high | done |
-| M07-T12 | Confirm round 7r by both providers, diff-scoped | codex, sol | S | gate risk:high | todo |
+| M07-T12 | Confirm round 7r by both providers, diff-scoped | codex, sol | S | gate risk:high | done |
 | M07-T13 | Run the full offline suite on the confirmed round 7r | orchestrator | S | risk:low | todo |
 | M07-T14 | Hand the accepted folder and manifest hash to the tenant chat | orchestrator | S | risk:low | todo |
 | M07-T15 | Bring the live kit folder to the accepted round, previous state kept | terra | S | risk:high | todo |
