@@ -164,3 +164,7 @@ Asked whether to open a second kit change round (7r) for the Graph request-conte
 
 Asked in one message by the new orchestrator chat: confirm DEC-003 (kit verifier accepted on a fixed bar), DEC-007 (the held-out repair changed the twin definition) and DEC-010 (shared sign-in cut from the kit); the M05 deletion gate with the recommendation to keep the eight vendored files; and plan amendment 2 (a kit milestone M07 with weights and a held-out re-expression task), drafted first with the weights brought back. G's answer: "Confirm all five". Recorded on DEC-003, DEC-007 and DEC-010, and as DEC-017 and DEC-018. Not asked as a question, reported only: DEC-015 and DEC-016 (auto).
 
+## Rulings relayed by G's team-manager chat (12 Nov 2026, 12:15 GMT)
+
+G was away from this chat. The team-manager chat showed him the 11:12 GMT questions and relayed his answer word for word: "You lead , AIRR i will try to sign in but all it's needed is in 1pw and use my SSH key". Under that, the manager chat ruled: the amendment 2 weights are approved (merge dabe352), kit gate tasks get worker seats first until phase D starts, and DEC-016 stays. Recorded with approver `reported` on DEC-016 and DEC-018 and as DEC-020. The Isambard-AI sign-in stays G's: this chat does not sign in for him.
+

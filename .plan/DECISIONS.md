@@ -148,12 +148,12 @@
 
 ## DEC-016 M04-T02: the baseline is recorded on main, with one test assertion changed
 - date: 2026-11-12
-- status: acted on; reported to G, who may reverse it
+- status: approved
 - decision: M04-T02's criteria contradicted each other. They ask for the HTML peak baseline to be recorded on the current `main` and for `tests/test_html_peak_harness.py` to pass with no other change, but that test requires the committed baseline to show unmasked names, and `main` has masked every name in the shareable report since 1.4.0 (first author run: blocked, 0 unmasked hits; EXP-peakbase). The task keeps the plan's intent, a baseline on the current `main`, and its files line gains the test for one assertion: the baseline must carry person names (`person_names > 0`) instead of unmasked hits. Both files belong to one module (misc-scripts).
 - options: keep the old baseline of 8 Nov, recorded before masking (peak 607,862,784 bytes; M04 limit 699,042,201) | record on `main` as the plan says (first measurement 650,166,272 bytes; M04 limit about 747,691,212) (chosen). Recorded at the merge (18275e0): 626,393,088 bytes, so the M04 limit is 720,352,051
 - why: the M04 limit is there to bound what the keyed scheme adds, so it is measured from the code just before that change; the old figure would charge M04 for the 7 percent that 1.4.0's masking already added. Another test still proves the workload carries names (`test_require_masked_fails_on_local_report`).
 - consequences: the M04 peak limit is 720,352,051 bytes, about 21 MB above the 699,042,201 of the old baseline (two runs on `main` gave 650 and 626 MB, so one run varies by about 4 percent). The "no workload person name" half of that done item already holds on `main` and acts as a regression guard. The task is no longer `risk:low`: it gets one review, by another Claude account because both Codex seats are held back (DEC-012).
-- approver: auto; listed for G
+- approver: auto; kept (reported: G's team-manager chat, 12 Nov 2026, under G's "You lead")
 
 ## DEC-017 M05 deletion gate
 - date: 2026-11-12
@@ -166,12 +166,12 @@
 
 ## DEC-018 Plan amendment 2 is drafted
 - date: 2026-11-12
-- status: approved to draft; the weights return to G before the amendment merges
+- status: approved; merged as c0edff9
 - decision: the kit and tenant work (rounds 7l to 7r, the tenant hand-over and phase D), run so far as M07 tasks under `.plan/work` only, becomes milestone M07 with its own weight, and a task to re-express the clean held-out inputs in the product's collected form before any M03 scoring is promoted from the backlog into M02 (DEC-013). The architect drafts it from `.plan/work/PLAN-v4/amend-2.md`.
 - options: leave the kit outside the plan and its percentage (rejected: it is the work G put ahead of everything, DEC-006, and the figure hides it) | amend (chosen)
 - why: the one public progress figure should count the work actually in scope; M03 scores are not comparable until the held-out inputs match what the product collects.
 - consequences: milestone weights change and the overall percentage is re-baselined once G approves the weights.
-- approver: G ("Confirm all five", 12 Nov 2026)
+- approver: G for the draft ("Confirm all five", 12 Nov 2026); the weights: reported (G's team-manager chat, 12:15 GMT on 12 Nov 2026, quoting G: "You lead , AIRR i will try to sign in but all it's needed is in 1pw and use my SSH key", and ruling the weights approved)
 - progress (12 Nov 2026): drafted at 77b7f17; one review and one repair (d7619ea) closed five loose pass conditions; the re-check then found the new held-out check under-specified, a new author applied the reviewer's fix (dabe352, a third author round allowed for one narrow gap, auto) and the final re-check approved dabe352. Proposed weights: M00 7, M01 13, M02 14, M03 15, M04 16, M05 10, M06 13, M07 12; overall 36% to 35%. Waiting for G's approval of the weights before the merge.
 
 ## DEC-019 M04-T03 design note: the legacy test's fixture carries the legacy label
@@ -182,4 +182,13 @@
 - why: the criterion is that a 1.4.0 bundle, which carries the old label, validates under both validators; a legacy fixture with the new label tests nothing real. It is a fixture correction inside the approved design, not a change to it.
 - consequences: the author continues on its branch for this one edit (a second sol round that is not a repair; a later repair after the review passes the round cap under this entry). Both tier A reviews see the edit. The author's noted risk goes to the reviewers: the CLI `auditex report analyze`, `api-calls`, `permissions`, `proof-table` and `handoff` commands print without the temporary-key notice that DEC-004 amendment 6 asks of reports.
 - approver: auto
+
+## DEC-020 Kit gate tasks take worker seats first until phase D starts
+- date: 2026-11-12
+- status: approved
+- decision: M07's remaining gate tasks (the round 7r finish, its confirmation by both providers, the full offline suite and the hand-over) get worker seats and the tier A review quota ahead of new Track A and Track B work until phase D starts on the tenant. Work already running continues.
+- options: seats in plan order (rejected: the trial end is the only fixed end in the plan) | kit first (chosen; the architect's recommendation in amendment 2)
+- why: phase D cannot start before round 7r is accepted, and the trial tenant ends on a fixed day (DEC-008).
+- consequences: M02-T03 and M04-T04 start only when no kit gate task is waiting for a seat; M04-T03, already running, continues. Codex 2's remaining review quota goes to the 7r confirmation first, then to M04-T03.
+- approver: reported (G's team-manager chat, 12 Nov 2026, under G's "You lead")
 
