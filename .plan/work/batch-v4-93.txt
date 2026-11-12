@@ -1,0 +1,1 @@
+--task REV-M04-T04-privacy --role sol --account claude-3 --readonly --sha task/M04-T04-name-masking --tags hard --timeout 3600 --max-turns 150 --budget 25 --brief .plan/work/REV-M04-T04-privacy/brief-src-2.md
