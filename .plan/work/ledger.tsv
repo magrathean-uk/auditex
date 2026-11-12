@@ -425,3 +425,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-12T13:23:45Z	CHK-M04-T03	terra	claude-1	claude-sonnet-5-5	medium	readonly	1	147	0.2536	partial	task/M04-T03-keyed-pseudonyms
 2026-11-12T13:26:15Z	REV-M04-T03	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	296		done	task/M04-T03-keyed-pseudonyms
 2026-11-12T13:33:25Z	REV-M04-T03-privacy	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	727	5.4341	done	task/M04-T03-keyed-pseudonyms
+2026-11-12T13:35:32Z	M07-T11	sol	claude-3	claude-opus-5-5	xhigh	branch	1	1698	6.9849	partial	task/M07-T11-kit-round-7r

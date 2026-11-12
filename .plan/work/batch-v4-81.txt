@@ -1,0 +1,2 @@
+--task REV-M07-T11-codex --role codex --model gpt-6.1-sol --account codex2 --readonly --tags hard --timeout 2700 --brief .plan/work/REV-M07-T11-codex/brief-src-2.md --var PRIOR=.plan/work/REV-M07-T11-codex/result-1.md
+--task REV-M07-T11-opus --role sol --account claude-1 --readonly --tags hard --timeout 2700 --max-turns 120 --budget 20 --brief .plan/work/REV-M07-T11-opus/brief-src-2.md --var PRIOR=.plan/work/REV-M07-T11-opus/result-1.md
