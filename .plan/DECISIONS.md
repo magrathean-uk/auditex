@@ -172,3 +172,4 @@
 - why: the one public progress figure should count the work actually in scope; M03 scores are not comparable until the held-out inputs match what the product collects.
 - consequences: milestone weights change and the overall percentage is re-baselined once G approves the weights.
 - approver: G ("Confirm all five", 12 Nov 2026)
+- progress (12 Nov 2026): drafted at 77b7f17; one review and one repair (d7619ea) closed five loose pass conditions; the re-check then found the new held-out check under-specified, a new author applied the reviewer's fix (dabe352, a third author round allowed for one narrow gap, auto) and the final re-check approved dabe352. Proposed weights: M00 7, M01 13, M02 14, M03 15, M04 16, M05 10, M06 13, M07 12; overall 36% to 35%. Waiting for G's approval of the weights before the merge.

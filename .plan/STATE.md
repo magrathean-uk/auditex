@@ -4,7 +4,7 @@ overall: 36% (was 34%)
 milestone: M02-explainer-data-and-judging 57%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: f5704dd 2026-11-12T10:49:18Z
+last_checkpoint: 93ddfd0 2026-11-12T11:12:26Z
 
 ## Next tasks
 - M02-T03 Build the prose training data for the explainer job (codex)
@@ -13,7 +13,8 @@ last_checkpoint: f5704dd 2026-11-12T10:49:18Z
 - none
 
 ## Pending G decisions
-- Plan amendment 2: the weights of the new kit milestone M07, once the architect has drafted it (DEC-018).
+- Plan amendment 2 (DEC-018), approved by review at dabe352 on task/PLAN-v4-plan-v4-amend-2, not merged: G approves the weights (M00 7, M01 13, M02 14, M03 15, M04 16, M05 10, M06 13, M07 12; overall 36% to 35%). Recommendation: approve.
+- Seat priority: M07's gate tasks ahead of new Track A and B work until phase D starts. Recommendation: yes (the trial end bounds it).
 - Reported to G, his to reverse: DEC-016 (M04 HTML peak baseline recorded on main; limit 720,352,051 bytes).
 
 ## Re-baselines
@@ -22,12 +23,12 @@ last_checkpoint: f5704dd 2026-11-12T10:49:18Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 48% orchestrator
-claude-1 51% ok
+claude 50% orchestrator
+claude-1 52% ok
 claude-2 49% shared
-claude-3 44% ok
+claude-3 45% ok
 claude-4 86% hot
-claude-5 68% ok
+claude-5 69% ok
 codex 91% hot
 codex2 83% ok
 <!-- quota:end -->
