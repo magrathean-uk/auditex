@@ -210,3 +210,12 @@
 - consequences: Codex 2 ends at about 86 percent; nothing else may use it before the reset.
 - approver: reported (G's team-manager chat, 12 Nov 2026, quoting G on who rules: "You lead" and "You herd, go!")
 
+## DEC-023 M04-T03: one last repair for the privacy review's findings
+- date: 2026-11-12
+- status: approved
+- decision: the gates on head 9f38936 split: the Codex 2 re-check approved, the Opus privacy review required changes (REV-M04-T03-privacy), the executing check did not get a heavy slot. One repair by the same author closes B1 (keyless customer pack: manifest, README and JSON source-artefact copies without the temporary-key notice), A1 (a guarded read can return the key bytes when the key is published between discovery and open) and A3 (a keyless run's memory key indexed by device and inode only), each with its test, and A4 (a rename). Nothing else enters. On the new head: the Opus privacy re-check and a Codex 2 re-check, both bounded to that diff and to whether B1, A1 and A3 are closed, then the executing check once. Codex 2: a third named run under DEC-022, same ceiling of 88 percent; the kit 7r re-confirmation keeps its run. Merge only on all three gates. If any fails, stop and bring it to G: no sixth author run, no further Codex run.
+- options: repair B1 only and leave A1 and A3 to M04-T04 (rejected: A1 is a path to the key itself) | stop and wait for G | one last repair for all three (chosen)
+- why: B1 breaks the output contract and A1 reaches the key, so 1.5.0 should carry neither; a second repair after a second, different gate is not a loop as long as it is the last.
+- consequences: the criteria and the files line of M04-T03 are amended in the milestone file. A2 (the CSV notice row) stays G's design choice.
+- approver: reported (G's team-manager chat, 12 Nov 2026, quoting G on who rules: "You lead" and "You herd, go!")
+
