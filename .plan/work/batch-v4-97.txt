@@ -1,0 +1,2 @@
+--task REV-M05-T03 --role sol --template sol-review --account claude-3 --readonly --sha task/M05-T03-scanner-limits-tables --timeout 2400 --max-turns 80 --budget 8 --var TASK=M05-T03 --var MILESTONE=.plan/milestones/M05-scanners-and-hygiene.md --var BRANCH=task/M05-T03-scanner-limits-tables
+--task REV-M04-T05 --role sol --template sol-review --account claude-5 --readonly --sha task/M04-T05-keyed-scheme-docs --timeout 3000 --max-turns 100 --budget 12 --var TASK=M04-T05 --var MILESTONE=.plan/milestones/M04-d5-keyed-pseudonyms.md --var BRANCH=task/M04-T05-keyed-scheme-docs

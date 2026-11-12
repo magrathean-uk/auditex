@@ -1,0 +1,1 @@
+--task REV-M05-T03 --role sol --template sol-review --account claude-3 --readonly --sha task/M05-T03-scanner-limits-tables --timeout 2400 --max-turns 80 --budget 8 --var TASK=M05-T03 --var MILESTONE=.plan/milestones/M05-scanners-and-hygiene.md --var BRANCH=task/M05-T03-scanner-limits-tables --var PRIOR=.plan/work/REV-M05-T03/result-1.md

@@ -264,3 +264,12 @@
 - why: a readable name in shareable output is the defect the task exists to remove, the fix is specified, and nothing merges before the other vendor has looked.
 - consequences: this is the last round on M04-T04 without G.
 - approver: reported (G's team-manager chat, 12 Nov 2026, under G's "You lead" and "You herd, go!"; G had not answered the choice in the orchestrator chat)
+
+## DEC-029 Author M04-T05 and M05-T03 ahead of their merge preconditions
+- date: 2026-11-12
+- status: acted on
+- decision: while M04-T04 waits for its Codex review (after the 14 Nov reset), M04-T05 and M05-T03 are authored now from `main`. M04-T05 reads the masking boundary from the M04-T04 branch at 0adcc49 and merges only after M04-T04 has merged, with a short touch-up if the Codex review changes that boundary. M05-T03 edits only the scanner limits section, which depends on merged work alone, and may merge after its review. M05-T04 and M06-T01 stay behind the M04-T04 merge (shared `output_redaction.py`; notes cover every merge). Default-tier doc tasks take a same-vendor review now, stated in the result; the other-vendor review follows after the reset where the milestone asks for one.
+- options: wait for the Codex reset with no worker out | stack branches on the M04-T04 branch (rejected: merges squash, so stacked branches would not rebase cleanly) | author the two doc tasks from `main` (chosen)
+- why: the preconditions exist to avoid conflicts in a shared file and to keep docs true to merged code; different sections and a held merge keep both.
+- consequences: the merge order of the milestone files is unchanged; no acceptance line changes.
+- approver: auto (sequencing; prompted by the daily lead review in G's team-manager chat)
