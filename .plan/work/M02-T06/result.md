@@ -1,23 +1,43 @@
 ## RESULT M02-T06
-status: blocked
-summary: Blocked on two conflicts between the amended criteria and the frozen kit, found by building and checking the full collected set in a scratch kit copy; real kit and repository unchanged.
-summary: (1) Any file under heldout/collected fails the sealed M02-T02 `kit-check twins` (its heldout/ folder check is complete and skips only caches and notes), breaking `kit-check all`, M02-T03's verify and REV-M02-kit. Fixing it needs a fourth twins.py change or another folder.
-summary: (2) `gpu-hours: heldout 0` fails `kit-check usage`: M02-T06 is not in the budget table's heldout row nor in the frozen usage.py stage list.
-summary: Scratch build: kept 221/501 (identity 209, transformed 19, all reproduced by the pinned Rego), 77/102 policies, 120/314 cells, twins 0, agreement 221/221; deterministic rebuild.
-changes: none in the kit or repository; .plan/work/M02-T06/{notes.md,notes-round1.md (round 1 notes renamed),progress.md,draft/} (work notes and draft code only)
-verification: 1.4.0 wheel sha256 equals WHEEL_SHA256 pass; OPA sha256 equals pin pass; scratch `twins --heldout heldout/collected` with OPA pass (221/221); scratch `collected` pass; builder --check pass; heldout/tests 24 pass with the three changes; heldout/collected/tests 22/23 with three changes (the failure is conflict 1), 23/23 with the candidate fourth change; brief verify on the scratch kit with a draft result under the scratchpad and the candidate fourth change: pass; scratch `usage` on that result: fail (conflict 2); real-kit verify not run (blocked)
-risks: Real-kit `kit-check all` already fails at `checks` (M02-T03 data not placed). | Leakage probe: nearest-neighbour decisive copy 147/221 (67 per cent) against 216/501 (43 per cent) sealed; REV-M02-kit should weigh it. | Frozen kitcheck rejects underscore keys; collected.py compares the eight state lines itself (no plan change).
-questions_for_g: (orchestrator) Conflict 1, pick one. A (recommended): amend DEC-025 to allow a fourth two-line twins.py change, so that when it checks a folder it skips the subfolders FOLDER_TASKS names beneath it (only collected/ under heldout); those files stay verified complete by `twins --heldout heldout/collected` and by `collected`, which `kit-check all` runs (draft/twins-candidate-fourth-change.diff). B: move the set to a kit-root folder such as heldout-collected/, with no fourth change, but amend the M02-T06 files and verify lines, the DEC-025 (2) pair, the M02 review item, M02-T03's text and the airr-kit map row. Conflict 2: drop `gpu-hours: heldout 0` from M02-T06's criteria (recommended; CPU-only task outside the budget table), or add M02-T06 to the heldout row and the frozen usage.py.
+status: done
+summary: Collected-form held-out set built with the pinned 1.4.0 wheel and sealed in kit/heldout-collected/ (DEC-027): 221 of 501 rows kept, 280 dropped and counted, none relabelled; rebuild byte-identical (sha256 80361d9e..., as the scratch build).
+  kit/checks/twins.py carries exactly the three DEC-025 changes (no fourth); new kit/checks/collected.py; checks/SHA256SUMS lines for both. No gpu-hours line (DEC-027).
+  The sealed heldout/ set is untouched and its twins check passes unchanged against the M02-T02 result. No kit data/ yet, so the explainer comparison is empty and the check says so.
+changes: kit/heldout-collected/** (heldout.jsonl, rule-outputs.json, dropped.json, manifest.json, measures.json, reproduction.json, consumed-splits.json, policy-states.json, build_heldout.py, heldout_lib.py, twin_definition.py, notes/field-reads.json, tests/test_collected_checks.py, SHA256SUMS); kit/checks/twins.py; kit/checks/collected.py; kit/checks/SHA256SUMS (twins.py line replaced, collected.py line added). No repository edits.
+verification: task verify run from the main checkout on the real kit against a scratch copy of this block under the session TMPDIR (folder M02-T06): pass. kit-check twins --result .plan/work/M02-T02/result.md: pass (lines unchanged, with and without OPA). kit-check twins --heldout heldout-collected: pass (with and without OPA). kit-check collected: pass. kit-check selftest: pass. kit/heldout-collected/tests 23 OK; kit/heldout/tests 24 OK (1 skipped). Builder --check: 0 problems. Detail: .plan/work/M02-T06/evidence.md
+risks: (1) leakage probe for REV-M02-kit: nn-copy decisive 147/221 (67 per cent) against 216/501 (43 per cent) sealed; full 99/221 against 205/501; policy-majority 92/221 against 189/501; rows the 1.4.0 rules can read sit closer to training rows. (2) coverage lost: 25 of 102 policies, 68 of 188 sealed cells; 126 drops are "section not collected" (product collection gap for the backlog); the DEC-013 bar on 221 rows needs the kit review's check. (3) the M02-T06 first-choice sentence in the milestone still lists `gpu-hours: heldout 0`; written per DEC-027 without it. `kit-check all --results .plan/work` on the real kit still stops at `checks` until M02-T03 places kit/data (not this task).
+questions_for_g: none
 ### Findings
-heldout-form: collected (scratch only; not sealed in the kit)
-scratch-kept: 221/501 (identity 209, transformed 19; default_scuba_config 10, single_object_as_list 12)
-scratch-kept-states: met 86, not_met 110, not_applicable 15, not_assessed 10
-scratch-dropped-states: met 131, not_met 140, not_applicable 9, not_assessed 0
-scratch-coverage: rows 221/501, policies 77/102 (25 lost), cells 120 of 188 sealed-covered (68 lost), template 314
-scratch-drop-reasons: section not collected 126, item value unusable 68, sharing capability unusable 11, section empty 10, environment field 9, DNS record 8, rules decide another verdict 8, other not-assessed codes 33, twin of a compared split row after re-expression 6, twin of a kept row 0, share-cap trim 1
-scratch-twins-check: heldout-twins 0, heldout-max-share 2.71 per cent, heldout-soundness pass, heldout-label-reproduction 221/221 (OPA rerun)
-scratch-heldout-sha256: 80361d9efd2d7fbe72627fad4ba15856e871de19272bb65fc26a5a89f792fb05
-blocker-1: files under heldout/collected fail the sealed M02-T02 twins check (complete heldout/ SHA256SUMS)
-blocker-2: gpu-hours line fails kit-check usage (M02-T06 not in the budget table's heldout row)
-gpu-hours: heldout 0
-Details: .plan/work/M02-T06/notes.md and .plan/work/M02-T06/draft/
+heldout-form: collected
+heldout-label-agreement: 221/221
+heldout-twins: 0
+heldout-sha256: 80361d9efd2d7fbe72627fad4ba15856e871de19272bb65fc26a5a89f792fb05
+heldout-kept-met: 86
+heldout-kept-not_met: 110
+heldout-kept-not_applicable: 15
+heldout-kept-not_assessed: 10
+heldout-dropped-met: 131
+heldout-dropped-not_met: 140
+heldout-dropped-not_applicable: 9
+heldout-dropped-not_assessed: 0
+heldout-rows: 221
+heldout-policies: 77/102
+heldout-cells: 120/314
+heldout-share-cap: 3 per cent
+heldout-max-share: 2.71 per cent
+heldout-soundness: pass
+heldout-unknown-policies: none
+heldout-label-reproduction: 221/221
+heldout-nn-copy-decisive: 147/221
+heldout-nn-copy-full: 99/221
+heldout-nn-copy-policy-majority: 92/221
+heldout-availability-matches: 0
+collected-explainer-twins: 0
+coverage kept: rows 221/501, policies 77/102, cells 120 of 188 sealed cells (template 314); lost: rows 280, policies 25, cells 68
+reexpression: identity 209, transformed 19 (default_scuba_config 10, single_object_as_list 12, dns_rdata_as_list 0), Rego reproduced 19/19
+drops by reason: section not collected 126; item value unusable 68; sharing capability unusable 11; section empty 10; environment field 9; DNS record unusable 8
+drops by reason (cont.): rules decide another verdict 8; other not-assessed codes 33; twin of a compared split row after re-expression 6; twin of a kept row 0; share-cap trim 1; Rego not reproduced 0 (total 280)
+negative cases change (1): emptied cell with a sealed row not dropped; wrong dropped count; reason on a cell without sealed rows; reason in the sealed folder (all fail as required)
+negative cases change (2): collected folder with task M02-T02; another folder with M02-T06; sealed folder with M02-T06 (all fail)
+negative cases change (3): cap drop the cap does not require; cap drop naming another policy (both fail)
+negative cases collected.py: shared file not identical, wheel pin mismatch, unlisted file, kept/dropped not a partition, rule output not the sealed label, relabelled row, explainer twin of a collected or sealed row, explainer sha256 mismatch, state lines against the result (all fail); discovery via heldout-form: collected

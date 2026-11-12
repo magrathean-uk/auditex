@@ -103,7 +103,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 |---|---|---|---|---|
 | M00 | foundation | 7 | 100 | done |
 | M01 | airr-bring-up | 13 | 100 | done |
-| M02 | explainer-data-and-judging | 14 | 50 | active |
+| M02 | explainer-data-and-judging | 14 | 63 | active |
 | M03 | explainer-training | 15 | 0 | planned |
 | M04 | d5-keyed-pseudonyms | 16 | 13 | planned |
 | M05 | scanners-and-hygiene | 10 | 17 | planned |

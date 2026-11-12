@@ -437,3 +437,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-12T15:12:23Z	M02-T03	sol	claude-5	claude-opus-5-5	xhigh	branch	2	6375	12.1682	blocked	task/M02-T03-prose-data
 2026-11-12T15:56:56Z	EXP-m02-data	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	657	4.2372	done	3705672
 2026-11-12T16:27:15Z	M02-T06	sol	claude-1	claude-opus-5-5	xhigh	branch	2	1749	6.2873	blocked	task/M02-T06-heldout-collected
+2026-11-12T16:39:50Z	M02-T06	sol	claude-1	claude-opus-5-5	xhigh	branch	0	692	2.4222	done	task/M02-T06-heldout-collected
