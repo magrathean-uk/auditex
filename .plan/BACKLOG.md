@@ -2,8 +2,7 @@
 <!-- Triaged ideas and unscheduled tasks. Promotion into a milestone is a change-control event. -->
 
 ## Now
-- Kit wording advisory from the 7q confirmation (REV-M07-T10-codex item 5): `populate/README.md:9` diagnoses directory replication from the HTTP status alone; word it "can be directory replication". Round 7r's brief asks its author to clear it; drop this line when M07-T12 shows it cleared.
-- Kit wording advisory from the 7q confirmation (REV-M07-T10-opus item 3): `99-rollback.ps1:736-737` say "absent-resolved intent" for a refused intent too; word it "absent- or refused-resolved intent". Same handling as the line above.
+- Kit, inherited from 7q and kept out of round 7r by DEC-014 (REV-M07-T11-codex item 2, REV-M07-T11-opus item 2): only Graph creates are sent with SDK retries off; updates, deletes and three POSTs (assignLicense, members/$ref, the rollback's PIM adminRemove) go out with the default three retries. A later kit round applies the retry-off proof to every write; until then LIMITS states it.
 
 ## Next
 - Product integration of a model explainer, only after G's build pick in M03: the options M03-T04 lists (the template stays the default and the fallback; no model verdict; local only).
