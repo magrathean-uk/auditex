@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 42% (was 40%)
+overall: 46% (was 42%)
 milestone: M02-explainer-data-and-judging 75%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 73043fe 2026-11-12T18:19:22Z
+last_checkpoint: 2c36c94 2026-11-12T20:31:15Z
 
 ## Next tasks
 - none
@@ -16,8 +16,7 @@ last_checkpoint: 73043fe 2026-11-12T18:19:22Z
 ## Pending G decisions
 - Kit 7r is accepted (both providers ship, suite 9 of 9; manifest 510f26e348fd). The hand-over note is written (records folder, dt-live/HANDOVER-kit-7r.md) but not delivered: the tenant chat is not open. G opens it (or a new tenant chat) and points it at the note; phase D then runs on G's go and sign-ins.
 - Recommendation no, G to confirm: whether training rows must also agree with each other on verdict (6 keys, 16 rows; DEC-026).
-- M03-T01 (base comparison) is ready except for G's budget look (caps: basecmp 1,024, large 2,048, build 64 GPU-hours; used so far about 52 of 20,000) and one choice: train on the 785 rows placed now, or wait for the other 2,790 cases (one job, 8357551, running on the interactive slot since 17:26 GMT on 12 Nov, about 2 hours; then a collecting run of M02-T03, which must first point plans/inflight-jobs.json at 8357551 before kit data/explainer/collect.sh; needs a valid certificate, today's ends 01:25 GMT).
-- M04-T03: all three gates passed at 2b74f7c (Codex 2, Opus privacy, executing check: 22,929 passed). The merge at 17:51 GMT on 12 Nov failed its verify for an environment reason (run without the project wrapper tools/merge-task.sh, so contract-smoke ran main's code) and left the branch rebased at 332b74e, code-identical to 2b74f7c, which the review gate now refuses. Needs G: move the branch back to 2b74f7c (a reset of a local task branch), then merge with the wrapper's environment under the host order.
+- M03-T01 (base comparison) waits only for G's budget look (caps: basecmp 1,024, large 2,048, build 64 GPU-hours; used so far about 60 of 20,000). The training data is complete: 3,005 rows placed (2,738 train, 267 validation) of 3,767 cases, 766 dropped by the checks, one cell (MS.EXO.2.2v3 not_met) listed missing; verify passes (M02-T03 round 3, 12 Nov).
 - For G when convenient: the CSV `pseudonym_notice` row on keyless runs (DEC-021); whether the kit README's connection check should prove a browser sign-in (DEC-014).
 
 ## Re-baselines
@@ -28,11 +27,11 @@ last_checkpoint: 73043fe 2026-11-12T18:19:22Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 13% orchestrator
-claude-1 61% ok
+claude 17% orchestrator
+claude-1 62% ok
 claude-2 49% shared
-claude-3 53% ok
-claude-4 3% ok
+claude-3 54% ok
+claude-4 4% ok
 claude-5 74% ok
 codex 91% hot
 codex2 85% hot

@@ -1,35 +1,39 @@
 ## RESULT M02-T03
 status: done
-summary: The 12 round-2 teacher jobs were still pending on the normal queue at 17:26 GMT. The interactive reservation accepts only one job per user at a time (1 running and 1 submitted), so one job replaces all 12.
-  First I held the 12 jobs. Then I submitted 8357551 to the interactive reservation. It started at 17:26:26 GMT and runs the unchanged teacher.sbatch 12 times in sequence: fill5a, then fill5b, then rest2 shards 0/10 to 9/10. Each run uses the settings of the job it replaces and writes the same raw file.
-  At 17:29 GMT all 24 fill5a candidates were on disk, so I cancelled the 12 held jobs. None of them had started, so no case runs twice and none is lost.
-  8357551 is left running, as this round asked; at round 1's speed it should take about 2 hours. Nothing else of mine is on the system. I did not collect, and kit data/explainer, data/splits.json and runs/usage are unchanged.
-  A later worker must add 8357551 to plans/inflight-jobs.json before running collect.sh (see risks).
-changes: kit runbook/README.md section 12 (status paragraph plus a new subsection, "Round 2 on the interactive reservation"); project store runs/m02t03/round2-interactive.sbatch (the wrapper job; a copy is .plan/work/M02-T03/round2-interactive.sbatch); .plan/work/M02-T03/{notes.md (Round 3), progress.md}. No repository edits.
-verification: brief verify (grep, kit-check checks, twins against M02-T02, collected against M02-T06) against a scratch copy of this block's Findings under $TMPDIR/M02-T03-r3: pass
-verification: kit-check usage on the same scratch result: pass (4.7878 GPU-hours, 36 jobs); data/explainer SHA256SUMS: pass, and no kit data or usage file has changed since round 2; the system's copies of the teacher scripts, configs and case files have the same sha256 as the kit's
-risks: collect.sh takes its job ids from plans/inflight-jobs.json, which lists only the 12 cancelled ids. Run as it is, it would not wait for 8357551, so it would copy partial raw files. It would also leave 8357551 out of accounting-prose-run3.psv and jobs.json, and kit-check usage would then fail to reconcile. The collecting worker must add 8357551 there first: collect.sh also needs a change to skip an entry with no raw file. The alternative is to wait for 8357551 to end and add its accounting export and jobs.json entry by hand. The recipe is in runbook section 12.
-risks: 8357551 holds this account's only interactive slot for about 2 hours, so no other task can use the interactive reservation until it ends. Its time limit is 6 hours. If it times out, the raw files keep what was written, and resubmitting the same wrapper resumes where it stopped.
-risks: The 4 MS.EXO.2.2v3 not_met refill cases may still fail check a, as 21 of the 23 candidates on that cell's only generated case did.
+summary: Collected job 8357551. It ended COMPLETED with exit 0, and all 12 of its runs ended with exit 0. Its raw files are complete: no case is missing and no shard failed. No new job was submitted. The prose data grows to 3,005 rows (2,738 train, 267 validation).
+  plans/inflight-jobs.json now lists 8357551, which has no raw file of its own, and collect.sh skips such an entry. collect.sh also had a bug: the ssh calls inside its raw loop read the loop's job list, so the first dry run copied only one raw file. Those calls now read /dev/null.
+  The held-out filter ran as in round 2 (DEC-026) and removed 0 of 3,771 cases. The 785 round-2 rows are byte-identical and no row was relabelled. 0 cases are left ungenerated.
+  MS.EXO.2.2v3 not_met is still the one missing cell: none of the 71 candidates on its 5 cases passes.
+  The accounting export for the 12 cancelled jobs and 8357551 is saved. The task total is 13.01 GPU-hours. Nothing of this task is queued or running.
+changes: kit data/explainer/{plans/inflight-jobs.json, collect.sh, raw/fill5a-*, raw/fill5b-*, raw/rest2-teacher-raw-{0..9}of10.jsonl, train.jsonl, validation.jsonl, split-manifest.json, drops.json, SHA256SUMS}; kit data/splits.json; kit runs/usage/M02-T03/{accounting-prose-run3.psv, jobs.json, SHA256SUMS}; kit runbook/README.md section 12 (status paragraph, new "Round 3: collecting 8357551"); .plan/work/M02-T03/{notes.md (Round 4), progress.md}. No repository edits.
+verification: collect.sh --dry-run then collect.sh: pass, with identical rows from both. The brief's verify (grep, kit-check checks, twins against M02-T02, collected against M02-T06) on the real kit, against a scratch copy of this block at $TMPDIR/M02-T03/result.md: pass
+verification: kit-check usage on the same scratch result: pass (13.01 GPU-hours, 49 attempts). DoD checks-sha256 equal to M02-T04's: pass. bash -n collect.sh: pass. The data/explainer SHA256SUMS verifies.
+risks: MS.EXO.2.2v3 not_met has no row because check a fails 68 of its 71 candidates. Closing it needs a decision on the prompt or the check; more samples will not do it.
+risks: 2,966 of the 3,005 rows are greedy samples from one teacher, and validation has 267 rows.
 questions_for_g: none
 ### Findings
 prose-data: pass
 checks-sha256: 3241cf2ccd799aa49496417c3c484ba807daad106df40d22cd561d3d1f0be44e
-prose-rows-train: 744
-prose-rows-validation: 41
-prose-rows-by-verdict: met 241, not_met 253, not_assessed 267, not_applicable 24
-prose-cases: 3771 (3767 plus 4 refill); 785 rows, 196 dropped by checks, 2790 queued (rest2 2786, fill5 4), 0 removed by the held-out filter
+prose-rows-train: 2738
+prose-rows-validation: 267
+prose-rows-placed: 3005 (role explainer-train 2738, role explainer-validation 267); round 2 had 785, 2220 added (1994 train, 226 validation)
+prose-rows-by-verdict: met 894, not_met 981, not_assessed 1042, not_applicable 88
+prose-original-cases-as-rows: 3005 of 3767 (the 4 refill cases: 0 rows)
+prose-cases: 3771 (3767 plus 4 refill); 3005 rows, 766 dropped by checks, 0 not generated, 0 removed by the held-out filter
 prose-sealed-twins-dropped: 9
 prose-collected-twins-dropped: 0
 prose-collected-conflicts-dropped: 0
-prose-heldout-filter: 0 of 3771 cases removed at placing (sealed 0, collected 0, conflicts 0); the 9 sealed twins were dropped at build
+prose-heldout-filter: 0 of 3771 cases removed at placing (sealed 0, collected 0, conflicts 0; 501 sealed and 221 collected rows pinned); the 9 sealed twins were dropped at build
 prose-cells-train: 313/314
-prose-cells-missing: MS.EXO.2.2v3 not_met (5 train cases: 1 generated with 23 candidates, each failing at least one of a 21, S 15, m 8, e 4, e3 1; 4 constructed refill cases queued, not yet generated)
-prose-candidate-failures: S 119, a 107, b 68, c 34, d 3, e 76, e2 2, e3 28, m 122, p 7, v 30, parse 5
-prose-case-drops-by-check: S 52, a 66, b 48, c 26, d 2, e 45, e2 2, e3 13, m 28, p 3, v 24, parse 4
-splits-roles: explainer/train.jsonl explainer-train, explainer/validation.jsonl explainer-validation, 41 other files other
+prose-cells-missing: MS.EXO.2.2v3 not_met (5 train cases: 1 fixture and 4 constructed refill; 71 candidates, every one failing: a 68, S 29, e 13, m 13, b 4, e3 2, parse 1)
+prose-candidate-failures: S 231, a 343, b 227, c 103, d 14, e 194, e2 6, e3 79, m 165, p 11, v 89, parse 38
+prose-case-drops-by-check: S 152, a 259, b 203, c 95, d 13, e 154, e2 6, e3 63, m 66, p 7, v 83, parse 36
+prose-kept-by-sample: greedy 2966, sampled 39
+splits-roles: explainer/train.jsonl explainer-train, explainer/validation.jsonl explainer-validation, 53 other files other
+data-manifest-sha256: data/explainer/SHA256SUMS 5ec3b695a34dcb877a40a0c5bae249cb06a318134a9167d1b078aaa63d4ceaa4
+data-splits-sha256: data/splits.json b1cc94b97773f1d59fca4d62eeab2cae4581e84a8fe912a16d5b49902f6003a1
 teacher: mistralai/Mistral-Small-4-119B-2603@a11f36bebf709121056b1dbcc943d1c6afbe494d (bf16 conversion manifest 7a9eb6d2...0f7d)
-jobs-queued: rest2 shards 0/10-9/10 8355767-8355776 (2786 cases, one greedy candidate each); fill5a 8355826 and fill5b 8355827 (4 refill cases, 6 candidates each)
-jobs-round2: 8357551 running on the interactive reservation (fill5a, fill5b, rest2 shards 0/10-9/10 in sequence, the same 2790 cases and raw files); 8355767-8355776 and 8355826-8355827 cancelled before start (replaced by 8357551)
-gpu-hours: prose 4.79
-gpu-hours-so-far: 4.79 counted (rounds 1-2); the 12 cancelled jobs 0; 8357551 running since 17:26 GMT, not yet exported (expected about 8)
+jobs-round2: 8357551 COMPLETED on the interactive reservation (fill5a, fill5b, rest2 0/10-9/10, all exit 0); 8355767-8355776 and 8355826-8355827 cancelled before start
+gpu-hours-8357551: 8.22 (scheduler: 7400 s elapsed x gres/gpu=4)
+gpu-hours: prose 13.01
+usage-exports: runs/usage/M02-T03/accounting-prose.psv, accounting-prose-run2.psv, accounting-prose-run3.psv; jobs.json 49 jobs
