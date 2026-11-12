@@ -155,3 +155,7 @@ Still listed for G, not answered: DEC-003, DEC-007 and DEC-010 (logged by the or
 ## Acceptance bar gate (G, 11 Nov 2026)
 
 Asked with the five rules of M02-T05, the note that the wins rule may prove unreachable (then it returns to G) and the note that the held-out inputs need re-expressing before scoring. G's answer: "Approve the bar". Recorded as DEC-013.
+
+## Kit fix round gate (G, 12 Nov 2026)
+
+Asked whether to open a second kit change round (7r) for the Graph request-context defect found on the first live dry run, or park the kit. G's answer: "Yes, fix it". Recorded as DEC-014.

@@ -127,3 +127,12 @@
 - why: the calibration showed the judge is reliable on planted defects in near-identical text and weak at ranking fuller text, so acceptance rests on the frozen checks, both-order wins above the mechanical band, and a human read.
 - consequences: if no model's band clears 72.9 per cent the question returns to G; the orchestrator does not loosen the rule. Not validatable before a trained model exists: reachability of rule 2, the seed spread, the human read. Before any M03 scoring the held-out inputs are re-expressed in the product's collected form or scores are reported per verdict state (through the 1.4.0 rules only 209 of 501 rows keep their sealed label).
 - approver: G
+
+## DEC-014 A second kit change round (7r) for the live Graph defect
+- date: 2026-11-12
+- status: approved
+- decision: the accepted kit 7q stops on its first live dry run on the operator's Mac: any change to the Graph request context after sign-in resets the SDK's client and the next request fails (Microsoft.Graph.Authentication 2.25.0); the kit changes the retry count around every create. No tenant write was made. A narrow change round 7r fixes this (every such change through one helper that reconnects and proves the same account, tenant and scopes, or the retry count set once before sign-in; both proven read-only against the real SDK), adds a mock model of the SDK behaviour, and states in the documents that later processes sign in to Graph silently from the SDK's auth record. Tier A gate as before: one strong author, confirmation by both providers on the frozen copy, the full offline suite at night.
+- options: fix round 7r (chosen; G: "Yes, fix it") | park the kit for this trial
+- why: without it the kit cannot seed the trial tenant; DEC-008 approved one change round only, so a second is G's call.
+- consequences: phase D stays paused until 7r is accepted; earliest the morning of 13 Nov. Nothing else enters the round.
+- approver: G
