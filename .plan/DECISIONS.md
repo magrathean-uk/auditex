@@ -217,5 +217,5 @@
 - options: repair B1 only and leave A1 and A3 to M04-T04 (rejected: A1 is a path to the key itself) | stop and wait for G | one last repair for all three (chosen)
 - why: B1 breaks the output contract and A1 reaches the key, so 1.5.0 should carry neither; a second repair after a second, different gate is not a loop as long as it is the last.
 - consequences: the criteria and the files line of M04-T03 are amended in the milestone file. A2 (the CSV notice row) stays G's design choice.
-- approver: reported (G's team-manager chat, 12 Nov 2026, quoting G on who rules: "You lead" and "You herd, go!")
+- approver: G ("Yes, one repair", in this chat on 12 Nov 2026), after the same ruling was relayed by his team-manager chat
 
