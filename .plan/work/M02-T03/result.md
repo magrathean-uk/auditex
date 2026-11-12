@@ -1,16 +1,16 @@
 ## RESULT M02-T03
 status: done
-summary: Placed: 785 of the 3,767 cases are rows (744 train, 41 validation) in kit/data/explainer, listed in kit/data/splits.json as explainer-train and explainer-validation, every other file other. The full verify passes on the real kit.
-  Filtered all 3,771 cases (3,767 plus 4 refill cases) against the sealed and the collected held-out sets, with the twin definition, field reads and conflict rule kit-check collected uses: 0 removed. The build had already dropped 9 sealed twins.
-  Cell listed as missing: MS.EXO.2.2v3 not_met. build_cases.py --refill added its 4 constructed not_met vectors (all train); their jobs are queued.
-  Submitted to the normal queue first: rest2 (the 2,786 cases not generated in round 1, jobs 8355767-8355776) and fill5a/fill5b (8355826, 8355827). All 12 were still pending at 17:21 GMT: each needs a whole 4-GPU node, and sbatch --test-only estimated a start on 13 Nov in the evening. Left queued, as the brief allows.
-  Collecting: once all 12 jobs have ended, kit/data/explainer/collect.sh copies the raw candidates, refilters, rewrites both manifests, saves accounting-prose-run3.psv and adds the jobs to jobs.json. Exact commands are in .plan/work/M02-T03/notes.md and kit runbook section 12, "Round 2".
-changes: kit data/explainer/** (rows, split-manifest.json, drops.json, cases.jsonl now 3,771, selection.json, build_cases.py --refill, filter_rows.py held-out filter, make_manifests.py explainer roles, collect.sh, plans/{rest2,fill5}.jsonl, plans/inflight-jobs.json, teacher-config-fill5{a,b}.json, README.md, SHA256SUMS); kit data/splits.json; kit runbook/README.md section 12; project store runs/m02t03/{rest2,fill5}.jsonl and kit/data/explainer/teacher-config-fill5{a,b}.json; .plan/work/M02-T03/{notes.md,progress.md,stage/**}. No repository edits.
-verification: brief verify (grep, kit-check checks, twins against M02-T02, collected against M02-T06) on the real kit, against a scratch copy of this block's lines under $TMPDIR/M02-T03/result.md: pass (collected: 2 explainer files compared, collected-explainer-twins 0)
-verification: kit-check usage on the same scratch result: pass (4.79 GPU-hours, 36 jobs); data/explainer SHA256SUMS: pass; held-out filter probe: catches 221/221 collected rows, 501/501 sealed rows and 20/20 collected rows given a flipped verdict; collect.sh --dry-run: pass (kit unchanged)
-risks: Data stays at 785 rows (21 per cent of cases) until the 12 queued jobs run and are collected. They are not in jobs.json yet, because their accounting can only be exported after they end; collect.sh adds both. They used no GPU-hours. To get rows sooner, the orchestrator could move them to the interactive reservation.
-risks: MS.EXO.2.2v3 not_met: on its one generated case, 21 of 23 teacher candidates state another verdict (check a), so the 4 refill cases may fail the same way.
-risks: About 50 GB of stale partial download files from round 1 remain in the project-store hub cache; deleting them goes through the deletion gate.
+summary: The 12 round-2 teacher jobs were still pending on the normal queue at 17:26 GMT. The interactive reservation accepts only one job per user at a time (1 running and 1 submitted), so one job replaces all 12.
+  First I held the 12 jobs. Then I submitted 8357551 to the interactive reservation. It started at 17:26:26 GMT and runs the unchanged teacher.sbatch 12 times in sequence: fill5a, then fill5b, then rest2 shards 0/10 to 9/10. Each run uses the settings of the job it replaces and writes the same raw file.
+  At 17:29 GMT all 24 fill5a candidates were on disk, so I cancelled the 12 held jobs. None of them had started, so no case runs twice and none is lost.
+  8357551 is left running, as this round asked; at round 1's speed it should take about 2 hours. Nothing else of mine is on the system. I did not collect, and kit data/explainer, data/splits.json and runs/usage are unchanged.
+  A later worker must add 8357551 to plans/inflight-jobs.json before running collect.sh (see risks).
+changes: kit runbook/README.md section 12 (status paragraph plus a new subsection, "Round 2 on the interactive reservation"); project store runs/m02t03/round2-interactive.sbatch (the wrapper job; a copy is .plan/work/M02-T03/round2-interactive.sbatch); .plan/work/M02-T03/{notes.md (Round 3), progress.md}. No repository edits.
+verification: brief verify (grep, kit-check checks, twins against M02-T02, collected against M02-T06) against a scratch copy of this block's Findings under $TMPDIR/M02-T03-r3: pass
+verification: kit-check usage on the same scratch result: pass (4.7878 GPU-hours, 36 jobs); data/explainer SHA256SUMS: pass, and no kit data or usage file has changed since round 2; the system's copies of the teacher scripts, configs and case files have the same sha256 as the kit's
+risks: collect.sh takes its job ids from plans/inflight-jobs.json, which lists only the 12 cancelled ids. Run as it is, it would not wait for 8357551, so it would copy partial raw files. It would also leave 8357551 out of accounting-prose-run3.psv and jobs.json, and kit-check usage would then fail to reconcile. The collecting worker must add 8357551 there first: collect.sh also needs a change to skip an entry with no raw file. The alternative is to wait for 8357551 to end and add its accounting export and jobs.json entry by hand. The recipe is in runbook section 12.
+risks: 8357551 holds this account's only interactive slot for about 2 hours, so no other task can use the interactive reservation until it ends. Its time limit is 6 hours. If it times out, the raw files keep what was written, and resubmitting the same wrapper resumes where it stopped.
+risks: The 4 MS.EXO.2.2v3 not_met refill cases may still fail check a, as 21 of the 23 candidates on that cell's only generated case did.
 questions_for_g: none
 ### Findings
 prose-data: pass
@@ -30,4 +30,6 @@ prose-case-drops-by-check: S 52, a 66, b 48, c 26, d 2, e 45, e2 2, e3 13, m 28,
 splits-roles: explainer/train.jsonl explainer-train, explainer/validation.jsonl explainer-validation, 41 other files other
 teacher: mistralai/Mistral-Small-4-119B-2603@a11f36bebf709121056b1dbcc943d1c6afbe494d (bf16 conversion manifest 7a9eb6d2...0f7d)
 jobs-queued: rest2 shards 0/10-9/10 8355767-8355776 (2786 cases, one greedy candidate each); fill5a 8355826 and fill5b 8355827 (4 refill cases, 6 candidates each)
+jobs-round2: 8357551 running on the interactive reservation (fill5a, fill5b, rest2 shards 0/10-9/10 in sequence, the same 2790 cases and raw files); 8355767-8355776 and 8355826-8355827 cancelled before start (replaced by 8357551)
 gpu-hours: prose 4.79
+gpu-hours-so-far: 4.79 counted (rounds 1-2); the 12 cancelled jobs 0; 8357551 running since 17:26 GMT, not yet exported (expected about 8)

@@ -440,3 +440,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-12T16:39:50Z	M02-T06	sol	claude-1	claude-opus-5-5	xhigh	branch	0	692	2.4222	done	task/M02-T06-heldout-collected
 2026-11-12T17:07:37Z	CHK-M04-T03	terra	claude-3	claude-sonnet-5-5	medium	readonly	3	2881	0.6170	malformed	task/M04-T03-keyed-pseudonyms
 2026-11-12T17:21:45Z	M02-T03	sol	claude-1	claude-opus-5-5	xhigh	branch	0	2455	4.5971	done	task/M02-T03-prose-data
+2026-11-12T17:31:33Z	M02-T03	sol	claude-1	claude-opus-5-5	xhigh	branch	0	506	2.2831	done	task/M02-T03-prose-data
+2026-11-12T17:51:41Z	CHK-M04-T03	terra	claude-3	claude-sonnet-5-5	medium	readonly	0	2607	0.7490	done	task/M04-T03-keyed-pseudonyms
