@@ -435,3 +435,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-12T14:27:16Z	REV-M04-T03-privacy	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	479	2.6995	done	task/M04-T03-keyed-pseudonyms
 2026-11-12T14:35:43Z	REV-M04-T03	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	489		done	task/M04-T03-keyed-pseudonyms
 2026-11-12T15:12:23Z	M02-T03	sol	claude-5	claude-opus-5-5	xhigh	branch	2	6375	12.1682	blocked	task/M02-T03-prose-data
+2026-11-12T15:56:56Z	EXP-m02-data	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	657	4.2372	done	3705672
