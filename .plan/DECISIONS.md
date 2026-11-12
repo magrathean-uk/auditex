@@ -246,3 +246,12 @@
 - consequences: the criteria, verify and files lines of M02-T03 and M02-T06 are amended in the milestone file; every change adds a check or a counted drop, none loosens one. Open for G: whether the soundness rule should also hold among the explainer rows themselves (6 keys, 16 rows; recommendation no). The 785 staged rows stay valid and are re-filtered after the seal.
 - approver: auto; listed for G
 
+## DEC-027 M02-T06: the collected set gets its own kit-root folder, and no GPU-hours line
+- date: 2026-11-12
+- status: acted on; listed for G
+- decision: the build run of M02-T06 built and checked the whole collected set in a scratch copy of the kit (221 of 501 rows kept: 209 unchanged and 19 transformed, less 6 twins and 1 cap trim; 77 of 102 policies; twins 0; rule agreement 221 of 221; all transformed rows reproduced by the pinned Rego) and stopped on two conflicts with the frozen kit. (1) Any file under `heldout/collected` fails the sealed M02-T02 `twins` check, whose folder check is complete. The set therefore lives in a kit-root folder `heldout-collected/`; every path in the M02 criteria is renamed, and DEC-025's pair becomes `heldout-collected` with M02-T06. (2) A `gpu-hours: heldout 0` line fails the frozen usage check, because M02-T06 is not in the budget table; the task is CPU only and writes no such line.
+- options: a fourth change to `checks/twins.py`, skipping the subfolder when it checks `heldout/` (the worker's recommendation; rejected: DEC-025 allowed exactly three changes to a check G accepted on a fixed bar, and a sealed folder should stay sealed) | another folder (chosen) | add M02-T06 to the budget row and the frozen usage check (rejected: a second frozen check changed for a line that carries no information)
+- why: both conflicts are placement and bookkeeping; neither needs the verifier to change beyond what G allowed.
+- consequences: path text changes only; no bar, count or check is loosened. For REV-M02-kit to weigh, from the worker's leakage probe: the nearest training neighbour copies the decisive value for 147 of the 221 kept rows (67 per cent) against 216 of 501 (43 per cent) for the sealed set.
+- approver: auto; listed for G
+
