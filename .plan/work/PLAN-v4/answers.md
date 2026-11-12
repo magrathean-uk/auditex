@@ -159,3 +159,8 @@ Asked with the five rules of M02-T05, the note that the wins rule may prove unre
 ## Kit fix round gate (G, 12 Nov 2026)
 
 Asked whether to open a second kit change round (7r) for the Graph request-context defect found on the first live dry run, or park the kit. G's answer: "Yes, fix it". Recorded as DEC-014.
+
+## Decision batch (G, 12 Nov 2026)
+
+Asked in one message by the new orchestrator chat: confirm DEC-003 (kit verifier accepted on a fixed bar), DEC-007 (the held-out repair changed the twin definition) and DEC-010 (shared sign-in cut from the kit); the M05 deletion gate with the recommendation to keep the eight vendored files; and plan amendment 2 (a kit milestone M07 with weights and a held-out re-expression task), drafted first with the weights brought back. G's answer: "Confirm all five". Recorded on DEC-003, DEC-007 and DEC-010, and as DEC-017 and DEC-018. Not asked as a question, reported only: DEC-015 and DEC-016 (auto).
+

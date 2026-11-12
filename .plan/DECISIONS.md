@@ -27,7 +27,7 @@
 - options: a third open review round before any GPU job | stop at a fixed bar, add the portal comparison and start the qualification job (chosen)
 - why: plan v3's lesson for adversarial checker work (two repair rounds, then a written merge bar); the portal figure is a check the kit cannot influence; the allocation has a fixed end.
 - consequences: the kit files' `SHA256SUMS` change once more with the `usage` fix; M02-T02, M02-T04 and M02-T05 also own `checks/SHA256SUMS` in the kit, because the verifier now refuses a check module the manifest does not list (files-line amendment, recorded here); run tasks keep `selection.json` out of public places or strip its paths, and the runbook says so.
-- approver: auto
+- approver: auto; confirmed by G on 12 Nov 2026 ("Confirm all five")
 
 ## DEC-004 D5 keyed pseudonym design
 - date: 2026-11-11
@@ -71,7 +71,7 @@
 - options: reopen M02-T01 as its own task first | let the one repair own both (chosen: the two are sequential, in one module, and the key and the set must agree)
 - why: every later score rests on this set; a key that is repaired separately from the set it guards would need a third pass.
 - consequences: M02-T01's recorded twin counts may change and are restated by the repair; the set's sha256 changes; M02-T03 and M03 read the definition only after the repaired set passes its review.
-- approver: auto
+- approver: auto; confirmed by G on 12 Nov 2026 ("Confirm all five")
 
 ## DEC-008 One kit change round from the trial tenant's live facts
 - date: 2026-11-11
@@ -94,12 +94,12 @@
 
 ## DEC-010 The shared sign-in leaves the gated kit round
 - date: 2026-11-11
-- status: acted on; reported to G, who may reverse it
+- status: approved
 - decision: kit round 7p's item 4 (one sign-in per window reused by several scripts, DEC-008) is removed from this round. After one repair the two gate reviews of the frozen copy split: one ship, one do-not-ship on session ownership and cleanup in error paths (a failed census can make a script close a session it did not open; unreadable session ids can be left connected while cleanup reports complete). Both agree the other four items are sound and that no finding can write to the wrong tenant or lock the operator out. A new author builds round 7q from the accepted baseline plus items 1, 2, 3 and 5 only, with all sign-in and session code byte-identical to the accepted kit; then one diff-scoped confirmation by both providers and the full offline suite.
 - options: a second repair of the opener by another author (rejected for this round: each review round found new defects in the same new code, and a tier A gate needs both providers) | accept on the split verdict with the findings as stated limits (rejected: a stated property would be false) | cut the feature from the gated round (chosen; announced to G as the fallback before the re-review)
 - why: the live run needs the Agent 365 removal, the refusal handling and the Teams version pin; the shared sign-in is a convenience. New session code is the riskiest part of a kit that writes to a tenant that cannot be reset.
 - consequences: on the live run G signs in once per script and service, as with the accepted kit. The opener's code and its reviews stay in the 7p folder; bringing it back is its own task with its own gate, only if G asks.
-- approver: orchestrator under the announced fallback; G-level, listed for G
+- approver: G (confirmed on 12 Nov 2026, "Confirm all five")
 
 ## DEC-011 The training pipeline is accepted although v10's score did not reproduce
 - date: 2026-11-11
@@ -154,3 +154,21 @@
 - why: the M04 limit is there to bound what the keyed scheme adds, so it is measured from the code just before that change; the old figure would charge M04 for the 7 percent that 1.4.0's masking already added. Another test still proves the workload carries names (`test_require_masked_fails_on_local_report`).
 - consequences: the M04 peak limit is 720,352,051 bytes, about 21 MB above the 699,042,201 of the old baseline (two runs on `main` gave 650 and 626 MB, so one run varies by about 4 percent). The "no workload person name" half of that done item already holds on `main` and acts as a regression guard. The task is no longer `risk:low`: it gets one review, by another Claude account because both Codex seats are held back (DEC-012).
 - approver: auto; listed for G
+
+## DEC-017 M05 deletion gate
+- date: 2026-11-12
+- status: approved
+- decision: the eight unused vendored files under `tenant-bootstrap/vendor/microsoft-skills` (the catalogue, the microsoft-foundry entry and the entra-agent-id entry; list in `.plan/work/M05-T05/result.md`) stay. No path is approved for removal, so CLEANUP.md gets no row and no removal task is dispatched.
+- options: remove them and change the "Retained scope" line of `docs/legal/third-party-notices.md` with wording from G | keep them (chosen)
+- why: nothing ships or runs from them, and removal would make a legal line untrue until G rewrote it.
+- consequences: the legal text and the vendored manifest stay as they are; the M05 done item for the gate is met with an empty removal list.
+- approver: G ("Confirm all five", 12 Nov 2026)
+
+## DEC-018 Plan amendment 2 is drafted
+- date: 2026-11-12
+- status: approved to draft; the weights return to G before the amendment merges
+- decision: the kit and tenant work (rounds 7l to 7r, the tenant hand-over and phase D), run so far as M07 tasks under `.plan/work` only, becomes milestone M07 with its own weight, and a task to re-express the clean held-out inputs in the product's collected form before any M03 scoring is promoted from the backlog into M02 (DEC-013). The architect drafts it from `.plan/work/PLAN-v4/amend-2.md`.
+- options: leave the kit outside the plan and its percentage (rejected: it is the work G put ahead of everything, DEC-006, and the figure hides it) | amend (chosen)
+- why: the one public progress figure should count the work actually in scope; M03 scores are not comparable until the held-out inputs match what the product collects.
+- consequences: milestone weights change and the overall percentage is re-baselined once G approves the weights.
+- approver: G ("Confirm all five", 12 Nov 2026)
