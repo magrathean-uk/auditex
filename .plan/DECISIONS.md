@@ -201,3 +201,12 @@
 - consequences: the files line and the rule in the milestone file are amended. Open for G, not blocking: on keyless runs the notice is one extra non-finding row (`pseudonym_notice`) in the findings CSV and a top-level key in JSON; the manager chat puts that design choice to G.
 - approver: reported (G's team-manager chat, 12 Nov 2026, quoting G on who rules: "You lead" and "You herd, go!")
 
+## DEC-022 Codex 2 may pass its working limit for two tier A re-checks
+- date: 2026-11-12
+- status: approved
+- decision: Codex 2 only may be dispatched up to 88 percent of its weekly window (working limit 85) until its reset on 14 Nov 2026 22:41 UTC, for two runs only, one each: the kit round 7r re-confirmation and the M04-T03 re-check. The limit is passed on those two dispatches and on nothing else; Codex 1 stays as it is. If either returns do-not-ship or changes-required, the choice goes to G or the team-manager chat; no further Codex run on the orchestrator's own call. Both runs and the Codex 2 figure before and after are named in the next report.
+- options: hold the 85 percent line, so M04-T03's re-check waits for the reset (rejected: about two days on the release track for a three-point margin) | a bounded exception for the two gates (chosen)
+- why: both are tier A gates that need the other vendor and each costs about a point; Codex 2 stood at 84 percent with two such runs due.
+- consequences: Codex 2 ends at about 86 percent; nothing else may use it before the reset.
+- approver: reported (G's team-manager chat, 12 Nov 2026, quoting G on who rules: "You lead" and "You herd, go!")
+
