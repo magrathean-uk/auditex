@@ -4,7 +4,7 @@ overall: 36% (was 34%)
 milestone: M02-explainer-data-and-judging 57%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 93ddfd0 2026-11-12T11:12:26Z
+last_checkpoint: 56419fa 2026-11-12T11:28:21Z
 
 ## Next tasks
 - M02-T03 Build the prose training data for the explainer job (codex)
@@ -24,7 +24,7 @@ last_checkpoint: 93ddfd0 2026-11-12T11:12:26Z
 ## Quota snapshot
 <!-- quota:begin -->
 claude 50% orchestrator
-claude-1 52% ok
+claude-1 53% ok
 claude-2 49% shared
 claude-3 45% ok
 claude-4 86% hot

@@ -173,3 +173,13 @@
 - consequences: milestone weights change and the overall percentage is re-baselined once G approves the weights.
 - approver: G ("Confirm all five", 12 Nov 2026)
 - progress (12 Nov 2026): drafted at 77b7f17; one review and one repair (d7619ea) closed five loose pass conditions; the re-check then found the new held-out check under-specified, a new author applied the reviewer's fix (dabe352, a third author round allowed for one narrow gap, auto) and the final re-check approved dabe352. Proposed weights: M00 7, M01 13, M02 14, M03 15, M04 16, M05 10, M06 13, M07 12; overall 36% to 35%. Waiting for G's approval of the weights before the merge.
+
+## DEC-019 M04-T03 design note: the legacy test's fixture carries the legacy label
+- date: 2026-11-12
+- status: approved
+- decision: the first author run of M04-T03 stopped, as its criteria require, on one test outside its files line: `tests/test_explainer_wire.py::test_legacy_assessment_still_validates_before_and_after_upgrade` relabels a freshly made assessment as schema 2026-10-29, and a fresh assessment now carries the new strategy label, which the unchanged dated schema refuses. The test sets the relabelled document's `projection.redaction.strategy` to `run-salted-sha256-v1`, the same edit the task already makes in the owned legacy test of `tests/test_scuba_projection.py`. The files line gains that one place in a file the task already owns in part.
+- options: change the dated schema to accept the new label (rejected: the approved design keeps the dated schema unchanged) | leave the test failing or skip it (rejected) | make the fixture a faithful legacy document (chosen)
+- why: the criterion is that a 1.4.0 bundle, which carries the old label, validates under both validators; a legacy fixture with the new label tests nothing real. It is a fixture correction inside the approved design, not a change to it.
+- consequences: the author continues on its branch for this one edit (a second sol round that is not a repair; a later repair after the review passes the round cap under this entry). Both tier A reviews see the edit. The author's noted risk goes to the reviewers: the CLI `auditex report analyze`, `api-calls`, `permissions`, `proof-table` and `handoff` commands print without the temporary-key notice that DEC-004 amendment 6 asks of reports.
+- approver: auto
+
