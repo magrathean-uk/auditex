@@ -108,4 +108,4 @@ def test_committed_baseline_carries_names() -> None:
     baseline = json.loads((ROOT / "benchmarks" / "html-peak-baseline.json").read_text(encoding="utf-8"))
     assert baseline["records"] == 90000
     assert baseline["profile"] == "shareable"
-    assert baseline["unmasked_name_hits"] > 0
+    assert baseline["person_names"] > 0
