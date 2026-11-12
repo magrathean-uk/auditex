@@ -192,3 +192,12 @@
 - consequences: M02-T03 and M04-T04 start only when no kit gate task is waiting for a seat; M04-T03, already running, continues. Codex 2's remaining review quota goes to the 7r confirmation first, then to M04-T03.
 - approver: reported (G's team-manager chat, 12 Nov 2026, under G's "You lead")
 
+## DEC-021 M04-T03: the test-update rule gains two classes, and the CLI notice joins the files line
+- date: 2026-11-12
+- status: approved
+- decision: the DEC-004 test-update rule is extended with exactly two classes. (iv) Legacy relabel, the DEC-019 class: in `tests/test_model_rules_only.py`, `tests/test_optional_collection_reason.py`, `tests/test_scope_postcheck.py` and `tests/test_value_rules_contract.py` the fixture that relabels a fresh assessment as the old dated schema carries `run-salted-sha256-v1`; the assertions stay as they are. (v) `tests/test_scuba_projection_area_hook.py`: both pinned hashes are refreshed, with a seeded test key for the keyless fixture. Conditions: `result.md` lists every file and line with its reason and shows the before-and-after difference for the two pins; any failure outside these classes stops the run again; one finish run, then the single re-check, the executing check and the privacy review; a failed re-check comes back as a choice, with no further author run on the orchestrator's own call. Recorded with it (orchestrator, same module): `src/auditex/cli.py` may carry the temporary-key notice in `_redacted_report_payload`, which the first review required for the five CLI report commands.
+- options: leave the 11 full-suite failures (rejected) | change the old dated schema (rejected: the approved design keeps it unchanged) | extend the rule to these two classes in five named files (chosen)
+- why: the repair fixed all three review items and stopped, as its criteria require, on 11 failures the rule did not cover (22,901 pass); the fixtures can only pass by being made faithful, and the pins moved only by the label and the pseudonyms the design changes on purpose.
+- consequences: the files line and the rule in the milestone file are amended. Open for G, not blocking: on keyless runs the notice is one extra non-finding row (`pseudonym_notice`) in the findings CSV and a top-level key in JSON; the manager chat puts that design choice to G.
+- approver: reported (G's team-manager chat, 12 Nov 2026, quoting G on who rules: "You lead" and "You herd, go!")
+

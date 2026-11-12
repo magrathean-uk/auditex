@@ -168,3 +168,7 @@ Asked in one message by the new orchestrator chat: confirm DEC-003 (kit verifier
 
 G was away from this chat. The team-manager chat showed him the 11:12 GMT questions and relayed his answer word for word: "You lead , AIRR i will try to sign in but all it's needed is in 1pw and use my SSH key". Under that, the manager chat ruled: the amendment 2 weights are approved (merge dabe352), kit gate tasks get worker seats first until phase D starts, and DEC-016 stays. Recorded with approver `reported` on DEC-016 and DEC-018 and as DEC-020. The Isambard-AI sign-in stays G's: this chat does not sign in for him.
 
+## Test-update rule ruling relayed by G's team-manager chat (12 Nov 2026, about 12:40 GMT)
+
+Asked by this chat at 12:25 GMT: may the DEC-004 test-update rule cover two more classes in five test files for M04-T03. The manager chat quoted G on who rules ("You lead", later "You herd, go!") and ruled yes to both, with conditions. Recorded as DEC-021, approver `reported`. The CSV `pseudonym_notice` row stays G's design choice; the manager chat puts it to him.
+
