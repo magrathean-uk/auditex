@@ -1,0 +1,2 @@
+--task REV-M04-T03 --role codex --model gpt-6.1-sol --account codex2 --readonly --sha task/M04-T03-keyed-pseudonyms --tags hard --timeout 2700 --brief .plan/work/REV-M04-T03/brief-src-3.md --var PRIOR=.plan/work/REV-M04-T03/result-2.md
+--task REV-M04-T03-privacy --role sol --account claude-3 --readonly --sha task/M04-T03-keyed-pseudonyms --tags hard --timeout 2700 --max-turns 120 --budget 20 --brief .plan/work/REV-M04-T03-privacy/brief-src-2.md --var PRIOR=.plan/work/REV-M04-T03-privacy/result-1.md
