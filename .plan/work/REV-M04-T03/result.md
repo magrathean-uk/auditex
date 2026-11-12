@@ -1,23 +1,19 @@
 ## RESULT REV-M04-T03
 status: done
 summary:
-verdict: changes-required
-reviewed: 1f0348d2be71a87bf9c22b45f0130a93315343ae
-Two blocking gaps remain in A1 and A3.
+verdict: approve
+reviewed: 2b74f7c52b7b827313911f289584444b93d0b219
+The bounded diff closes the class within DEC-024.
 changes: none
-verification: PASS git diff --check, Python AST/parity checks, read-only mocked race/cache probes, frozen HEAD and clean-worktree checks. Focused pytest blocked before collection: no writable temporary directory.
-risks: Full suite and contract-smoke left to the executing check. Progress/evidence files unwritable in the sandbox.
+verification: PASS git diff --check, frozen HEAD, clean worktree, Python AST checks and in-memory discovery-removal/key-isolation probes. Focused pytest could not collect: no writable temporary directory.
+risks: Full suite and contract-smoke left to the separate executing check; sandbox prevented durable review notes.
 questions_for_g: none
 
 ### Findings
 
-1. closed by inspection: B1 notices reach source JSON, README, manifest and printed result (src/auditex/reporting.py:1869, src/auditex/reporting.py:2179, src/auditex/reporting.py:2193). The test walks every pack file (tests/test_redaction_keyed_pseudonyms.py:1158); the two exceptions contain no generated pseudonyms and are documented accurately (docs/reference/output-contract.md:274).
-2. open: A1 repairs the four changed entry points, but misses the subdirectory-root path through open_run_file (src/azure_tenant_audit/run_files.py:78).
-3. open: A3 uses triples everywhere, but absent, non-string and empty run IDs share an empty discriminator (src/azure_tenant_audit/guarded_io.py:402; src/azure_tenant_audit/output_redaction.py:348).
-4. open, advisory: rename is behaviour-neutral; seven repair paths are authorised and plan changes are inherited. Keyed-output logic and smoke inputs remain unchanged. One keyed-JSON absence assertion was weakened (src/auditex/scuba_projection.py:1566; tests/test_redaction_keyed_pseudonyms.py:1170).
-5. closed: no additional privacy, security or contract consequence found beyond items 2-4 (src/auditex/reporting.py:2193; docs/reference/output-contract.md:265).
-
-- blocking A1: read_run_file(run/"operator-inputs", "pseudonym.key") admitted the synthetic key when publication occurred after discovery and before directory opening. Re-discover the selected path after opening, before admission, and add this root variant to the race regression; amend file ownership as needed (src/azure_tenant_audit/run_files.py:80).
-- blocking A3: replacement manifests with absent/null/empty IDs reused both the temporary key and pseudonym; distinct IDs did not. Avoid the shared empty discriminator through safe refusal or a non-reusable run identity, with regressions for each missing-ID case (src/azure_tenant_audit/guarded_io.py:402).
-- advisory: the stated _write_private discovery/open overwrite did not reproduce. Parent creation precedes discovery and existing-key admission resynchronises identities. Add a regression documenting this protection (src/azure_tenant_audit/private_io.py:75; src/azure_tenant_audit/private_io.py:104).
-- advisory: restore the whole-file temporary-notice absence assertion for keyed JSON pack files, retaining the expanded file walk (tests/test_redaction_keyed_pseudonyms.py:1170).
+1. closed: no missing reachable guarded entry point found. Wrappers, pinned reuse, directory helpers and fixed-name exceptions match the code (src/azure_tenant_audit/guarded_io.py:1113; src/azure_tenant_audit/private_io.py:73; src/azure_tenant_audit/run_files.py:42).
+2. closed: discovery precedes admission for ordinary reads, writes, removals, trees and stdin, including subfolder and nested-run reads (src/azure_tenant_audit/guarded_io.py:957, :1035, :1182, :1221, :1253, :1271; src/azure_tenant_audit/run_files.py:83). Regression coverage is sensitive to removing discovery; the tree-root check is redundant with per-file discovery (tests/test_redaction_keyed_pseudonyms.py:1292, :1339, :1370, :1381).
+3. closed: missing, null, numeric, list and empty run ids receive context-only keys. Distinct runs and contexts remain separate; repeated resolutions within an operation agree. Reports retain their resolved RedactionContext and packs share a guard context (src/azure_tenant_audit/output_redaction.py:348; src/auditex/reporting.py:2076, :4004; tests/test_redaction_keyed_pseudonyms.py:1396).
+4. closed: the restored assertion checks the entire keyed JSON file. The _write_private regression exercises actual publication before opening and proves pre-window refusal without a manifest, preserved key bytes and temporary cleanup (tests/test_redaction_keyed_pseudonyms.py:1171, :1422).
+5. closed: pathless regular stdin refuses; tree binding failures precede removal. No documented flow break identified: ordinary descriptor-backed stdin remains admitted, and generated stale-pack sources contain no private run (src/azure_tenant_audit/guarded_io.py:954, :1271, :1276; src/auditex/reporting.py:2051).
+6. closed: all five changed files are authorised; run_files.py changes only re-discovery. Keyed derivation remains unchanged, and smoke seeds, digest fixtures, schemas and contract constants are untouched (src/azure_tenant_audit/run_files.py:83; src/azure_tenant_audit/output_redaction.py:372; docs/reference/output-contract.md:267).
