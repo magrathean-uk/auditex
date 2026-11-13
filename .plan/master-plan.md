@@ -108,7 +108,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M02 | explainer-data-and-judging | 14 | 75 | active |
 | M03 | explainer-training | 15 | 20 | planned |
 | M04 | d5-keyed-pseudonyms | 16 | 38 | planned |
-| M05 | scanners-and-hygiene | 10 | 50 | planned |
+| M05 | scanners-and-hygiene | 10 | 67 | planned |
 | M06 | release-1-5-0 | 13 | 0 | planned |
 | M07 | dummy-tenant-kit | 12 | 63 | planned |
 <!-- milestones:end -->
