@@ -1,0 +1,1 @@
+--task REV-M03-T08 --role sol --account claude-3 --readonly --tags hard --timeout 3600 --max-turns 150 --budget 20 --brief .plan/work/REV-M03-T08/brief-src.md

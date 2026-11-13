@@ -4,7 +4,7 @@ overall: 52% (was 53%)
 milestone: M02-explainer-data-and-judging 75%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 529c019 2026-11-13T19:54:32Z
+last_checkpoint: b04b535 2026-11-13T21:51:52Z
 
 ## Next tasks
 - none
@@ -28,12 +28,12 @@ last_checkpoint: 529c019 2026-11-13T19:54:32Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 36% orchestrator
-claude-1 68% ok
+claude 41% orchestrator
+claude-1 69% ok
 claude-2 49% shared
-claude-3 64% ok
-claude-4 24% ok
+claude-3 66% ok
+claude-4 26% ok
 claude-5 75% ok
-codex 91% hot
+codex 92% hot
 codex2 85% hot
 <!-- quota:end -->

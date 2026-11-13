@@ -32,7 +32,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T05 | Add the explainer score kind to the kit verifier | sol | S | hard | done |
 | M03-T06 | Teacher prompt v2 and the validation pilot | terra | M | hard | todo |
 | M03-T07 | Regenerate, judge-filter and register data v2 | terra | M | - | todo |
-| M03-T08 | Add the data-round checks to the kit verifier | sol | M | hard | todo |
+| M03-T08 | Add the data-round checks to the kit verifier | sol | M | hard | done |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
