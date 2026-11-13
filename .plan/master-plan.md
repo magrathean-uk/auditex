@@ -42,8 +42,8 @@ Track B, explainer model research on Isambard-AI (outside the repository):
 - A clean held-out set with zero twins under one written definition, sealed outside git, re-expressed in the product's
   collected form before any M03 scoring or scored per verdict state (M02-T06, DEC-013).
 - A judging method for free text calibrated on planted defects, and an acceptance bar recorded before large runs.
-- Bases compared with a noise band and picked by the EU-first rule; one judged build scored once on the held-out
-  set; a recommendation with the product-integration options; G's pick recorded.
+- Bases compared with a noise band and picked by the EU-first rule; one data round whose validation pilot passes
+  before any training target is regenerated (DEC-037); one judged build scored once on the held-out set; a recommendation with the product-integration options; G's pick recorded.
 - Every Track B result is reproduced by the kit's `kit-check` from hashed artefacts, and an other-vendor review
   reruns it at each milestone close.
 - No model decides or changes a verdict; no paid API runs; GPU-hours per stage, every job included (failed and
@@ -57,7 +57,7 @@ Dummy-tenant kit and trial tenant (M07, outside the repository; DEC-006, DEC-008
 Track A: the 1.5.0 release from G's gate answers - the wider Ruff set, the contract-test and gate-doc
 fixes, keyed per-run D5 pseudonyms with the middle-initial and title follow-up, the scanner follow-ups, the small
 review follow-ups and the release, which stops at the approved candidate until G's yes names 1.5.0. Track B: the
-explainer model research from bring-up to G's pick of a judged build (or of none). M07: the kit gate, the hand-over,
+explainer model research from bring-up to G's pick of a judged build (or of none), one data round included (DEC-037). M07: the kit gate, the hand-over,
 phase D's record and the rollback. 100 percent means every DoD item in M00-M07 is ticked; the release waits for
 neither Track B nor M07.
 
@@ -79,7 +79,8 @@ unassigned hours sit in the reserve: the orchestrator resizes stage caps within 
 DEC-002 first and then changing that row's cap and its set-by DEC, and shows G the table. The budget look before M03-T01 is the planned point. No hours before DEC-001 is approved.
 Stages: bringup (bring-up and qualification), repro (v10 reproduction), heldout (twins and held-out set, CPU only),
 prose (teacher-written training data), judging (judging method and bar), basecmp (base comparison), large (large
-runs), build (judged build). Tasks write `gpu-hours: <stage> <used>`; DoD predicates read the cap from this table and sum exactly (`bc`).
+runs), build (judged build), dataround (prompt v2, the pilot and data v2, DEC-037). Tasks write `gpu-hours: <stage> <used>`; DoD predicates read the cap from this table and sum exactly (`bc`).
+The dataround tasks write `round-gpu-hours: dataround <used>`, recomputed by `kit-check dataround`, because the frozen usage check binds stages to the tasks of the table's first rows.
 
 | stage | tasks | cap | set by |
 |---|---|---|---|
@@ -91,7 +92,8 @@ runs), build (judged build). Tasks write `gpu-hours: <stage> <used>`; DoD predic
 | basecmp | M03-T01 | 1,024 | DEC-001 |
 | large | M03-T02 | 2,048 | DEC-001 |
 | build | M03-T03 | 64 | DEC-001 |
-| reserve | - | 16,384 | DEC-002 |
+| dataround | M03-T06, M03-T07 | 160 | DEC-037 |
+| reserve | - | 16,224 | DEC-037 |
 | total | - | 20,000 | DEC-002 |
 
 ## Architecture
@@ -104,7 +106,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M00 | foundation | 7 | 100 | done |
 | M01 | airr-bring-up | 13 | 100 | done |
 | M02 | explainer-data-and-judging | 14 | 75 | active |
-| M03 | explainer-training | 15 | 25 | planned |
+| M03 | explainer-training | 15 | 20 | planned |
 | M04 | d5-keyed-pseudonyms | 16 | 38 | planned |
 | M05 | scanners-and-hygiene | 10 | 50 | planned |
 | M06 | release-1-5-0 | 13 | 0 | planned |
@@ -115,7 +117,7 @@ Priority (G): Track B gets worker seats first; Track A runs beside it as seats a
 Track B: M01-T01 and M01-T03 in parallel; M01-T02 after G's login; then M01-T04 -> M01-T05. M02-T01 (CPU) may run
 beside M01; M02-T02 (CPU) after M02-T01 and M01-T03 (it needs `kit-check`); M01-T04 -> M02-T04 (freezes the checks)
 -> M02-T05; M02-T06 (CPU) after M02-T02 and M02-T05; M02-T03 after M02-T04, M02-T02 and M02-T06 (DEC-026); M03-T01 after M01-T05,
-M02-T03, M02-T06, the bar and the budget look; then M03-T02 -> M03-T03 (also after M02-T06) -> M03-T04.
+M02-T03, M02-T06, the bar and the budget look; M03-T08 (CPU) -> M03-T06 (pilot; on `pilot: fail` the round stops and G decides under DEC-013) -> M03-T07 -> M03-T02 -> M03-T03 (also after M02-T06) -> M03-T04 (DEC-037).
 Track A: M00-T05, then M00-T01 alone, then M00-T02 and M00-T03 in parallel, M00-T06 after M00-T02 (shared
 `Makefile`) beside M00-T03, then M00-T04. M04-T01 (read-only design) may run during M00. After M00: M04-T02 ->
 M04-T03 (after G's design DEC) -> M04-T04 -> M04-T05; M05-T01 and M05-T02 in parallel beside M04; M05-T05 at any
@@ -132,7 +134,7 @@ chat); M07-T15 after M07-T14 when no kit script runs; M07-T17 before the trial e
 3. The allocation has a fixed end and unused hours are lost; Track B has priority, and the caps keep the large runs
    from eating the comparison.
 4. Judging free text is easy to get wrong: deterministic checks gate first, the judge is a different model family
-   from the candidate, calibrated on planted defects with position swap, and the bar is fixed before large runs.
+   from the candidate, calibrated on planted defects with position swap, and the bar is fixed before large runs; the data round may still miss the bar (EXP-m03-losses), so a validation pilot gates it and a second miss ends it (DEC-037).
 5. The keyed scheme is a bundle and contract change touching engine, product, schemas and docs; the design gate,
    the digest gate (failing today on a date-derived field, fixed by M00-T05), both privacy reviews, the
    1.4.0-bundle compatibility test and the current-version test edits in M04-T03 contain it.
