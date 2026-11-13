@@ -5,6 +5,18 @@ All notable changes to Auditex are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The run-bundle contract has its own
 date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`).
 
+## [Unreleased]
+
+### Security and privacy
+
+- **Pseudonyms come from a private per-run key.** Pseudonyms are HMAC-SHA256 of a random 32-byte key made when
+  collection seals a run (`operator-inputs/pseudonym.key`, the file `0600` in a `0700` folder, never in a report,
+  pack, export or hash), so knowing the run folder no longer lets anyone confirm a guessed name. Pseudonyms from
+  1.4.0 and earlier do not match. A run made before 1.5.0 (or copied without `operator-inputs/`, or sealed on
+  storage without locking) is masked with a temporary key, and its output says so, until `auditex report
+  prepare-key RUN_DIR` is run once. A 1.4.0 reader loses the explanations of a 1.5.0 run. See
+  `docs/reference/security-privacy.md`.
+
 ## [1.4.0] - 2026-11-10
 
 The model layer is retired, shareable output masks names, and the build is reproducible. `CONTRACT_VERSION` and

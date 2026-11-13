@@ -279,6 +279,8 @@ auditex report render <run-dir> --format oscal --output reports/oscal.json
 
 The SARIF export is SARIF 2.1.0 and the OSCAL export is OSCAL 1.1.2 Assessment Results; both are validated against the official JSON Schemas in the test suite. The OSCAL collection time is the run's `created_utc`, not the time of the export. See the [output contract](../reference/output-contract.md#sarif-and-oscal-exports).
 
+A run made before 1.5.0, copied without `operator-inputs/` or sealed on storage without locking has no private pseudonym key, so shareable output masks names with a temporary key and says so; run `auditex report prepare-key <run-dir>` once (it prints `created` or `present`) to make the pseudonyms stable across sessions.
+
 ## Run Explorer
 
 ```bash

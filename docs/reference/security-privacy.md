@@ -49,7 +49,8 @@ The identity collector's user inventory selects `onPremisesImmutableId`, so raw
 safety ceiling. Previously only the hybrid collector's first 100 sampled users
 carried it. Normalised user records, the evidence index and customer packs do
 not carry it. Model projection keeps only effective administrators and
-pseudonymises non-null values in the local projection.
+pseudonymises non-null values in the local projection with the run's pseudonym key
+(see [Pseudonym key](#pseudonym-key)).
 
 The PIM role policy reads of the directory roles (`identity_governance`) collect the
 notification recipients of each policy rule: these are e-mail addresses, collected as
@@ -97,7 +98,7 @@ call, and the audit log records both what ran and what was refused.
 | Microsoft Graph methods | `GraphClient._request` (`graph.py`) | Allows `GET`, and `POST` only to the Graph `/$batch` endpoint when every inner request is a relative `GET` without a body. Anything else raises `GraphError` (`ReadOnlyViolation`) before a token is requested or the network is touched. Every request must be HTTPS to `graph.microsoft.com` (also for `get_json(..., full_url=True)`), so the bearer token cannot go to another host, and `X-HTTP-Method-Override`, `X-HTTP-Method` and `X-Method-Override` headers are refused, on the request and on each `$batch` inner request. A redirect is never followed by the HTTP library: `GraphClient` follows it by hand (at most three hops), keeps the bearer token only for a hop on Graph, and fetches any other hop without the token, over HTTPS and only on a Microsoft download host (`.office.com`, `.office.net`, `.office365.com`, `.microsoft.com`, `.microsoftonline.com`, `.sharepoint.com`, `.azureedge.net`, `.windows.net`); anything else is refused (`RedirectRefused`, event `graph.request.redirect_refused`). The usage-report functions answer 302 to a pre-authenticated download URL, so each hop is logged as `graph.request.redirect` with host and path only, never the query (it is a credential), and an error after a redirect names the host and path without the query. The OAuth token endpoint is the only other call the client makes. | `graph.request.refused` event; `observed_ledger.graph.refused` |
 | Command adapters | `adapters/read_guard.py`, called by the m365 CLI, PowerShell and Microsoft365DSC adapters before any process starts | Both languages are checked as plain ASCII: any non-ASCII or control character (other than tab, LF, CR) is refused, because the parsers treat Unicode quotes, dashes and line breaks differently from this check; a CR ends a statement like an LF. m365: the executable must be `m365`, the command must end in `list`, `get` or `status` (or be an `outlook report <name>` usage report), and after the command words every token must be a known option (`--output`/`-o`, `--period`, `--top`, `--help`/`-h`, `--verbose`, `--debug`) or that option's value, so a later bare word or `--` cannot extend the command inside the CLI parser. PowerShell: only `Get-*`, a few read-shaping pipeline cmdlets and `Search-UnifiedAuditLog`; comments, backticks, redirection, here-strings, `::`, a call operator on anything but a script block, subexpressions in double-quoted strings, dynamic member access (`.` followed by a quote or `$`) and method calls other than a few string helpers are refused. Microsoft365DSC also allows `Export-M365DSCConfiguration`, which reads the tenant and writes only local files. The lab response plane runs through the same adapters, so `--command-override` is held to the same allowlist. It is a syntactic allowlist that fails closed, not a PowerShell parser; the read-only role and scopes remain the authoritative boundary. Refusal reasons are redacted and clipped before they are logged. | `command.refused` event; `observed_ledger.commands.refused` |
 | API ledger | `api_inventory.py`, attached by `AuditWriter.write_json_artifact` to every `api-inventory.json` it writes | `safety.read_only` and `safety.no_content_reads` are re-derived from the audit log. A write method, a non-read command, any refused call, a `$batch` whose inner calls or methods were not all recorded, a malformed or unreadable log line, a body-reading endpoint (message, attachment and content endpoints, calendar events and `calendarView`, group threads, conversations and posts, chat messages, SharePoint list items, To Do tasks), a `$select` of a body field or an `$expand` of a content collection (also when it sits in a next-page URL or a `$batch` inner URL) makes them false, whatever the collectors declared. Logged command words are cross-checked against the logged command text. `teams_admin_rest.request` records method, host, path, status and duration without headers or tokens; `observed_ledger.teams_admin_rest` counts attempts and endpoints, and non-GET or missing methods feed `safety.observed_write_calls`. Observed calls outside the declared set are listed (including `outside_declared.teams_admin_rest`), and redirect hops under `observed_ledger.graph.redirects`. Endpoint templates replace only identifiers with `{id}`, so a long resource name such as `deviceCompliancePolicies` stays visible. The handoff, `api-calls.md`, the pack README and `report.md` print the observation basis next to `read_only` and `no_content_reads` and render the ledger; a declaration is never printed as an observed fact. | `api-inventory.json` `observed_ledger`, `safety.observation_basis` |
-| Bundle files | `output.py` (`AuditWriter`, `harden_bundle`), `evidence_db.py` | Run directories and every directory under them are `0700`; every file is `0600`; the audit log, evidence database and temporary files are created that way, whatever the caller's umask. A final sweep covers files other code wrote into the bundle. Files the tooling writes later are private on creation too, through one writer (`private_io.py`): rendered reports (`report render`, the exporters, the guided `--report-format`), the explorer page (default `reports/explorer.html`), report payloads sent to `--output`, and customer packs are `0600` in `0700` directories whatever the umask. Directories that already exist are not changed; a pack directory is tightened. A file is replaced through a temporary file, never written through a symbolic link. The sweep leaves symbolic links alone, and a symbolic link anywhere in a run makes the bundle fail its integrity check. | `ls -l` of the bundle |
+| Bundle files | `output.py` (`AuditWriter`, `harden_bundle`), `evidence_db.py` | Run directories and every directory under them are `0700`; every file is `0600`; the audit log, evidence database and temporary files are created that way, whatever the caller's umask. A final sweep covers files other code wrote into the bundle. Files the tooling writes later are private on creation too, through one writer (`private_io.py`): rendered reports (`report render`, the exporters, the guided `--report-format`), the explorer page (default `reports/explorer.html`), report payloads sent to `--output`, and customer packs are `0600` in `0700` directories whatever the umask. Directories that already exist are not changed; a pack directory is tightened. A file is replaced through a temporary file, never written through a symbolic link. The sweep leaves symbolic links alone, and a symbolic link anywhere in a run makes the bundle fail its integrity check. The private key `operator-inputs/pseudonym.key` is `0600` in an `operator-inputs/` folder of `0700`; a key or folder with any group or other bit is refused, never tightened. | `ls -l` of the bundle |
 | User-authored text | `data_minimisation.py`, used by `google_workspace/client.py`, `google_workspace/collectors.py`, `collectors/mailbox_forwarding.py`, both normalizers, `AuditWriter` and the offline replay copy in `cli.py` | Gmail vacation-responder subject and body (plain and HTML), Gmail send-as signatures, Graph automatic-reply message bodies, the words an inbox rule matches (`subjectContains`, `bodyContains`, `bodyOrSubjectContains`, `headerContains`, `senderContains`, `recipientContains`, each kept as `<field>Count` and `has<Field>`) and the Gmail filter `query`, `negatedQuery` and `subject` (kept as `<field>Length` and `has<Field>`; address lists and actions are kept, and a responder who needs the keywords of a suspect rule goes back to the tenant) are dropped before `raw/`, `normalized/`, `ai_safe/`, chunk files or any report, on live collection and on offline replay of a fixture. The booleans (`enableAutoReply`, `restrictToDomain`, `status`, `externalAudience`) and a `<field>Length` and `has<Field>` pair per dropped field stay. | `raw/`, `normalized/` |
 | MCP tools | `mcp_registry.py`, `mcp_paths.py`, `mcp_server.py` | No tool takes a bearer token or client secret value: Microsoft auth comes from the local auth context and the server's environment (`AZURE_CLIENT_SECRET`), and the Google tools take confined paths to credential files (`service_account_key`, `oauth_client`, `token_cache`), never secret values. Every filesystem argument is resolved against the MCP root and refused when it contains `..`, starts with `~`, or lands outside the root (including through a symbolic link). Tenant and run names (which become part of a run directory name) are refused when they contain `/`, `\`, `..` or a control character; `AuditWriter` enforces the same rule. The server refuses to start, and every path argument is refused, when the root is `/`, or the home directory with `AUDITEX_MCP_ROOT` unset. Tools whose `read_only_hint` is false are listed below. | `McpPathError` from the tool |
 
@@ -112,6 +113,13 @@ or local auth state, or, for the response tool, because it is a gated response a
 - `auditex_run_google_workspace_audit`: writes a run bundle locally; the audit itself is read-only.
 - `auditex_probe_live`: writes probe artifacts locally; the probe is read-only.
 - `auditex_run_response_action`: gated response tool, listed only when `AUDITEX_ENABLE_RESPONSE` is truthy (lab only).
+
+No tool whose `read_only_hint` is true ever writes a run. Tools that derive pseudonyms from a run
+(summaries, diffs, comparisons, previews, notifications, the inventory and handoff tools) only read its key;
+they never create one. A keyless run (made by 1.4.0 or earlier, copied without `operator-inputs/`, or sealed on
+storage without locking) is masked with a temporary key held in memory, and the result says so. The command
+`auditex report prepare-key RUN_DIR` creates the run's key; it is a CLI command and is not offered over MCP. This
+paragraph makes no claim about when an MCP client asks for approval of a tool.
 
 The MCP root is `AUDITEX_MCP_ROOT` when set, otherwise the server's working
 directory. Run outputs, run directories, credential file paths and imported
@@ -289,8 +297,9 @@ has a path-free message and a `.reason` attribute; `outside`, `oversize`,
 `hardlink` and `type` identify those specific refusals. Missing files still
 raise `FileNotFoundError`.
 
-Control files, including manifests, summaries, validation, AI context and
-salt, have a 32 MiB limit (`MAX_RUN_FILE_BYTES`). Evidence and other data
+Control files, including manifests, summaries, validation and AI context,
+have a 32 MiB limit (`MAX_RUN_FILE_BYTES`). The pseudonym key is read with an
+exact 32-byte bound instead: any other size is `damaged`. Evidence and other data
 files have a 256 MiB limit (`MAX_RUN_DATA_BYTES`). Hashing and copies use
 guarded streams. Guarded reads during writer finalisation have no size cap.
 Bundle hash manifest generation and verification stream without a size cap;
@@ -349,7 +358,8 @@ deliberately conservative, even when the WAL frames were already checkpointed.
 The held main descriptor is checked again after SQLite inspection and before
 fallback from a failed SQLite open. A change refuses the read, including when a
 query fails. Read-only consumers never create, append to or
-change anything in a bundle they inspect. A process that is producing a run appends
+change anything in a bundle they inspect; that includes the pseudonym key, which
+only collection and `auditex report prepare-key` create. A process that is producing a run appends
 one constant info line (no path or value, never the console) to that run's debug log
 the first time it reads the index in place, when the existing guarded log accepts an
 append without creating a log or changing its permissions; an unwritable or unsafe log gets no line and the read still succeeds. A resume
@@ -485,8 +495,8 @@ explainer profile redact dashed GUIDs and strings under `owner`, `justification`
 names and role names remain. The redactor also masks e-mail local parts, the names of
 every person in the run's directory records (see
 [Person names](#person-names)), immutable IDs, credentials and run-directory
-paths. Public baseline example addresses are kept. A run-specific pseudonym uses
-the resolved run path as its salt input. GUIDs become `Guid` plus a digest,
+paths. Public baseline example addresses are kept. A pseudonym is keyed with the
+run's private key (see [Pseudonym key](#pseudonym-key)). GUIDs become `Guid` plus a digest,
 which is stable on another pass without reserving a range of real GUIDs.
 
 The report structure is redacted before rendering, so free-text keys work in
@@ -539,20 +549,11 @@ Final markup passes over rendered HTML leave tags and character references
 alone and skip single-word keys, so the renderers' own markup is never
 rewritten; multi-word keys still apply.
 
-Pseudonym scheme: the salt is the SHA-256 hex digest of the UTF-8 real path of
-the run directory; the pseudonym is the first 16 hex characters of SHA-256 over
-the salt, a NUL byte and the person's canonical name in UTF-8 (the display name,
-else the address). It is
-deterministic for a run path, so the prose form equals the structured
-`displayName` form, and differs for another run path. Two people with the same
-display name share a pseudonym. The salt derives from the run path, which is not
-secret: this is pseudonymisation, not anonymisation, and someone who can guess
-the path and holds a candidate list can confirm a guess. A keyed scheme with a
-private per-run key is in the backlog; it would add a file to the run bundle and
-needs approval. `scuba_projection` keeps its own pseudonym for privileged users
-(salted with the manifest digest, a field of the assessment envelope); it feeds
-the private assessment path, not a shareable writer. Multi-run contexts (compare
-and drift) mask the names of every run with the first run's salt.
+Pseudonym scheme: the pseudonym is keyed (see [Pseudonym key](#pseudonym-key)), over
+the person's canonical name in UTF-8 (the display name, else the address). It is
+deterministic for a key, so the prose form equals the structured `displayName`
+form. Two people with the same display name share a pseudonym. Multi-run contexts
+(compare and drift) mask the names of every run with the first-listed run's key.
 
 The unmatched note: a person whose names cannot all be followed safely is
 counted, never named. When any such person exists, shareable HTML and Markdown
@@ -567,7 +568,7 @@ id, else principal name), under the first applicable reason:
 | `too_short` | fewer than four letters and digits |
 | `no_letters` | no letter at all (a numeric name must not rewrite numbers) |
 | `too_many_tokens` | more than six words or a word over 64 characters |
-| `vocabulary` | equal to product, role or group vocabulary found in the run, or a pseudonym word |
+| `vocabulary` | equal to product, role or group vocabulary found in the run, a pseudonym word, or a product field name (only the mapping key stays; see the limits below) |
 | `common_word` | only common words such as `admin`, `support` or `meeting room` |
 | `structural` | a structural code such as a policy id or snake-case name |
 | `separator` | a separator the matcher does not follow (for example `/` or `+`); the spellings it does follow are still masked |
@@ -579,14 +580,82 @@ the table above.
 - People who are not in the run's directory records and never appear as a user
   reference are not discovered.
 - Only recorded spellings match. Nicknames, transliterations, dropped
-  diacritics, initials (`A. Smith`) and a family name on its own are not masked.
-  Middle initials and titles are counted as unmatched or left, and masking them
-  is in the backlog.
+  diacritics and a family name on its own are not masked. Spellings that differ
+  only in Unicode form (composed or decomposed letters, combining marks of any
+  script) match. A user record that carries only a given name and a family name
+  is discovered and masked.
+- Middle initials and titles are handled only in part. A recorded name also
+  matches without its leading titles and without its middle initials, and in the
+  text a middle initial between two parts of a name, and a capitalised run of the
+  listed titles directly before a name, are masked with it. The listed titles are
+  `Mr`, `Mrs`, `Ms`, `Miss`, `Mx`, `Dr`, `Prof`, `Professor`, `Sir`, `Dame`,
+  `Lord`, `Lady`, `Rev` and `Revd`, with or without a full stop. A name with
+  middle initials or a title that cannot be resolved inside the scan budget is
+  withheld: the whole string becomes the text placeholder `<redacted-text>`, never
+  left readable. These limits stand, and each name left as written is not reported unless the table above
+  lists it:
+  - a leading initial for the given name (`A. Smith`) and post-nominals (`Jr`,
+    `PhD`);
+  - titles outside the list: with `Capt. Jane Doe` recorded, a bare `Jane Doe`
+    in text stays readable, and the unmatched note does not count it;
+  - a title before a sentence stop is joined to the next name (`Contact the
+    Lord. Jane Doe` gives `Contact the User <hex>`), and a capitalised `Miss`,
+    `Rev` or `MS` used as an ordinary word before a name is absorbed (`We Miss
+    Jane Doe`); a comma never joins a title to a name, and a lower-case `miss` is
+    kept;
+  - some records with a title or initial after the family name (`Smith, Dr.
+    John`, `Smith, John A.`);
+  - a name written with a zero-width space or a fullwidth full stop;
+  - a name with several middle initials where the walk has taken them on another
+    key's path is not left readable: with a recorded `John A. B. C. D. Jones`
+    sign-in path, `John A. B. C. D. Smith` is withheld as `<redacted-text>`, or
+    masked as one name when that full name is recorded.
 - A name URL-encoded (`Alice%20Smith`), joined by `+` or `/`, or inside an HTML
   tag or attribute of already rendered text, is left as written.
 - A mapping key that is a person written as an identifier (`priya_kovalenko`,
-  `PriyaKovalenko`) is treated as a structural key and left, and is not counted
-  in the note. Its value is still masked.
+  `PriyaKovalenko`) is masked only when the whole key is that person's name
+  (`user-<hex>` for the snake form, `User <hex>` for the camel form). A key whose
+  plain form, after its titles and initials are stripped, is a person
+  (`dr_priya_kovalenko`, `priya_x_kovalenko`) is withheld as `<redacted-text>`
+  (`#n` is added on a collision and the value is kept). Other parts of a key
+  (`priya_kovalenko_mailbox`) stay as written. A mapping key that is a product field name (a property in
+  `schemas/`, a key in `configs/`, or an identifier-shaped literal written as a
+  key or constant under `src/`, kept as `_D5_FIELD_NAMES` in
+  `output_redaction.py`) is never renamed, whoever has that name: a person
+  called `Break Glass` keeps the key `break_glass`, is counted as `vocabulary`,
+  and is still masked in values and free text. A key that exists only in
+  collected data and in no schema, config or source literal (a Graph property
+  passed through), and a field name the generator misses (a key passed as a call
+  keyword, for example in `google_workspace/normalize.py`), is not exempt, so a
+  person with that name has the key renamed. A new product key under `src/`,
+  `schemas/` or `configs/` fails the drift test until `_D5_FIELD_NAMES` is
+  edited by hand; the failure lists the missing names.
+- Stated limits of the merged matcher (DEC-044 stop rule: limits, not defects to
+  fix here). Examples are invented.
+  - Withholding reaches the whole string (a field, list item or key), and in the
+    final pass over rendered output the whole file. The placeholder does not say
+    why. This happens when a name start is followed by more initials than the
+    six-word window resolves (`First A B C D E Last`).
+  - With one user known only as `Neral` and another as `Neral Vosk Taren`,
+    `Vosk Taren` stays readable in `Neral A B C D Vosk Taren`: the window ends on
+    a non-initial.
+  - A name whose last letter carries an extra combining mark the recorded
+    spelling lacks (`Orin Pasḱ`) stays readable, and so does the accent-dropped
+    form of a name recorded in decomposed form (`Zoe Vosk` for `Zoë Vosk`).
+    Before this change the matcher masked that name when the mark was written
+    as a separate character after the last letter, leaving the mark after the
+    pseudonym.
+  - A name with an invisible character inside it (zero-width joiner, soft hyphen,
+    combining grapheme joiner, variation selector) or a combining mark after a
+    space stays readable.
+  - Mapping keys that stay readable: camel-joined with a title or initial
+    (`DrNeralVosk`, `NeralAVosk`), suffixed (`neral_vosk_adm`), reversed
+    (`vosk_neral`), with an edge initial (`a_neral_vosk`), with middle names as
+    initials (`orin_t_m_pask`), over six tokens, or with a token over 64
+    characters.
+  - Parts-only records: the given and family fields are withheld, but `N. Vosk`
+    and either part on its own stay readable, and parts with stray spaces or a
+    different case take their own pseudonym.
 - Scripts written without spaces (CJK) match only where spaces or punctuation
   delimit the name.
 - Single-word local parts (`asmith`) are masked inside addresses and full-address
@@ -595,12 +664,16 @@ the table above.
   spellings the index does not support can stay readable (for `separator` and
   `limit`, every other accepted spelling is still masked), and the name fields
   are pseudonymised.
+- The note's fixed wording ("the same words elsewhere are left as written") is
+  generic. For a person counted as `vocabulary` only the mapping key stays
+  readable; the name is still masked in values and free text, as above.
 - Over-masking: an ordinary word equal to a person's name and outside the
   common-word and vocabulary lists is masked too.
 - Immutable-ID matching is unchanged and is one alternation over every
   discovered ID.
-- The unsalted explainer context of an internal ScubaGear export has no run
-  salt, so it uses unsalted pseudonyms.
+- The explainer context of an internal ScubaGear export has no run, so it uses a
+  fresh random key for that one context and knows no run paths or undiscovered
+  names.
 
 Before sharing, identity discovery reads all `normalized/**/*.json` files. It
 refuses malformed, unreadable or non-regular entries, symbolic and hard links, changes
@@ -628,6 +701,93 @@ for schemes of 1 to 32 characters and scheme-relative URLs. Known immutable
 IDs are matched in narrative only at word-character boundaries and when at
 least four characters long; a structured immutable-ID field is redacted even
 when shorter. Person-name matching follows [Person names](#person-names), which lists its limits.
+
+### Pseudonym key
+
+Every pseudonym is the first 16 lower-case hex digits of HMAC-SHA256 under a 32-byte
+key, keeping its prefix (`User `, `Id `, `Guid `, `user-`); the strategy label is
+`keyed-hmac-sha256-v1`. The 1.4.0 label `run-salted-sha256-v1` still validates in an
+older `model_assessment.json`; writers emit only the new one. There is no salt and
+no unkeyed pseudonym. Pseudonyms of 1.4.0 and earlier came from the run path and do
+not match those of 1.5.0; they stay confirmable by a holder who knows the path.
+
+Key sources:
+
+- Run key: collection creates `operator-inputs/pseudonym.key` when it seals a run
+  (`secrets.token_bytes(32)`, exactly 32 raw bytes, the file `0600` in an
+  `operator-inputs/` folder of `0700`, beside `operator-inputs/.gitignore` holding
+  `*`). `bundle-hashes.json` names it under `excluded` by path and reason only. It is
+  never in a report, preview, customer pack, export, notification, MCP output, log or
+  error message, and a customer pack never copies `operator-inputs/`. Auditex never
+  removes, shortens or replaces a published key, and never changes the modes of an
+  existing one. The guard refuses the key as an ordinary input by name, case alias,
+  link, standard input or output destination.
+- Modes: a key or its folder with any group or other bit is refused (`permissions`),
+  and a key of any size but 32 bytes is refused (`damaged`). Either refusal stops
+  every derivation of that run, local reports with policy explanations included,
+  until the operator restores or restricts it (`0600`, `0700`) or removes it;
+  removing it starts a new pseudonym series. The refusal message is fixed and names
+  neither a path nor key bytes.
+- Memory key per context: output with no run (no run folder in the call, the
+  explainer context of an internal ScubaGear export) uses a fresh random key for
+  that one context. Names are consistent within the output and cannot be recomputed.
+- Session (temporary) key for a keyless run: a keyless run is one made by 1.4.0 or
+  earlier, one copied without `operator-inputs/`, or one sealed on storage without
+  locking. Reads never write into it. It is masked with a random key held in memory,
+  one per run (folder and the manifest's `run_id`) per process, so the files of one
+  customer pack and the calls of one MCP server session agree. That holds only when
+  the manifest's `run_id` is usable: when it is missing, null, not a string or empty,
+  the key lives for the current context only and no other run or call shares it. Output made with it
+  says so in a fixed line, and its pseudonyms are not stable across sessions: another
+  command or a restarted server gives different ones. `auditex report prepare-key
+  RUN_DIR` creates the key once (it prints `created`, or `present`), after which the
+  pseudonyms are stable. The command is not offered over MCP, and a context keeps the
+  first key it resolved for each run.
+- Export-derived key: an internal ScubaGear export has no run folder, so
+  `redaction_key` derives its key in memory from the whole export (SHA-256 over a
+  purpose string, the privileged entries, their object IDs and a digest of the whole
+  parsed export); it orders the numbered users with the same function and is never
+  written. Only a holder of the whole export, who already holds every name, can
+  derive it.
+- Several runs (compare, drift, diff) mask every run's names with the first-listed
+  run's key, so a person lines up with their pseudonym in that run's own reports;
+  the other order uses the other key. `project_run` reads the run's key (or the
+  temporary key) only when redaction is on, and never creates one.
+
+Boundary: the key protects people who hold outputs, not people who can run Auditex
+against the run folder. Anyone who can call a tool on the run can obtain the
+run-key pseudonym of a name of their choosing: `auditex_compare_external_assessments`
+with `run_dir` masks names from a file the caller supplies with that run's key, and
+`auditex_diff_runs` and `auditex_compare_runs` mask a second run's names with the
+first run's key (an MCP client can build such a run with
+`auditex_run_offline_validation`). That caller can already read the run's evidence
+through the same host. This is pseudonymisation, not anonymisation, and one key
+protects a name only as long as the key is private.
+
+Limits of key creation:
+
+- Storage without locking never gets a key. Every lock error except would-block,
+  try-again and interrupted counts as no locking, raised before anything is written
+  (Linux network storage answers this way). Collection seals such a run keyless and
+  logs `pseudonym_key.unavailable` with reason `nolock` in `audit-log.jsonl`;
+  `prepare-key` refuses there until the run is copied to local storage; a keyless
+  run renders with a temporary key meanwhile.
+- Locks between machines on network storage depend on the server's lock service.
+  Two machines creating a key in one keyless run at the same moment, on storage
+  whose locks do not span hosts, could both publish, and the output of the first
+  would not match.
+- Durability: the run folder is flushed after `operator-inputs/` is created and
+  `operator-inputs/` after the key is published, where the storage supports it.
+  Where a folder cannot be flushed (storage that cannot flush a folder, a flush that
+  fails after the key was published, the moment between publication and the flush,
+  and macOS, where a flush does not empty the disk's own cache), a power loss soon
+  after creation can lose the key's folder entry. Output made before the loss then
+  does not match the key created next.
+- Output made with a temporary key is not stable across sessions until
+  `auditex report prepare-key RUN_DIR` is run.
+- A 1.4.0 reader of a 1.5.0 run ignores the key and masks with its own run-path
+  salt, and it rejects the 1.5.0 `model_assessment.json`, so its render of that run
+  loses the policy explanations.
 
 ## Credentials and local files
 
@@ -665,7 +825,8 @@ null is preserved and other shapes become `{not_shown: "shape"}`.
 Pass the redacted view as is, without extra pseudonymisation. The existing
 idempotent email-local-part guard remains on section values and reason text.
 Projection already pseudonymises privileged-user DisplayName and non-null
-OnPremisesImmutableId with the run salt. Internal rule views, detail, labels,
+OnPremisesImmutableId with the run's pseudonym key (or the temporary key of a
+keyless run). Internal rule views, detail, labels,
 tenant/run identifiers, paths, timestamps, credentials and uncited records are
 not explainer inputs. Public baseline Instructions retain their example
 addresses until final output redaction.
@@ -680,12 +841,12 @@ group names and role names remain. This is not full anonymisation.
 Serving passes the public rule answer and redacted model-case sections to the
 explainer, never the private rule view. It redacts the complete result with the
 `explainer` profile before attaching it. For run bundles the context contains
-the run salt, paths and discovered identities; incomplete discovery or any
+the run's pseudonym key (a temporary key for a keyless run), paths and discovered identities; incomplete discovery or any
 rendering or redaction exception suppresses the explanation without changing
 the verdict. Logs contain only the policy id and exception class. An internal
-ScubaGear export has no run context, so its explainer uses an empty context:
-pseudonyms are unsalted and run paths and undiscovered names are not known to
-that context. The same profile still masks recognised identifiers and secrets.
+ScubaGear export has no run context, so its explainer uses an empty context
+with a fresh random key: its pseudonyms are not stable across assessments, and run
+paths and undiscovered names are not known to that context. The same profile still masks recognised identifiers and secrets.
 
 Reports guard and validate the assessment before reading explanations and apply
 the explainer profile again, including for local reports, so modified
