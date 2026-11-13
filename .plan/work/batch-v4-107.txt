@@ -1,0 +1,1 @@
+--task EXP-m03-ties --role sol --account claude-3 --readonly --tags hard --timeout 3600 --max-turns 150 --budget 20 --brief .plan/work/EXP-m03-ties/brief-src.md

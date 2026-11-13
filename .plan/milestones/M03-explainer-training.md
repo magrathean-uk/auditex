@@ -12,7 +12,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 
 ## Definition of Done
 - [x] Review: G looked at the spend so far and the allocation balance before any M03 run, and confirmed or moved the remaining stage caps (DECISIONS.md entry "AIRR budget look", approver G; moved caps are written into the master-plan budget table with that DEC): `grep -A8 '^## DEC-[0-9]* AIRR budget look' .plan/DECISIONS.md | grep -q '^- approver: G'`
-- [ ] The base comparison ranks every candidate with a noise band from at least three seeds, and the pick follows the EU-first rule, recomputed from the saved validation scores: `grep -qx 'base-comparison: complete' .plan/work/M03-T01/result.md && grep -q '^base-pick: ' .plan/work/M03-T01/result.md && "$AIRR_KIT/bin/kit-check" score runs/base-comparison --result .plan/work/M03-T01/result.md`
+- [x] The base comparison ranks every candidate with a noise band from at least three seeds, and the pick follows the EU-first rule, recomputed from the saved validation scores: `grep -qx 'base-comparison: complete' .plan/work/M03-T01/result.md && grep -q '^base-pick: ' .plan/work/M03-T01/result.md && "$AIRR_KIT/bin/kit-check" score runs/base-comparison --result .plan/work/M03-T01/result.md`
 - [ ] The large runs selected their checkpoint on validation only, with the held-out set untouched: `grep -qx 'heldout-reads: 0' .plan/work/M03-T02/result.md && grep -q '^selected-checkpoint: ' .plan/work/M03-T02/result.md && "$AIRR_KIT/bin/kit-check" score runs/large --result .plan/work/M03-T02/result.md`
 - [ ] The judged build is quantised, hashed and scored once on the clean held-out set against the bar, recomputed from the saved outputs and judgements: `grep -qE '^build-bar: (pass|fail)$' .plan/work/M03-T03/result.md && grep -qE '^build-sha256: [0-9a-f]{64}$' .plan/work/M03-T03/result.md && "$AIRR_KIT/bin/kit-check" score builds --result .plan/work/M03-T03/result.md`
 - [ ] The recommendation and the product-integration options are written: `grep -qx 'recommendation: written' .plan/work/M03-T04/result.md`
@@ -23,7 +23,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M03-T01 | Compare the candidate bases on the explainer job | terra | M | debug | todo |
+| M03-T01 | Compare the candidate bases on the explainer job | terra | M | debug | done |
 | M03-T02 | Run the large training runs on the chosen base | terra | M | debug | todo |
 | M03-T03 | Build, hash and judge the final explainer build | terra | S | - | todo |
 | M03-T04 | Write the recommendation and the product-integration options | sol | S | - | todo |
