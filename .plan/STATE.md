@@ -4,7 +4,7 @@ overall: 64% (was 62%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: afa6308 2026-11-13T23:49:59Z
+last_checkpoint: 16bb4fa 2026-11-13T23:54:29Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -12,9 +12,9 @@ last_checkpoint: afa6308 2026-11-13T23:49:59Z
 - M03-T04 Write the recommendation and the product-integration options (sol)
 
 ## Blockers
-- Host: QUIET WINDOW since about 23:10 GMT on 13 Nov (manager): start nothing that takes a heavy slot (merge wrapper, executing check, full suite) until the manager releases. Cluster jobs, Codex reviews and docs work go on. Otherwise heavy work goes through hostload.sh with PLAN_LOAD_MAX=12.
+- Host: quiet window until 00:30 GMT on 14 Nov (manager): until then nothing that takes a heavy slot. From 00:30 GMT heavy steps run again under the usual rule: one heavy slot through hostload.sh, load 12 or less (PLAN_LOAD_MAX=12).
 - Track A: M04-T04 (8a72e59, both providers approve the merged head; no further author round, ever) and M04-T05 (afa6308, docs with ten stated limits) are merged. M04-T06 (DEC-045: withhold only the line or cell in rendered output, count it in the note) is with its author (sol, no heavy slot); then REV-M04-T06 by Codex, one repair, one re-check, then a choice to the manager; its executing check, a short doc follow-up and its merge wait for the release. Then M05-T04, M06-T01 and the M06 gates. Codex seats may run to 98 per cent (DEC-041); Codex authors here run pytest only.
-- Track B: the pilot FAILED and the data round has stopped (M03-T06 done, verified: attempt 1 6 wins of 190, attempt 2 18 of 190, 139 needed; filtered preference 0.5112 then 0.5337 against 0.729; unfiltered losses rose from 42 to 73). M03-T07, M03-T02 and M03-T03 do not run. The choice (revisit rule 2 of the bar, or park the model track) is G's, taken to him by the manager; nothing in M03 moves before his answer. GPU-hours: basecmp 235.67 of 1,024, large 2.78 of 2,048, dataround 5.57 of 160.
+- Track B: the pilot FAILED and the data round has stopped (M03-T06 done, verified: attempt 1 6 wins of 190, attempt 2 18 of 190, 139 needed; filtered preference 0.5112 then 0.5337 against 0.729; unfiltered losses rose from 42 to 73). M03-T07, M03-T02 and M03-T03 do not run. The choice (revisit rule 2 of the bar, or park the model track) is G's, taken to him by the manager; nothing in M03 moves before his answer (he is back at 07:00 GMT on 14 Nov; the manager recommends parking, as I do). Amendment 4 for the parked case is being prepared as AMEND-4 and is not merged without his words (DEC-046). GPU-hours: basecmp 235.67 of 1,024, large 2.78 of 2,048, dataround 5.57 of 160.
 
 ## Pending G decisions
 - Questions go to the team-manager chat with a recommendation and an evidence path, never to G here (DEC-036); its rulings and relayed words count as his. It wants messages only for decisions, blockers, G's hands or eyes, reserved actions and results it asked for.
