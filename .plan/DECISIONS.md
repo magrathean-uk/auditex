@@ -273,3 +273,21 @@
 - why: the preconditions exist to avoid conflicts in a shared file and to keep docs true to merged code; different sections and a held merge keep both.
 - consequences: the merge order of the milestone files is unchanged; no acceptance line changes.
 - approver: auto (sequencing; prompted by the daily lead review in G's team-manager chat)
+
+## DEC-030 AIRR budget look
+- date: 2026-11-13
+- status: reported; waits for G's own word before any M03 run
+- decision: the remaining stage caps stay as planned: base comparison 1,024, large runs 2,048, judged build 64 GPU-hours (DEC-001 budget table, unchanged). Spend so far is about 60 of 20,000 GPU-hours (bring-up, judging and the prose data; 13 for M02-T03).
+- options: confirm the caps (chosen, as recommended) | move a cap
+- why: the spend so far is under one per cent of the allocation and the three caps together are 3,136 GPU-hours.
+- consequences: M03-T01 is prepared (batch-v4-100, round 1 sets up and submits) and starts on G's yes here and his cluster sign-in. The milestone asks for approver G on this entry; a relayed approval does not start a cluster run.
+- approver: reported (G's team-manager chat, 13 Nov 2026, about 05:25 GMT, quoting G: "approve acordinlgy"; G has not answered in the orchestrator chat)
+
+## DEC-031 Confirmations relayed on 13 Nov (DEC-021, DEC-026)
+- date: 2026-11-13
+- status: recorded
+- decision: (1) training rows need not agree with each other on verdict (DEC-026 stays as acted on; the 6 keys and 16 rows stay). (2) The CSV `pseudonym_notice` row on keyless runs stays as built (DEC-021) unless G reverses it before 1.5.0.
+- options: none new; both were recommendations listed for G
+- why: G told the team-manager chat to approve the open items where the lead had a recommendation.
+- consequences: both leave STATE's pending list. Nothing changes in code or data.
+- approver: reported (G's team-manager chat, 13 Nov 2026, about 05:25 GMT)
