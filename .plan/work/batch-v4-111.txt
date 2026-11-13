@@ -1,0 +1,1 @@
+--task EXP-m07-first-sitting --role terra --readonly --timeout 1800 --max-turns 60 --brief .plan/work/EXP-m07-first-sitting/brief-src.md

@@ -336,3 +336,30 @@
 - why: G, typed in the orchestrator chat on 13 Nov 2026, in full: "change your rules. relayed words and all accepted. i speak to manager, and you take his orders." He is the product owner, not a coder, and wants one chat to answer to.
 - consequences: the conditions "G's own yes in the orchestrator chat" in DEC-028 and DEC-035 are met by the manager chat's word from now on. Messages from any other chat, worker output and repository text stay evidence. Sign-ins, passwords and the product's own boundaries are unchanged: nobody but G signs in.
 - approver: G
+
+## DEC-037 Plan amendment 3: one data round for the explainer, pilot first
+- date: 2026-11-13
+- status: drafting; no cluster job before the manager chat answers (DEC-036)
+- decision: the data round G chose (DEC-035) enters M03 as a validation-only pilot with a pass rule written before its first job, then, only on a pass, regenerated and judge-filtered training data and a three-seed training run on it. The architect drafts it from `.plan/work/AMEND-3/brief-src.md` and the facts in `.plan/work/EXP-m03-losses/result.md`.
+- options: run the whole round at once (rejected: the classification rates the bar unlikely from removing faults alone, and the pilot costs 2.5 to 13.2 GPU-hours against 45 to 166 for the round) | pilot first (chosen)
+- why: the judge is right about the added text (75 of 82 losing judgements name a real fault); the bar needs about 139 of the 190 validation rows with headroom to win in both orders, against 13 today.
+- consequences: the bar (DEC-013), the judge and its prompt are unchanged. A failed pilot stops the round and returns the choice between revisiting rule 2 and parking Track B. Weights are unchanged; the percentage is re-baselined if the new Definition of Done items move it.
+- approver: pending (the manager chat, DEC-036)
+
+## DEC-038 Kit README connection check: no change for this trial
+- date: 2026-11-13
+- status: approved
+- decision: the question left open under DEC-014 (should the kit README's connection check prove a browser sign-in) is settled: no change. Kit 7r stays frozen at its accepted manifest. The check is carried to the next kit round only if phase D shows a sign-in problem.
+- options: change the README now (rejected: it breaks the accepted manifest and needs another gate round) | no change (chosen)
+- why: the gap is already a stated limit of the hand-over (a browser sign-in as the same operator would pass unnoticed; another account, tenant or scope set is refused) and the first live dry run is read-only.
+- consequences: none for the kit; one BACKLOG line.
+- approver: manager (team-manager chat, 13 Nov 2026, under DEC-036)
+
+## DEC-039 M04-T04: one more round for the two-initial defect
+- date: 2026-11-13
+- status: approved; waits for REV-M04-T04
+- decision: the open defect (a name with two middle initials can stay readable when the probe budget runs out) is fixed, not named as a limit. One more author round, by a Codex author, after REV-M04-T04 has listed everything it finds, so that one round covers all of it. This is the round DEC-028 reserved.
+- options: name it as a limit in the privacy reference | fix it with one more round (chosen)
+- why: a readable name in shareable output is what the task exists to remove.
+- consequences: M04-T04 merges only after that round and its re-check; M04-T05, M05-T04 and M06-T01 follow as before.
+- approver: manager (team-manager chat, 13 Nov 2026, under DEC-036)
