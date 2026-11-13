@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 63% (was 61%)
+overall: 62% (was 63%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: f558abe 2026-11-13T23:42:14Z
+last_checkpoint: 5ec21e0 2026-11-13T23:46:20Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -19,13 +19,13 @@ last_checkpoint: f558abe 2026-11-13T23:42:14Z
 ## Pending G decisions
 - Questions go to the team-manager chat with a recommendation and an evidence path, never to G here (DEC-036); its rulings and relayed words count as his. It wants messages only for decisions, blockers, G's hands or eyes, reserved actions and results it asked for.
 - Phase D: kit 7r is accepted (manifest 510f26e348fd). The manager asks G for a slot and opens the tenant chat (start it in this checkout, no worktree, no /plan); nothing moves there until it says so.
-- For the plan tooling owner (clean-dev), no decision: Codex sandboxes route the bytecode cache differently from the dispatching shell; milestone tags M00 to M03 exist from plan v2, so plan v4 milestones cannot be tagged; RETRO-M02 proposes a footer rule for runs over two hours.
 
 ## Re-baselines
 - from 100% (plan v3 closed at 1.4.0) to 4% (plan v4 scope and weights, DEC-001, approved by G on 11 Nov 2026)
 - from 13% to 12% (plan amendment 1: M00-T06 and one new M00 item for the as-of date, DEC-005)
 - from 36% to 35% (plan amendment 2: milestone M07 at weight 12, M02-T06, new weights; DEC-018)
 - from 53% to 52% (plan amendment 3: the data round adds two M03 items, the pilot and data v2; DEC-037)
+- from 63% to 62% (new task M04-T06 and one M04 item: the withholding reach in rendered output; DEC-045)
 
 ## Quota snapshot
 <!-- quota:begin -->
@@ -33,7 +33,7 @@ claude 45% orchestrator
 claude-1 71% ok
 claude-2 49% shared
 claude-3 67% ok
-claude-4 30% ok
+claude-4 31% ok
 claude-5 75% ok
 codex 92% hot
 codex2 87% hot

@@ -2,31 +2,31 @@
 status: done
 summary:
 verdict: changes-required
-reviewed: 45bb34f4e82ad6753a8a67078ada3d832ebd8951
-The precondition "M04-T04 merged" is not met: 0adcc49 is in neither main nor HEAD, and the task table shows M04-T04 as todo. The masking-boundary passages in security-privacy.md describe code that exists only on task/M04-T04-name-masking (`_D5_FIELD_NAMES`, the title list), so merging now would claim masking that main does not do.
-The key-scheme, key-source, MCP, limits, CHANGELOG, manual and adapter text matches HEAD code. Verify passes. No scope creep.
-changes: .plan/work/REV-M04-T05/evidence.md, .plan/work/REV-M04-T05/progress.md
-verification: M04-T05 verify greps (result.md read from the main checkout): pass, exit 0
-risks: if T04 changes in its Tier A reviews, the masking-limit list (security-privacy.md:579-621) drifts again; the author reported a same-vendor read-through only
+reviewed: 00507754d7d9aec04ba0f55a2d0c73609a2ef4ae
+Rebased onto main with M04-T04 merged. The new masking text, the nine privacy-review limits, the T04 limit, the session-key clause and the note-wording line all match the merged code.
+Prior item 1 is only partly fixed: docs/reference/security-privacy.md:608-614 still list two cases as readable that the merged matcher masks or withholds, and :610-614 contradicts the doc's own :592-594.
+changes: .plan/work/REV-M04-T05/evidence.md, .plan/work/REV-M04-T05/progress.md (prior evidence kept as evidence-1.md)
+verification: M04-T05 verify greps (result.md read from the main checkout): pass, exit 0; matcher probed read-only with main .venv: output in evidence.md
+risks: author ran no matcher test for the docs claims; same-vendor read-through only
 questions_for_g: none
 ### Findings
-Criteria:
-- Precondition M04-T04 merged: not met (evidence.md).
-- Keyed scheme (key at collection, pseudonym.key and modes, HMAC, label): met, docs/reference/security-privacy.md:666-679 and :101.
-- Key sources (run, memory per context, session key for keyless, export-derived): met, security-privacy.md:681-714.
-- Masking boundary (middle initials, titles, mapping keys): written (security-privacy.md:566, :579-621) but not checkable against merged code; not met until T04 merges.
-- Oracle boundary of design section 2: met, security-privacy.md:716-724.
-- Confirm-a-guess limit and salt wording dropped from the design section 13 passages: met. Remaining "salt" uses are historical (:670-673, :748).
-- No read-only tool writes a run, and prepare-key is named: met, security-privacy.md:117-122, :352-354.
-- DEC-004 amendments: every keyless kind covered and no MCP approval claim (:117-122, :693-701); nolock and flush limits named (:726-741); temporary-key stability plus command (:742-743). Met.
-- CHANGELOG entry under [Unreleased]: met, CHANGELOG.md:8-18. Manual line: met, docs/guides/product-manual.md:282. Adapter key lines match scubagear_export.py:314-345: met, docs/development/scubagear-export-adapter.md:94-98.
-- `read-through: complete` in result.md: present, but read against the unmerged T04 branch (`masking-boundary-source: task/M04-T04-name-masking@0adcc49`).
-- DoD: the terra read-through item stays open until the precondition holds.
-Security: no secrets, no code, no dependencies.
-Scope: all four paths are within the files line.
+Criteria (current head):
+- Precondition M04-T04 merged: met (main is an ancestor of HEAD).
+- Keyed scheme, pseudonym.key and its modes, HMAC, label: met, docs/reference/security-privacy.md:704-720, :101.
+- Key sources (run, memory per context, session for keyless with the run_id clause, export-derived): met, :722-754; matches src/azure_tenant_audit/output_redaction.py:341-360.
+- Masking boundary with middle initials, titles, mapping keys: not met. :581-594, :616-657 are correct, but :608-614 are stale (required change 1).
+- Oracle boundary, confirm-a-guess and salt wording dropped, no read-only tool writes a run, prepare-key named: met, :117-122, :361-362, :756-764.
+- DEC-004 amendments (keyless kinds, no MCP approval claim, nolock and flush limits, temporary-key stability): met, :117-122, :766-789.
+- CHANGELOG, manual line, adapter key lines: met (unchanged since the first review).
+- read-through: complete: present, but the passage it vouches for still carries stale claims.
+- DoD terra read-through item: open until change 1 is made.
+Security: docs only; no secrets, code or dependencies. Scope: all four paths are in the files line.
 Required changes:
-1. docs/reference/security-privacy.md:566, :579-621. The text documents matcher behaviour that is not on main. Fix: once M04-T04 merges, rebase this branch onto main, re-read these passages against the merged output_redaction.py (and the tests in tests/test_redaction_person_names.py), correct anything T04's reviews changed, and refresh `read-through: complete` in result.md against the merged head.
+1. docs/reference/security-privacy.md:608-609. This line lists "a decomposed initial (a letter plus a combining accent)" as readable, but the merged matcher masks it (`Neral E\u0301. Vosk` gives `User <hex>`; tests/test_redaction_person_names.py:851-858). Fix: drop the decomposed-initial clause and keep the zero-width space and the fullwidth full stop, which are still readable.
+2. docs/reference/security-privacy.md:610-614. This item says `John A. B. C. D. Smith` stays readable beside a `John A. B. C. D. Jones` sign-in path. The merged matcher withholds that string as `<redacted-text>`, or masks it when the full name is recorded (tests/test_redaction_person_names.py:812-817), and the item contradicts :592-594. Fix: remove the item, or reword it as withholding of the whole string.
+Re-check of the prior review:
+- Item 1 (rebase, re-read the masking passages, correct them, refresh the read-through): partly fixed. Rebase and new passages are done; :608-614 are not fixed.
+- Suggestion (session-key run_id clause): fixed, :737-739.
+- Defect class "documentation of an unmerged dependency": fixed (rebased onto main, which contains M04-T04).
 Suggestions (non-blocking):
-- security-privacy.md:698: the session key is one per run per process only when the manifest's run_id is usable. Otherwise it lasts for one guard context (output_redaction.py:341-357). Say so in a clause.
-### Defect classes
-- documentation of an unmerged dependency (precondition not met, text read against a branch rather than the base)
+- security-privacy.md:647-648: the privacy review notes that `Orin Pasḱ` was masked before this change. Adding that would tell a reader that this limit is a regression.

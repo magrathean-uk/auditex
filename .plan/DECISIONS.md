@@ -411,3 +411,12 @@
 - consequences: the round DEC-039 allowed is used; this is the only one after it. G reads it in the manager's morning brief.
 - approver: manager (team-manager chat, 13 Nov 2026, quoting its ruling: "A, one last round on M04-T04 with the stop rule"; under DEC-036)
 
+## DEC-045 A new task narrows the withholding reach in rendered output
+- date: 2026-11-13
+- status: approved; the task's criteria are being drafted
+- decision: the fail-closed fix of M04-T04 withholds the whole text when a name start is followed by more single letters than the six-token window resolves, and in the final pass over rendered output that can be a whole report or pack file, with nothing telling the reader why (REV-M04-T04-privacy at the merged head, finding 4). A new task, M04-T06, changes this before 1.5.0: the final pass withholds the smallest unit it works on (the line or the cell), and the redaction note gains one counted line, a number only, never content. Its tests include a name split across a line break or a cell boundary: withholding one unit must not leave the rest of that name readable in the next one. It is its own task with its own review (privacy code: the other provider's review and an executing check), not a round on M04-T04, whose stop rule stands. One review, one repair, one re-check; after that the manager gets a choice. Until it lands the docs task states the present behaviour as a limit. It holds no heavy slot before the manager releases the Mac.
+- options: A accept the present behaviour for 1.5.0 as a stated limit only | B add the task (chosen)
+- why: a shareable report that comes out as one word with no explanation is a defect a user will hit and cannot understand; the fix keeps the fail-closed rule for the text that could not be resolved, and it is contained.
+- consequences: M04 gains a task and a Definition of Done item, so the percentage is re-baselined. G reads the ruling in the manager's morning brief and can overrule it.
+- approver: manager (team-manager chat, 13 Nov 2026, quoting its ruling: "B, add the withholding-reach task"; under DEC-036)
+
