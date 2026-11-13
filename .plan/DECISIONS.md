@@ -300,3 +300,12 @@
 - why: the verifier recomputes the pick independently of the run's own scripts; that needs another author and a schema fixed before the collecting round.
 - consequences: one task row and one criteria block added to M03; no Definition of Done line, bar, cap or weight changes. The build's held-out scoring (M03-T03) needs its own kind later (BACKLOG).
 - approver: auto; listed for G
+
+## DEC-033 Base comparison: the noise band on an exact tie at the top
+- date: 2026-11-13
+- status: recorded before any base-comparison score exists (judging still running)
+- decision: the selection rule in the kit runbook (section 13) does not say whose seed range is the noise band when two bases tie exactly on mean preference at the top of the rank. In that case the band is the union of the tied bases' seed ranges (lowest minimum to highest maximum); EU-first then applies unchanged. The verifier fails on such a tie today; if the tie occurs, the collecting round writes this rule into the runbook and one M03-T05 repair implements it.
+- options: leave it open and decide if it happens (rejected: a rule chosen after the scores exist) | the union of the ranges (chosen: the wider band, so EU-first decides more often)
+- why: the reading rule is set before the score exists (DEC-009 practice).
+- consequences: none unless the tie occurs.
+- approver: auto; listed for G

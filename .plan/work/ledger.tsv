@@ -456,3 +456,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-12T23:31:45Z	M05-T03	sol	claude-4	claude-opus-5-5	xhigh	branch	0	382	1.8419	done	task/M05-T03-scanner-limits-tables
 2026-11-12T23:32:44Z	REV-M05-T03	sol	claude-3	claude-opus-5-5	high	readonly	0	48	0.4933	done	task/M05-T03-scanner-limits-tables
 2026-11-13T06:47:48Z	M03-T01	sol	claude-4	claude-opus-5-5	xhigh	branch	1	3504	7.5995	partial	task/M03-T01-base-comparison
+2026-11-13T07:11:17Z	M03-T05	sol	claude-1	claude-opus-5-5	xhigh	branch	0	1260	5.9496	done	task/M03-T05-explainer-score-kind
+2026-11-13T07:26:28Z	REV-M03-T05	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	863	2.9883	done	ace5607
