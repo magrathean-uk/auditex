@@ -237,6 +237,7 @@
 - why: the bar should judge the explainer on what the product will really feed it.
 - consequences: every M03 report states the coverage lost (24 policies, 66 cells). The M02 kit review confirms the DEC-013 bar is still usable on the smaller set with three seeds; if the wins rule becomes unreachable it returns to G, as DEC-013 says. The 126 "section not collected" drops go to the backlog as a product collection gap. The twins check was accepted on a fixed bar (DEC-003): its change is reviewed with the set by the other vendor (REV-M02-kit). M02-T06 never runs while M02-T03 does (its files line).
 - approver: G ("A, collected form", in this chat on 12 Nov 2026)
+- amendment (2026-11-13, REV-M02-kit finding 1): the figures above are the prototype's (228 rows, 78 policies, 122 cells; losses of 24 policies and 66 cells) and stay as its history. The set M02-T06 sealed keeps 221 of the 501 rows, 77 of 102 policies and 120 of 188 cells. Every M03 report states the final coverage lost: 25 policies and 68 cells.
 
 ## DEC-026 How the prose rows and the collected held-out set are registered and compared
 - date: 2026-11-12

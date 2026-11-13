@@ -74,3 +74,56 @@ Ledger-level issues:
 - Gate chain on main with per-step logs and exit codes: M00-T04 (six steps exit 0, logs in `.plan/work/M00-T04/gate/`).
 - Terra on mechanical tasks: 16 runs, no non-zero exit, 3.9374 total cost (M00-T03 final pass 25 s).
 - Reviews checked from the frozen commit: REV-M00-T01 checked 27 of 70 unsafe-fix justifications; REV-M00-T06 re-ran probes at the date bounds.
+
+## M02
+
+Scope: 61 ledger rows: `M02-` and `REV-M02-` rows from the PLAN-v4 run onward, plus rows of other ids whose result.md names an M02 task. Earlier `M02-` rows from superseded plan versions are excluded because the ids were reused. Evidence: `.plan/work/RETRO-M02/evidence.md`.
+
+### Spend
+
+| launcher | runs | cost_usd | seconds | non-zero exits |
+|---|---|---|---|---|
+| claude-1 | 20 | 75.4005 | 29177 | 3 |
+| claude-3 | 15 | 47.2308 | 15816 | 0 |
+| claude-4 | 3 | 6.4037 | 1101 | 0 |
+| claude-5 | 9 | 32.9857 | 23961 | 2 |
+| codex2 | 14 | no cost recorded | 4766 | 2 |
+| **total** | **61** | **162.0207** | **74821** | **7** |
+
+| role | runs | cost_usd | seconds | non-zero exits |
+|---|---|---|---|---|
+| sol | 40 | 158.4124 | 67641 | 4 |
+| terra | 5 | 3.5296 | 2142 | 1 |
+| luna | 2 | 0.0787 | 272 | 0 |
+| astra | 1 | no cost recorded | 452 | 0 |
+| codex | 13 | no cost recorded | 4314 | 2 |
+
+Cost covers 46 rows. The 15 blank-cost rows are the 14 codex2 runs and the M02-T04 timeout row. The ledger header names 12 columns; rows from the PLAN-v4 run onward carry a 13th value (`plan_version`) that the header does not name. Not malformed, but the header is stale.
+
+### Failures and retries
+
+| task | attempts | non-zero exits (launcher, seconds) | final | cause |
+|---|---|---|---|---|
+| M02-T04 | 4 | timeout, exit 124 (claude-5, 10801) | done, then 2 more done runs | mechanical: run hit its time limit |
+| M02-T03 | 4 | blocked, exit 2 (claude-5, 6375) | done, then 2 more done runs | not recorded |
+| M02-T06 | 3 | blocked, exit 2 twice (claude-1, 703 and 1749) | done (692 s) | not recorded |
+| M02-T01 | 4 | partial, exit 1 (claude-1, 677) | done, then 2 more done runs | not recorded |
+| REV-M01-kit | 2 | partial, exit 1 (codex2, 641) | done (40 s) | not recorded |
+| REV-M02-kit | 4 | blocked, exit 2 (codex2, 23) | done, 3 done rows across 2 commits | not recorded |
+
+Seven non-zero exits, all recovered by a later exit-0 row for the same task. Six have no cause in the ledger, and the result.md files name only the final run. Repair rounds with exit 0 are not counted as failures: M02-T01, M02-T02, M02-T03 and M02-T04 each have three done rows; REV-M02-T02 has three, REV-M02-T04 two.
+
+Design gap, not a run failure: M02-T03 left `MS.EXO.2.2v3 not_met` without a row (71 candidates, check a failed 68 of them). Closing it needs a decision on the prompt or the check.
+
+### Proposed brief fixes
+
+- `~/.claude/skills/plan/briefs/_footer.md`: add "A run expected to exceed about two hours: submit it with `run-job`, record the job ids in progress.md and exit; a short worker collects." Problem: M02-T04's attempt ran 10801 s and exited 124. Backed by the M00 Change note on the same pattern.
+- Not a brief change: the orchestrator should keep each partial or blocked summary (for example `.plan/work/<task>/attempt-<n>.md`) before a retry overwrites it. Six of seven failures have no recorded cause, and the footer already requires the cause in the summary.
+
+### Keep
+
+- Repairs that re-score nothing: M02-T04 repair 2 changed no prompt, items, pairs or raw judgements, and ran CPU only (judge calibration still pass).
+- Other-provider review closed the milestone: CHK-M02-kit reran the rules (221/221 agree), then REV-M02-kit (codex2) approved after one blocked attempt.
+- Frozen checks shared by hash: `checks-sha256` 3241cf2c matches in M02-T03 and M02-T04.
+- Acceptance bar validated on CPU from saved judgements with no GPU job: M02-T05, one attempt.
+- Long jobs submitted, then collected by a separate step: M02-T03 job 8357551 collected with 12 of 12 runs at exit 0; M02-T04 repair 1 ran on the normal queue.

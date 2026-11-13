@@ -2,7 +2,7 @@
 id: M03
 name: explainer-training
 weight: 15
-status: planned
+status: active
 ---
 # M03 explainer-training
 Track B, same rules as M01. Ends at a judged build with a recommendation; whether a model explainer enters a product release, and how, is a later G gate. The Hugging Face upload stays parked until a build passes its bar and G says yes. No M03 run starts before the budget look.
