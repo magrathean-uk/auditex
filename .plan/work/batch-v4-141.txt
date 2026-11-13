@@ -1,0 +1,1 @@
+--task REV-M04-T05 --role sol --template sol-review --account claude-5 --readonly --sha task/M04-T05-keyed-scheme-docs --timeout 2400 --max-turns 80 --budget 8 --var TASK=M04-T05 --var MILESTONE=.plan/milestones/M04-d5-keyed-pseudonyms.md --var BRANCH=task/M04-T05-keyed-scheme-docs --var PRIOR=.plan/work/REV-M04-T05/result-2.md
