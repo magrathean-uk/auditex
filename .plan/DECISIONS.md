@@ -291,3 +291,12 @@
 - why: G told the team-manager chat to approve the open items where the lead had a recommendation.
 - consequences: both leave STATE's pending list. Nothing changes in code or data.
 - approver: reported (G's team-manager chat, 13 Nov 2026, about 05:25 GMT)
+
+## DEC-032 M03-T05: the explainer score kind for the kit verifier
+- date: 2026-11-13
+- status: acted on; listed for G
+- decision: M03-T01 round 1 found that `kit-check score` knows only the `structured-v1` kind, so the verify lines of M03-T01, M03-T02 and M03-T03 cannot pass on explainer runs. A new task M03-T05 adds the kind as a plug-in check module, the way the kit's interface already provides for; the frozen interface files are not changed. Its author is not the author of the runs; it takes a same-vendor review now (another account, stated) and the other-vendor look inside REV-M03-kit, which reruns `kit-check all`.
+- options: widen M03-T01's files line so the run author writes the kind (rejected: the run author would write the check of its own run) | wait for a Codex author after the 14 Nov reset (rejected: the jobs finish first and the collection would wait a day) | a separate author now (chosen)
+- why: the verifier recomputes the pick independently of the run's own scripts; that needs another author and a schema fixed before the collecting round.
+- consequences: one task row and one criteria block added to M03; no Definition of Done line, bar, cap or weight changes. The build's held-out scoring (M03-T03) needs its own kind later (BACKLOG).
+- approver: auto; listed for G

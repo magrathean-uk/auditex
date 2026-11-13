@@ -27,6 +27,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T02 | Run the large training runs on the chosen base | terra | M | debug | todo |
 | M03-T03 | Build, hash and judge the final explainer build | terra | S | - | todo |
 | M03-T04 | Write the recommendation and the product-integration options | sol | S | - | todo |
+| M03-T05 | Add the explainer score kind to the kit verifier | sol | S | hard | todo |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
@@ -59,3 +60,13 @@ G has looked at the budget against the allocation balance before any M03 run; th
 - Writes `recommendation: written` under `### Findings`; the orchestrator brings it to G for the build pick.
 - verify: `grep -qx 'recommendation: written' .plan/work/M03-T04/result.md`
 - files: `.plan/work/M03-T04/result.md`
+
+### M03-T05 Add the explainer score kind to the kit verifier
+- Added by DEC-032. Precondition: M02-T05 done. Runs while the M03-T01 jobs are queued and is done before the M03-T01 collecting round, which writes its `measures.json` to this kind's schema.
+- A new check module `checks/explainer_score.py` exports `SCORE_KINDS` with one kind for explainer runs scored on validation (the base comparison and the large runs), plugged in the way `bin/README.md` describes; the frozen interface (`bin/**`, `checks/{selftest,score,usage}.py`) is not changed.
+- Given the verified run folder, the kind recomputes from the saved validation outputs and judgements alone, per base, seed and checkpoint: the frozen checks' pass counts and the bar's measures (`checks/bar.py` `evaluate_seed` and the `checks/calibration.py` parsers imported unchanged, parameters from `judging/bar/bar.json`); the selected checkpoint per seed by the selection rule of runbook section 13; the rank with the noise band from the seeds; and the pick by the EU-first rule inside the band. It does not import or run anything under `runs/**`.
+- It fails when a recomputed figure, selection or pick differs from `measures.json`, when a file it reads is missing from the run's `SHA256SUMS`, when a path under `heldout/` or `heldout-collected/` is named, or when a base has fewer than three seeds. It returns the lines the M03-T01 and M03-T02 criteria name (`base-pick:`, `selected-checkpoint:`) so that `--result` compares them as the verifier compares every other line.
+- The `measures.json` schema of the kind is written in the module docstring. Tests under `checks/tests/` cover a passing synthetic run and each failure above (an altered judgement, an altered selection, a wrong pick, an unpinned file, a held-out path, two seeds); the kit's existing tests still pass. The kind is tried on a scratch copy of `runs/base-comparison/smoke1` with a `measures.json` written to the schema, and the result says what it printed.
+- Writes `explainer-score-kind: <kind name>` and `kit-tests: pass` under `### Findings`.
+- verify: `grep -q '^explainer-score-kind: ' .plan/work/M03-T05/result.md && grep -qx 'kit-tests: pass' .plan/work/M03-T05/result.md && "$AIRR_KIT/bin/kit-check" selftest --result .plan/work/M01-T03/result.md`
+- files: `checks/explainer_score.py`, `checks/tests/test_check_explainer_score.py` and `checks/SHA256SUMS` (its own module's lines only) in the AIRR kit folder; `.plan/work/M03-T05/result.md`
