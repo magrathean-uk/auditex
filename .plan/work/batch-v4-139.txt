@@ -1,0 +1,1 @@
+--task M04-T05 --role sol --template terra-implement --branch --slug keyed-scheme-docs --account claude-1 --tags size:S --max-turns 80 --timeout 2400 --budget 8 --var TITLE="Keyed-scheme docs: two stale limit lines" --var MILESTONE=.plan/milestones/M04-d5-keyed-pseudonyms.md --var FILES="the files line of M04-T05 in the milestone file" --var REVIEW=.plan/work/M04-T05/fix-2.md
