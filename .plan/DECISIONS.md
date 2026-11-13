@@ -19,6 +19,7 @@
 - consequences: no change to scope, weights or percentage; the sum of the stage caps never exceeds the balance read on the system; a stage that reaches its cap still stops and reports; the budget look before M03-T01 stays as planned. This supersedes DEC-001's "hours beyond the stage caps" limit and the reserve's G-only release, nothing else.
 - approver: G
 - amendment 1 (2026-11-11): balance read by G on the awards portal: 20,000 GPU-hours allocated, 0 used, allocation ends 31 Jan 2027. reserve 384 -> 16,384 and total 4,000 -> 20,000. The working stage caps stay as they are until M01-T05 has measured what a run costs on the system; the budget look before M03-T01 then moves hours from the reserve into the prose, judging, basecmp and large stages.
+- amendment 2 (2026-11-13, DEC-037): new stage dataround 0 -> 160 for M03-T06 and M03-T07; reserve 16,384 -> 16,224; total stays 20,000. Balance: 20,000 allocated, about 300 used by the recorded stage figures (not re-read on the system for this line).
 
 ## DEC-003 Kit verifier: merge bar after two repair rounds
 - date: 2026-11-11
@@ -339,12 +340,12 @@
 
 ## DEC-037 Plan amendment 3: one data round for the explainer, pilot first
 - date: 2026-11-13
-- status: drafting; no cluster job before the manager chat answers (DEC-036)
+- status: approved; the merge waits for the re-check of the one repair round (B1, B2 and B3 of REV-AMEND-3); the pilot's result goes to the manager chat with the saved figures, and a failed pilot is G's choice, taken to him by the manager
 - decision: the data round G chose (DEC-035) enters M03 as a validation-only pilot with a pass rule written before its first job, then, only on a pass, regenerated and judge-filtered training data and a three-seed training run on it. The architect drafts it from `.plan/work/AMEND-3/brief-src.md` and the facts in `.plan/work/EXP-m03-losses/result.md`.
 - options: run the whole round at once (rejected: the classification rates the bar unlikely from removing faults alone, and the pilot costs 2.5 to 13.2 GPU-hours against 45 to 166 for the round) | pilot first (chosen)
 - why: the judge is right about the added text (75 of 82 losing judgements name a real fault); the bar needs about 139 of the 190 validation rows with headroom to win in both orders, against 13 today.
 - consequences: the bar (DEC-013), the judge and its prompt are unchanged. A failed pilot stops the round and returns the choice between revisiting rule 2 and parking Track B. Weights are unchanged; the percentage is re-baselined if the new Definition of Done items move it.
-- approver: pending (the manager chat, DEC-036)
+- approver: G for the choice (his answer "A" to "one data round aimed at what the judge rewards, about 100 to 150 GPU-hours", relayed by the team-manager chat on 13 Nov 2026); the team-manager chat for the amendment text, the pass rule and the 160 GPU-hour cap, under DEC-036. G has not seen the amendment text.
 
 ## DEC-038 Kit README connection check: no change for this trial
 - date: 2026-11-13
@@ -363,3 +364,12 @@
 - why: a readable name in shareable output is what the task exists to remove.
 - consequences: M04-T04 merges only after that round and its re-check; M04-T05, M05-T04 and M06-T01 follow as before.
 - approver: manager (team-manager chat, 13 Nov 2026, under DEC-036)
+
+## DEC-040 Data round: its GPU-hours are counted by the round's own check
+- date: 2026-11-13
+- status: decided
+- decision: the kit's frozen usage check ties each budget stage to fixed task ids, so M03-T06 and M03-T07 can claim neither a new stage nor the `prose` and `judging` stages. The round writes `round-gpu-hours: dataround <used>` lines, which the frozen check ignores, and the round's verifier task (M03-T08) recomputes them from the scheduler accounting against the 160 cap. The frozen interface is not changed.
+- options: a one-line change to the frozen stage table (rejected: it re-opens a reviewed, frozen file for a convenience) | count the hours in the round's own check (chosen)
+- why: the author found the limit, the reviewer confirmed it (REV-AMEND-3, point 4), and the cap, the total and the existing stage checks all keep working.
+- consequences: M03-T08 is size M, not S. REV-M03-kit looks at the new check with the other vendor.
+- approver: auto
