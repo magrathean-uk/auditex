@@ -484,3 +484,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-13T22:56:05Z	M04-T04	codex	codex2	gpt-6.1-sol	high	branch	0	262		done	task/M04-T04-name-masking	v4
 2026-11-13T22:56:44Z	CHK-M02-kit	terra	claude-3	claude-sonnet-5-5	high	readonly	0	366	1.2330	done	368a654	v4
 2026-11-13T22:58:10Z	REV-M04-T04	codex	codex2	gpt-6.1-sol	high	readonly	0	83		done	task/M04-T04-name-masking	v4
+2026-11-13T23:00:12Z	CHK-M04-T04	terra	claude-5	claude-sonnet-5-5	high	readonly	0	206	0.2164	done	task/M04-T04-name-masking	v4
