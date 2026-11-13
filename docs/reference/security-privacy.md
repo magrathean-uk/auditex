@@ -215,34 +215,39 @@ read-only role and scopes granted to the auditor remain the authoritative bounda
 Both scanners fail closed on a value they cannot prove: a launcher argument, importer name, callee lookup, standard
 input or HTTP receiver that is not provably literal or a known non-opener is reported and fails the suite. Over-reporting
 is therefore possible (for example a flow-insensitive mutation mark, an f-string with a field, or a parameter that shares
-a receiver's name in another scope); it is a false positive, not a gap. Limits that hide a call are listed below. No test
-asserts a limit itself: the test named for each is the nearest one, and it pins the neighbouring case the scanner does
-handle.
+a receiver's name in another scope); it is a false positive, not a gap. The limits below hide a call and are known to
+be open, each a "named limit" (v2 DEC-011): no test asserts the limit itself, and it is reviewed by hand. They are the
+limits found in the scanners and their reviews so far; a static scan can have others. Planted tests in
+`tests/test_read_boundaries.py` close shadowing by a module binding only: when the module itself binds a read-only
+hand-off or transparent-conversion name such as `info` or `list` (`def`, `class`, assignment, import or parameter),
+that shortcut no longer applies. They also close the import, `with`, `def`, `class`, `except`, `match` and
+comprehension-walrus bindings after a literal, and class-body names. The same name called on another object, a call
+matched to a module function by name, the `zip` and `enumerate` unpacking and a store on `builtins` stay open and are
+listed. In `tests/test_http_verb_allowlist.py` the opener attribute store (`pathlib.Path = factory`) is closed the same
+way.
 
 Read-boundary scanner:
 
-| Limit | Bounded by |
+| Limit | Status |
 | --- | --- |
-| A local function that shadows a read-only hand-off callee (such as `info`) and changes its argument | `test_values_proved_literal_stay_resolved` |
-| A local function that shadows a transparent conversion (such as `list`) | `test_values_proved_literal_stay_resolved` |
-| An import binding after a literal assignment to the same launcher argument name | `test_a_declared_import_joins_the_declared_scope` (declared form only) |
-| A plain `with`, `def`, `class`, `except` or `match` binding, or a comprehension walrus, after a literal assignment to a launcher argument name; the same forms under `global` or `nonlocal` fail closed | `test_a_declared_binding_the_scan_cannot_follow_leaves_the_launch_unresolved` |
-| A launch in a class body that reads a class-local name | `test_default_values_annotations_and_decorators_belong_to_the_enclosing_scope` |
-| A script passed by file (`-File`) or encoded (`-EncodedCommand`); the launch is found, the script text is not read | `test_launches_outside_plain_subprocess_calls_are_found` |
-| A script written to a process's standard input after it starts (`communicate`, `stdin.write`); `input=` is read | `test_values_the_scan_cannot_prove_literal_leave_the_launch_unresolved` |
-| Launchers outside the named set (`ctypes` or `cffi` calls into libc, `multiprocessing`, third-party process libraries) | `test_untraceable_launch_forms_are_reported` |
-| `getattr(obj, name)` with a computed name on a runtime object that is not a launcher module | `test_dynamic_access_that_cannot_reach_a_launcher_is_not_reported` |
-| A module-level container changed from another module (`helpers.ARGV.append(x)`) is not seen in the module that binds it | `test_a_launcher_re_exported_by_another_module_is_followed` |
-| A Google service read straight from the builder cache outside the builder methods | `test_google_calls_held_or_fetched_indirectly_fail_closed` |
+| A script passed by file (`-File`) or encoded (`-EncodedCommand`); the launch is found, the script text is not read | named limit (v2 DEC-011) |
+| A script written to a process's standard input after it starts (`communicate`, `stdin.write`); `input=` is read | named limit (v2 DEC-011) |
+| Launchers outside the named set (`ctypes` or `cffi` calls into libc, `multiprocessing`, third-party process libraries) | named limit (v2 DEC-011) |
+| `getattr(obj, name)` with a computed name on a runtime object that is not a launcher module | named limit (v2 DEC-011) |
+| A module-level container changed from another module (`helpers.ARGV.append(x)`) is not seen in the module that binds it | named limit (v2 DEC-011) |
+| A Google service read straight from the builder cache outside the builder methods | named limit (v2 DEC-011) |
+| A shortcut name called on another module or object that this module does not bind (`helpers.info(argv)`, `obj.list(ARGV)`) is taken as the read-only builtin or conversion | named limit (v2 DEC-011) |
+| A call matched by name to a function the module defines, even where the call site binds the name otherwise (a parameter or a local assignment); that function's parameters and returns are read instead | named limit (v2 DEC-011) |
+| A rebound `zip` or `enumerate` in loop unpacking, even one the module defines itself: the unpacked names are read from its arguments. The other name-matched shortcuts (string methods, `.get`, `append`, `insert`, `extend`) also ignore what the receiver is, but their result is proved only when the receiver is itself a proved literal, so no gap is known there | named limit (v2 DEC-011) |
+| A store on the `builtins` module (`builtins.list = f`, `setattr(builtins, "list", f)`) is not a binding the shortcuts check | named limit (v2 DEC-011) |
 
 HTTP verb scanner:
 
-| Limit | Bounded by |
+| Limit | Status |
 | --- | --- |
-| A trusted module attribute rebound to a factory that returns an opener (`pathlib.Path = factory`), so `pathlib.Path().open(...)` is classified as safe | `test_a_receiver_proved_not_to_be_an_opener_is_not_a_site` |
-| Cross-module writes through `__dict__`, `vars(obj)` or `sys.modules` | `test_an_attribute_set_from_another_module_joins_the_union` |
-| A parameter annotation is trusted, so an argument that contradicts it is not seen | `test_a_receiver_proved_not_to_be_an_opener_is_not_a_site` |
-| Send methods of clients the source does not use (such as an `httpx` `stream`), a verb chosen by `getattr` with a computed name, and `googleapiclient` request chains | `test_the_scanner_sees_the_known_get_call_sites` and `test_a_request_value_the_scan_cannot_prove_is_not_get` |
+| Cross-module writes through `__dict__`, `vars(obj)` or `sys.modules` | named limit (v2 DEC-011) |
+| A parameter annotation is trusted, so an argument that contradicts it is not seen | named limit (v2 DEC-011) |
+| Send methods of clients the source does not use (such as an `httpx` `stream`), a verb chosen by `getattr` with a computed name, and `googleapiclient` request chains | named limit (v2 DEC-011) |
 
 ## External lookups
 
