@@ -468,3 +468,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-13T19:36:25Z	EXP-m07-first-sitting	terra	claude-4	claude-sonnet-5-5	medium	readonly	0	74	0.4033	done	7d8397f	v4
 2026-11-13T19:42:32Z	AMEND-3	sol	claude-4	claude-opus-5-5	high	branch	0	535	3.2847	done	task/AMEND-3-amend-3	v4
 2026-11-13T19:48:53Z	REV-AMEND-3	sol	claude-3	claude-opus-5-5	high	readonly	0	332	2.1824	done	task/AMEND-3-amend-3	v4
+2026-11-13T19:51:39Z	AMEND-3	sol	claude-4	claude-opus-5-5	high	branch	0	136	0.9061	done	task/AMEND-3-amend-3	v4
+2026-11-13T19:53:35Z	REV-AMEND-3	sol	claude-3	claude-opus-5-5	high	readonly	0	93	0.6654	done	task/AMEND-3-amend-3	v4
