@@ -1,0 +1,1 @@
+--task REV-M04-T04 --role codex --account codex2 --readonly --sha task/M04-T04-name-masking --tags review,risk:high --timeout 3600 --brief .plan/work/REV-M04-T04/brief-src-2.md

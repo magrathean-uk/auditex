@@ -1,59 +1,42 @@
 ## RESULT REV-M04-T04
 status: done
-summary: verdict: changes-required
-reviewed: 0adcc490f63b3fc43d43562001c6f26ddfbaee8b
-Review completed by code inspection; execution was blocked by the sandbox. Five required changes follow.
-changes: none; read-only sandbox prevented progress and evidence files
-verification: git diff --check main...HEAD PASS; required verification and invented-name probes blocked by sandbox; historical test results were not independently reproduced
-risks: readable names; whole-key allocation lacks a token bound; HTML peak ratio unverified
+summary:
+verdict: changes-required
+reviewed: d719698b214f322d103e2a2f505725677756d597
+The original examples are addressed, but two nearby variants still expose names by code inspection.
+changes: none; read-only review; progress file skipped because writes are unavailable
+verification: git status, rev-parse, diff and diff --check PASS; no tests executed, as instructed. .plan/work/CHK-M04-T04/result.md records exact-head lint, 396 tests, HTML peak and 43/43 contract digests PASS.
+risks: two readable-name variants remain; HTML peak margin is thin; other-provider exact-head review remains outstanding
 questions_for_g: none
 ### Findings
 
-Criteria checklist:
-- MET: M04-T03 precondition, `.plan/milestones/M04-d5-keyed-pseudonyms.md:66`; merged commit 2c36c94fea9a868741467970c98e3b403a0b7f16.
-- NOT MET: masking and bounded-memory requirements, `.plan/milestones/M04-d5-keyed-pseudonyms.md:67`; findings 1-5 below. The streaming text walk itself retains six-probe and six-token limits.
-- MET by inspection: keyed derivation and unchanged key handling, `.plan/milestones/M04-d5-keyed-pseudonyms.md:68`; context validates 32 bytes at `src/azure_tenant_audit/output_redaction.py:299`, and matcher replacements call `pseudonym(self.key, canonical)` at line 1725. Required test execution is UNTESTABLE here.
-- NOT MET: exact-head dual privacy approval, `.plan/milestones/M04-d5-keyed-pseudonyms.md:69`; `.plan/work/REV-M04-T04-privacy/result.md:4` reviews an older head and requests changes.
-- UNTESTABLE: verification at `.plan/milestones/M04-d5-keyed-pseudonyms.md:70`, blocked as recorded below.
-- MET: files restriction, `.plan/milestones/M04-d5-keyed-pseudonyms.md:71`; only the named source file and two named test files changed. No outside paths.
-- MET: design approval DoD, `.plan/milestones/M04-d5-keyed-pseudonyms.md:14`; `.plan/DECISIONS.md:33` records G's approval and seed strategy.
-- UNTESTABLE: combined regression DoD, `.plan/milestones/M04-d5-keyed-pseudonyms.md:15`; not rerun.
-- UNTESTABLE: contract-smoke DoD, `.plan/milestones/M04-d5-keyed-pseudonyms.md:16`; version difference confirmed at `src/azure_tenant_audit/contracts.py:25`, smoke not rerun.
-- NOT MET: masking DoD, `.plan/milestones/M04-d5-keyed-pseudonyms.md:17`; uncounted readable cases below.
-- UNTESTABLE: HTML peak DoD, `.plan/milestones/M04-d5-keyed-pseudonyms.md:18`.
-- UNTESTABLE: milestone-close suite, smoke, digests and acceptance DoD, `.plan/milestones/M04-d5-keyed-pseudonyms.md:19`; skipped in this restricted review.
-- NOT MET: merged-head review DoD, `.plan/milestones/M04-d5-keyed-pseudonyms.md:20`; T04 remains unmerged and unapproved.
-- NOT MET on this frozen tree: documentation DoD, `.plan/milestones/M04-d5-keyed-pseudonyms.md:21`; `docs/reference/security-privacy.md:537` still describes the old scheme. T05's recorded read-through is later milestone work.
-
-Privacy coverage, inferred from code rather than executed:
-- MASKED: one, two and three initials, dotted or undotted, without competing prefixes; initials are skipped within the window at `src/azure_tenant_audit/output_redaction.py:1655`.
-- READABLE, BLOCKING: two/three initials plus an admin sign-in prefix and trailing prose; finding 1. Repeating this in a long list repeats the leak without exceeding the probe budget.
-- MASKED: Mr, Mrs, Ms, Miss, Mx, Dr, Prof, Professor, Sir, Dame, Lord, Lady, Rev and Revd, dotted/undotted and stacked before a supported name; `src/azure_tenant_audit/output_redaction.py:1267` and line 1684. Lower-case titles can remain, with the person's name masked.
-- MASKED: ordinary exact snake-case, hyphenated and two/three-word joined mapping keys; READABLE, BLOCKING: four-word joined keys and inserted-title/initial keys, finding 3.
-- MASKED: ASCII case, fullwidth letters, matching accented spellings, ASCII hyphens and straight/curly apostrophes; `src/azure_tenant_audit/output_redaction.py:1248` and line 1338. READABLE, BLOCKING: composed/decomposed equivalents, finding 2.
-- MASKED: split given/family fields when a full name or address establishes the person, `src/azure_tenant_audit/output_redaction.py:2040`; READABLE, BLOCKING: parts-only user records, finding 4.
-- COUNTED IN NOTE: exempt name-equal product keys and recorded unsupported separators/lengths, `src/azure_tenant_audit/output_redaction.py:1421` and line 1444. Their structured name fields remain pseudonymised.
-
-Required changes:
-1. `src/azure_tenant_audit/output_redaction.py:1645` and line 1677: budget exhaustion silently abandons a name. One invented user suffices: display name `Neral Vosk`, sign-in `neral.a.vosk.adm@example.invalid`, text `Neral A. B. Vosk wrote`. The six probes are `neral`, `neral a`, `neral a b`, `neral a vosk`, `neral a vosk wrote`, `neral vosk wrote`; the held `neral vosk` is then refused. Three initials fail similarly.
-   Smallest safe repair: when an unresolved initial-bearing candidate cannot be checked within budget, withhold that text using the existing text placeholder. Cover both the miss-fallback boundary and deferred-fallback exhaustion. This adds no probes, window growth or index expansion; retain confirmed longer-name precedence.
-   Add `test_two_and_three_initials_with_admin_upn_and_trailing_word_mask_or_withhold`, dotted/undotted and repeated-list cases. Change the readable expectation in `tests/test_redaction_scan_budget.py:425`; retain all budget assertions and the longer-name regressions at `tests/test_redaction_person_names.py:650`. The HTML workload's ordinary path stays unchanged, but its ratio still needs measurement.
-2. `src/azure_tenant_audit/output_redaction.py:1249` and line 1338: tokenisation precedes Unicode normalisation. Recorded `Néral Vosk` does not match `Ne\u0301ral Vosk`; a decomposed accented initial also breaks the separator. Neither variant is counted. Include combining marks in complete tokens, normalise before initial classification, preserve source offsets, and add NFC/NFD name and initial regressions.
-3. `src/azure_tenant_audit/output_redaction.py:1402` and line 1719: `NeralABVosk`, for recorded `Neral A. B. Vosk`, is neither indexed nor counted because joining stops at three words. For recorded `Neral Vosk`, `neral_a_vosk` and `dr_neral_vosk` also remain readable; `tests/test_redaction_person_names.py:686` pins this omission. Extend whole-key coverage to these supported name forms, or count unsupported forms; preserve product-field and suffix-key protection. Add explicit regressions.
-4. `src/azure_tenant_audit/output_redaction.py:495`: `{"kind":"user","given_name":"Neral","surname":"Vosk"}` has no canonical full name/address, so `_person()` returns None. Discovery drops it and line 2040 never masks either part. Use usable given-plus-family names as the canonical fallback, including nested Google name parts; test structured parts and associated narrative.
-5. `src/azure_tenant_audit/output_redaction.py:1713`: `whole()` allocates every token with `findall()` before rejecting more than six. A hostile structural key creates a token list proportional to its entire length. Reject impossible lengths first and scan incrementally, stopping at the seventh token without retaining an unrestricted list; add an oversized-key allocation regression.
-
-BACKLOG disposition:
-- `.plan/BACKLOG.md:23`: keyword-key harvesting (`member_type`, `org_unit`) may remain a follow-up: it renames fields but leaks no name. A generator script may also remain a maintenance follow-up.
-- `.plan/BACKLOG.md:23`: vocabulary-note wording may remain for T05; `src/azure_tenant_audit/output_redaction.py:1575` inaccurately describes where those words remain readable.
-- `.plan/BACKLOG.md:25`: probe-exhaustion defect MUST be fixed before merge, as `.plan/DECISIONS.md:359` requires. Its “limit” alternative is superseded by DEC-039.
-
-Security: no added tenant writes, injection path, name-built regex, salt derivation or key disclosure found. HMAC and key-handling code are unchanged. Finding 5 is the additional memory concern.
-Verification command, through the required hostload wrapper: `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_scan_budget.py tests/test_redaction_profiles_d3.py tests/test_redaction_keyed_pseudonyms.py && .venv/bin/python benchmarks/html_peak.py --records 90000 --profile shareable --baseline benchmarks/html-peak-baseline.json --max-ratio 1.15 --require-masked`.
-First blocking line: `hostload.sh: line 92: cannot create temp file for here document: Operation not permitted`. The probe script's shell temporary file was also refused. No workaround was attempted.
-### Defect classes
-Probe-budget exhaustion returns readable names.
-Unicode normalisation occurs after token boundaries.
-Whole-key name variants escape masking and accounting.
-Parts-only directory identities escape discovery.
-Whole-key token allocation is unbounded by the matcher window.
+Required change 1: not fixed - src/azure_tenant_audit/output_redaction.py:1698; original two/three-initial admin-UPN cases, dotted/undotted and repeated, are masked or withheld; a shorter confirmed name defeats withholding at the window limit (B1).
+Required change 2: not fixed - src/azure_tenant_audit/output_redaction.py:1253; original NFC/NFD acute-accent names and initials are masked with source offsets preserved; combining marks outside the listed blocks still split equivalent spellings (B2).
+Required change 3: fixed - src/azure_tenant_audit/output_redaction.py:1408 and :1751; four-to-six-token joined recorded names are indexed; supported whole-key title/initial variants are withheld, including competing identities; suffix/product protections remain.
+Required change 4: fixed - src/azure_tenant_audit/output_redaction.py:496; flat and nested given-plus-family records establish a canonical identity; their structured parts are withheld and associated narrative is masked.
+Required change 5: fixed - src/azure_tenant_audit/output_redaction.py:1731; oversized keys are rejected before token allocation; incremental scanning stops at the seventh token.
+Defect class 1, probe-budget exhaustion: not fixed - src/azure_tenant_audit/output_redaction.py:1698; B1 leaves a surname readable.
+Defect class 2, Unicode token boundaries: not fixed - src/azure_tenant_audit/output_redaction.py:1253; B2 leaves an equivalent name readable.
+Defect class 3, whole-key variants: fixed - src/azure_tenant_audit/output_redaction.py:1751; the reviewed supported variants are masked or withheld.
+Defect class 4, parts-only discovery: fixed - src/azure_tenant_audit/output_redaction.py:496; both reviewed record shapes reach structured and narrative masking.
+Defect class 5, unbounded whole-key allocation: fixed - src/azure_tenant_audit/output_redaction.py:1737; retained tokens and allocation are bounded.
+B1 BLOCKING - src/azure_tenant_audit/output_redaction.py:1698: with directory names “Neral” and “Neral Vosk”, text “Neral A B C D E Vosk” sets best to the single-name hit, reaches width six, then bypasses withholding because best exists. Only “Neral” is replaced; initials and “Vosk” survive. Withhold unresolved initial-bearing extensions even when an earlier, shorter hit exists; add this regression without increasing either budget.
+B2 BLOCKING - src/azure_tenant_audit/output_redaction.py:1253: recorded "\u0958neral Vosk" folds to "\u0915\u093cneral vosk", but the equivalent written "\u0915\u093cneral Vosk" splits at U+093C, which the token pattern excludes. No starting phrase matches and no unmatched reason is recorded. Include all relevant combining marks in source-spanned tokens and add this canonical-equivalence regression.
+Criteria: masking remains unmet through B1/B2; probe/window limits remain six by inspection; keyed replacement remains at src/azure_tenant_audit/output_redaction.py:1766; changed paths and source scope match the brief; supplied execution evidence passes the required checks.
+Tests in tests/test_redaction_person_names.py, every new or edited function:
+:681 test_mapping_key_equal_to_a_name_is_masked_as_a_whole - asserts requested withholding; retains readable surname and suffix-key expectations under the existing protection boundary.
+:814 test_two_and_three_initials_with_admin_upn_and_trailing_word_mask_or_withhold - asserts the original dotted/undotted and repeated-list repair, including absence of both name parts; misses B1.
+:827 test_composed_and_decomposed_names_and_initials_share_token_boundaries - asserts the requested acute-accent equivalence in prose/markup; two parameters are unchanged guards; misses B2.
+:838 test_unicode_name_matching_preserves_source_offsets_and_budgets - asserts offsets, repeated hits, separators, initials, idempotence and unchanged six-probe/window bounds; covers 80 parameters.
+:867 test_whole_mapping_keys_cover_joined_names_titles_and_initials - asserts requested masking/withholding and idempotence; deliberately pins readable name-plus-mailbox suffix keys.
+:875 test_whole_mapping_key_with_competing_initial_names_is_withheld - asserts the requested ambiguity-safe withholding.
+:884 test_parts_only_directory_records_mask_parts_and_associated_narrative - asserts both structured shapes, narrative masking and absence of name parts.
+:898 test_incomplete_name_parts_do_not_invent_a_directory_identity - valid negative guard; does not demonstrate the parts-only fix or assert output masking.
+Tests in tests/test_redaction_scan_budget.py, every new or edited function:
+:365 test_d5_budget_holds_for_middle_initials_and_titles - tightens readable exhaustion to withholding; retains probe/window bounds.
+:387 test_d5_initial_fallback_keeps_probes_per_start_at_most_six - tightens unsuccessful-match expectations to withholding; retains per-start/window bounds.
+:411 test_d5_initial_fallback_on_a_running_key_stays_at_six_probes - asserts withholding and longer-name precedence; tightens expected exhaustion probes from eleven to six; bounds remain.
+:484 test_d5_oversized_whole_key_allocation_is_bounded - asserts allocation below 64 KiB and zero probes; deliberately pins the oversized repeated-name key unchanged.
+:499 test_d5_whole_key_token_scan_stops_at_the_seventh_token - asserts exactly seven visited tokens and zero probes, as requested.
+:518 test_d5_exhausted_initial_candidates_are_withheld_without_extra_probes - asserts withholding plus per-start, total-probe and window bounds for the original exhaustion cases; misses B1.
+Non-blocking: no budget assertion was weakened. The supplied evidence says 96 offset-test parameters, whereas this head defines 80; correct that count. The passing HTML peak has little headroom.

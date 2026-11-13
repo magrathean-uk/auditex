@@ -392,3 +392,12 @@
 - consequences: the re-check and the executing check cover it; if a fix moves the contract-smoke digests or the HTML peak ratio the author reports it and the change comes back as its own decision.
 - approver: auto
 
+## DEC-043 Codex authors may write the bytecode cache of their own worktree
+- date: 2026-11-13
+- status: approved
+- decision: the rule changed is the plan skill's security class "sandbox and permission settings". On Codex author lines in this project only, per call and never exported, the tooling's documented switch `PLAN_CODEX_ADD_DIRS` adds one folder to the Codex sandbox: the part of the routed Python bytecode cache that mirrors the task's own worktree path, created before the dispatch. The whole cache is not added, because it serves every project on the machine. If lint or the tests still fail because they compile something outside the worktree, nothing is widened: the manager is told what they tried to write. The Claude executing check stays the proof for each fix; the switch only lets the author run its own lint and tests before it hands over.
+- options: add the whole bytecode cache (asked; rejected by the manager as too wide) | add only the worktree's mirror (chosen) | leave Codex authors unable to run lint or tests
+- why: the first Codex author run under plan v4 (M04-T04's fix round) drafted five fixes and could execute nothing, because `make lint` compiles the sources into a cache outside the sandbox.
+- consequences: applies to M04-T04's remaining Codex work and to M05-T04. G reads it in the manager's morning brief.
+- approver: manager (team-manager chat, 13 Nov 2026, under DEC-036); G is told in the morning brief
+
