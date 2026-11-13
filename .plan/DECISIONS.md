@@ -276,12 +276,12 @@
 
 ## DEC-030 AIRR budget look
 - date: 2026-11-13
-- status: reported; waits for G's own word before any M03 run
+- status: approved
 - decision: the remaining stage caps stay as planned: base comparison 1,024, large runs 2,048, judged build 64 GPU-hours (DEC-001 budget table, unchanged). Spend so far is about 60 of 20,000 GPU-hours (bring-up, judging and the prose data; 13 for M02-T03).
 - options: confirm the caps (chosen, as recommended) | move a cap
 - why: the spend so far is under one per cent of the allocation and the three caps together are 3,136 GPU-hours.
-- consequences: M03-T01 is prepared (batch-v4-100, round 1 sets up and submits) and starts on G's yes here and his cluster sign-in. The milestone asks for approver G on this entry; a relayed approval does not start a cluster run.
-- approver: reported (G's team-manager chat, 13 Nov 2026, about 05:25 GMT, quoting G: "approve acordinlgy"; G has not answered in the orchestrator chat)
+- consequences: M03-T01 is prepared (batch-v4-100, round 1 sets up and submits) and starts once G has signed in to the cluster.
+- approver: G (in the orchestrator chat, 13 Nov 2026: "yes confirmed"; first relayed by the team-manager chat at about 05:25 GMT)
 
 ## DEC-031 Confirmations relayed on 13 Nov (DEC-021, DEC-026)
 - date: 2026-11-13
