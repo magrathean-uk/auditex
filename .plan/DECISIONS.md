@@ -318,3 +318,12 @@
 - why: DEC-013 says that if no model's band clears 72.9 per cent the question returns to G; the probe measures whether the training data itself can clear it.
 - consequences: if the targets also score near 0.5, G chooses between new training data aimed at what the judge rewards, revisiting rule 2 of the bar, or parking Track B. The pick of Gemma 4 31B stands by the rule whatever he chooses.
 - approver: auto; listed for G
+
+## DEC-035 Track B after the ceiling probe: one data round
+- date: 2026-11-13
+- status: reported; the read-only first step may start, the plan amendment and every job wait for G's own yes
+- decision: the training data's own ceiling on the judge is 0.476 against the bar's 0.729 (DEC-034 probe). G chose option A: one data round aimed at what the judge rewards. It starts with a read-only, no-GPU classification of the losing judgements (is the added text really unsupported by the row's facts), then a plan amendment for the data round (task rows, a GPU budget row, about 100 to 150 GPU-hours estimated), which G approves himself before any job is submitted.
+- options: A one data round (chosen) | B revisit rule 2 of the bar | C park Track B
+- why: the cause is specific (the judge reads the added text as unsupported in 48 of 52 losing judgements) and about 300 of 20,000 GPU-hours are used.
+- consequences: the bar (DEC-013) is unchanged. The pick of Gemma 4 31B stands. M03-T02's sweep stays held until the new data exists.
+- approver: reported (G's team-manager chat, 13 Nov 2026, quoting G in full: "A"; not typed in the orchestrator chat)
