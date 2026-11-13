@@ -11,9 +11,9 @@ Track A, after M00. M05-T01 and M05-T02 may run in parallel with each other and 
 The read-boundary and HTTP scanner limits named in v3 DEC-008 and DEC-009 are closed for planted cases under the fail-closed rule, the privacy reference lists only what stays open, the small plan v3 review follow-ups are closed, and the vendored microsoft-skills entries are settled by G's deletion-gate decision.
 
 ## Definition of Done
-- [ ] Both scanners pass with a planted case for every limit they close: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_http_verb_allowlist.py`
+- [x] Both scanners pass with a planted case for every limit they close: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_http_verb_allowlist.py`
 - [ ] Review: an other-vendor review approves the plan v4 merges of M05-T01 and M05-T02 at the exact merged head (ARCHITECTURE.md review binding): `for T in M05-T01 M05-T02; do c=$(git log v1.4.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && grep -qE "^[[:space:]]*(summary: )?reviewed: $s" ".plan/work/REV-$T/result.md" && grep -qE '^[[:space:]]*(summary: )?verdict: approve' ".plan/work/REV-$T/result.md" || exit 1; done` Orchestrator check at close: the dispatch record names a launcher of the other vendor from the author's.
-- [ ] Review: the limits tables in the privacy reference list only limits left open, each with its planted test or the word "named limit", and scanner citations say "v2 DEC-011" (terra read-through): `grep -qx 'read-through: complete' .plan/work/M05-T03/result.md`
+- [x] Review: the limits tables in the privacy reference list only limits left open, each with its planted test or the word "named limit", and scanner citations say "v2 DEC-011" (terra read-through): `grep -qx 'read-through: complete' .plan/work/M05-T03/result.md`
 - [ ] The plan v3 review follow-ups are closed: no "model view" wording for the projection, no dead `names` parameter on `Redactor.text`, and the follow-up tests pass: `! grep -rqi 'model view' docs src && ! grep -q 'def text(self.*names' src/azure_tenant_audit/output_redaction.py && .venv/bin/python -m pytest tests/test_compare_run_outputs.py tests/test_check_reproducible_build.py tests/test_redaction_person_names.py`
 - [x] The vendored microsoft-skills entries are settled by G's deletion-gate decision, and every path it approved for removal is gone: ``d=$(sed -n 's/^## \(DEC-[0-9]*\) M05 deletion gate.*/\1/p' .plan/DECISIONS.md) && test -n "$d" && P=$(awk -F'|' -v d="$d" '{gsub(/[ `]/,"",$2); gsub(/ /,"",$5)} $5==d {print $2}' .plan/CLEANUP.md) && for p in $P; do test ! -e "$p" || exit 1; done`` (evidence: DEC-017, G on 12 Nov 2026: keep all eight; no CLEANUP.md row, command exit 0)
 - [ ] Full suite, contract smoke, the digest comparison and both acceptance suites pass at milestone close: `make test && make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract && make acceptance`
@@ -23,7 +23,7 @@ The read-boundary and HTTP scanner limits named in v3 DEC-008 and DEC-009 are cl
 |---|---|---|---|---|---|
 | M05-T01 | Close the read-boundary scanner limits from v3 DEC-008 | codex | M | hard | done |
 | M05-T02 | Close the HTTP scanner attribute-store limit from v3 DEC-009 | codex | M | - | done |
-| M05-T03 | Update the scanner limits tables in the privacy reference | terra | S | - | todo |
+| M05-T03 | Update the scanner limits tables in the privacy reference | terra | S | - |done |
 | M05-T04 | Close the plan v3 review follow-ups | codex | M | - | todo |
 | M05-T05 | Confirm the vendored microsoft-skills entries and bring the deletion gate | terra | S | - | done |
 
