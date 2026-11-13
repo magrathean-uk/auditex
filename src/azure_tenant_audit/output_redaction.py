@@ -493,6 +493,8 @@ def _person(keys: Mapping[str, Any]) -> _Person | None:
     )
     addresses = [keys[k] for k in _D5_ADDRESS_FIELDS if keys.get(k) in ids and "@" in keys[k]]
     canonical = names[0] if names else (addresses[0] if addresses else None)
+    if canonical is None and _usable(given) and _usable(family):
+        canonical = f"{given} {family}"
     if canonical is None:
         return None
     object_id = next((keys[k] for k in _D5_OBJECT_ID_FIELDS if _usable(keys.get(k))), None)
@@ -1231,28 +1233,46 @@ def assert_runs_stable(run_dirs: Iterable[str | Path], context: RedactionContext
 #
 # Bounded rule (design M05-T01, sections 3 to 6): every directory person's name and id forms become lower-case token
 # phrases (keys) in one dictionary, together with every proper token prefix of every key. Matching is one left-to-right
-# pass per string: at a token, the candidate phrase grows one token at a time while the separator is a whitespace run
-# or exactly one of ``. _ - ' ’``, the grown phrase is in the dictionary and the window holds at most
-# ``_D5_MAX_KEY_TOKENS`` tokens; each step is one dictionary probe and the longest key wins. No regular expression is
-# built from names, so the cost per string is independent of the number of people.
+# pass per string: at a token, the candidate phrase grows one token at a time while the separator is a whitespace run,
+# exactly one of ``. _ - ' ’`` or one of them followed by a whitespace run (``John A. Smith``), the grown phrase is in
+# the dictionary and the window holds at most ``_D5_MAX_KEY_TOKENS`` tokens; each step is one dictionary probe and the
+# longest key wins. A single-letter token the grown phrase misses is a middle initial: it joins the hit without joining
+# the phrase and still takes its place in the window. A phrase that took an initial on another key's path and then
+# misses gets one more probe without that initial, and its window shrinks by one token to pay for it, so a start costs
+# at most ``_D5_MAX_KEY_TOKENS`` probes. A run of capitalised titles (``_D5_TITLES``) written directly before a hit, and
+# not followed by a comma, joins the hit with no probe. No regular expression is built from names, so the cost per
+# string is independent of the number of people.
 
 _D5_MAX_KEYS_PER_PERSON = 16
 _D5_MAX_KEY_TOKENS = 6
 _D5_MAX_TOKEN_CHARS = 64
 _D5_MIN_KEY_CHARS = 4
 _D5_SEPARATORS = frozenset(".-_'’")
-_D5_WORD_RE = re.compile(r"[^\W_]+")
+# Every Unicode mark (Mn, Mc, Me) belongs to its preceding token, across all scripts and Unicode blocks.
+# Build the character class once from categories; matches retain the original string's replacement offsets.
+_D5_MARKS = "".join(chr(point) for point in range(0x110000) if unicodedata.category(chr(point)).startswith("M"))
+_D5_WORD = rf"[^\W_](?:[^\W_]|[{re.escape(_D5_MARKS)}])*"
+_D5_WORD_RE = re.compile(_D5_WORD)
 # The first alternative keeps pseudonyms (``User <hex>``, ``user-<hex>``) opaque, so a second pass changes nothing and
 # a person called ``User`` cannot re-match one. The markup form also keeps HTML tags and character references opaque.
 _D5_OPAQUE = rf"(?P<opaque>(?<![^\W_])(?:(?:User|Id|Group|Guid) {_HEX16}|user-{_HEX16})(?![^\W_]))"
-_D5_TOKEN_RE = re.compile(_D5_OPAQUE + r"|(?P<tok>[^\W_]+)")
-_D5_MARKUP_TOKEN_RE = re.compile(_D5_OPAQUE + r"|(?P<tag><[^<>]{0,4096}>|&#?[A-Za-z0-9]{1,32};)|(?P<tok>[^\W_]+)")
-# A whole mapping key of this shape is a product identifier and is never rewritten.
+_D5_TOKEN_RE = re.compile(_D5_OPAQUE + rf"|(?P<tok>{_D5_WORD})")
+_D5_MARKUP_TOKEN_RE = re.compile(_D5_OPAQUE + rf"|(?P<tag><[^<>]{{0,4096}}>|&#?[A-Za-z0-9]{{1,32}};)|(?P<tok>{_D5_WORD})")
+# A whole mapping key of this shape is a product identifier: it is rewritten only when it is, as a whole, a person's key
+# phrase (``priya_kovalenko``, ``PriyaKovalenko``), never in part.
 _D5_STRUCTURAL_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*$")
 _D5_ID_NEIGHBOURS = frozenset("/\\@=_~%")
 _D5_ID_JOINERS = frozenset(".-:+#?&")
 _D5_ID_PREFIX = "user-"
 _D5_PLACEHOLDER_WORDS = frozenset({"user", "id", "group", "guid", "redacted", "text", "run", "dir"})
+# Titles written before a name, folded and without their full stop. The index adds each recorded name without its
+# leading titles (``Dr. Jane Doe`` is also ``jane doe``); the matcher masks a capitalised run of them before a hit
+# (``Prof. Dr. Jane Doe``) together with the name. Everyday honorifics (``Mx`` is the gender-neutral one), the academic
+# and medical ``Dr``, ``Prof`` and ``Professor``, the honours ``Sir`` and ``Dame``, the peerage ``Lord`` and ``Lady``,
+# and the clergy ``Rev`` and ``Revd``.
+_D5_TITLES = frozenset(
+    {"mr", "mrs", "ms", "miss", "mx", "dr", "prof", "professor", "sir", "dame", "lord", "lady", "rev", "revd"}
+)
 _D5_COMMON_WORDS = frozenset(
     {
         "admin", "administrator", "admins", "account", "accounts", "user", "users", "guest", "guests", "member",
@@ -1275,11 +1295,32 @@ D5_REASONS = (
 
 def _joins(separator: str) -> bool:
     """Whether the text between two tokens continues a name, for the index and the matcher alike: a whitespace run,
-    exactly one of ``_D5_SEPARATORS``, or a comma alone or followed by a whitespace run (``Kovalenko, Priya``)."""
-    if separator[:1] == ",":
-        rest = separator[1:]
-        return not rest or rest.isspace()
-    return separator.isspace() or (len(separator) == 1 and separator in _D5_SEPARATORS)
+    or a comma or exactly one of ``_D5_SEPARATORS``, alone or followed by a whitespace run (``Kovalenko, Priya``,
+    ``John A. Smith``, ``Dr. Jane Doe``)."""
+    if separator.isspace():
+        return True
+    first, rest = separator[:1], separator[1:]
+    return (first == "," or first in _D5_SEPARATORS) and bool(first) and (not rest or rest.isspace())
+
+
+def _initial(token: str) -> bool:
+    """A single letter: a middle initial (``A`` of ``John A. Smith``)."""
+    return len(token) == 1 and token.isalpha()
+
+
+def _plain_forms(phrase: str) -> list[str]:
+    """The forms of a key phrase that a person is also written as, each of at least two tokens: without its leading
+    titles (``dr jane doe`` as ``jane doe``) and without its middle initials (``john a smith`` as ``john smith``)."""
+    tokens = phrase.split(" ")
+    lead = 0
+    while lead < len(tokens) - 1 and tokens[lead] in _D5_TITLES:
+        lead += 1
+    bare = tokens[lead:]
+    forms = [" ".join(bare)] if lead and len(bare) >= 2 else []
+    kept = [t for i, t in enumerate(bare) if i == 0 or i == len(bare) - 1 or not _initial(t)]
+    if len(bare) > len(kept) >= 2:
+        forms.append(" ".join(kept))
+    return forms
 
 
 def _written_joinable(raw: str) -> bool:
@@ -1335,26 +1376,44 @@ def _drop_reason(phrase: str, vocabulary: frozenset[str], raw: str | None = None
     return None
 
 
-def _person_keys(person: _Person, vocabulary: frozenset[str]) -> tuple[list[str], str | None]:
+def _person_keys(
+    person: _Person, vocabulary: frozenset[str], derived: set[str] | None = None,
+) -> tuple[list[str], str | None]:
     """``(keys, reason)`` for one person record. Every recorded spelling (each name field, and given plus family name)
     is either a key the matcher follows as written, or reported: ``reason`` is the earliest in ``D5_REASONS`` of the
-    spellings that cannot be masked, ``None`` when every one can.
+    spellings that cannot be masked, ``None`` when every one can. A person with a key that is, as a whole, a product
+    field name (``_D5_FIELD_NAMES``, ``Break Glass``) is reported as ``vocabulary``: that key stays a key in free text,
+    but a mapping key spelled that way is left as written.
 
     Keys come in priority order and at most ``_D5_MAX_KEYS_PER_PERSON`` are kept: first the required forms (each
-    accepted spelling, family plus given name, the comma swap of a ``Last, First`` name), then the joined forms
-    (``alicesmith``) and the address forms. A key that does not fit is reported as ``limit``, never dropped silently."""
+    accepted spelling, family plus given name, the comma swap of a ``Last, First`` name, and each of these without
+    leading titles or middle initials), then the joined forms (``alicesmith``) and the address forms. A key that does
+    not fit is reported as ``limit``, never dropped silently. ``derived``, when given, receives the kept keys that
+    are only a form without titles or middle initials (and its joined form), never a recorded spelling."""
     _canonical, names, given, family, ids, _identity = person
     required: list[str] = []
     optional: list[str] = []
     reasons: list[str] = []
+    recorded: set[str] = set()  # keys from a recorded spelling (its joined, swapped and address forms included)
+    plain_only: set[str] = set()  # keys from a form without titles or middle initials
 
     def accepted(phrase: str, raw: str | None = None) -> bool:
         return bool(phrase) and _drop_reason(phrase, vocabulary, raw) is None
 
-    def joined(phrase: str) -> None:
+    def keep(target: list[str], phrase: str, plain_form: bool = False) -> None:
+        target.append(phrase)
+        (plain_only if plain_form else recorded).add(phrase)
+
+    def joined(phrase: str, plain_form: bool = False) -> None:
         tokens = phrase.split(" ")
-        if 2 <= len(tokens) <= 3 and accepted("".join(tokens)):
-            optional.append("".join(tokens))  # ``alicesmith``
+        if 2 <= len(tokens) <= _D5_MAX_KEY_TOKENS and accepted("".join(tokens)):
+            keep(optional, "".join(tokens), plain_form)  # ``alicesmith``
+
+    def plain(phrase: str) -> None:
+        for form in _plain_forms(phrase):  # not a recorded spelling: a form that cannot be a key is not reported
+            if accepted(form):
+                keep(required, form, plain_form=True)
+                joined(form, plain_form=True)
 
     spellings = [(raw, True) for raw in names]
     if given and family:
@@ -1367,25 +1426,31 @@ def _person_keys(person: _Person, vocabulary: frozenset[str]) -> tuple[list[str]
             continue
         if not _written_joinable(raw):
             reasons.append("separator")  # the phrase is still a key: it masks the spellings the matcher does follow
-        required.append(phrase)
+        keep(required, phrase)
         joined(phrase)
+        plain(phrase)
     if given and family and accepted(_phrase(f"{family} {given}")):
-        required.append(_phrase(f"{family} {given}"))
+        keep(required, _phrase(f"{family} {given}"))
     for swapped in map(_swapped, names):
         if swapped is not None and accepted(_phrase(swapped)):
-            required.append(_phrase(swapped))
+            keep(required, _phrase(swapped))
             joined(_phrase(swapped))
+            plain(_phrase(swapped))
     for value in ids:
         local, at, _domain = value.partition("@")
         local_phrase = _phrase(local)
         if local_phrase.count(" ") >= 1 and accepted(local_phrase):  # ``alice.smith``; one token: addresses only
-            optional.append(local_phrase)
+            keep(optional, local_phrase)
         if at and accepted(_phrase(value)):
-            optional.append(_phrase(value))  # ``alice smith contoso com`` (OneDrive segments)
+            keep(optional, _phrase(value))  # ``alice smith contoso com`` (OneDrive segments)
     keys = list(dict.fromkeys((*required, *optional)))
     if len(keys) > _D5_MAX_KEYS_PER_PERSON:
         reasons.append("limit")
         keys = keys[:_D5_MAX_KEYS_PER_PERSON]
+    if any(key.replace(" ", "") in _D5_FIELD_NAMES for key in keys):
+        reasons.append("vocabulary")  # ``Break Glass``: the mapping key ``break_glass`` is a product field
+    if derived is not None:
+        derived.update(key for key in keys if key in plain_only and key not in recorded)
     return keys, min(reasons, key=D5_REASONS.index) if reasons else None
 
 
@@ -1403,6 +1468,9 @@ class _NameIndex:
     """``table`` maps every key phrase to its person's canonical name and every proper prefix of a key to ``""``."""
 
     table: dict[str, str] = field(default_factory=dict)
+    # Key phrases whose value comes only from a form without titles or middle initials; another person's recorded
+    # spelling of the same phrase outranks them, here and in a per-value overlay.
+    derived: set[str] = field(default_factory=set)
     # Coverage, never published: every person with at least one spelling that cannot be masked, as identity group
     # (``oid:``, ``upn:`` or ``name:`` and the value) to the earliest reason in ``D5_REASONS``.
     unmatched: dict[str, str] = field(default_factory=dict)
@@ -1464,13 +1532,25 @@ def _build_index(persons: Collection[_Person], vocabulary: frozenset[str]) -> _N
     """The index over every person record of a context, identities resolved once over all of them."""
     index = _NameIndex()
     pending: list[tuple[str, str, str, str]] = []
+    later: list[tuple[str, str]] = []
     for person in persons:
         canonical = person[0]
-        keys, reason = _person_keys(person, vocabulary)
+        derived: set[str] = set()
+        keys, reason = _person_keys(person, vocabulary, derived)
         for key in keys:
-            index.add(key, canonical)
+            if key in derived:
+                later.append((key, canonical))
+            else:
+                index.add(key, canonical)
         if reason is not None:
             pending.append((*_identity(person), canonical, reason))
+    # A form without titles or middle initials (``john smith`` of ``John A. Smith``) is added only where no recorded
+    # spelling holds the phrase, so it never takes another person's name; between derived forms the smallest wins.
+    table = index.table
+    for key, canonical in later:
+        if not table.get(key) or key in index.derived:
+            index.add(key, canonical)
+            index.derived.add(key)
     if pending:
         index.unmatched = _unmatched_people(pending, persons)
     return index
@@ -1530,48 +1610,111 @@ class _NameMatcher:
         ahead: deque[re.Match[str]] = deque()
         pieces: list[str] = []
         last = 0
+        lead = lead_end = -1  # the run of titles written directly before the current token (start, end), or -1
         while True:
             match = ahead.popleft() if ahead else next(tokens, None)
             if match is None:
                 break
             if match.lastgroup != "tok" or len(match[0]) > _D5_MAX_TOKEN_CHARS:
+                lead = -1
                 continue
-            phrase = _fold(match[0])
+            if lead >= 0 and (text[lead_end:lead_end + 1] == "," or not _joins(text[lead_end:match.start()])):
+                lead = -1  # a comma never joins a title to what follows (``Dear Sir, Jane Doe``)
+            first = _fold(match[0])
+            phrase = first
             value = self._probe(phrase)
-            if value is None:
-                continue
             best: tuple[int, str, str] | None = None  # (tokens beyond the first, phrase, canonical)
-            if value and not markup:
-                best = (0, phrase, value)
-            end = match
-            width = 1
-            while width < _D5_MAX_KEY_TOKENS:
-                if len(ahead) < width:
-                    following = next(tokens, None)
-                    if following is None:
+            if value is not None:
+                if value and not markup:
+                    best = (0, phrase, value)
+                end = match
+                width = 1
+                cap = _D5_MAX_KEY_TOKENS
+                initial_seen = False
+                unresolved = -1  # candidate extent whose fallback could not be checked within the budget
+                bare, took = phrase, False  # the phrase without the initials it took, and whether it took one
+                aside: list[tuple[int, str]] = []  # (tokens beyond the first, phrase without the initials) to try
+                spent = self.probes - 1  # probes before this start
+                while width < cap:
+                    if len(ahead) < width:
+                        following = next(tokens, None)
+                        if following is None:
+                            break
+                        ahead.append(following)
+                        self.widest = max(self.widest, len(ahead) + 1)
+                    following = ahead[width - 1]
+                    if following.lastgroup != "tok" or len(following[0]) > _D5_MAX_TOKEN_CHARS:
                         break
-                    ahead.append(following)
-                    self.widest = max(self.widest, len(ahead) + 1)
-                following = ahead[width - 1]
-                if following.lastgroup != "tok" or len(following[0]) > _D5_MAX_TOKEN_CHARS:
-                    break
-                if not _joins(text[end.end():following.start()]):
-                    break
-                phrase = phrase + " " + _fold(following[0])
-                value = self._probe(phrase)
-                if value is None:
-                    break
-                width += 1
-                end = following
-                if value:
-                    best = (width - 1, phrase, value)
+                    if not _joins(text[end.end():following.start()]):
+                        break
+                    token = _fold(following[0])
+                    initial = _initial(token)
+                    initial_seen |= initial
+                    grown = phrase + " " + token
+                    value = self._probe(grown)
+                    if value is None and took and width < cap - 1 and not initial:
+                        # The phrase took an initial on another key's path (``john a`` of ``john a jones``) and dies
+                        # here: one probe of the phrase without the initials it took (``john smith``), paid for by
+                        # a window one token narrower, so a start never costs more than six probes.
+                        cap -= 1
+                        grown = bare + " " + token
+                        value = self._probe(grown)
+                        took = False
+                    elif value == "" and took and not initial:
+                        aside.append((width, bare + " " + token))  # the path runs on past it (``john a smith adm``)
+                    if value is None:
+                        if not initial:
+                            if took and width >= cap - 1:
+                                unresolved = width - 1
+                            break
+                        # A middle initial the key does not hold (``John A. Smith`` for ``john smith``): it joins
+                        # the hit if a key follows it, and takes its place in the window.
+                        width += 1
+                        end = following
+                        continue
+                    if initial:
+                        took = True
+                    else:
+                        bare += " " + token
+                    phrase = grown
+                    width += 1
+                    end = following
+                    if value:
+                        best = (width - 1, phrase, value)
+                # Where the walk ran on along a longer key past a phrase that took an initial (``john a smith`` of
+                # the sign-in name ``john.a.smith.adm``), the phrase without the initials (``john smith``) is tried
+                # after the walk, longest first, only where no longer hit was found and only with probes left, so
+                # the window never narrows for it and a start never costs more than six probes.
+                for extra, held in reversed(aside):
+                    if best is not None and best[0] >= extra:
+                        break
+                    if self.probes - spent >= _D5_MAX_KEY_TOKENS:
+                        unresolved = max(unresolved, extra)
+                        break
+                    found = self._probe(held)
+                    if found:
+                        best = (extra, held, found)
+                        break
+                if ((unresolved >= 0 and (best is None or best[0] < unresolved))
+                        or (initial_seen and width >= cap
+                            and (best is None or (best[0] < width - 1 and _initial(_fold(end[0])))))):
+                    # No extra probe or larger window: an unresolved name must never survive a budget refusal.
+                    # An earlier shorter hit does not resolve the initial-bearing extension at the window limit.
+                    return TEXT_PLACEHOLDER
             if best is None or best[1] in self.skip:
+                if first in _D5_TITLES and match[0][:1].isupper():
+                    if lead < 0:
+                        lead = match.start()
+                    lead_end = match.end()
+                else:
+                    lead = -1
                 continue
             extra, _phrase_hit, canonical = best
             last_match = ahead[extra - 1] if extra else match
             for _ in range(extra):
                 ahead.popleft()
-            start, stop = match.start(), last_match.end()
+            start, stop = (lead if lead >= last else match.start()), last_match.end()
+            lead = -1
             pieces.append(text[last:start])
             pieces.append(self._replacement(text, start, stop, canonical))
             last = stop
@@ -1580,6 +1723,48 @@ class _NameMatcher:
         pieces.append(text[last:])
         return "".join(pieces)
 
+    def whole(self, text: str) -> str:
+        """A structural mapping key (``priya_kovalenko``, ``PriyaKovalenko``) that is, as a whole, a person's key
+        phrase, as that person's pseudonym; any other key as it is. Title/initial variants are withheld after a
+        single probe of their plain form, avoiding ambiguity between recorded and derived identities. A product
+        field name (``_D5_FIELD_NAMES``: ``break_glass``, ``displayName``) is never renamed. At most one probe,
+        none for a pseudonym or a product field name."""
+        # Only structural keys reach this path: at most six 64-character tokens and five separators.
+        # Reject before regex/token allocation, then retain at most six tokens and stop on the seventh.
+        if len(text) > _D5_MAX_KEY_TOKENS * (_D5_MAX_TOKEN_CHARS + 1) - 1:
+            return text
+        opaque = _D5_TOKEN_RE.match(text)
+        if opaque is not None and opaque.lastgroup == "opaque" and opaque.end() == len(text):
+            return text
+        tokens: list[str] = []
+        for match in _D5_WORD_RE.finditer(text):
+            if len(tokens) == _D5_MAX_KEY_TOKENS or len(match[0]) > _D5_MAX_TOKEN_CHARS:
+                return text
+            tokens.append(_fold(match[0]))
+        if not tokens:
+            return text
+        phrase = " ".join(tokens)
+        if phrase.replace(" ", "") in _D5_FIELD_NAMES:
+            return text
+        if phrase in self.skip:
+            return text
+        # Probe only once, as before. Strip supported titles/initials before the probe and withhold the whole
+        # key on a hit: a plain form cannot establish which of competing recorded spellings owns this variant.
+        # No index entries or probes are added for inserted titles/initials; suffix-bearing keys still miss.
+        forms = _plain_forms(phrase)
+        plain = forms[-1] if forms else phrase
+        variant = plain != phrase and _drop_reason(plain, frozenset()) is None
+        if variant:
+            phrase = plain
+            if phrase.replace(" ", "") in _D5_FIELD_NAMES or phrase in self.skip:
+                return text
+        canonical = self._probe(phrase)
+        if not canonical:
+            return text
+        if variant:
+            return TEXT_PLACEHOLDER
+        return self._replacement(text, 0, len(text), canonical)
+
     def _replacement(self, text: str, start: int, stop: int, canonical: str) -> str:
         digest = pseudonym(self.key, canonical)
         return (_D5_ID_PREFIX if _id_context(text, start, stop) else _USER_PREFIX) + digest
@@ -1587,8 +1772,13 @@ class _NameMatcher:
 
 def _id_context(text: str, start: int, stop: int) -> bool:
     """Whether a hit sits in an id, URL or path (``user-<hex>``) rather than prose (``User <hex>``). A comma inside the
-    hit (``Kovalenko, Priya``) is prose."""
-    if any(not c.isalnum() and not c.isspace() and c != "," for c in text[start:stop]):
+    hit (``Kovalenko, Priya``), or a separator followed by whitespace (``John A. Smith``, ``Dr. Jane Doe``), is prose."""
+    for at in range(start, stop):
+        c = text[at]
+        if c.isalnum() or c.isspace() or c == "," or unicodedata.category(c).startswith("M"):
+            continue
+        if c in _D5_SEPARATORS and at + 1 < stop and text[at + 1].isspace():
+            continue
         return True
     left = text[start - 1] if start else ""
     right = text[stop] if stop < len(text) else ""
@@ -1730,11 +1920,16 @@ class _Redactor:
         overlay: dict[str, str] = {}
         if persons:
             table = base.table
-            for phrase, canonical in _build_index(persons, context_vocabulary | value_vocabulary).table.items():
+            found_index = _build_index(persons, context_vocabulary | value_vocabulary)
+            for phrase, canonical in found_index.table.items():
                 current = table.get(phrase)
-                combined = _combine(current, canonical)
+                if current and canonical and (phrase in found_index.derived) != (phrase in base.derived):
+                    combined = current if phrase in found_index.derived else canonical  # recorded outranks derived
+                else:
+                    combined = _combine(current, canonical)
                 if combined != current:
                     overlay[phrase] = combined
+            del found_index
         del found, persons  # this frame's last references to the value's discovery sets
         self.matcher = _NameMatcher(base.table, self.key, overlay, value_vocabulary)
         # Immutable ids are protected by value, whatever their shape and case (``planted_immutable_id`` is as much an id
@@ -1774,9 +1969,11 @@ class _Redactor:
         value = _ENCODED_EMAIL_RE.sub(self._mask_encoded_email, value)
         value = _GUID_RE.sub(self._mask_guid, value)
         # D5 applies to every string, controlled values and group or role names included (DEC-003); a mapping key
-        # is skipped only when it is a whole product identifier.
+        # shaped as a product identifier is masked only when it is, as a whole, a person's name.
         if not key or not _D5_STRUCTURAL_KEY_RE.match(value):
             value = self.matcher.mask(value, self.markup)
+        else:
+            value = self.matcher.whole(value)  # a product identifier, unless it is a person's name as a whole
         if not key and self.id_re is not None:
             value = self.id_re.sub(self._identifier, value)
         return value
@@ -2023,3 +2220,569 @@ def redact_payload(
 def temporary_key_note(context: RedactionContext) -> str:
     """``TEMPORARY_KEY_NOTICE`` when ``context`` uses a temporary key (a keyless run), ``""`` otherwise."""
     return TEMPORARY_KEY_NOTICE if context.temporary_key else ""
+
+
+# -- D5: product field names -----------------------------------------------------------------------------------------
+#
+# Generated: every product field name, lower-case letters and digits only, so ``break_glass``, ``breakGlass`` and
+# ``Break-Glass`` are one entry: property names in ``schemas/``, keys in ``configs/``, and the identifier-shaped
+# strings the code under ``src/`` writes as mapping keys or holds in module-level constants (hex digests left out).
+# ``_NameMatcher.whole`` never renames a mapping key spelled as one of them, and a person with a key equal to one is
+# counted as ``vocabulary`` in the unmatched note. The test
+# ``test_every_product_field_name_is_exempt_from_whole_key_masking`` in ``tests/test_redaction_person_names.py``
+# regenerates the set and fails, listing them, when a product field name is missing here.
+_D5_FIELD_NAMES = frozenset(
+    """
+aadadminconsentworkflow aadpremiump2 absent ac17 accept accepted acceptedbyseverity acceptedcount accepteddomains
+acceptedrisk acceptedriskcount acceptedrisks acceptedrisksummary accessdenied accessmode accesspackages
+accessreviews accesstoken account accountenabled accounting accounts accountsource action actionplan actionplanpath
+actionregister actions active activeconnection activecontext activecoveragegapcount activeusers activity actual
+actualstatus adapter adaptercapabilities adapterreportversion adapters added address addxheader adjacentdiffs
+adjudicated admin adminactivities adminauditlogconfig adminconsent adminconsentoff adminconsenton
+adminconsentrequestpolicy administrativeunits administrator administratorcount administratorexclusions
+administratormfa administratorset administratorsetunknown adminmfav2 adminrole admins adminsandguestinviters
+adminsetstate adminsguestinvitersandallmembers admitted affected affectedcount affectedobjects after
+agencycontactmissing agent agentidrisklevels agentriskhigh aggregateaddresses aggregateaddressesinvalid
+aggregatedcount agree agreement agreementcounts agreementpaircount agreements agrees aicontextpath
+alertmissingordisabled alertpolicies alerts alertsapiansweredlicensingnotread alertsapianswerednodefenderevidence
+alertstateunusable algorithm alias aliases aliaseserrors allalertsenabled allclear allcloudonly allcompliant
+alldisabled allenvironmentscovered allenvironmentspolicy allfindingshighconfidence alllocationscovered allow
+allowanonymoususerstostartmeeting allowcloudrecording allowedapplist allowedcombinations alloweddomain
+alloweddomaincount alloweddomains alloweddomainsasalist alloweddomainsstate allowedsenderdomains allowedtocreateapps
+allowedvalues allowemailintochannel allowexternalparticipantgiverequestcontrol allowfederatedusers allowinvitesfrom
+allowlabresponse allowlist allowlistunusable allowpstnuserstobypasslobby allowpublicusers allowteamsconsumer
+allowteamsconsumerinbound allowwrite allqualifier allrulesblock allrulesnotify alltypesprotected alongside also
+alsoreachablefrom alternatesetupsteps amcontext amlow analyzereport android androidcompliancepolicy
+androiddeviceownercompliancepolicy androidmanagedappprotections androidworkprofilecompliancepolicy annotateduser
+annotations anonymous anonymousaccess anonymouslinkcount anonymouslinkexpirydays answered antimalwarepolicies
+antimalwarerules antimalwareversion antiphishpolicies antiphishpolicy antiphishrules anyflag anyone anytrueismet
+aospdeviceownercompliancepolicy apicalls apienablement apiinventory apiinventorypath apiinventoryrecorderversion
+apikey apimethods apitoken apiversion appaudit appconsent appcredentials appdisplayname appid applicability
+applicabilitynotes application applicationauthenticationclientsigninactivity
+applicationauthenticationresourcesigninactivity applicationconsents applicationcredentialobjects
+applicationcredentials applicationfilter applicationname applicationprincipalcount applicationrestrictions
+applications applied appliedbuiltinprotectionpolicynoncompliant appliedcustompolicynoncompliant
+applieddefaultpolicynoncompliant appliedpresetnoncompliant applies appliesto appliestotruncated applytop
+appmanagementpolicies appmanagementpolicyappliesto appmissingreplyurl appowneredges appownerorganizationid
+apppermissionpolicies apppolicies appprobe appreadonlyfull apprestriction approles approvedremediation
+approximatelastsignindatetime apprun apps appsecret appsetuppolicies archive area arealabel areas array
+artefactwithheld artifact artifactcount artifactkind artifactmap artifactmissing artifactnotaddressable
+artifactoutsiderundir artifactpath artifacts artifactsha256 artifactunreadable aspackresponse assertion assertions
+assess assessed assessedat assessedcollectors assessedratio assessment assessmentcount assessmentid assessmentids
+assessmentpaths assessmentresults assessments assessrun assessscubagearexport assets assignaturesoutofdate assigned
+assignedpolicies assignedpolicycount assignedtoalldevices assignedtoallusers assignedusers assignment
+assignmentalert assignmentcount assignments assignmentsknown assignmentsunknowncount assurance
+atpbuiltinprotectionrules atpenterprise atppart atppolicyforo365 atppolicyrules atpprotectionpolicyrules atriskcount
+attachment attachments attackgraph attackpath attackpathid attackpaths attempt attempts attribution attrs audience
+audiences audit auditcommandlogpath auditdisabled auditex auditexapiinventory auditexappconsenthighprivilege
+auditexauthcapability auditexauthcontextspath auditexauthlist auditexauthstatus auditexauthuse
+auditexbreakglassaccounts auditexcollectorfailure auditexcollectorpermission auditexcollectorservice
+auditexcompareexternalassessments auditexcompareruns auditexcontractschemamanifest auditexcoveragegap
+auditexdiffruns auditexenableresponse auditexenterprisehandoff auditexenterprisehandoffpack auditexexoaccesstoken
+auditexexoremotedomainautofwd auditexexotransportexternalredirect auditexexportlist auditexfindingids
+auditexgoogledoctor auditexgoogleprobe auditexguardcontext auditexintunedevicestalesync auditexlabtenantids
+auditexlistadapters auditexlistblockers auditexlistcollectors auditexlistprofiles auditexlistresponseactions
+auditexlocalauthenv auditexm365connectionname auditexm365home auditexmcproot auditexnormalizeexternalassessment
+auditexnotifypreview auditexonly auditexopenfindingcount auditexpartnerdomainsfile auditexpermissionsledger
+auditexprivilegechangeevent auditexprobelive auditexprobesummarize auditexprooftable auditexreportanalyze
+auditexreportpreview auditexresourceroot auditexruleids auditexrulesinventory auditexrundelegatedaudit
+auditexrungoogleworkspaceaudit auditexrunofflinevalidation auditexrunresponseaction auditexsampleonly
+auditexsensitiveusersfile auditexsetupguide auditexsigninrisky auditexslackwebhookurl auditexspobroadlink
+auditexspoexternalprincipal auditexstaleguestdays auditexstalesyncdays auditexstate auditexsummarizerun
+auditexteamswebhookurl auditextenantid auditextenantname auditexuncappedwriterreads auditexusermfanotregistered
+auditexverifycustomerpack auditlevel auditlevels auditlogger auditlogpath auditlogs auditonbydefault auditor
+auditorprofile auditorscore auditplan auditplanpath auditplanstatus auth authcontext authcontextpath authcontexts
+authenticated authenticatesas authenticationcontextclassreferences authenticationflows authenticationflowspolicy
+authenticationmethod authenticationmethodconfigurations authenticationmethodfeaturesettings
+authenticationmethodpolicy authenticationmethodspolicy authenticationplans authenticationstrength
+authenticationstrengthcollection authenticationstrengthpolicies authenticationstrengthunverified authenticationtype
+authenticatorduplicated authenticatorentryabsent authenticatorstateunusable authmethodregistrationobjects
+authmethods authmode authoritative authority authorityurl authorityurlishttps authorization authorizationpolicies
+authorizationpolicy authpath authrequirements authscope authscopesummary authstrength authtype authz auto
+autoadmittedusers autoforwardenabled automated automaticrepliessetting automaticupdatemode
+automaticuserconsentinboundallowed automaticuserconsentoutboundallowed automationdetails autopilotquality
+autoupdateexpiration available avsignaturesoutofdate avstate azureadandpersonalmicrosoftaccount azureadmultipleorgs
+azurecli azureclientid azureclientsecret azuretenantaudit azuretenantid b2bcollaborationinboundaccess
+b2bcollaborationoutboundaccess b2bdirectconnectinboundaccess b2bdirectconnectoutboundaccess backoffseconds
+badrequest banners barlow barlow400 barlow600 barlowcondensed600 baseline baselinealignment baselineattribution
+baselinecompleted baselinediff baselinematch baselinepin baselinerundir baselines baselinesourcesha256
+baselinestatus baselinesteps baselinetext basis basissummary batch batchinnerrequests batchrequests bccmessage
+bearer because before beta betacalls bimi blastradius block blockaccess blockaccessscope blocked blockedapplist
+blockedcollectors blockedconnectorcount blockeddomaincount blockeddomains blockedgatecount blockedpermission
+blockedwithexclusions blockercount blockerhint blockerkind blockerreason blockers blockerspath blockersummary
+blockflagunusable blockingpolicies blocklegacyauthentication blocklist blocksplitacrosspolicies body bodycontains
+bodyorfilecontentreads bodyorsubjectcontains bodypreview boolean boollist bootstrap boundedsample boundedsamples
+bounds breached breaches breakglass breakglassaccounts breakglassassessment breakglassunresolved breakindex
+breakpoints broad broadcastpolicies broadcastrecordingmode broadpermissionsrecordedasscoperisk
+broadscopesrecordedasscoperisk browser build buildrunevidenceindex buildview builtin builtincompliant
+builtincontrols builtinnoncompliant builtinpolicies builtinprotectionpolicyappliescompliant builtinprotectionrules
+builtinruleunusable bundlehashessha256 business businessconnectorcount businessimpact businessreadyupdatesonly busy
+bytes cabreakglassexclusion cacheprompt caexists cafindings calendar calendaracls calendaraclserrors calendarid
+calendarresources calendars call caller candidategroupcount cannot cannottrust canonicalised canonicalref canreset
+cantrust capabilities capabilitybasis capabilitycount capabilitygated capabilitymatrix capabilitymatrixpath
+capabilitystatus capexclusions careportingonly case caseid caseorspace cases casmailboxsmtpauth catalogue
+catalogverifiedon category causeerrorclass caveats ceiling cell cellid cellinventory cells cellsfor cellsourcefile
+ceplusassessortest ceplustest chain changed changedin changedout changedpaths changes channels charsfull charskept
+check checkedcount checkedfilecount checkid checkids checklicenceorpermissions checkpointentries checkpointresume
+checkpointresumed checkpointstate checkpointstatepath checks checksumlinecount checksumssha256 chromeosdevices
+chunkcount chunkcounts chunkfiles chunkpaths chunks chunkwriter cisascuba cism365v3 cism365v7 citation citationcount
+citations citationsummary cited citedsections citedvariants claim claims class classes classic classification
+classifications classificationsunusable clean client clientall clientapplications clientapptypes clientconfiguration
+clientemail clienterror clientid clientlegacy clientsecret closed closedcount closedgate closedvalues
+cloudinstancename cloudpcs cloudtype code collaboration collect collected collectedat collectedlabel collection
+collectiongapcount collectiongaps collectionlimit collectionlimited collectionlimitedsections collectionlimitreached
+collectionnotices collectionstatus collectiontruncated collector collectorcheckpointstate collectorcount
+collectorparity collectorpermissions collectorpreset collectors collectorstatus collectorstatuscounts
+collectorswithmissingpermissions command commandcollectors commandcount commandempty commanderror commandexception
+commandline commandnotauthenticated commandnotavailable commandnotfound commandoptionalfailure commandoutputempty
+commandoutputoverlimit commandoutputparseerror commandparseerror commandrefused commands commandsrequired
+commandtimeout commandtools commandtype commandunits commandvariants commandwords comment comments commercial commit
+common commonword compare comparecontext comparedfiles compareexternalassessmentfiles comparemanyruns comparison
+comparisons compatibility complete completed completedcollectors completeeffectiverole completeequivalentscope
+completeexactscope completeofflinesample compliance complianceingraceperiod complianceplatformcoverage
+compliancepolicy compliancepolicyobjects compliancepolicysummary complianceunknown compliant compliantdevice
+components compromised concealednames conditionalaccess conditionalaccessgraph conditionalaccesspolicies
+conditionalaccesspolicy conditions confidence config configentryunusable configexclusiontarget configlistempty
+configlistunusable configmet confignotmet configonly configpath configs configshapeunusable configunusable
+configurationexport conflict conflictingpolicies conflicts conj connectedas connectionname connections connfilter
+consent consented consentmode consentpolicy consentpolicyobjects consumers contact contactsmissing contains
+containsauthclaims containspii content contentcapable contenthash contentreadcalls contentreads contenttype contexts
+contract contractissuecount contractstatus contractvalid contractvalidation contractversion control controlcategory
+controlid controlids controlname controlprofilecount controlprofileid controls controlselections controlsimulator
+conversations convertfromjson converttojson copilotadminsettingobjects copilotchatactiveusers
+copilotchatenabledusers copilotgovernance copilotusageobjects copilotusagereports core coremissing coreready
+coresecurity count countambiguous counted counts countsatorabovethreshold countsbyopenseverity countsbyseverity
+coverage coveragecount coveragegap coveragegapcount coveragegaps coveragegapweight coverageledger coverageledgeronly
+coverageledgerpath coveragenote coveragepath coveragereason coveragerowcount coveragerows coveragestatus
+coveragestatuscounts covered coveredbypolicyids coveredexclusions coversonlysomeadministratorroles created createdat
+createddatetime createdtime createdusing createdutc creators cred credential credentialrecord criteria critical
+criticality crosstenantaccess crosstenantaccessobjects crosstenantaccesspolicy crosstenantdefaultobjects
+crosstenantpartnerobjects current currentcompleted currentriskscore currentrundir currentscore custom
+customauthenticationfactors customauthfactors customcoverscompliant customerid customerpack customerpackredaction
+customerreason customersafe customnoncompliant customorderdependent custompolicies
+custompolicycoversallrecipientscompliant custompolicywithoutrule customqualifies customtopologyunusable
+cyberessentials damaged dame danglingreferences data dataclass dataexposure datahandling datahandlingevents
+datahandlingpath datamethodsseen dataprotection dataunavailableaccessdenied dataunavailablecustompolicypriority
+dataunavailablelicenceflagunusable dataunavailablenobaselinetext dataunavailablenolicence
+dataunavailablesectionempty dataunusablehiddencoveringrule dataunusableitemlabelabsent dataunusableitemvalue
+dataunusablepartialtier dataunusablepartialtiermaycover dataunusablepolicyset dataunusablequalifiershadowed
+dataunusableruleprioritytie dataunusablesectionnotalist dataunusablesubdomainrootcase
+dataunusablesubdomainwithoutroot dataverse daysuntilexpiry deadlineforfeatureupdatesindays
+deadlineforqualityupdatesindays deadlinegracedays deadlinegraceperiodindays debuglogpath decision declaredcalls
+declaredcollectors default defaultappmanagementpolicy defaultcatalogappstype defaultcompliant defaultconfiguration
+defaultdomain defaultenvironmentcovered defaultenvironmentnotcovered defaultlinkpermission defaultnoncompliant
+defaultnotsingleton defaultorder defaultpagesize defaultpolicy defaultpolicyambiguous defaultpolicyappliescompliant
+defaultpolicyunusable defaultqualifies defaultrun defaultsharinglinktype defaultuserrolepermissions defender
+defenderalertapi defenderalertsobserved defenderavobjects defenderavstate defenderavsummary defendercloudapps
+defendercloudappsconsentobjects defenderdlplicense defenderincidents defenderlicense defenderrequired
+defenderserviceplanpresent deferrallimitdays delayseconds delegated delegatedclientsigninactivity delegatedlogin
+delegatedpermissionclassifications delegatedprobe delegatedresourcesigninactivity delegatedroles delegatedrun
+delegatedscopes delete deleteaction deleted delivermessageafterscan demo demotenant denied dependencies
+dependencyavailable dependencytext dependencyunavailable dependson derivedfanout derivedfrom description
+desklesspack detafter detail detailkind details detbefore detection detectioncoverage detectionsignalobjects device
+devicebasedpush devicecompliancepolicies devicecompliancepolicyassignments deviceconfigurationassignments
+deviceconfigurationassignmentsfanout deviceconfigurationprofiles deviceconfigurations devicecount devicefilter
+devicefiltermode devicefilterrule devicehealthstate deviceid devicemanagement devicemanagementscripts devicename
+deviceposture deviceposturesummary devices devicestate devicestates dhsaddressabsent diagnostic diagnosticclasses
+diagnosticcount diagnostics diagnosticscount diagnosticspath diffruns diffsummary digests direct directactive
+direction directory directoryauditlogs directoryaudits directoryauditsreadable directoryrelationshipcoverage
+directoryrelationshipobjects directoryrelationships directoryscopeid directorysettings disabled
+disabledtier0principals disableenvironmentcreationbynonadminusers disableportalscreationbynonadminusers
+disablesharewitheveryone disabletrialenvironmentcreationbynonadminusers disagree disagreement disagreementpaircount
+disagreements disclaimer discoveredgroupcount discoverystatus displayconcealednames displayname disposition dkim
+dkimconfig dkimenabled dkimnotenabled dkimrecords dkimsigningconfig dkimstatus dlpcompliancepolicies
+dlpcompliancerules dlppolicies dlppolicyscopes dlppolicyunusable dlprules dlpstructureunusable dmarc
+dmarcagencycontacts dmarcdhsrua dmarcpublished dmarcrecords dmarcreject dnsposture dnsposturefailed
+dnspostureobjects dnspresent dnsresolvererror doamin docs docsguides docslegal docsprovenance docsreference doctor
+documenttitle documenturl dodcon domain domaindelegation domainhybridobjects domainjoineddevice domainname
+domainposture domains domainsettings domainshybrid domaintype domainuniverse domainunlabelled domainunusable
+domainvalidity dora driftsummary drive drivefilecontentreads drivefiles drivemetadataonly driver driversexcluded
+droppedconditions dryrun dscexport duplicatekeys durationms durationseconds dynamicdelivery edge edgecount
+edgecounts ediscovery ediscoverycases ediscoveryexportjobs ediscoveryreviewsets ediscoverysearches edit
+editiondependent effectiveadmin effectiveadminset effectiveadminsetstate effectiveadminsetsummary effectivedate
+effectivemfa effectivenote effectivesharingcapability eligible else elseif email emailaddresses
+emailattestationreauthdays emailattestationrequired emergencyaccess emitted empty emptyornonstringindexes
+emptyoutput emptypolicyassignmentlist emsedu emspremium enableatpforspoteamsodb enableautoreply enabled enabledcount
+enabledforreportingbutnotenforced enabledmissing enablednotboolean enabledpolicies enabledpolicycount
+enabledsecuritygroups enablefilefilter enablefirstcontactsafetytips enableforinternalsenders
+enableorganizationdomainsprotection enablesafelinksforemail enablesafelinksforoffice enablesafelinksforteams
+enablesafelist enablesimilardomainssafetytips enablesimilaruserssafetytips enabletargeteddomainsprotection
+enabletargeteduserprotection enableunauthenticatedsender enableunusualcharacterssafetytips enableviatag encrypted
+encryptionoff encryptionon encryptionrequired encryptionunknown enddatetime endofsupport endofsupportat
+endofsupportdate endofsupporthomepro endpoint endpointdevices endpointdlplocation endpointhost endpointname
+endpoints endpointstatuses endpointunavailable endswith endtime enforce enforced enforcedscopes
+enforcedwithexclusions enforces engineversion enrolled enrolledat enrollmenttype enterprisehandoff enterprisepack
+enterprisepremium entitlementcatalogs entra entries entry entrymissing enum environmentambiguous environmentcreation
+environmentgate environmentlist environmentlistunusable environmentname environments environmentsku environmenttype
+environmentunknown environmentwithoutpolicy eoponly eopprotectionpolicyrules error errorclass errorclasses errorcode
+errorcount errors estimatedriskreduction evaluated evaluatedscope event events everyfindinghasevidence everyone
+everything evidence evidencecount evidencedbpath evidencedepth evidencegates evidenceids evidenceindexpath
+evidencekind evidencelimits evidencemissing evidencepathcount evidencepaths evidenceref evidencerefgenerated
+evidencerefindex evidencerefs evidencescope evidencesource evidenceunusable exact examples exceptifrecipientdomainis
+exceptifsentto exceptifsenttomemberof exception exchange exchangeaccepteddomains exchangeactivesync
+exchangeapplicationpermissions exchangeassisted exchangeenterprise exchangeinventory exchangelocation
+exchangemissing exchangeonlinemanagement exchangepolicy exchangepolicyfailed exchangepolicyobjects exchangeprobe
+exchangereader exchangeready exchangesdeskless exchangesenterprise exchangesessentials exchangesstandard
+exchangesstandardmidmarket exchangestandard excl exclude excludeapplications excluded excludedaccounts
+excludedapplications excludedgroups excludedlocations excludedplatforms excludedprincipalcount excludedprincipals
+excludedusers excludegroups excludeguestsorexternalusers excludelocations excludeplatforms excluderoles
+excludeserviceprincipals excludeusers exclusion exclusioncount exclusions executable execute executed executedby
+execution executionverified executivesummary exemptionkeyambiguous existingexternalusersharingonly exists
+exoforwarding exospfrecordsforalldomains expandedgroupcount expandedmembercount expected expectedcollectors
+expectedcommands expectedcount expectedmanifestsha256 expectedmanifestsha256matched expectedreason expectedstatus
+expectedvalue expectmanifestsha256 expedited expeditedupdatesettings expired expiredsecret expiredwaiverstatuscount
+expiresatutc expireson expiressoon expiringacceptedriskcount expiringsoon expiringsooncount expirydaysremaining
+expirystate explain explainer explainererror explanation explanationsentences explanationtemplate
+explanationtemplatefallbacks explanationwords export exporters exportm365dscconfiguration exportmailbox
+exportmessage exportquarantinemessage exportsemanticsverified exposure extendedsupportuntil external externalaccess
+externalexecution externalidentity externalidentityobjects externalrecipients externalrelay externalreplymessage
+externaltenants externaluserandguestsharing externalusersharingonly extras fail failed failedoperationcount
+failedrelationshipcount failedruntime failon failures fallback false falsepositivenotes falsepositiveresistance
+family familyname fanout fanoutcomplete fanoutlimit fanoutomittedcount fanoutscope fanouttargetcount fanouttotal
+fast feature featuredeadlinedays featuredeferraldays featurepaused featuresettings featureupdateprofiles
+featureupdatesdeferralperiodindays featureupdatespaused featureupdatespauseexpirydatetime featureupdateversion
+federatedadminfound federatedcredentials federateddomaincount federatedmultifactor federatedsinglefactor
+federationconfiguration fetchstatus fido2 field fieldabsent fieldrules fields fieldunusable file
+fileanonymouslinktype files filetypes finally finance finding findingconfidence findingcount findingid findingids
+findings findingsasof findingscount findingspath fingerprint fingerprints finishreason firewallrequired firewalls
+first fixdetail fixtureprovenance flag flagandemptylist flagbad flagbadunlabelled flags flagtrue flagtrueunlabelled
+flagunusable flowdevicecode folderanonymouslinktype foothold footholdcount footholdcounts footholdlabel
+footholdreasons footholds forced forcedpiece foreach forensicaddresses forensicaddressesinvalid format formatlist
+formats formattable formatversion formerr forwardernotallowed forwardersallallowed forwardsexternally
+forwardsinternally forwardsto framework frameworkmappings frameworks frameworkthresholds freshness
+friendlynamewarningcount from fromid frompath fromscope fromstatus fromtype full fullcounts fullcountsbasis
+fulldescription fullname fullscanoverdue fullscanrequired gaactivationalert gaapproval gacountinrange
+gacountoutofrange gained gapseverity gasetupapp gate gcchigh generatedat generatedfilecount generatedfiles
+generatetemplate generator getantiphishpolicy getantiphishrule getatpbuiltinprotectionrule getatppolicyforo365
+getatpprotectionpolicyrule getchilditem getcontent geteopprotectionpolicyrule gethostedconnectionfilterpolicy
+gethostedcontentfilterpolicy gethostedcontentfilterrule getitem getitemproperty getitempropertyvalue
+getmalwarefilterrule getmessage getmg getmgallchatmessage getmgbeta getmgchatmessage getmgchatmessagedelta
+getmgchatmessagereply getmgchatmessagereplydelta getmgdriveitemcontent getmggroupcalendarevent
+getmggroupcalendarview getmggroupconversation getmggroupconversationthread getmggroupconversationthreadpost
+getmggroupevent getmggroupeventdelta getmggroupeventinstance getmggroupthread getmggroupthreadpost
+getmgteamchannelallmessage getmgteamchannelmessage getmgteamchannelmessagedelta getmgteamchannelmessagereply
+getmgteamchannelmessagereplydelta getmgteamprimarychannelmessage getmgteamprimarychannelmessagereply
+getmgusercalendarcalendarview getmgusercalendarevent getmgusercalendareventdelta getmgusercalendareventinstance
+getmgusercalendargroupcalendarevent getmgusercalendargroupcalendarview getmgusercalendarview getmguserchatmessage
+getmguserchatmessagedelta getmguserchatmessagereply getmguserdriveitemcontent getmguserevent getmgusereventdelta
+getmgusereventinstance getmgusermailfolderchildfoldermessage getmgusermailfolderchildfoldermessagedelta
+getmgusermailfoldermessage getmgusermailfoldermessagedelta getmgusermessage getmgusermessagedelta getonlyallowlist
+getpnpfile getpnpfilecontent getpnplistitem getpnppage getquarantinemessageheader getsafeattachmentpolicy
+getsafeattachmentrule getsafelinkspolicy getsafelinksrule givenname global globaladmin globaladmincount
+globaladministrator globaladministratorcount globalapprecommendation globalbad globalcatalogappstype
+globalduplicated globalgood globalreader globalrecord globalunusable gmail gmailbodyreads gmailsettingsonly good
+google googleactivityevents googlealertcenter googlealerts googlealiaserrors googleapi googleapipythonclient
+googleauth googleauthoauthlib googlecalendaraclerrors googlecalendaracls googlecalendarposture
+googlecalendarresources googlecalendars googlechromeosdevices googledevices googledirectory googlednsposture
+googledoctor googledomains googledrivefiles googledriveposture googlegmailsettings googlegroupmembererrors
+googlegroupmembers googlegroups googlegroupsettingerrors googlegroupsettings googlegroupssettings
+googlemailboxsettings googlemobiledevices googleoauthgranterrors googleoauthgrants googleoauthtokens googlepolicies
+googlereports googleroleassignments googlerunconfig googleshareddrives googletwosteppolicies googleuser googleusers
+googleworkspace googleworkspacebaseline googleworkspacelibraries googleworkspacesample governance governanceobjects
+grade grant grantanydevice grantcontrols grantdevices grantnotevaluable grants grantsunusable granttype graph
+graphcommand graphdocs graphfallback graphid graphmetadataandsettingsonly graphoutputsample graphpermissions
+graphpermissionscsv graphscopes graphtransient graudit group groupassignment groupdisplayname groupemail groupid
+groupmembers groupmemberserrors groupmembershipedges groupmembershipfanout groupname groupnames
+grouppolicyconfigurations groupprincipalcount groups groupsettings groupsettingserrors grouptargetcount guest
+guestorexternalusertypes guests guestsorexternalusers guestuserroleid guestusertypes guestwithrole guid guidedrun
+halcyon handoff handoffstatus hardwareoath hasapprole hasrole headercontains headers headline healthoverviews help
+helpdesk helpuri hiddencoveringrule hidefromuser high highconfidencephishaction highconfidencespamaction highlight
+highriskscopes hmacsha256 home hopcount hops host hostedconnectionfilterpolicy hostedcontentfilterpolicies
+hostedcontentfilterpolicy hostedcontentfilterrules href html httperror httpstatus humanreviewerrequired identifiedby
+identities identity identitybasis identitycontrolverdict identitycontrolverdicts identitygovernance identityonly
+identityprotection identityprotectionobjects identityprotectionriskdetection identityref
+identitysecuritydefaultsenforcementpolicy identitysource identityusers identityverified idformat idtoken ignored
+ignoredfailures ignoredfields immutableid immutableids impact implementationstatus implemented importap
+importsupported improvedcount improvedfindings inboundtrustcompliantdeviceaccepted
+inboundtrusthybridaadjoinedaccepted inboundtrustmfaaccepted inboxruleobjects incidents include
+includeagentidserviceprincipals includeall includeapplications includeauthenticationcontextclassreferences
+includeauthenticationcontexts includeblocked includedapplications includedgroups includedlocations includedusers
+includeexchange includegroups includeguestsorexternalusers includelocations includeplatforms includeroles
+includeserviceprincipals includeuseractions includeusers incomplete incompletecollectors incompleteevidence
+incompletefiles incompleteomitted incompletereasons incompleteshape index inferred info information informational
+informationuri infrastructure ingestiondisabled ingestionenabled ingraceperiod inline input inputcollectionlimited
+inputcomplete inputcondition inputcount inputfailedsections inputhmacsha256 inputissues inputlimited
+inputlimitedsections inputname inputpath inputrecordcount inputrecordcounts inputsha256 inputunreadable inscope
+insiderrisklevels installdelaydays installhint instrheadingline instructions instructionscrossreference
+instructionscrossreferencemetadata instrumentation insufficientpermissions integer integratedapps integrity intent
+internal internaldomains internaldomainssource internaldomainsstatus internalrecipients internalrelay
+internalreplymessage intune intunea intunead intuneassignmentobjects intuneavl intunedepth intuneedu
+intunepolicyassignmentobjects intunereader intunesmb invalid invaliddocument invalidobjectid inventory
+ioscompliancepolicy iosmanagedappprotections ipallowlist ippssessionnotopened isadmin isapprovalrequired isbuiltin
+isdataverseenabled isdefault isdelegatedadmin isdisabled isenabled isencrypted isexpirationrequired isguest
+islocalhost ismfaregistered iso27001 isolatedscopes ispowerappsenabled ispowerautomateenabled isprimary isprivileged
+isservicedefault isserviceprovider issuecodes issuecount issuedatutc issuekey issuenumber issuer issuerhost issues
+issuetype issueurl issuperadmin isuser isvirtualmachine iswildcard item itemcount items jailbreakblocked
+jailbreakclean jailbreakjailbroken jailbreaknotapplicable jailbreakunknown jailbroken json jsonlline
+jsonllinenotfound jsonpointer jsonpointercount jsonpointernotfound justification keycredentials keyedhmacsha256v1
+keyid keymaterial keynotpublished keytype kind kinds known knownlimitations knownlimits label labelnullok labels
+labguard labguardstate lady language lastfullscandatetime lastlogintime lastmodified lastmodifieddatetime
+lastquickscandatetime lastreportedat lastreporteddatetime lastseen lastseenat lastsignin lastsigninactivity
+lastsigninat lastsignindatetime lastsuccessfulsigninat lastsync lastsyncunknown latencyms lead leadmap leaf
+leafbesidebad leafcode leaftext leastprivilegefailed leastprivilegeok ledger ledgerunavailable leftassessment
+leftcheckids leftrun leftstatus legacy legacyallowed legacyauthenticationblock legacyblocked legacyblockedunlabelled
+legacyfallback legacynopolicies legacysectionnotalist legacyunresolvedref legacyunresolvedrefcount legacyunusable
+legal level licence licencefalse licenceflagunusable licenceinferred licencenotdetected licencereason licences
+licenceskupartnumbers licenceskus licencestate license licensedgroups licensedusers licensefit licenseinventory
+licenseprofile licenserequired licensestate licensetier licensetiers licensing limit limitationids limitations
+limitationsdeclared limitedpolicies limits line lineend lines lineskept linestart linestotal link linked
+linkpermissioncount list listblockers listcount listelementunusable listexists listfield listkey listrules
+livereadiness livereadinesspath loaded loadrunindexsummary loadtemplates local localauth localtool location
+locationnotcovered locations logicallocations loginactivities logourl logourlishttps longlivedsecret lookups lord
+lost lowconfidencefindings lowerbound lowwithrisky ltscendofsupport m365 m365cli m365cliappid m365cliclientid
+m365dsc m365edua3faculty m365edua3student m365edua5faculty m365edua5student m365environment machine macos
+macoscompliancepolicy maester mail mailbox mailboxauditbypass mailboxauditbypassclear mailboxauditdefault
+mailboxbodyreads mailboxes mailboxeswithsmtpauthenabled mailboxforwarding mailboxlicence mailboxsettingobjects
+mailboxsettings mailboxsettingsskippedsuspended mailboxusagedetail mailflow mailnickname main major majorbelow
+malformedlines malformedloglines malformedmanifest malformedrulecount malware malwarefilterpolicy malwarefilterrules
+malwareprotection malwareprotectionenabled manageasapp managedbymicrosoft manageddevices manifest manifestmissing
+manifestmissingreason manifestpath manifestsha256 manual mappingconfidence markdown marketing maskedrepairedkeys
+match matchedfields matchesvalidationjson maxage maxchars maxd maxdepth maxemptypages maximum maximumduration
+maxitems maxlifetime maxpaths maxresults maxrows maxscore maxsteps maxtop mcostandard mcsb mdelite mdesmb
+mdoautoforwardingmode mdoblockmailforward measureobject mechanisms medium meeting meetingpolicies meetings member
+memberof members membershipkind membersread message messagemoderationlevel messagerules messages messagetrace
+messagingpolicies meta metadata method methodenabled methodentrymissing methods methodsseen methodstateunusable
+metlownorisk metnoselfgrant metpolicyclean metpolicydeclaredexclusions metric mfacombinations mfaenrollmentratio
+mfageneral mfanotregistered mfaregistered mfaregistration mfaregistrationv2 microsoft365 microsoft365dsc
+microsoftgraphfound microsoftmanaged microsoftmaxscore microsoftonly microsoftscore microsoftstate
+microsoftupdateserviceallowed microsoftuserdefaultallowconsentapps microsoftuserdefaultlegacy
+microsoftuserdefaultlow microsoftuserdefaultrecommended migrationinprogress minimum minimumliveaccess
+minimummoduleversion minimumrolehints minosversion mintop miss missing missingappcredentials missingargument
+missingartifact missingcount missingevidence missingexpectedcollectors missingfield missingfields missingintent
+missingmanifest missingpaths missingpermissions mitigations mitigationsobserved mitreattack mobileanddesktopclients
+mobiledevices mode model modelabel modelname modelshadow modelstatus modevalid modified modifiedat modifiedcount
+modifieddatetime modifiedpaths modifiedtime modifysubject modulecompatibility modulecompatibilityunverified
+moduleincompatible modulename modulenotfound moduleversion monkey365 moot mootadditionblocked mootscopeunknown
+mostpermissivecapability movetofolder movetojmf mssecurescore msstatus mszerotrust mtasts multiplerecords
+multitenantapp mutatingcalls name namearguments namedenumsv1 namedlocation namedlocations nearmissexclusions need
+negatedquery neither nestedgroup network networkinspectionsystemenabled never neverconfigured newaccepted
+newacceptedcount newatorabovethreshold newcount newcountatorabovethreshold newest newfindings
+newmailboxexportrequest next nextactions nextexpiry nextlinkrefused nextstep nis2 nist80053 noaccountsidentified
+noaction nobaselinetext nobypassassociations nocontentreads nodata node nodecount nodefaultpolicy nodkimrecordentry
+nodlppolicies noenabledalertpolicies noenabledriskpolicies noevidence nofullprotectionrule noglobalpolicy
+noisesuppression noletters nolock nomanageddomain nomanifest nomfa nonbusiness nonbusinessconnectorcount
+noncompliant none noneenabled nonondefaultenvironments nonqualifyingblockpolicies nonqualifyingmfapolicies
+nonqualifyingpolicycount nonregular nopolicies nopolicycoversall nopolicymeets noqualifyingpolicy noqualifyingrule
+norecord noregoreader noreply normalizationcomplete normalizationcoverage normalizationincompletesections
+normalizationissuecount normalizationscope normalized normalizedcounts normalizeexternalassessment norulesconfigured
+nosetting nosigningconfig notallusers notapplicable notapplicablecollectors notapplicabletoplatform notassessed
+notassessedreasons notbeforeutc notblocked notcollected notcollectedarmdiagnosticsettings notcompromised note
+notenabled notenforced notes notexcludedaccounts notfound nothing notice notices notificationrecipients
+notificationrecommended notificationtype notifyunusable notifyuser notifyusertype notimp notimplemented
+notinorganization notmet notneeded notread notreassessed notreassessedcount notreported notrulegated notrun
+notselected notshown notverified noun nousableitems nouseractions null nulllistsreadasempty number nvareas
+o365business o365businessessentials o365businesspremium oauth oauth2permissiongrants oauthclient oauthclientpresent
+oauthgrants oauthgrantserrors object objectcount objectcounts objectdisplayname objectid objectids objectkind
+objectkinds objects objectstotal objectstruncated objectswithoutfield objecttype observationbasis observations
+observationuuid observed observedadmincount observedat observedcallcount observedcallindex observedcalls
+observedcommands observedcontentreadcalls observedcount observedglobaladmincount observedgraphendpoints
+observedgraphrequests observedledger observedlogcomplete observedmethods observedoutsidedeclared observedpermissions
+observedteamsadminrestendpoints observedteamsadminrestrequests observedvalue observedwritecalls ocloexec
+odbsharingcapability odirectory office office365activeusercounts officemobilesubscription officesubscription
+offlinebundle offlinereplay offlinesample oldest oneadmin onedrive onedrivefilecontentreads onedriveforbusiness
+onedrivelocation onedriveposture onedrivepostureobjects onedrivesharingcapability onedriveusageaccountdetail
+onlylegacyunresolvedrefs onofollow ononblock onpremisesimmutableid onpremisessamaccountname open opencount openended
+openfindingcount openfindings openweight operation operationcheckpointstate operations operator
+operatoraccountsunresolved operatorconfig operatorinputrequired operatorinputs operatorlimit operatoror optional
+optionalappescalationpermissions optionalcollection optionalcommands optionalsections ordinaryuser organisation
+organisationlevel organization organizationauditconfig organizationlinkcount organizationonly organizations
+orgconfig orgpolicy orgsettingnone orgsettingnotnone orgsettingvalueunusable orgunits orientationunitsdropped
+originalerrorclass orphaned orphanedsite orphansubdomain oscal oscalversion osfamily oslifecycle
+oslifecycleeditiondependent oslifecycleevaluatedon oslifecycletableverifiedon oslifecycleunknown
+oslifecycleunknownreasons osversion osversionmissing osversionunparsable other otheractivationalert outcome outdir
+outlook outnull output outputdir outputpath outsidedeclared overall overallstatus overflow overlimit oversize
+ownedresourcepolicies owner ownercount owners ownership ownershipstate ownertype ownlines owns ownsgroup pabsent
+pack packagemanager packdir packmanifest packmanifestpath packmanifestsha256 packrelativepaths packs packsha256 page
+pagecount pagenumber pagesize pagetoken paginationfailed paginationnotfollowed parameter params parentappid
+parentdisplayname parentid parentpolicyname parenttype parse parser parserclass partial partialbad partialcollectors
+partialfingerprints partialrequirementnogapfound partialrulenoncompliant partialsuccess partialtiermaycover
+partialtiernoncompliant partialtierviolation partialworkloadnotice partnerconfigurations partnerdomains pass
+passcodeminlength passcoderequired passed passwd password passwordcredentials passwordexpiryset passwordsneverexpire
+pastendoflife patch path patharguments pathcount pathprefix paths pathsafter pathsbefore pathsfound pathstyle
+payload payloadfilename payloadname payroll pctpartial percentage permission permissioncount permissiongrantpolicies
+permissiongrantpoliciesassigned permissiongrantpolicycollection permissiongrantpolicyidsassignedtodefaultuserrole
+permissionhints permissions permissionsledger permissionstop perpage persisting persistingcount
+personalmicrosoftaccount personalsitecount personalsites peruserdelegation phishexists phishingresistant
+phishingresistantpolicyids phishingresistantrolecataloguncoveredroles phishingresistantrolecatalogverdict
+phishingresistantverdict phishspamaction pill pimeligible pinnedreference pinnedrevision pinvalid placeholders plane
+plannedcommands platform platformcounts platformkey platformlabel platformnotcovered platforms pnotreject policies
+policiesmissingbreakglassexclusion policiesread policieswithoutexclusion policy policycascade policycollection
+policycount policyduplicated policyexplanations policyfieldunusable policyflagoff policyflagsok policyflagunusable
+policyid policyids policyitem policyleafunusable policymigrationstate policyname policynames policynotinexport
+policyobjectabsent policysampletruncated policyscope policyscopeunusable policysections policyunusable
+policywithoutexportablerules policywithoutrules position possible post postcheck posts posture powerapps powerbi
+powerbiaccessdeniedreason powerbilicensefound powerbitenantsettings powerplatform powerplatformdlppolicyobjects
+powerplatformenvironmentobjects powerplatformtenantsettingobjects powershellgraph ppconstant ppdlp ppflag
+ppisolation preambleunitsdropped preflight preflightblocked preflighterror preflightexception preflightpath
+preflightrows premigration prependsubject present preset presetcovers presetdomainscope presetnoncompliant
+presetqualifies presetre presetruleunusable presets presetscope presettopologyunusable presetvia previewnotification
+previewquarantinemessage previewreport previousstatus primaryemail principal principalcount principalid principalids
+principalname principaltype printer priority priorityunusable privacy privacylevel private privatecatalogappstype
+privatekey privileged privilegedgroupfanout privilegedrole privilegedroles privilegedusers privroles privusers probe
+probemode probesurface problem productdependencies productfamily productionwrites productivitylicence productstatus
+prof professor profile profiled profilenotallowed profilerolehints profiles profiletype project projected projectid
+projection promptconvention promptsha256 proof proofrows proofstatus prooftable prooftablecount proofversion
+properties propertymissing propertyname props protectedids protectednames protectednonempty protectionalerts
+protectionpolicyrules provenance provethis provider provideradapterversion providerassertions providerresponsibility
+providerscorecard provisioningpolicies prunable prunedkeys pruning pseudonymnotice publicfootprint
+publicfootprintobjects publiclookuperror published publisherdomain publishername purpose purview purviewauditexport
+purviewauditexports purviewauditjobs purviewdlppolicies purviewretentionlabels purviewretentionpolicies pwsh
+pwshmissing pwshpath pwshready python pythonpath qualifiershadowed qualifierwithheld qualifyingpolicies
+qualifyingrule quality qualitydeadlinedays qualitydeferraldays qualitygate qualitypaused qualitypauseexpiresat
+qualityupdateprofiles qualityupdatesdeferralperiodindays qualityupdatespaused qualityupdatespauseexpirydatetime
+quarantine query queryanswers querymethod queryname querypageminimum queryparams queryplan queryresult question
+questionset quickscanoverdue rank ratelimit rawca rawchanged rawclaims rawsecretcapture rdata reach
+reactivatedacceptedriskcount reactivatedacceptedrisks reactivatedatorabovethreshold
+reactivatedcountatorabovethreshold read readable readdetail readerrorclass readfailed readiness readonly
+readonlyaudit readonlyhint readonlyviolation readorder readstate readstatus readsunvalidatedfield readverballowlist
+readverballowlistexportonly readwrite realtimeprotectionenabled realtimestate reason reasoncode reasoncodes
+reasonpairs reasonpatterns reasons reasontext reasontexts reasontextsbycode reasonvariantsseen rebootrequired
+reception recipientcontains recipientdomainis recipienttype recollectunusableevidence recommendation
+recommendationids recommendations recommendationtext recommendedgranted recommendedpolicytype recommendedroles
+recomputed record recordcount recordkey recordkeycount recordkeys recordnotfound records redacted redactedartifacts
+redaction redactionmode redirect redirectrefused redirects redirectsrefused redirecturis references refindex
+refreshtoken refs refusalreason refused refusedcalls refusedcount registrationcontext registrationreportincomplete
+regoread reject relateddocuments relatedobservations relation relationship relationshipcount relationshipcoverage
+relationships relationshiptype release releasedatedisplayname releasenotintable releaseref releases relevantevidence
+remainingchanged remarks remediation remediationsource remediationsteps remediationstepsfull remediationtruncated
+remotedomains removed render renderfull renderreport repaired repairedkeys replace replacedby replay replaycontext
+replaysource replyurls report reportedstatus reportonlyblockpolicies reportonlymfapolicies reportonlypolicies
+reportonlypolicycount reportpackcitationsummary reportpackpath reportperiod reportproductfault reportqa
+reportrefreshdate reports reportsettings reportsreader reportsusage reportusability reportuuid repository request
+requestattempts requested requestedclaims requestedmatch requestedoperationcount requests
+requireanonymouslinksexpireindays requiredartifacts requiredevidencesectionnotcollected requiredgraphscopes
+requiredkey requiredpermissions requiredresourceaccess requiredscopes requiredtools requirement
+requirementssatisfied requirementstatus requirementstatuscounts requirementstatuses requires requireslivetenant
+requiresmfa requirespremiumlicense requireswriteaccess reruncollectors reruntext resolution resolved resolvedcount
+resolvedfindings resolvererror resource resourceids resourcenotfound resources resourceschemabaseline response
+responseaction responseadapter responseadapteroverridedisabled responseallowlabresponse responseallowwrite
+responseargumentmalformed responseargumentunsafe responsebodyhtml responsebodyplaintext
+responsecommandoverridedisabled responseexecute responseformat responseinvalidadapteroverride responselength
+responsepayload responsereadiness responsesha256 responsestatus responsesubject responsetarget responsetext
+responsewriteguard restrictedpolicyonly restrictforappscreatedafterdatetime restrictionnotmet restrictions
+restrictionscompliant restrictiontype restrictionunusable restricttocontacts restricttodomain result resultlimit
+results resumefrom retryaftersec returncode returnedvalue revd reviewartifacts reviewcommands reviewedcontrols
+reviewerindex reviewersummary reviewpolicyagainstbaselinetext reviewstatus revision rightassessment rightcheckids
+rightrun rightstatus risk riskafter riskbands riskbasedconditionalaccess riskbefore riskdetail
+riskdetectionavailable risklevel risklevelcounts riskrating riskscore riskstate riskstatecounts
+riskydelegatedpermissionclassifications riskyusersummary role roleassignablegroupmembers roleassignablegroupowners
+roleassignments roleassignmentschedule roleassignmentschedulecount roleassignmentschedules rolecatalogscope
+rolecataloguncoveredroles rolecatalogverdict rolecount roledefinition roledefinitionid roledefinitionname
+roledefinitions roledisplayname roleeligibilityschedule roleeligibilityschedulecount roleeligibilityschedules
+roleexclusions rolefieldunusable roleflagged roleid rolemanagementpolicyassignment rolemanagementpolicyassignments
+rolemanagementpolicyrule rolemanagementpolicyrules rolemanagementpolicyrulesfanout rolename rolenames roleoverlap
+roles roletemplateid roleunlabelled rolewithoutname rolewithoutpolicy rolloutsettings room root route routed routes
+rowcount rowindex rows rowscollected rtype ruaabsent rufabsent rule ruleabsent ruleanswered ruleevaluationfailed
+rulefailure ruleid ruleids ruleindex rulenotblocking rulenotimplemented rulenotnotifying ruleparameters rulepolicies
+ruleprecheck ruleprioritytie rules rulesacceptedrisk rulesaffected rulescopeunusable rulesevaluated rulesfailed
+rulesmapped rulesnotassessed rulesnotevaluated rulesource rulesourcetype rulespassed rulesspec rulessupporting
+rulestateunusable rulestatuses ruleunusable runa runainfo runb runbinfo runcount rundir rundirmissing rundirs
+runfile runfingerprint rungooglelive rungoogleoffline rungoogleprobe runid runmode runnablecollectors runname
+runoffline runpaths runs runtime safe safeattachmentpolicies safeattachmentpolicy safeattachmentrules
+safeforexternalllm safelinkspolicies safelinkspolicy safelinksresolution safelinksrules safety sales sameplatform
+sametenant sample samplebundle samplecount samplecounts sampledcount sampledusers samplelimit samplepath
+sampletruncated sanctioned sanctionedexclusionsource sarif sastoken savedauthcontext savedconnections
+savedconnectionserror savedcontext sc28 scan scanmaxbytes scanmaxchunks scanmaxrows scanner scansizeexceeded
+scanurls schemacontractversion schemadir schemas schemaversion scheme scope scopecount scopedgap scopenarrowed
+scopepostcheck scoperisk scopes scopescsv scopewarnings score scoreinpercentage script scripts scrub scubaconfig
+scubagear scubagearrevision searches searchmailbox searchunifiedauditlog second secondsremaining secops secret
+secretstate secrettext section sectionabsent sectiongapcollectors sectiongaps sectionnotalist sectionnotcollected
+sectionnotsingleton sections sectionscoped sectionshapeunusable sectionspruned sectionstats secure
+securebootrequired secureconfiguration securemissing securescore securescorecontrolprofiles securescores security
+securityalerts securitydefaults securitydirectoryauditevents securityonly securityreader
+securityscorecontrolprofiles securityscores securitysigninevents securitysuite securitysuiteunsuccessfulcommands
+securityupdatemanagement seen selected selectedcollectors selectobject selector selector1 selector2 selectordetails
+selectorsmissing selectorspresent selectorsunresolved sendas sendercontains sendnotification sensitiveruleunusable
+sensitiveusers sensitiveusersbinding sentinelxdr sentinelxdralertobjects sentinelxdrincidentobjects sentto
+senttomemberof separator sequence servererror servfail service serviceabsent serviceaccount serviceaccountkey
+serviceaccountkeypresent servicehealth servicehealthobjects serviceissues servicenotavailable servicenotrunning
+serviceplanid serviceplanname serviceplans serviceprincipal serviceprincipalappid serviceprincipalapproleassignments
+serviceprincipalcredentialobjects serviceprincipalcredentials serviceprincipalfilter serviceprincipalid
+serviceprincipalname serviceprincipalowners serviceprincipalrestrictions serviceprincipalrisklevels
+serviceprincipals serviceprincipaltype services servicesources servicestartedwithoutmalwareprotection
+serviceunavailable serving session sessioncontext sessioncontextpath sessioncontrols sessionnotconnected setting
+settingandcertconflict settingcascade settingduplicated settingentryduplicated settingentrymissing settingname
+settingnames settings settingsempty settingsnotalist settingsnotread settingsshapeunusable setupnotices setuponly
+setupsteps severity severitybefore severitycounts sha256 shareable shared sharedcontrolcount shareddrives
+sharedexceptions sharedreasons shareofsiteswithanyonelinks sharepoint sharepointaccess sharepointenterprise
+sharepointfilecontentreads sharepointlocation sharepointpermissionedges sharepointsettings sharepointsharingfindings
+sharepointsitepostureobjects sharepointsiteusagedetail sharepointstandard sharepointtenantsettings sharepointwac
+sharingalloweddomainlist sharingblockeddomainlist sharingcapability sharingcapabilityfromsites
+sharingcapabilitysource sharingdomainrestrictionmode sharingpolicy short shortdescription shown
+shownstepscutbeforeurlstep siemlogexport signals signature signaturestate signatureupdateoverdue signatureversion
+signinaudience signindataavailable signinlogs signinlogsreadable signinriskhigh signinrisklevels signins
+simulatedbestscore simulatedscoreafter since singlepolicyverdict singles sink site siteid sitekind sitename
+sitepermissionsbysite sites sitesexceedingtenantsetting siteslistedtruncated siteswithanyonelinks
+siteswithguestsharing sitevalues size sizebytes skillsappreadonlyescalation skillsauditexoperator
+skillsdelegatedauth skillsevidencepack skipcount skipped skippedcollectors skippedreason skippedsuspended skoid
+sktid slack sliderunusable smbbusiness smbbusinessessentials smbbusinesspremium smtpauthenabledmailboxcount
+smtpclientauthdisabled smtpclientauthenticationdisabled smtpdomain snapshot soc2 softwareoath sortobject source
+sourceartifactcount sourceartifacts sourcecollector sourcecommit sourcefile sourceid sourceintegritystatus
+sourcelinks sourcename sourcepath sourcereferences sources sourcesection sourcesha256 sourcetype sourceurl
+sourceversion spamaction spamcascade specificpeople specversion spee3 spee3usgovdod spee3usgovgcchigh spee5 spef1
+spfrecords spgated spoempty spoexternalsharingmanaged sponotsingleton sposhapeunusable spotenant spscalar stage
+stagecount stale staleacceptedriskcount staleacceptedriskcountatorabovethreshold staleacceptedrisks
+staleacceptedrisksatorabovethreshold staleaccountdays staleafterdays stalecount staledevicedays staleguestdays
+stalesyncdays staleuserdays standard standardcoverscompliant standardpack standardpresetcoversallrecipientscompliant
+start startdatetime starthere startswith starttime starttlsused state statecomplete statefieldabsent statement
+statenotastring statenotcomplete statenull statetransitioncount statetransitions status statusbefore statuscode
+statuscounts statuses statusreasons stderr stderrbytes stderrsample stdin stdout stdoutbytes stdoutsample steps
+stepwords stmtdone storage strategy strengthpr strict strictcoverscompliant strictpresetcoversallrecipientscompliant
+string structural subdomainpolicy subject subjectcontains subjects subjectscope subjectscoped subjectuuid
+subscribedskus subset substringpair subsurface success successful suffix summarizerun summary summaryjson summarymd
+summarymdpath summarypath superadmincount supersedes supplementarypolicies supplied support supported
+supportedactions supportedauthmodes supportedcount supportedeffectiverole supportedequivalentscope
+supportedexactscope supportedprofiles supportedproofrows supporting supportingevidenceonly supportssyntheticevidence
+suppressed suppressedchanged suppressedobjectkinds suppressedpathcounts suppressedreasoncounts surface surfacecount
+surfacecoverage surfaces surname symlinkcount symlinkpaths symlinks syncsampleusers syntaxok synthesis synthetic
+system systempromptsha256 t1098 t1114 t1199 t1528 t1552 t1566 tables tags tamperprotectionenabled target targetdir
+targeteddomainprotectionaction targeteddomainstoprotect targeteduserprotectionaction targeteduserscoverage
+targeteduserscoveragebinding targeteduserstoprotect targetid targetlist targetname targetresources targettype team
+teamgroups teamid teams teams1 teamsadminrest teamsbyteam teamslocation teamspolicy teamspolicyobjects
+teamspowershellnotsupported teamstokenunavailable technicalappendix technique techniquename techniques template
+templateid temporaryaccesspassmultiuse temporaryaccesspassonetime tenant tenantaccess tenantappsettings
+tenantconfigured tenantcontact tenantdefaultsmtpclientauthdisabled tenantfederationconfiguration tenantid
+tenantidentity tenantidpublic tenantidrequested tenantids tenantidsobserved tenantidunusable tenantisolation
+tenantkey tenantname tenantpolicy tenantregionscope tenantregionsubscope tenants tenantsettings termsofuse test
+testing text that theme themes then thinkingdisabled thinkingstripped third thirdparty thirdpartyapp threads
+threatintelligence threatprotectionrequired thresholddays thresholdfindings thresholdpercent throttlemode tier0
+tier0principallabels tier0principals tier0targets timeline timestamp timewindow title tlsrpt tlsverificationrelaxed
+toid token tokencache tokencachepresent tokenclaims tokenfailed tokenfile tokenpath tokenpreview tokenrequests
+tokensucceeded tokenurl tolower tool toolchain toolchaincount toolchainreadinesspath toolchains toolchainunavailable
+tooldependencies toolrequirements tools toomanytokens tooshort topfindings toplimit topopenfindings toseverity
+tostatus tostring total totals totype toupper traceback trackclicks tracked training transfermethods transformed
+transformedsourceartifacts translationcatalog translationcatalogcount transportauditlog transportconfig
+transportrule trim true truncated truncatedlists truncatedsections truncationreason trustedcollectors
+trustedgatecount trustlevel tsutc twoflag twosteppolicystatus twostepverificationpolicies type types typesmissing
+ultrasafe unassignedpolicycount unauthenticated unavailable unbackedstatuscount uncataloguedrequirementids
+unclassified uncompromised uncoveredroles undecidable unencrypted unexpandedgroupcount unexpected unexpectedcount
+unexpectedpaths unifiedauditlog unifiedauditlogingestionenabled unionpossible uniquebody units unknown unknownaction
+unknownfuturevalue unknownidentitycount unless unlisted unlistedcount unlistedpaths unmappable unmappedfindings
+unmet unmetpreconditions unreachable unreadable unreadablemanifest unreadablerule unreadableschedule unrecognised
+unrecognisedsettings unrecognisedvalues unresolved unresolvedaccounts unresolvedoperatoraccounts unresolvedreason
+unresolvedreference unrestrictedpolicies unsanctionedexclusioncount unsanctionedexclusions unseenenumvalue
+unseenshape unsuccessful unsuccessfulcount unsupported unsupportedclaimcount unsupportedclaims unsupportedconditions
+unsupportedenvironment unsupportedquery until unusable unverified unverifiedbatchrequests unverifiedcollectors
+unverifiedpolicies unwritable updatedat updatedtime updatemanagementobjects updatemanagementsummary updateprofile
+updatering updaterings urls usagereportobjects usagereportsettingobjects user useraccesscontrol useragent
+useraudithistory userconsent userdisplaynames useremail userid userkey usermail username userpauseaccess
+userprincipalcount userprincipalname userrecordunusable userregistrationdetails userriskhigh userrisklevels users
+usersettings usersigninactivity usertype uuid vacation valid validatecollection validated validateobject validation
+validationmode validationpath validationstatus validationsummary validitydays value valuecompliant valueconflict
+valuemembership valuenoncompliant valueoutsideset values valuesource valuetype valueunusable variant variantcount
+venv verdict verdicts verdictsource verdictstate verification verificationlevels verified verifiedon
+verifiedpublisherslowriskpermissions verifycustomerpack version viadomainscope viagroup view vocabulary voice waived
+waiver waiverapplied waiverfile waiverpath warn warning warningcount warnings warningwindowdays weak weaknesses
+weakownership weburl what whattocollect whereobject which whocanpostmessage wholeexport wholeobjectuse whyitmatters
+windefatp windows windows10compliancepolicy windows365 windows81compliancepolicy
+windowsfeatureupdateprofileassignments windowsfeatureupdateprofiles windowshelloforbusiness windowsphone
+windowsphone81compliancepolicy windowsprotectionstates windowsqualityupdateprofileassignments
+windowsqualityupdateprofiles windowsupdateforbusinessconfiguration windowsupdateringassignments windowsupdaterings
+withexchange withmcp without withoutexpirycount withoutownercount withoutreasoncount withpwsh wordingfile
+worksfromsavedbundle workspace workspacedomain worsenedcount worsenedfindings writeactions writecalls writecapable
+writecapablescopes writecapablescopesusedforreadonlymethods writeenterprisehandoffpack writeexplorer
+writeexportcheckpoint writeexportrecords writeexportsummary writelikepermissioncount writerisk
+x509certificatemultifactor x509certificatesinglefactor xdgdatahome xgithubapiversion xhttpmethod xhttpmethodoverride
+xmethodoverride xrefs yammerenterprise zapenabled
+    """.split()
+)

@@ -1,6 +1,7 @@
 """D5: every directory person's name is masked in shareable output, using synthetic values only."""
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -405,8 +406,11 @@ def test_reports_carry_the_note_only_when_names_are_unmatched(tmp_path: Path) ->
 
 def test_mapping_keyed_by_a_name_is_rewritten_with_collision_suffix() -> None:
     context = _context(_user())
-    out = redact_output({NAME: 1, "priya kovalenko": 2, _prose(): 3, "priya_kovalenko": 4, "display_name": 5}, context=context)
-    assert out == {_prose(): 3, f"{_prose()}#2": 1, f"{_prose()}#3": 2, "priya_kovalenko": 4, "display_name": 5}
+    value = {NAME: 1, "priya kovalenko": 2, _prose(): 3, "priya_kovalenko": 4, "display_name": 5, "PriyaKovalenko": 6,
+             "priya_kovalenko_mailbox": 7}
+    out = redact_output(value, context=context)
+    assert out == {_prose(): 3, f"{_prose()}#2": 1, f"{_prose()}#3": 2, _id(): 4, "display_name": 5, f"{_prose()}#4": 6,
+                   "priya_kovalenko_mailbox": 7}  # a structural key is masked only when it is the name as a whole
 
 
 # 9. group and role names (DEC-003)
@@ -558,3 +562,367 @@ def test_incomplete_discovery_still_refuses(run: Path) -> None:
 def test_non_string_name_is_ignored() -> None:
     value = {"user": {"kind": "user", "display_name": 42, "principal_name": ["x"]}, "text": "42 and Priya"}
     assert redact_output(value, context=RedactionContext()) == value
+
+
+# 18. middle initials, titles and name-equal mapping keys (M04-T04)
+
+JOHN = "John Smith"
+JANE = "Jane Doe"
+TITLES = sorted(redaction._D5_TITLES)
+
+
+def _people(*names: str) -> RedactionContext:
+    return _context(*(_user(name, name.lower().replace(" ", ".").replace("..", ".") + "@contoso.example") for name in names))
+
+
+@pytest.mark.parametrize("text", ["John A. Smith", "John A Smith", "John a smith", "John A. B. Smith", "JOHN Q. SMITH"])
+def test_middle_initial_of_a_name_recorded_without_it_is_masked(text: str) -> None:
+    out = redact_output(f"Report by {text}, today.", context=_people(JOHN))
+    assert out == f"Report by {_prose(name=JOHN)}, today.", out
+
+
+def test_middle_initial_recorded_in_the_name_masks_every_written_form() -> None:
+    recorded = "John A. Smith"
+    context = _people(recorded)
+    assert context.unmatched_names == ()  # ``. `` now joins, so the spelling as written is followed
+    for text in (recorded, "John A Smith", JOHN, "John B. Smith", "JohnSmith"):
+        assert redact_output(f"by {text} now", context=context) == f"by {_prose(name=recorded)} now", text
+
+
+@pytest.mark.parametrize("title", TITLES)
+def test_title_before_a_name_is_masked_with_it(title: str) -> None:
+    written = title.capitalize()
+    out = redact_output(f"Signed by {written}. Jane Doe and {written} Jane Doe.", context=_people(JANE))
+    assert out == f"Signed by {_prose(name=JANE)} and {_prose(name=JANE)}.", out
+
+
+def test_title_recorded_in_the_name_masks_the_bare_name() -> None:
+    recorded = "Dr. Jane Doe"
+    context = _people(recorded)
+    assert context.unmatched_names == ()
+    for text in (recorded, "Dr Jane Doe", JANE, "Prof. Dr. Jane Doe", "Dr. Jane Q. Doe", "JaneDoe"):
+        assert redact_output(f"by {text} now", context=context) == f"by {_prose(name=recorded)} now", text
+
+
+def test_title_without_a_name_or_written_in_lower_case_is_left() -> None:
+    context = _people(JANE, JOHN)
+    assert redact_output("Dr. Doe said Mr. Smith agreed", context=context) == "Dr. Doe said Mr. Smith agreed"
+    assert redact_output("we miss Jane Doe", context=context) == f"we miss {_prose(name=JANE)}"
+    assert redact_output("Dr. (Jane Doe)", context=context) == f"Dr. ({_prose(name=JANE)})"  # ``. (`` does not join
+    assert redact_output("Dr. Mr", context=context) == "Dr. Mr"
+
+
+def test_initial_and_title_joins_take_a_separator_then_whitespace_only() -> None:
+    context = _people(JOHN)
+    for text in ("John A . Smith", "John A.. Smith", "John A (Smith)", "John AB Smith", "John 4 Smith"):
+        assert redact_output(text, context=context) == text, text
+    assert redact_output("Dr .John Smith", context=context) == f"Dr .{_prose(name=JOHN)}"  # `` .`` does not join it
+    assert redact_output("A. Smith", context=context) == "A. Smith"  # an initial for the given name is not masked
+    assert redact_output("John A.Smith", context=context) == _id(name=JOHN)  # a separator with no space: id form
+
+
+@pytest.mark.parametrize("text", ["John A. Smith", "John A Smith", "John A. B. Smith", "Dr. John A. Smith"])
+def test_initial_on_another_keys_path_still_masks_the_name(text: str) -> None:
+    # ``john a`` is a prefix of the first.m.last sign-in name ``john.a.jones``: the path takes the initial, dies at
+    # ``smith`` and retries once without it (B1 of the privacy review).
+    context = _context(_user(JOHN, "john.smith@contoso.example"), _user("Johnny Jones", "john.a.jones@contoso.example"))
+    assert redact_output(f"Report by {text}, today.", context=context) == f"Report by {_prose(name=JOHN)}, today."
+    jones = _prose(name="Johnny Jones")
+    assert redact_output("John A. Jones and john.a.jones", context=context) == f"{jones} and {_id(name='Johnny Jones')}"
+    recorded = _people(JOHN, "John A. Jones")  # the same prefix from another person's recorded initial
+    assert redact_output(f"by {text} now", context=recorded) == f"by {_prose(name=JOHN)} now"
+
+
+@pytest.mark.parametrize("text", ["John A. Smith", "John A Smith", "Dr. John A. Smith"])
+def test_initial_on_a_key_that_runs_on_past_the_name_still_masks_it(text: str) -> None:
+    # ``john a smith`` is only a prefix of a longer key, so the walk does not die at ``smith``: the person's own admin
+    # sign-in name ``john.a.smith.adm`` or another person's recorded ``John A. Smith-Jones``. The phrase without the
+    # initial is probed once and held while the walk follows the longer key (B1 variant of the privacy re-check).
+    own = _context(_user(JOHN, "john.smith@contoso.example"), _user(JOHN, "john.a.smith.adm@contoso.example"))
+    assert redact_output(f"Report by {text}, today.", context=own) == f"Report by {_prose(name=JOHN)}, today."
+    assert redact_output("john.a.smith.adm", context=own) == _id(name=JOHN)
+    other = "John A. Smith-Jones"
+    hyphen = _context(_user(JOHN, "john.smith@contoso.example"), _user(other, "jsj@contoso.example"))
+    assert redact_output(f"Report by {text}, today.", context=hyphen) == f"Report by {_prose(name=JOHN)}, today."
+    assert redact_output("John A. Smith Jones", context=hyphen) == _prose(name=other)  # the longer key still wins
+
+
+def test_a_longer_name_with_an_initial_still_wins_over_the_form_without_it() -> None:
+    # The form without the initial is tried only after the walk, so it never narrows the window or takes the hit of
+    # a longer name: a six-token name with an initial, and a name the walk reaches through the miss fallback.
+    long = "Ana M. de la Cruz Silva"
+    assert redact_output(f"by {long} and Ana M de la Cruz Silva", context=_people(long)) == (
+        f"by {_prose(name=long)} and {_prose(name=long)}")
+    jones = "John Smith Jones"
+    context = _context(_user(JOHN, "john.a.smith.adm@contoso.example"), _user(jones, "jsj@contoso.example"))
+    assert redact_output("John A. Smith Jones and John A. Smith", context=context) == (
+        f"{_prose(name=jones)} and {_prose(name=JOHN)}")
+
+
+def test_a_comma_never_joins_a_title_to_a_name() -> None:
+    context = _people(JANE)
+    for lead in ("Dear Sir, ", "Ask the Prof., ", "Dr, "):
+        assert redact_output(f"{lead}Jane Doe signed", context=context) == f"{lead}{_prose(name=JANE)} signed", lead
+    assert redact_output("Dear Sir Jane Doe", context=context) == f"Dear {_prose(name=JANE)}"
+
+
+@pytest.mark.parametrize("profile", SHAREABLE_PROFILES)
+def test_initial_and_title_spellings_are_masked_in_every_shareable_profile(tmp_path: Path, profile: str) -> None:
+    from auditex.reporting import preview_report
+
+    root = _run(tmp_path / "run", [_user(JOHN, "john.smith@contoso.example"), _user(JANE, "jane.doe@contoso.example")],
+                narrative="John A. Smith asked Dr. Jane Doe to review it.")
+    key = _key(root)
+    out = preview_report(run_dir=str(root), format_name="md", include_sections=["executive_summary"], profile=profile)
+    assert f"{_prose(key, JOHN)} asked {_prose(key, JANE)} to review it." in out["content"]
+    assert not re.search(r"\b(?:John|Smith|Jane|Doe|Dr)\b", out["content"])
+
+
+def test_mapping_key_equal_to_a_name_is_masked_as_a_whole() -> None:
+    context = _people(NAME, JOHN)
+    value = {"priya_kovalenko": 1, "Priya-Kovalenko": 2, "PriyaKovalenko": 3, "john_a_smith": 4, "dr_john_smith": 5,
+             "priya_kovalenko_mailbox": 6, "display_name": 7, "userPrincipalName": 8, "kovalenko": 9}
+    out = redact_output(value, context=context)
+    assert out == {_id(): 1, f"{_id()}#2": 2, _prose(): 3, redaction.TEXT_PLACEHOLDER: 4, f"{redaction.TEXT_PLACEHOLDER}#2": 5,
+                   "priya_kovalenko_mailbox": 6, "display_name": 7, "userPrincipalName": 8, "kovalenko": 9}
+    assert redact_output(out, context=context) == out  # a pseudonym key is never matched again
+
+
+def test_mapping_key_equal_to_a_group_name_in_the_value_is_left() -> None:
+    context = _people("Kemi Rotax")
+    value = {"groups": [{"principalType": "Group", "displayName": "Kemi Rotax"}], "kemi_rotax": 1}
+    assert redact_output(value, context=context)["kemi_rotax"] == 1
+
+
+def test_initial_title_and_mapping_key_pseudonyms_come_from_the_matcher_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    index = redaction._build_index(redaction._names_as_persons([JOHN, "Dr. Jane Doe"]), frozenset())
+    calls: list[tuple[bytes, str]] = []
+    real = redaction.pseudonym
+    monkeypatch.setattr(redaction, "pseudonym", lambda key, text: calls.append((key, text)) or real(key, text))
+    text = "John A. Smith wrote to Prof. Jane Doe"
+    outputs = []
+    for key in (KEY, bytes(range(32, 64))):
+        matcher = redaction._NameMatcher(index.table, key)
+        out = matcher.mask(text)
+        assert out == f"{_prose(key, JOHN)} wrote to {_prose(key, 'Dr. Jane Doe')}", out
+        assert matcher.whole("john_smith") == _id(key, JOHN)
+        assert matcher.whole("JaneDoe") == _prose(key, "Dr. Jane Doe")
+        outputs.append(out)
+    assert outputs[0] != outputs[1]
+    assert calls and all(len(key) == redaction.PSEUDONYM_KEY_BYTES and key in (KEY, bytes(range(32, 64)))
+                         for key, _ in calls)
+    for canonical in (JOHN, "Dr. Jane Doe"):  # never an unkeyed hash of the name
+        assert hashlib.sha256(canonical.encode()).hexdigest()[:16] not in "".join(outputs)
+
+
+# 19. product field names, derived forms and recorded spellings (M04-T04 repair)
+
+
+def _product_field_names() -> set[str]:
+    """Every product field name, normalised as ``_D5_FIELD_NAMES`` holds them: property names in ``schemas/``, keys
+    in ``configs/``, and the identifier-shaped strings the code under ``src/`` writes as mapping keys (dict displays,
+    ``dict()`` keywords, subscript stores) or holds in a module-level constant (surface and collector names). A hex
+    digest (eight or more hex characters, one a digit) is neither a field name nor a person's key and is left out."""
+    root = Path(__file__).resolve().parents[1]
+    names: set[str] = set()
+
+    def walk(node: object, schema: bool) -> None:
+        if isinstance(node, dict):
+            if not schema:
+                names.update(node)
+            elif isinstance(node.get("properties"), dict):
+                names.update(node["properties"])
+            if schema and isinstance(node.get("required"), list):
+                names.update(name for name in node["required"] if isinstance(name, str))
+            for item in node.values():
+                walk(item, schema)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, schema)
+
+    for path in sorted((root / "schemas").glob("*.json")):
+        walk(json.loads(path.read_text(encoding="utf-8")), True)
+    for path in sorted((root / "configs").rglob("*.json")):
+        walk(json.loads(path.read_text(encoding="utf-8")), False)
+    for path in sorted((root / "src").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for statement in tree.body:
+            if isinstance(statement, (ast.Assign, ast.AnnAssign)) and statement.value is not None:
+                names.update(node.value for node in ast.walk(statement.value) if isinstance(node, ast.Constant))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                names.update(key.value for key in node.keys if isinstance(key, ast.Constant))
+            elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store) and isinstance(node.slice, ast.Constant):
+                names.add(node.slice.value)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "dict":
+                names.update(keyword.arg for keyword in node.keywords if keyword.arg)
+    return {
+        redaction._norm(name) for name in names
+        if isinstance(name, str) and redaction._D5_STRUCTURAL_KEY_RE.match(name)
+        and len(redaction._norm(name)) >= redaction._D5_MIN_KEY_CHARS
+        and not re.fullmatch(r"(?=[a-f]*[0-9])[0-9a-f]{8,}", redaction._norm(name))
+    }
+
+
+def test_every_product_field_name_is_exempt_from_whole_key_masking() -> None:
+    exempt = redaction._D5_FIELD_NAMES
+    assert all(redaction._norm(name) == name for name in exempt)
+    missing = sorted(_product_field_names() - exempt)
+    assert not missing, "regenerate _D5_FIELD_NAMES in src/azure_tenant_audit/output_redaction.py; missing: " + " ".join(missing)
+
+
+
+def test_product_field_keys_are_kept_when_a_person_has_that_name() -> None:
+    people = ("Break Glass", "Emergency Access", "Data Protection", "Display Name")
+    context = _people(*people)
+    assert context.unmatched_names == (("vocabulary", 4),)  # counted in the note
+    value = {"synthesis": {"break_glass": {"accounts": 1}}, "surfaces": {"emergency_access": 1, "data_protection": 2},
+             "breakGlass": 3, "Break-Glass": 4, "records": [_user(JOHN, "john.smith@contoso.example")],
+             "note": "Break Glass signed in"}
+    out = redact_output(value, context=context)
+    assert out["synthesis"] == {"break_glass": {"accounts": 1}}
+    assert out["surfaces"] == {"emergency_access": 1, "data_protection": 2}
+    assert out["breakGlass"] == 3 and out["Break-Glass"] == 4
+    assert set(out["records"][0]) == set(value["records"][0])  # ``display_name`` stays a field name
+    assert out["note"] == f"{_prose(name='Break Glass')} signed in"  # free text is still masked
+    # A person found only in the value (the per-value overlay) is held to the same rule.
+    found = redact_output({"records": [_user("Break Glass", "break.glass@contoso.example")], "break_glass": 1},
+                          context=RedactionContext(key=KEY))
+    assert found["break_glass"] == 1
+    assert redaction._NameMatcher({"break glass": "Break Glass"}, KEY).whole("break_glass") == "break_glass"
+
+
+@pytest.mark.parametrize(("recorded", "other"), [(JOHN, "John A. Smith"), (JANE, "Dr. Jane Doe")])
+def test_a_derived_form_never_takes_another_persons_recorded_spelling(recorded: str, other: str) -> None:
+    text = f"{recorded} met {other}."
+    expected = f"{_prose(name=recorded)} met {_prose(name=other)}."
+    assert redact_output(text, context=_people(recorded, other)) == expected
+    assert redact_output(text, context=_people(other, recorded)) == expected
+    for base, found in ((recorded, other), (other, recorded)):  # one in the context, the other only in the value
+        value = {"records": [_user(found, found.lower().replace(".", "").replace(" ", ".") + "@contoso.example")],
+                 "text": text}
+        assert redact_output(value, context=_people(base))["text"] == expected, (base, found)
+
+
+# Other-vendor review regressions, invented directory identities only.
+
+
+@pytest.mark.parametrize("title", ["", "Dr. "])
+@pytest.mark.parametrize("initials", ["A B C D E", "A. B. C. D. E."])
+def test_shorter_name_does_not_expose_an_unresolved_initial_extension(title: str, initials: str) -> None:
+    context = _people("Neral", "Neral Vosk")
+    text = f"{title}Neral {initials} Vosk wrote"
+    assert redact_output(text, context=context) == redaction.TEXT_PLACEHOLDER
+
+
+@pytest.mark.parametrize("composed, decomposed", [
+    ("\u0958neral Vosk", "\u0915\u093cneral Vosk"),
+    ("\u09dcneral Vosk", "\u09a1\u09bcneral Vosk"),
+    ("\u0f43neral Vosk", "\u0f42\u0fb7neral Vosk"),
+])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("markup", [False, True])
+def test_combining_marks_across_scripts_preserve_equivalent_names_and_source_offsets(
+    composed: str, decomposed: str, reverse: bool, markup: bool,
+) -> None:
+    recorded, written = (decomposed, composed) if reverse else (composed, decomposed)
+    matcher = redaction._NameMatcher(_people(recorded)._index.table, KEY)
+    prefix, suffix = ("<b>e\u0301: ", "</b>") if markup else ("e\u0301: ", "!")
+    text = f"{prefix}{written}; {written}{suffix}"
+    expected = f"{prefix}{_prose(name=recorded)}; {_prose(name=recorded)}{suffix}"
+    assert matcher.mask(text, markup=markup) == expected
+    assert matcher.probes <= 4 * 6
+    assert matcher.widest <= 6
+    assert matcher.mask(expected, markup=markup) == expected
+
+
+@pytest.mark.parametrize("initials", ["A. B.", "A B", "A. B. C.", "A B C"])
+@pytest.mark.parametrize("repetitions", [1, 80])
+def test_two_and_three_initials_with_admin_upn_and_trailing_word_mask_or_withhold(
+    initials: str, repetitions: int,
+) -> None:
+    name = "Neral Vosk"
+    context = _context(_user(name, "neral.a.vosk.adm@example.invalid"))
+    text = f"Neral {initials} Vosk wrote; " * repetitions
+    out = redact_output(text, context=context)
+    assert out == redaction.TEXT_PLACEHOLDER or out == f"{_prose(name=name)} wrote; " * repetitions
+    assert "Neral" not in out and "Vosk" not in out
+
+
+@pytest.mark.parametrize("recorded", ["Néral Vosk", "Ne\u0301ral Vosk"])
+@pytest.mark.parametrize("written", ["Néral Vosk", "Ne\u0301ral Vosk", "Néral É. Vosk", "Ne\u0301ral E\u0301. Vosk"])
+def test_composed_and_decomposed_names_and_initials_share_token_boundaries(recorded: str, written: str) -> None:
+    # The two composed-name cases already passed before the fix; retain them as guards.
+    # The other six cases require combining marks to stay in their original token.
+    context = _people(recorded)
+    assert redact_output(f"by {written}, today", context=context) == f"by {_prose(name=recorded)}, today"
+    assert redact_output(f"<b>{written}</b>", context=context, markup=True) == f"<b>{_prose(name=recorded)}</b>"
+
+
+@pytest.mark.parametrize("separator", [" ", "\t", ", ", ".", "_", "-", "'", "’"])
+@pytest.mark.parametrize("initial", ["", "É. ", "E\u0301. ", "É ", "E\u0301 "])
+@pytest.mark.parametrize("markup", [False, True])
+def test_unicode_name_matching_preserves_source_offsets_and_budgets(
+    separator: str, initial: str, markup: bool,
+) -> None:
+    recorded = "Néral Vosk"
+    context = _people(recorded)
+    matcher = redaction._NameMatcher(context._index.table, KEY)
+    # Call the matcher directly to check offsets in the original decomposed string.
+    # Multiple hits and decomposed surrounding text expose any shifted source offsets.
+    written = f"Ne\u0301ral{separator}{initial}Vosk"
+    prefix, suffix = ("<b>e\u0301: ", "</b>") if markup else ("e\u0301: ", "!")
+    text = f"{prefix}{written}; {written}{suffix}"
+    replacement = _id(name=recorded) if separator in (".", "_", "-", "'", "’") else _prose(name=recorded)
+    expected = f"{prefix}{replacement}; {replacement}{suffix}"
+    assert matcher.mask(text, markup=markup) == expected
+    pattern = redaction._D5_MARKUP_TOKEN_RE if markup else redaction._D5_TOKEN_RE
+    tokens = sum(m.lastgroup == "tok" for m in pattern.finditer(text))
+    assert matcher.probes <= tokens * 6
+    assert matcher.widest <= 6
+    assert matcher.mask(expected, markup=markup) == expected
+
+
+@pytest.mark.parametrize("recorded, mapping_key", [
+    ("Neral A. B. Vosk", "NeralABVosk"),
+    ("Neral A. B. C. Vosk", "NeralABCVosk"),
+    ("Neral Vosk", "neral_a_vosk"),
+    ("Neral Vosk", "neral_a_b_vosk"),
+    ("Neral Vosk", "dr_neral_vosk"),
+    ("Neral Vosk", "prof_dr_neral_a_vosk"),
+])
+def test_whole_mapping_keys_cover_joined_names_titles_and_initials(recorded: str, mapping_key: str) -> None:
+    context = _people(recorded)
+    expected = redaction.TEXT_PLACEHOLDER if "_" in mapping_key else _prose(name=recorded)
+    out = redact_output({mapping_key: 1, mapping_key + "_mailbox": 2, "display_name": 3}, context=context)
+    assert out == {expected: 1, mapping_key + "_mailbox": 2, "display_name": 3}
+    assert redact_output(out, context=context) == out
+
+
+def test_whole_mapping_key_with_competing_initial_names_is_withheld() -> None:
+    context = _people("Neral Vosk", "Neral A. Vosk")
+    assert redact_output({"neral_a_vosk": 1}, context=context) == {redaction.TEXT_PLACEHOLDER: 1}
+
+
+@pytest.mark.parametrize("parts", [
+    {"given_name": "Neral", "surname": "Vosk"},
+    {"name": {"givenName": "Neral", "familyName": "Vosk"}},
+])
+def test_parts_only_directory_records_mask_parts_and_associated_narrative(parts: dict) -> None:
+    user = {"kind": "user", **parts}
+    context = _context(user)
+    out = redact_output({"records": [user], "narrative": "Neral Vosk wrote"}, context=context)
+    assert out["narrative"] == f"{_prose(name='Neral Vosk')} wrote"
+    masked = out["records"][0]
+    if "name" in parts:
+        assert masked["name"] == {"givenName": redaction.TEXT_PLACEHOLDER, "familyName": redaction.TEXT_PLACEHOLDER}
+    else:
+        assert masked["given_name"] == masked["surname"] == redaction.TEXT_PLACEHOLDER
+    assert "Neral" not in json.dumps(out) and "Vosk" not in json.dumps(out)
+
+
+@pytest.mark.parametrize("parts", [{"given_name": "Neral"}, {"surname": "Vosk"}])
+def test_incomplete_name_parts_do_not_invent_a_directory_identity(parts: dict) -> None:
+    assert redaction._person({redaction._norm(k): v for k, v in parts.items()}) is None
