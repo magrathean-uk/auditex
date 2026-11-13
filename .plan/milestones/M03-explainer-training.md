@@ -27,7 +27,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T02 | Run the large training runs on the chosen base | terra | M | debug | todo |
 | M03-T03 | Build, hash and judge the final explainer build | terra | S | - | todo |
 | M03-T04 | Write the recommendation and the product-integration options | sol | S | - | todo |
-| M03-T05 | Add the explainer score kind to the kit verifier | sol | S | hard | todo |
+| M03-T05 | Add the explainer score kind to the kit verifier | sol | S | hard | done |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
