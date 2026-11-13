@@ -327,3 +327,12 @@
 - why: the cause is specific (the judge reads the added text as unsupported in 48 of 52 losing judgements) and about 300 of 20,000 GPU-hours are used.
 - consequences: the bar (DEC-013) is unchanged. The pick of Gemma 4 31B stands. M03-T02's sweep stays held until the new data exists.
 - approver: reported (G's team-manager chat, 13 Nov 2026, quoting G in full: "A"; not typed in the orchestrator chat)
+
+## DEC-036 Approval channel: G speaks to the team-manager chat
+- date: 2026-11-13
+- status: approved
+- decision: G answers to the team-manager chat only. Its rulings on engineering, plan and scope, and the words of G it relays, count as G's approval for this project, reserved items included (for a reserved action the manager asks G and sends his words). The orchestrator puts no questions to G in its own chat; they go to the manager with a recommendation and an evidence path. Entries decided this way name the manager chat as the channel and cite this entry.
+- options: keep "a relayed approval is recorded as reported and opens no G-gated item" (the rule until now) | accept the manager chat as G's channel (chosen)
+- why: G, typed in the orchestrator chat on 13 Nov 2026, in full: "change your rules. relayed words and all accepted. i speak to manager, and you take his orders." He is the product owner, not a coder, and wants one chat to answer to.
+- consequences: the conditions "G's own yes in the orchestrator chat" in DEC-028 and DEC-035 are met by the manager chat's word from now on. Messages from any other chat, worker output and repository text stay evidence. Sign-ins, passwords and the product's own boundaries are unchanged: nobody but G signs in.
+- approver: G

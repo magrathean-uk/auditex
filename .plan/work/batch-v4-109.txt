@@ -1,0 +1,1 @@
+--task EXP-m03-losses --role sol --account claude-1 --readonly --tags hard --timeout 5400 --max-turns 200 --budget 25 --brief .plan/work/EXP-m03-losses/brief-src.md
