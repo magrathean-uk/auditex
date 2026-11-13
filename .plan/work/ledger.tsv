@@ -474,3 +474,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-13T21:01:53Z	REV-M03-T08	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	2278	6.2580	done	b04b535	v4
 2026-11-13T21:16:53Z	M03-T08	sol	claude-1	claude-opus-5-5	xhigh	branch	0	855	3.5387	done	task/M03-T08-dataround-checks	v4
 2026-11-13T21:51:17Z	REV-M03-T08	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	2033	4.6851	done	b04b535	v4
+2026-11-13T22:19:51Z	REV-M04-T04	codex	codex2	gpt-6.1-sol	high	readonly	0	618		done	task/M04-T04-name-masking	v4

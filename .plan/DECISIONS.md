@@ -373,3 +373,22 @@
 - why: the author found the limit, the reviewer confirmed it (REV-AMEND-3, point 4), and the cap, the total and the existing stage checks all keep working.
 - consequences: M03-T08 is size M, not S. REV-M03-kit looks at the new check with the other vendor.
 - approver: auto
+
+## DEC-041 Codex seats may run down to 1 per cent of their week
+- date: 2026-11-13
+- status: approved
+- decision: the 85 per cent weekly ceiling on both Codex seats is lifted for now: each may be used until 1 per cent of its week is left. The owed other-vendor work starts tonight in this order: REV-M04-T04, then the one fix round by a Codex author (DEC-039) and its re-check; REV-M02-kit; the M05 other-vendor review. The quota is checked before each run and none starts on a seat at 98 per cent or more. Five projects share the two seats: Tier A first, and only what is needed.
+- options: wait for the resets of 14 Nov (the rule until now) | run the seats down (chosen)
+- why: G, relayed word for word by the team-manager chat on 13 Nov 2026: "also if anyone needs codex, feel free to run down both codex acocunts until 1%."
+- consequences: Track A (release 1.5.0) no longer waits for the reset. Dispatches to Codex run with the script's threshold set to 98 for that call only; the Claude seats keep 85.
+- approver: G (through the team-manager chat, DEC-036); the order of work is the manager's
+
+## DEC-042 M04-T04 fix round: the files line covers `_person()` for one fix
+- date: 2026-11-13
+- status: decided
+- decision: REV-M04-T04 (other vendor, changes-required at 0adcc49) lists five required changes. Four are in the name matcher; the fourth (a user record that carries only a given name and a family name is never discovered, so neither part is masked) is in `_person()` in the same file. The one fix round (DEC-039) covers that function too. Nothing else outside the name matcher changes.
+- options: leave the parts-only records for a later task (rejected: a readable name in shareable output, found by the tier A review before the release) | widen the files line inside the same module and owner (chosen)
+- why: same file, same module owner, and the round DEC-039 allows is meant to cover everything the review lists.
+- consequences: the re-check and the executing check cover it; if a fix moves the contract-smoke digests or the HTML peak ratio the author reports it and the change comes back as its own decision.
+- approver: auto
+

@@ -4,14 +4,14 @@ overall: 52% (was 53%)
 milestone: M02-explainer-data-and-judging 75%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: b04b535 2026-11-13T21:51:52Z
+last_checkpoint: 5ec272f 2026-11-13T22:21:04Z
 
 ## Next tasks
 - none
 
 ## Blockers
 - Host: the WGEX-first order is lifted (G's team-manager chat, 12 Nov, 23:00 GMT). Use the two heavy slots through hostload.sh in the ordinary way and wait while the load is above 12 (PLAN_LOAD_MAX=12).
-- M04-T04 (branch at 0adcc49, accepted under DEC-028) waits for REV-M04-T04 by Codex after the reset (14 Nov, 14:28 UTC; give it evidence-3.md and the BACKLOG lines), then merges through the records-folder merge wrapper. M04-T05 (branch at 45bb34f, DEC-029) waits for that merge, then a short re-read and a re-check. M05-T04 and M06-T01 wait for both merges. REV-M02-kit and the M05 other-vendor review wait for the same reset.
+- Track A (DEC-041: G lifted the Codex ceiling, seats may run to 98 per cent): REV-M04-T04 (Codex, tier A) is running on the branch head 0adcc49; then the one fix round by a Codex author (DEC-039), its re-check and an executing check, and the merge through the records-folder merge wrapper. M04-T05 (45bb34f, DEC-029) follows that merge with a short re-read and re-check; then M05-T04 and M06-T01. After the M04-T04 chain: REV-M02-kit, then the M05 other-vendor review. Check quota before each Codex run.
 - M04-T04 open defect: a name with two middle initials can stay readable when the probe budget runs out (the 41 reviewer probes pass; this case is outside them). Ruling (DEC-039): fix it with one more round by a Codex author after REV-M04-T04 has listed everything; it goes in that review's brief.
 - M03 (13 Nov): M03-T01 done, the rule picks Gemma 4 31B (no EU base in the band: Ministral 8B misses the floor on 2 seeds, 14B on 1). Every base ties the template on validation (0.50; the bar needs 0.729, DEC-013). Ceiling probe (M03-T02 round 1, DEC-034, 2.78 GPU-hours): the teacher-written targets themselves score 0.4757 against the template (wins 13, losses 26, ties 174 of 267; 0.47 on the held-out mix), so this training data cannot reach the bar and settings will not help. M03-T02 is partial and held: no sweep job before G's choice. GPU-hours so far: basecmp 235.67 of 1,024, large 2.78 of 2,048.
 
@@ -28,12 +28,12 @@ last_checkpoint: b04b535 2026-11-13T21:51:52Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 41% orchestrator
+claude 42% orchestrator
 claude-1 69% ok
 claude-2 49% shared
 claude-3 66% ok
-claude-4 26% ok
+claude-4 27% ok
 claude-5 75% ok
 codex 92% hot
-codex2 85% hot
+codex2 86% hot
 <!-- quota:end -->
