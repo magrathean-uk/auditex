@@ -1,0 +1,1 @@
+--task CHK-M04-T04 --role terra --account claude-5 --readonly --sha task/M04-T04-name-masking --tags debug,risk:high --timeout 5400 --max-turns 100 --budget 10 --brief .plan/work/CHK-M04-T04/brief-src-4.md

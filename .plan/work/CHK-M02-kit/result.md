@@ -1,0 +1,21 @@
+## RESULT CHK-M02-kit
+status: done
+summary: All M02 checks and verify lines pass, and the rules rerun agrees 221/221. `kit-check all` exits 1 only because `score` finds an M03-T02 result with no verified `runs/large` (M03 scope). 12 of M02-T03's 49 declared jobs are missing from the scheduler evidence, but they ran for 0 s with no GPU, so hours are unaffected. The checkpoint and build hashes on the system were not checked (no cluster access).
+changes: none in the repository; wrote only .plan/work/CHK-M02-kit/ (logs/, scripts/, notes.md, progress.md); scratch removed
+verification: kit-check all fail (exit 1, score discovery only; 16 of 17 checks pass); verify lines M02-T01 to T06 pass; DoD items 1 to 7 pass; DoD item 8 (the review verdict) not run, it is the reviewer's output; twins --heldout heldout-collected pass; collected pass; shasum -c on heldout-collected pass; rules rerun pass; dropped.json sum pass; scheduler comparison fail (12 jobs absent)
+risks: (1) 12 declared M02-T03 jobs (8355767 to 8355776, 8355826, 8355827) are not in the evidence file, so the reviewer should look them up on the system. (2) The kit's own `build_heldout.py --check` (wheel-based) was not run; the rerun used the v1.4.0 source archive. (3) Job 8357551 ran from the home folder, not `runs/m02t03`; it is declared and matches.
+questions_for_g: none
+### Findings
+- 1 `kit-check all` fail: exit 1, 16 of 17 checks pass; the failure is `score` discovery (M03-T02 result exists, no `runs/large`). All M01 and M02 checks pass, including bar, calibration, checks (T03 and T04), collected, selftest and twins. Logs: kit-check-all.log, verify-M02-T01.log to verify-M02-T06.log, verify-DoD1.log to verify-DoD7.log (all exit 0).
+- 2 pass: `twins --heldout heldout-collected` gives twins 0, sha256 80361d9e..., 221 rows, nn-copy 147/221, 99/221, 92/221. `collected` passes with 2 explainer files compared and 0 twins. Logs: twins-collected.log, collected.log, heldout-collected-sha256sums.log.
+- 3 pass: the v1.4.0 rules, from the `git archive` of the tag (module path asserted), agree with the sealed labels on 221/221 kept rows. Per state: met 86/86, not_met 110/110, not_applicable 15/15, not_assessed 10/10. Decided rows are 211/211, there are 0 mismatches, and `rule-outputs.json` equals the rerun. This matches `.plan/work/M02-T06/result.md`. Log: rules-rerun-v140.log.
+- 3 context: the same rules on the sealed provider-export form agree on 209/501 (met 83/217, not_met 101/250, not_applicable 15/24, not_assessed 10/10).
+- 4 pass: `dropped.json` has 280 entries, which equals the stated total, and the kept and dropped ids partition the 501 sealed ids. Dropped by state: met 131, not_met 140, not_applicable 9. Log: dropped-json-counts.log.
+- 4 per reason: section not collected 126; item value unusable 68; sharing capability 11; section empty 10; environment field 9; DNS record 8; twin after re-expression 6; share cap 1. "Rules decide another verdict" is 8 (not_met 6, met 2) and the other not-assessed codes total 33. All of these match the result's breakdown. The log also holds the 14 distinct codes and the split per sealed state, for judging each reason.
+- 4 per policy family: SECURITYSUITE 90, AAD 66, TEAMS 40, EXO 31, SHAREPOINT 28, POWERPLATFORM 14, POWERBI 11, across 91 distinct policies.
+- 5 fail: state, elapsed and GPUs match the evidence for 37 of 49 M02-T03 jobs and 9 of 9 M02-T04 jobs. The 12 jobs listed in the risks are missing from the evidence (0 s, no GPU, cancelled before start). Both inventories equal their exports.
+- 5 undeclared jobs: 0 evidence jobs for the M02-T03, T04 or T05 names and working folders are undeclared. M02-T05 declares no jobs and the evidence has none. Log: scheduler-accounting.log.
+- 5 hours: the recomputed figures match the result lines (prose 13.01, judging 17.04 from M02-T04 plus 0 from M02-T05). Both are under the caps (prose 256, judging 128, heldout 0). The reservation shares are prose 13.0100 of 13.0100 and judging 5.3244 of 17.0378.
+- 6 pass: `kit-check twins` recomputes the probe and the figures equal the results. Collected set: decisive 147/221 (67 per cent), full 99/221, policy-majority 92/221. Sealed set: 216/501 (43 per cent), 205/501, 189/501. Logs: twins-collected.log, kit-check-all.log.
+
+gpu-hours-recomputed: prose 13.01 judging 17.0378 heldout 0 reservation 18.3344

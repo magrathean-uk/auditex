@@ -1,0 +1,1 @@
+--task REV-M02-kit --role codex --model gpt-6.1-sol --account codex2 --readonly --tags hard --timeout 3600 --brief .plan/work/REV-M02-kit/brief-src.md

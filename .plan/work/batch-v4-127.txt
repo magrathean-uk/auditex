@@ -1,0 +1,1 @@
+--task CHK-M02-kit --role terra --account claude-3 --readonly --tags debug --timeout 5400 --max-turns 120 --budget 12 --brief .plan/work/CHK-M02-kit/brief-src.md

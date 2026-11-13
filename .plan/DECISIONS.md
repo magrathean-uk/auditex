@@ -401,3 +401,12 @@
 - consequences: applies to M04-T04's remaining Codex work and to M05-T04. G reads it in the manager's morning brief.
 - approver: manager (team-manager chat, 13 Nov 2026, under DEC-036); G is told in the morning brief
 
+## DEC-044 M04-T04: one last narrow round, then a stop rule
+- date: 2026-11-13
+- status: approved
+- decision: the Codex re-check at d719698 is changes-required on two narrow variants (B1: five or more middle initials beside a user known only by the same first name leaves the family name readable; B2: a combining mark outside the listed Unicode blocks stops an equivalent spelling from matching). The executing check passes at that head. One last round: a Codex author fixes exactly B1 and B2 as the reviewer specifies, with the regressions; the Claude executing check proves them; the Codex re-check looks at those two points only. Stop rule, binding: after this round there is no further author round on M04-T04. Anything the re-check still finds goes into the privacy reference as a stated limit in M04-T05. The one exception, a plain name in a common form left readable, goes to the manager as a choice and is not fixed on the orchestrator's own word. Then the merge, and M04-T05 follows.
+- options: A one last narrow round with the stop rule (chosen) | B merge now and name both as limits in the privacy reference
+- why: both fixes close a class and fail closed, B2 can leave real names in Indic scripts readable, and the task exists to prevent exactly that. G's direction stands beside it: less looping, quality first.
+- consequences: the round DEC-039 allowed is used; this is the only one after it. G reads it in the manager's morning brief.
+- approver: manager (team-manager chat, 13 Nov 2026, quoting its ruling: "A, one last round on M04-T04 with the stop rule"; under DEC-036)
+

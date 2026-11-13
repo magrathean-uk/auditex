@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 54% (was 52%)
-milestone: M02-explainer-data-and-judging 75%
+overall: 55% (was 54%)
+milestone: M02-explainer-data-and-judging 88%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 5470d97 2026-11-13T22:49:36Z
+last_checkpoint: 368a654 2026-11-13T22:59:19Z
 
 ## Next tasks
 - none
@@ -28,7 +28,7 @@ last_checkpoint: 5470d97 2026-11-13T22:49:36Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 43% orchestrator
+claude 44% orchestrator
 claude-1 70% ok
 claude-2 49% shared
 claude-3 66% ok
