@@ -309,3 +309,12 @@
 - why: the reading rule is set before the score exists (DEC-009 practice).
 - consequences: none unless the tie occurs.
 - approver: auto; listed for G
+
+## DEC-034 M03-T02 starts with a ceiling probe; the large sweep is held for G
+- date: 2026-11-13
+- status: acted on; listed for G
+- decision: the base comparison ended with every base tied with the template on validation (preference 0.49 to 0.52; the bar needs 0.729). The read-only diagnosis EXP-m03-ties measured that the models already match the teacher targets' fullness, that every model copies the template on the not_assessed rows because most such targets are copies, and that training had converged; it infers that the data and the judge set the ties, not the settings. M03-T02 therefore starts with one probe only: the 198 validation targets that differ from the template are judged against it in both orders with the unchanged judge and prompt (about 2.1 to 2.4 GPU-hours, stage `large`, kit folder `runs/large-ceiling-probe/`, added to the task's files line). No training job of the large sweep is submitted before G has seen the probe's result.
+- options: start the sweep on Gemma 4 31B now (rejected: up to 2,048 GPU-hours on settings the diagnosis says cannot move the score) | ask G before the probe (rejected: the probe is 0.1 per cent of the cap G confirmed and tells him what to decide) | probe first, then G (chosen)
+- why: DEC-013 says that if no model's band clears 72.9 per cent the question returns to G; the probe measures whether the training data itself can clear it.
+- consequences: if the targets also score near 0.5, G chooses between new training data aimed at what the judge rewards, revisiting rule 2 of the bar, or parking Track B. The pick of Gemma 4 31B stands by the rule whatever he chooses.
+- approver: auto; listed for G

@@ -44,7 +44,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 - The held-out set is not read (`heldout-reads: 0`, checked from the job logs, which are saved with `SHA256SUMS`).
 - Writes `selected-checkpoint: <run and step>`, `heldout-reads: 0` and `gpu-hours: large <used>` under `### Findings`.
 - verify: `grep -qx 'heldout-reads: 0' .plan/work/M03-T02/result.md && "$AIRR_KIT/bin/kit-check" score runs/large --result .plan/work/M03-T02/result.md`
-- files: `runs/large/**` and `runs/usage/M03-T02/**` in the AIRR kit folder; `.plan/work/M03-T02/result.md`
+- files: `runs/large/**`, `runs/large-ceiling-probe/**` (DEC-034) and `runs/usage/M03-T02/**` in the AIRR kit folder; `.plan/work/M03-T02/result.md`
 
 ### M03-T03 Build, hash and judge the final explainer build
 - Preconditions: M03-T02 and M02-T06 done; scored on the set and with the reporting M02-T06 fixed (`heldout-form: collected` uses its resealed set, `per-state` reports every bar figure per verdict state).
