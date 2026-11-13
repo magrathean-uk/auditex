@@ -340,7 +340,7 @@
 
 ## DEC-037 Plan amendment 3: one data round for the explainer, pilot first
 - date: 2026-11-13
-- status: approved; the merge waits for the re-check of the one repair round (B1, B2 and B3 of REV-AMEND-3); the pilot's result goes to the manager chat with the saved figures, and a failed pilot is G's choice, taken to him by the manager
+- status: approved; merged as 529c019 after one review, one repair and the re-check's approval at 97c80b6 (REV-AMEND-3); the pilot's result goes to the manager chat with the saved figures, and a failed pilot is G's choice, taken to him by the manager
 - decision: the data round G chose (DEC-035) enters M03 as a validation-only pilot with a pass rule written before its first job, then, only on a pass, regenerated and judge-filtered training data and a three-seed training run on it. The architect drafts it from `.plan/work/AMEND-3/brief-src.md` and the facts in `.plan/work/EXP-m03-losses/result.md`.
 - options: run the whole round at once (rejected: the classification rates the bar unlikely from removing faults alone, and the pilot costs 2.5 to 13.2 GPU-hours against 45 to 166 for the round) | pilot first (chosen)
 - why: the judge is right about the added text (75 of 82 losing judgements name a real fault); the bar needs about 139 of the 190 validation rows with headroom to win in both orders, against 13 today.
