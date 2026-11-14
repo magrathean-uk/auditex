@@ -27,12 +27,20 @@ tenant-wide Exchange policy visibility under Global Reader: read-only Get-* cmdl
 only; no mutating cmdlet is issued. A write-capable scope does not authorise tenant
 writes. No additional Graph permission is introduced by these defaults.
 
-Auditex opens no Security & Compliance (IPPS) session. Alert policies are **not
-assessed**, with reason `ipps_session_not_opened`: "Not assessed: alert policies
-need a Security & Compliance session, which Auditex does not open". This by-design
-section skip leaves the collector and run **ok** when other reads succeed; the gate
-passes with a named limitation. The gap remains in coverage, collection gaps,
-the handoff, explorer and AI context.
+Alert and DLP policies are read in a Security & Compliance (IPPS) session, which
+Auditex opens only in app-only **certificate** runs: a token minted silently from the
+certificate for Microsoft Exchange Online Protection is passed to
+`Connect-IPPSSession -AccessToken`. It needs `Exchange.ManageAsApp` on **Microsoft
+Exchange Online Protection** (a second admin consent) with Global Reader, and
+`ExchangeOnlineManagement` 3.8.0 or later; only read-only `Get-*` reads are issued
+(see the [admin permission guide](admin-permission-guide.md#security--compliance-in-app-only-certificate-runs)).
+A client-secret, delegated or access-token run opens no such session, and a connect
+that fails stops the reads that follow: alert and DLP policies are then **not
+assessed**, with reason `ipps_session_not_opened`. A session without the DLP cmdlets
+skips the DLP reads as `dlp_licence_not_detected`. These section skips leave the
+collector and run **ok** when other reads succeed; the gate passes with a named
+limitation. The gap remains in coverage, collection gaps, the handoff, explorer and
+AI context.
 
 The run sends the tenant's domain names to the public **Cloudflare DNS-over-HTTPS
 resolver**, `https://cloudflare-dns.com/dns-query`. Only domain names, no user data,
@@ -191,8 +199,8 @@ sign-in cannot serve silently (no consent for it) is recorded as a named coverag
 
 | Run mode | Interactive sign-ins per run | Service tokens |
 |---|---|---|
-| App-only, certificate (`--certificate-path`, `--certificate-thumbprint`) | 0 | All minted silently from the certificate: Microsoft Graph, Exchange Online, the Teams admin API, Power BI and Power Platform |
-| App-only, client secret (`--client-secret`) | 0 | Minted silently from the secret: Microsoft Graph, Exchange Online, Power BI and Power Platform; the Teams admin policies are skipped (`teams_token_unavailable`), never prompted |
+| App-only, certificate (`--certificate-path`, `--certificate-thumbprint`) | 0 | All minted silently from the certificate: Microsoft Graph, Exchange Online, Security & Compliance (`exchange_policy` alert and DLP reads), the Teams admin API, Power BI and Power Platform |
+| App-only, client secret (`--client-secret`) | 0 | Minted silently from the secret: Microsoft Graph, Exchange Online, Power BI and Power Platform; the Teams admin policies (`teams_token_unavailable`) and the Security & Compliance reads (`ipps_session_not_opened`) are skipped, never prompted |
 | Guided `app-audit` with Exchange | 0 | As app-only; the Microsoft 365 CLI signs in with the client secret, without a browser |
 | Delegated, one sign-in (`--interactive --client-id <sign-in app>`, and guided `gr-audit` when the sign-in app id is saved or passed) | 1 | Microsoft Graph from the sign-in; Exchange Online (`exchange_policy`) minted silently from the same sign-in. Teams admin, Power BI, Power Platform and Security & Compliance are not collected in delegated mode and never prompt |
 | Delegated, Azure CLI token (`--use-azure-cli-token`, and guided `gr-audit` without a sign-in app id and without Exchange) | 0 inside Auditex | Microsoft Graph from the operator's existing Azure CLI sign-in (one `az login` made before the run and reused until it expires). Auditex never runs `az login` during a run |

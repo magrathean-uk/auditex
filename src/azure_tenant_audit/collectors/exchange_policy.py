@@ -25,9 +25,26 @@ Detection-coverage commands (all read-only ``Get-*`` cmdlets):
   no account names are kept.
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-mailboxauditbypassassociation
 * ``Get-ProtectionAlert`` -> alert policy names, state, severity, category. Security & Compliance
-  PowerShell only (``Connect-IPPSSession``); Auditex never opens that session or invokes
-  the cmdlet, and records the ``ipps_session_not_opened`` section skip.
+  PowerShell only; see the compliance session below.
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert
+
+Security & Compliance reads (SCuBA MS.SECURITYSUITE 3.1-3.4 and 4.1) run in their own session, opened only in app-only
+certificate mode: a certificate token for the Microsoft Exchange Online Protection resource (``COMPLIANCE_SCOPE``, its
+``Exchange.ManageAsApp`` permission plus a read role such as Global Reader) is passed to ``Connect-IPPSSession`` as an
+access token with the initial domain. A secret, delegated or access-token run, or a connect that fails, records the
+``ipps_session_not_opened`` section gap on every read below and never invokes them after the failure; the gaps are
+section-scoped, so the Exchange reads above keep the collector's status.
+https://learn.microsoft.com/en-us/powershell/exchange/app-only-auth-powershell-v2
+
+* ``Get-ProtectionAlert`` (above) -> alert policy name and ``Disabled`` for SS 4.1.
+* ``Get-Command Get-DlpCompliancePolicy`` -> a count only: whether the session offers the DLP cmdlets, the DLP licence
+  fact ScubaGear reads the same way. A count of 0 skips the two DLP reads as ``dlp_licence_not_detected``.
+* ``Get-DlpCompliancePolicy`` -> name, state, mode, workloads and the five location lists; each location entry is
+  written as text, and every entry other than ``All`` becomes the placeholder ``location`` (no user, group or site name).
+  https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-dlpcompliancepolicy
+* ``Get-DlpComplianceRule`` -> name, parent policy, state, information types, block and notify settings; ``NotifyUser``
+  entries become the same-length placeholder ``recipient``.
+  https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-dlpcompliancerule
 
 Mail protection commands (Cyber Essentials malware protection and secure configuration; all read-only
 ``Get-*`` cmdlets that pass the shared read guard, Exchange Online PowerShell):
@@ -75,9 +92,14 @@ from collections.abc import Callable
 from typing import Any
 
 from ..adapters import get_adapter
-from ..adapters.powershell_graph import PowerShellGraphAdapter
+from ..adapters.powershell_graph import (
+    PowerShellGraphAdapter,
+    compliance_certificate_token,
+)
 from ..collection_gaps import (
+    DLP_LICENCE_SKIP_TEXT,
     IPPS_SKIP_TEXT,
+    REASON_DLP_LICENCE_NOT_DETECTED,
     REASON_FANOUT_LIMIT,
     REASON_IPPS_SESSION_NOT_OPENED,
     SECTION_SCOPED,
@@ -91,6 +113,25 @@ from .exchange_defender_commands import (
 )
 
 EXCHANGE_ONLINE_SCOPE = "https://outlook.office365.com/.default"
+# Security & Compliance PowerShell: the Microsoft Exchange Online Protection resource (Exchange.ManageAsApp on it).
+COMPLIANCE_SCOPE = "https://ps.compliance.protection.outlook.com/.default"
+
+# DLP reads ScubaGear's rules use. Location entries are cast to text, as ScubaGear's JSON export writes them.
+DLP_LOCATIONS = ("ExchangeLocation", "SharePointLocation", "OneDriveLocation", "TeamsLocation", "EndpointDlpLocation")
+DLP_POLICY_COMMAND = (
+    ",@(Get-DlpCompliancePolicy | Select-Object Name,Enabled,Mode,Workload,"
+    + ",".join(f"@{{Name='{name}';Expression={{[string[]]$_.{name}}}}}" for name in DLP_LOCATIONS)
+    + ")"
+)
+DLP_RULE_COMMAND = (
+    ",@(Get-DlpComplianceRule | Select-Object Name,ParentPolicyName,Disabled,IsAdvancedRule,AdvancedRule,"
+    "ContentContainsSensitiveInformation,BlockAccess,BlockAccessScope,NotifyUser,NotifyUserType)"
+)
+# A count, never empty: 1 when the session offers the DLP cmdlets (the DLP licence fact), else 0.
+DLP_LICENSE_COMMAND = "Get-Command Get-DlpCompliancePolicy -ErrorAction SilentlyContinue | Measure-Object | Select-Object Count"
+DLP_READS = ("dlpCompliancePolicies", "dlpComplianceRules")
+# Every read that runs in the Security & Compliance session; each is section-scoped.
+IPPS_OPERATIONS = frozenset({"protectionAlerts", "dlpLicense", *DLP_READS})
 
 # Forwarding mailboxes kept per run. The command asks for LIMIT + 1 rows so that a longer list is detected, not guessed.
 FORWARDING_MAILBOX_LIMIT = 500
@@ -120,22 +161,102 @@ def _exchange_session(client: Any, log_event: Any) -> dict[str, Any]:
         if delegated and user:
             return {"kind": "exchange_online", "access_token": delegated, "user_principal_name": user}
         return {"kind": "none"}
-    organization = None
-    if token and hasattr(client, "get_all"):
-        try:
-            domains = client.get_all("/domains", params={"$select": "id,isInitial"})
-            organization = next((str(item["id"]) for item in domains if item.get("isInitial") and item.get("id")), None)
-        except Exception as exc:  # noqa: BLE001
-            if log_event:
-                log_event("collector.exchange_session.failed", "Could not read the tenant's initial domain", {"error": str(exc)})
+    organization = _initial_domain(client, log_event) if token else None
     if token and organization:
         return {"kind": "exchange_online", "access_token": token, "organization": organization}
     return {"kind": "none"}
 
 
+def _initial_domain(client: Any, log_event: Any) -> str | None:
+    """The tenant's initial ``.onmicrosoft.com`` domain from Graph, or None."""
+    if not hasattr(client, "get_all"):
+        return None
+    try:
+        domains = client.get_all("/domains", params={"$select": "id,isInitial"})
+        return next((str(item["id"]) for item in domains if item.get("isInitial") and item.get("id")), None)
+    except Exception as exc:  # noqa: BLE001
+        if log_event:
+            log_event("collector.exchange_session.failed", "Could not read the tenant's initial domain", {"error": str(exc)})
+        return None
+
+
+def _compliance_session(client: Any, organization: str | None, log_event: Any) -> dict[str, Any]:
+    """Security & Compliance session (certificate token plus initial domain), or a marker that none is available.
+
+    App-only certificate mode only: the token is minted silently from the run's certificate credential and must pass
+    ``compliance_certificate_token``. A secret, delegated or access-token run asks for no token at all (no Microsoft
+    source shows a secret-minted token is accepted), so it never prompts and the reads record ``ipps_session_not_opened``.
+    """
+    auth = getattr(client, "auth", None)
+    if getattr(auth, "certificate", None) is None or not hasattr(client, "app_token_for"):
+        return {"kind": "none"}
+    token = client.app_token_for(COMPLIANCE_SCOPE)
+    if not token or not compliance_certificate_token(token):
+        if log_event:
+            log_event("collector.compliance_session.unavailable", "No certificate token for the compliance session",
+                      {"error_class": REASON_IPPS_SESSION_NOT_OPENED})
+        return {"kind": "none"}
+    organization = organization or _initial_domain(client, log_event)
+    if not organization:
+        return {"kind": "none"}
+    return {"kind": "security_compliance", "access_token": token, "organization": organization}
+
+
+def _ipps_skip(command: str) -> dict[str, Any]:
+    return {
+        "command": command, "value": [], "status": "skipped", "reason": REASON_IPPS_SESSION_NOT_OPENED,
+        "error_class": REASON_IPPS_SESSION_NOT_OPENED, "error": IPPS_SKIP_TEXT,
+    }
+
+
+def _dlp_not_licensed(response: Any) -> bool:
+    """The licence probe ran and found no DLP cmdlet in the session (a count of exactly 0)."""
+    if not isinstance(response, dict) or response.get("error") or response.get("error_class"):
+        return False
+    rows = response.get("value")
+    return (isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict)
+            and type(rows[0].get("Count")) is int and rows[0]["Count"] == 0)
+
+
+def minimise_dlp(name: str, response: dict[str, Any]) -> None:
+    """Replace DLP location and notify-user entries in place; the rules read only ``All`` and list emptiness.
+
+    A lone information-type object becomes a one-item list, as ScubaGear's export always writes a list. A failed read
+    keeps only the length of its output, as the Defender rule reads do, since partial output can name people.
+    """
+    if name not in DLP_READS:
+        return
+    if response.get("error") and "stdout" in response:
+        response["stdout_bytes"] = len(response.pop("stdout"))
+    rows = response.get("value")
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if name == "dlpCompliancePolicies":
+            for key in DLP_LOCATIONS:
+                value = row.get(key)
+                if isinstance(value, list):
+                    row[key] = [item if item == "All" else "location" for item in value]
+                elif isinstance(value, str) and value and value != "All":
+                    row[key] = "location"
+            continue
+        notify = row.get("NotifyUser")
+        if isinstance(notify, list):
+            row["NotifyUser"] = ["recipient"] * len(notify)
+        elif isinstance(notify, str) and notify:
+            row["NotifyUser"] = "recipient"
+        if isinstance(row.get("ContentContainsSensitiveInformation"), dict):
+            row["ContentContainsSensitiveInformation"] = [row["ContentContainsSensitiveInformation"]]
+
+
 class ExchangePolicyCollector(Collector):
     name = "exchange_policy"
-    description = "Exchange transport, domain, connector, forwarding, malware filter, SMTP AUTH and DKIM signing policy posture."
+    description = (
+        "Exchange transport, domain, connector, forwarding, malware filter, SMTP AUTH and DKIM signing policy posture, "
+        "and Security & Compliance alert and DLP policies."
+    )
     required_permissions: list[str] = []
     command_collectors = [
         (
@@ -164,6 +285,9 @@ class ExchangePolicyCollector(Collector):
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count",
         ),
         ("protectionAlerts", ",@(Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule)"),
+        ("dlpLicense", DLP_LICENSE_COMMAND),
+        ("dlpCompliancePolicies", DLP_POLICY_COMMAND),
+        ("dlpComplianceRules", DLP_RULE_COMMAND),
         ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"),
         ("transportConfig", "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled"),
         # An aggregate, so the answer is never empty (an empty output is read as a failed command) and no mailbox is named.
@@ -184,15 +308,27 @@ class ExchangePolicyCollector(Collector):
         total = 0
 
         exchange_session = _exchange_session(context.get("client"), log_event)
+        compliance_session = _compliance_session(context.get("client"), exchange_session.get("organization"), log_event)
         anti_phish = _anti_phish_boundary(context)
         for name, command in self.command_collectors:
-            # Auditex deliberately opens no IPPS session. Never invoke this cmdlet.
-            if name == "protectionAlerts":
-                payload[name] = {
-                    "command": command, "value": [], "status": "skipped",
-                    "reason": REASON_IPPS_SESSION_NOT_OPENED,
-                    "error_class": REASON_IPPS_SESSION_NOT_OPENED, "error": IPPS_SKIP_TEXT,
-                }
+            if name in IPPS_OPERATIONS:
+                if compliance_session["kind"] != "security_compliance":
+                    # No session (or a connect that already failed): the read is never invoked.
+                    payload[name] = _ipps_skip(command)
+                    continue
+                if name in DLP_READS and _dlp_not_licensed(payload.get("dlpLicense")):
+                    payload[name] = {
+                        "command": command, "value": [], "item_count": 0, "status": "skipped",
+                        "reason": REASON_DLP_LICENCE_NOT_DETECTED, "error_class": "license_required",
+                        "error": DLP_LICENCE_SKIP_TEXT,
+                    }
+                    continue
+                response = adapter.run(command, log_event=log_event, session=compliance_session)
+                response.setdefault("command", command)
+                minimise_dlp(name, response)
+                payload[name] = response
+                if response.get("error_class") == REASON_IPPS_SESSION_NOT_OPENED:
+                    compliance_session = {"kind": "none"}
                 continue
             if name == anti_phish.OPERATION:
                 response = _run_anti_phish(adapter, command, log_event, exchange_session, anti_phish, context)
@@ -229,8 +365,14 @@ class ExchangePolicyCollector(Collector):
                 "error_class": response.get("error_class"),
                 "error": response.get("error"),
             }
-            if response.get("status") == "skipped":
-                row.update(status="skipped", section_scoped=True, reason=REASON_IPPS_SESSION_NOT_OPENED)
+            if name in IPPS_OPERATIONS:
+                # Security & Compliance reads are section-scoped: their gap is named, the rules that read them say so,
+                # and the Exchange reads alone decide the collector's status.
+                row[SECTION_SCOPED] = True
+                if response.get("status") == "skipped":
+                    row.update(status="skipped", reason=response.get("reason"))
+                elif response.get("error_class") == REASON_IPPS_SESSION_NOT_OPENED:
+                    row["reason"] = REASON_IPPS_SESSION_NOT_OPENED
             if cut:
                 # More forwarding mailboxes exist than were kept: a coverage gap, so the rule never reads this list as clean.
                 row.update(

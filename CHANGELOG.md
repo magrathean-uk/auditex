@@ -13,6 +13,20 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ### Collection
 
+- **Security & Compliance alert and DLP policies (MS.SECURITYSUITE 3.1-3.4 and 4.1).** In an app-only run with a
+  certificate, `exchange_policy` now opens Security & Compliance PowerShell with `Connect-IPPSSession -AccessToken`
+  (a certificate token for the Microsoft Exchange Online Protection resource, minted silently from the run's certificate;
+  no sign-in) and reads `Get-ProtectionAlert`, a DLP licence probe (`Get-Command Get-DlpCompliancePolicy`, a count
+  only), `Get-DlpCompliancePolicy` and `Get-DlpComplianceRule`. New rule adapters `protection_alerts`,
+  `dlp_compliance_policies`, `dlp_compliance_rules` and `defender_dlp_license` feed the five rows. DLP location entries
+  other than `All` and notify-user entries are stored as placeholders. A secret, delegated or access-token run, or a
+  connect that fails, records the section-scoped gap `ipps_session_not_opened` on each read and never a pass; a session
+  without DLP cmdlets records `dlp_licence_not_detected` and the DLP rows read "licence not detected". Setup adds one
+  consent: `Exchange.ManageAsApp` on Microsoft Exchange Online Protection (Global Reader is already enough), and
+  `ExchangeOnlineManagement` 3.8.0 or later.
+- **API inventory: collection reads written `,@(Get-X ...)` are declared under their own cmdlet.** The declared command
+  family was read from whitespace-split text, so these reads appeared under `outside_declared`; the text is now split
+  at PowerShell punctuation as well.
 - **Teams org-wide app settings (MS.TEAMS 5.1-5.3).** `teams_policy` records the unified app-settings read
   (`tenantAppSettings`, the source of `Get-M365UnifiedTenantSettings`) as its own operation. Microsoft serves it only to a
   user sign-in, so an app-only run names the skip (`teams_powershell_not_supported`) and sends no request; the new

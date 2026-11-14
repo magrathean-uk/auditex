@@ -8,6 +8,7 @@ import pytest
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 from azure_tenant_audit.collectors.exchange_policy import (
     EXCHANGE_ONLINE_SCOPE,
+    IPPS_OPERATIONS,
     ExchangePolicyCollector,
     _exchange_session,
 )
@@ -134,7 +135,8 @@ def test_empty_failed_exchange_lists_stay_failures(monkeypatch, name, command, r
 _REQUIRED_ANSWERS = {'adminAuditLogConfig', 'organizationAuditConfig', 'mailboxAuditBypass',
                      'transportConfig', 'casMailboxSmtpAuth', 'acceptedDomains', 'remoteDomains',
                      'sharingPolicy', 'malwareFilterPolicy', 'atpPolicyForO365',
-                     'antiPhishPolicies', 'hostedContentFilterPolicies', 'hostedConnectionFilterPolicy'}
+                     'antiPhishPolicies', 'hostedContentFilterPolicies', 'hostedConnectionFilterPolicy',
+                     'dlpLicense'}
 
 
 def test_only_legitimately_empty_exchange_collections_are_wrapped():
@@ -189,4 +191,5 @@ def test_real_adapter_empty_lists_keep_exchange_collector_ok(monkeypatch, list_s
     assert result.status == 'ok'
     assert result.payload['mailboxForwarding']['value'] == []
     assert all(row['status'] == 'ok' or row.get('section_scoped') for row in result.coverage)
-    assert len(calls) == len(ExchangePolicyCollector.command_collectors) - 1
+    # The Security & Compliance reads open no session without a certificate credential and are never invoked.
+    assert len(calls) == len(ExchangePolicyCollector.command_collectors) - len(IPPS_OPERATIONS)

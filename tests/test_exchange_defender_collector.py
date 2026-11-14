@@ -10,7 +10,10 @@ import pytest
 from azure_tenant_audit import baselines
 from azure_tenant_audit.adapters.read_guard import check_command
 from azure_tenant_audit.collectors import exchange_defender_commands as defender
-from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
+from azure_tenant_audit.collectors.exchange_policy import (
+    IPPS_OPERATIONS,
+    ExchangePolicyCollector,
+)
 from azure_tenant_audit.secret_hygiene import redact_command_string
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -93,16 +96,20 @@ def test_defender_collector_collects_every_new_operation_without_changing_sessio
     assert result.status == "ok"
     assert set(NEW_OPERATIONS) <= result.payload.keys()
     assert all(result.payload[name]["value"] == [] for name in NEW_OPERATIONS)
-    assert all(row["status"] == "ok" for row in result.coverage if row["name"] != "protectionAlerts")
-    alert = next(row for row in result.coverage if row["name"] == "protectionAlerts")
-    assert alert["status"] == "skipped" and alert["reason"] == "ipps_session_not_opened"
+    assert all(row["status"] == "ok" for row in result.coverage if row["name"] not in IPPS_OPERATIONS)
+    # Without a certificate credential no Security & Compliance session opens: each of its reads is a named,
+    # section-scoped skip and is never invoked.
+    for name in IPPS_OPERATIONS:
+        row = next(row for row in result.coverage if row["name"] == name)
+        assert row["status"] == "skipped" and row["reason"] == "ipps_session_not_opened" and row["section_scoped"] is True
     names = list(result.payload)
     assert names.index("acceptedDomains") < min(names.index(name) for name in NEW_OPERATIONS)
     assert names.index("eopProtectionPolicyRules") + 1 == names.index("atpProtectionPolicyRules")
     calls = dict(adapter.calls)
     sessions = {name: calls[command] for name, command in ExchangePolicyCollector.command_collectors
-                if name != "protectionAlerts"}
-    assert dict(ExchangePolicyCollector.command_collectors)["protectionAlerts"] not in calls
+                if name not in IPPS_OPERATIONS}
+    commands = dict(ExchangePolicyCollector.command_collectors)
+    assert not {commands[name] for name in IPPS_OPERATIONS} & calls.keys()
     assert all(sessions[name] == {"kind": "none"} for name in NEW_OPERATIONS)
 
 

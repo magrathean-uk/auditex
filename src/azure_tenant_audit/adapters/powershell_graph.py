@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -18,9 +19,32 @@ from .read_guard import CommandRefused, VettedCommand, check_command, refusal_re
 # A signed-in user name (UPN): plain address characters only; it travels in the environment, never in script text.
 _USER_PRINCIPAL_PATTERN = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _ORGANIZATION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.onmicrosoft\.(?:com|us|de|cn)")
+# Security & Compliance PowerShell (Connect-IPPSSession): the Microsoft Exchange Online Protection resource, by its
+# identifier URI or its application id. Only an app-only token minted from a certificate for it opens the session.
+COMPLIANCE_AUDIENCES = frozenset({"https://ps.compliance.protection.outlook.com", "00000007-0000-0ff1-ce00-000000000000"})
+# Error class, and the fixed text the compliance prelude throws, when Connect-IPPSSession fails: the original error
+# (which can name the tenant, the app or the token) is dropped inside PowerShell and never reaches stderr.
+IPPS_SESSION_NOT_OPENED = "ipps_session_not_opened"
 # Bounded reads for a sensitive command: stdout chunk size and the stderr kept for failure classification only.
 READ_CHUNK = 64 * 1024
 STDERR_KEEP = 1024 * 1024
+
+
+def compliance_certificate_token(token: Any) -> bool:
+    """Credential gate for the Security & Compliance session; the service validates the signature.
+
+    Entra v1 ``appidacr`` and v2 ``azpacr`` are ``2`` for a certificate credential (``1`` is a client secret). A delegated
+    token (``scp``), a secret-minted, opaque or unreadable token, or one for another audience fails closed: no Microsoft
+    source shows a secret-minted token is accepted for app-only Security & Compliance PowerShell.
+    """
+    try:
+        payload = str(token).split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        credential = claims.get("azpacr", claims.get("appidacr"))
+        audience = str(claims.get("aud") or "").casefold().rstrip("/")
+        return credential == "2" and not claims.get("scp") and audience in COMPLIANCE_AUDIENCES
+    except (AttributeError, IndexError, ValueError, TypeError, RecursionError):
+        return False
 
 
 class _BoundedRun:
@@ -188,7 +212,24 @@ class PowerShellGraphAdapter(Adapter):
 
         Every connect passes an access token (DEC-065): an app-only token with -Organization, a delegated token
         from the run's one sign-in with -UserPrincipalName. Without a usable token there is no connect at all.
+
+        The ``security_compliance`` kind connects Security & Compliance PowerShell (``Connect-IPPSSession``, module
+        3.8.0 or later for its access-token parameter) with an app-only certificate token for the compliance audience
+        and the initial domain. A failed connect throws only the fixed ``IPPS_SESSION_NOT_OPENED`` text, so no read
+        runs outside the session and the failure is named, never a pass.
         """
+        if session and session.get("kind") == "security_compliance":
+            token = session.get("access_token")
+            organization = str(session.get("organization") or "")
+            if not token or not _ORGANIZATION_PATTERN.fullmatch(organization) or not compliance_certificate_token(token):
+                return ""
+            env["AUDITEX_IPPS_ACCESS_TOKEN"] = str(token)
+            return (
+                "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "
+                "try { Connect-IPPSSession -AccessToken $env:AUDITEX_IPPS_ACCESS_TOKEN "
+                f"-Organization '{organization}' -ShowBanner:$false -ErrorAction Stop | Out-Null }} "
+                f"catch {{ throw '{IPPS_SESSION_NOT_OPENED}' }}; "
+            )
         if not session or session.get("kind") != "exchange_online":
             return ""
         token = session.get("access_token")
@@ -271,6 +312,17 @@ class PowerShellGraphAdapter(Adapter):
 
         env = dict(os.environ)
         prelude = self._session_prelude(session, env)
+        compliance = _session_kind(session) == "security_compliance"
+        if compliance and not prelude:
+            # The compliance session needs its certificate token and initial domain; without them no process starts.
+            if log_event:
+                log_event(
+                    "command.failed",
+                    "Security & Compliance session not opened",
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words),
+                     "error_class": IPPS_SESSION_NOT_OPENED},
+                )
+            return {"error": IPPS_SESSION_NOT_OPENED, "error_class": IPPS_SESSION_NOT_OPENED, "command": safe_command}
         prepared = f"$ErrorActionPreference = 'Stop'; {prelude}{self._json_pipeline(script)}"
         if _sensitive(script):
             return self._run_sensitive(
@@ -331,6 +383,9 @@ class PowerShellGraphAdapter(Adapter):
                 module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
                 if module_missing:
                     error_class = "module_not_found"
+                elif compliance and result.returncode != 0 and IPPS_SESSION_NOT_OPENED in stderr:
+                    # The prelude's fixed text: Connect-IPPSSession failed, so the read never ran.
+                    error_class = IPPS_SESSION_NOT_OPENED
                 elif self._looks_like_not_found(combined) and session is not None and not prelude:
                     # Exchange/Teams cmdlets only exist inside a connected session.
                     error_class = "session_not_connected"
@@ -342,7 +397,8 @@ class PowerShellGraphAdapter(Adapter):
                     error_class = "command_error"
                 completed(error_class)
                 return {
-                    "error": "module_not_found" if module_missing else f"command_failed:{result.returncode}",
+                    "error": ("module_not_found" if module_missing else IPPS_SESSION_NOT_OPENED
+                              if error_class == IPPS_SESSION_NOT_OPENED else f"command_failed:{result.returncode}"),
                     "error_class": error_class,
                     "command": safe_command,
                     "return_code": result.returncode,
@@ -541,6 +597,10 @@ class PowerShellGraphAdapter(Adapter):
         except Exception:  # noqa: BLE001 - fixed class only: no str(exc), repr or traceback for this command
             event("command.failed", "PowerShell command exception", {"error_class": "command_exception", **numbers})
             return failure("command_exception", "command_exception", numbers)
+
+
+def _session_kind(value: Any) -> str | None:
+    return value.get("kind") if isinstance(value, dict) else None
 
 
 def _sensitive(script: str) -> bool:

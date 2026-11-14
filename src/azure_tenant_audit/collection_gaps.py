@@ -51,13 +51,26 @@ TRUNCATION_ERROR_CLASS = "collection_limit"
 # section say so themselves). Such a gap is still named: in the manifest, ``collection_gaps`` and the gates.
 SECTION_SCOPED = "section_scoped"
 
+# The Security & Compliance session (alert and DLP policies) opens only in app-only certificate mode; a run without it,
+# or a connect that fails, names this reason on every read that needed the session.
 REASON_IPPS_SESSION_NOT_OPENED = "ipps_session_not_opened"
-IPPS_SKIP_TEXT = "Not assessed: alert policies need a Security & Compliance session, which Auditex does not open"
+IPPS_SKIP_TEXT = (
+    "Not assessed: alert and DLP policies need a Security & Compliance session, which opens only with app-only "
+    "certificate authentication (Exchange.ManageAsApp on Microsoft Exchange Online Protection and a read role such as "
+    "Global Reader); no session was opened"
+)
+# The session opened but offers no DLP cmdlet: no DLP licence was detected (missing permissions look the same).
+REASON_DLP_LICENCE_NOT_DETECTED = "dlp_licence_not_detected"
+DLP_LICENCE_SKIP_TEXT = (
+    "Not assessed: the Security & Compliance session offers no DLP cmdlet, so no DLP licence was detected "
+    "(a missing DLP read role looks the same)"
+)
 
 REASON_TEAMS_TOKEN_UNAVAILABLE = "teams_token_unavailable"
 REASON_TEAMS_POWERSHELL_NOT_SUPPORTED = "teams_powershell_not_supported"
 SECTION_GAP_REASON_TEXT = {
     REASON_IPPS_SESSION_NOT_OPENED: IPPS_SKIP_TEXT,
+    REASON_DLP_LICENCE_NOT_DETECTED: DLP_LICENCE_SKIP_TEXT,
     REASON_TEAMS_TOKEN_UNAVAILABLE: "not collected: certificate token for the Teams admin API not available",
     REASON_TEAMS_POWERSHELL_NOT_SUPPORTED: "not collected: Teams PowerShell sessions are not supported",
 }

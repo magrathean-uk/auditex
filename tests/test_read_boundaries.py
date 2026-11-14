@@ -58,13 +58,13 @@ CONFIGS = REPO_ROOT / "configs"
 COLLECTOR_DEFINITIONS = CONFIGS / "collector-definitions.json"
 GOOGLE_DIR = SRC / "auditex" / "google_workspace"
 
-WRAPPER_VERBS = ("Import-Module", "Connect-ExchangeOnline", "Invoke-Expression")
+WRAPPER_VERBS = ("Import-Module", "Connect-ExchangeOnline", "Connect-IPPSSession", "Invoke-Expression")
 
 # Closed: the only executable sites allowed to carry a wrapper operation, and which ones.
 _TRUSTED_WRAPPER_SITES: dict[tuple[str, str], tuple[frozenset[str], str]] = {
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "PowerShellGraphAdapter._session_prelude"): (
-        frozenset({"Import-Module", "Connect-ExchangeOnline"}),
-        "Exchange Online connect preamble, prepended after the caller's script passed the guard",
+        frozenset({"Import-Module", "Connect-ExchangeOnline", "Connect-IPPSSession"}),
+        "Exchange Online and Security & Compliance connect preambles, prepended after the caller's script passed the guard",
     ),
     ("src/azure_tenant_audit/adapters/m365dsc.py", "M365DSCAdapter.run"): (
         frozenset({"Import-Module", "Invoke-Expression"}),

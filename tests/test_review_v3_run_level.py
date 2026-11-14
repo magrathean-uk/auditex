@@ -531,8 +531,11 @@ def test_ipps_skip_keeps_healthy_app_run_ok_and_real_exchange_failure_partial(mo
     assert manifest["overall_status"] == ("ok" if healthy else "partial")
     summary = {row["name"]: row for row in load(run_dir, "summary.json")["collectors"]}
     assert summary["exchange_policy"]["status"] == ("ok" if healthy else "partial")
-    from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
-    assert len(calls) == len(ExchangePolicyCollector.command_collectors) - 1
+    from azure_tenant_audit.collectors.exchange_policy import (
+        IPPS_OPERATIONS,
+        ExchangePolicyCollector,
+    )
+    assert len(calls) == len(ExchangePolicyCollector.command_collectors) - len(IPPS_OPERATIONS)
     row = next(row for row in load(run_dir, "coverage.json") if row["name"] == "protectionAlerts")
     assert row["status"] == "skipped" and row["section_scoped"] is True
     assert row["reason"] == row["error_class"] == "ipps_session_not_opened"

@@ -829,6 +829,10 @@ Graph camelCase is converted recursively for the selected fields.
 | `org_config` | Exchange raw `exchange_policy.organizationAuditConfig`: `{Identity, Name, AuditDisabled}`. The command selects all three fields. Normalised `organizationAuditConfig` records are keyed by `Identity`. Live `Identity` serialisation remains unverified; an unreadable value withholds the section. |
 | `meeting_policies` | Teams raw `teams_policy.meetingPolicies`: records containing only the validated fields `Identity`, `AllowAnonymousUsersToStartMeeting`, `AllowCloudRecording`, `AllowExternalParticipantGiveRequestControl`, `AllowPSTNUsersToBypassLobby`, `AutoAdmittedUsers`. Summary policy objects cannot supply missing fields. |
 | `sharing_policy` | Raw `exchange_policy.sharingPolicy` with `Name` and string `Domains`, available to the rule view. The model shape gate still withholds shapes without a frozen pack witness. |
+| `protection_alerts` | Raw `exchange_policy.protectionAlerts` (Security & Compliance session), rule view only: `{Name, Disabled}` per alert policy; `Severity`, `Category` and `IsSystemRule` are listed under `ignored_fields`. |
+| `dlp_compliance_policies` | Raw `exchange_policy.dlpCompliancePolicies`, rule view only: `Name`, `Enabled`, `Mode`, `Workload` and the five location lists (entries other than `All` stored as `location`). When the collector skipped the read because the session offers no DLP cmdlet (`license_required`, reason `dlp_licence_not_detected`) and `defender_dlp_license` reads false, the section is a known-empty list, so SS 3.1-3.4 read "licence not detected"; any other failure withholds it with the collector's error class. |
+| `dlp_compliance_rules` | Raw `exchange_policy.dlpComplianceRules`, rule view only: `Name`, `ParentPolicyName`, `Disabled`, `IsAdvancedRule`, `AdvancedRule`, `ContentContainsSensitiveInformation` (always a list), `BlockAccess`, `BlockAccessScope`, `NotifyUser` (same-length `recipient` placeholders), `NotifyUserType`; empty on the same licence condition as `dlp_compliance_policies`. |
+| `defender_dlp_license` | Raw `exchange_policy.dlpLicense`, rule view only: one `{Count}` row from `Get-Command Get-DlpCompliancePolicy`; true when the count is above 0, false at 0. A non-integer, negative or missing count, or a failed read, withholds it. |
 | `tenant_app_settings` | Teams raw `teams_policy.tenantAppSettings`, rule view only. A read answer gives `{SettingName, SettingValue}` per setting (`SettingValue` passed as read, so the rules judge a missing or non-string value; `Users` and `Groups` are never kept); a setting without a `SettingName` withholds the section. The unified app settings answer only a user sign-in, so an app-only certificate run records `tenantAppSettings` as a section-scoped coverage row with `status: skipped` and reason `teams_powershell_not_supported` and sends no request; from that skip alone the adapter gives the rules `[{"CertificateBasedAuth": true}]`, ScubaGear's certificate-authentication input, and MS.TEAMS 5.1v2-5.3v2 are decided from `app_policies`. Every other gap (`teams_token_unavailable`, `unsupported_environment`, a failed read) leaves the section not collected. |
 
 PowerShell sections can also use existing `normalized/exchange_policy_objects.json`
@@ -1516,7 +1520,7 @@ for at most 100 Windows devices; a larger fleet leaves a `fanout_limit` entry in
 | `exchange.smtp_auth_enabled_tenant_wide` | `SmtpClientAuthenticationDisabled` is false for the tenant, or the tenant default is true and `casMailboxSmtpAuth` counts mailboxes that switch it back on for themselves (finding `exchange_policy:cas_mailbox:smtp_auth_enabled`, once per run, with the count and no address) | medium | `Get-TransportConfig` was not read or omitted the setting, or the per-mailbox count (`Get-CASMailbox`, an aggregate `Measure-Object \| Select-Object Count`, so the answer is never empty and no mailbox is named) was not read in full |
 | `exchange.dkim_signing_disabled` | DKIM signing is off for an authoritative accepted domain other than `*.onmicrosoft.com`. One finding per domain. `DomainType` and `DomainName` are read whether Exchange returns names, integers or objects | medium | `Get-DkimSigningConfig` or `Get-AcceptedDomain` was not read, there is no custom domain, a domain has no signing row, or `dns_posture.dkim_missing` already reports the disabled domain (`reported_by:dns_posture.dkim_missing`) |
 
-**Mail protection rules are judged on their own command rows.** The three Exchange rules do not wait for the whole `exchange_policy` collector: it runs multiple independent commands and is `partial` when a command genuinely fails. `Get-ProtectionAlert` is a by-design section skip because Auditex does not open a Security & Compliance session; that skip alone does not make Exchange partial. Each rule reads `not_assessed` unless its own command rows were read in full (`malwareFilterPolicy`, `transportConfig` with `casMailboxSmtpAuth`, `dkimSigningConfig` with `acceptedDomains`), and `auditex compare` reassesses a vanished finding on the same rows. CIS `2.1.9` and ScubaGear `MS.EXO.3.1v1` now need `exchange.dkim_signing_disabled` as well as `dns_posture.dkim_missing`: selectors published in DNS no longer make them `pass` on their own. Exchange Online returns enumerations as integers in some builds, so the adapter asks for names (`ConvertTo-Json -EnumsAsStrings` where PowerShell has it) and the normalizer reads either form.
+**Mail protection rules are judged on their own command rows.** The three Exchange rules do not wait for the whole `exchange_policy` collector: it runs multiple independent commands and is `partial` when a command genuinely fails. `Get-ProtectionAlert` and the DLP reads run in a Security & Compliance session that opens only in app-only certificate runs; their section-scoped skip (`ipps_session_not_opened`) alone does not make Exchange partial. Each rule reads `not_assessed` unless its own command rows were read in full (`malwareFilterPolicy`, `transportConfig` with `casMailboxSmtpAuth`, `dkimSigningConfig` with `acceptedDomains`), and `auditex compare` reassesses a vanished finding on the same rows. CIS `2.1.9` and ScubaGear `MS.EXO.3.1v1` now need `exchange.dkim_signing_disabled` as well as `dns_posture.dkim_missing`: selectors published in DNS no longer make them `pass` on their own. Exchange Online returns enumerations as integers in some builds, so the adapter asks for names (`ConvertTo-Json -EnumsAsStrings` where PowerShell has it) and the normalizer reads either form.
 
 **End-of-life table.** `configs/os-end-of-life.json` is read from disk and never from the network. It records
 `verified_on`, and for each Windows build (10 and 11, General Availability Channel) and each macOS, iOS, iPadOS and
@@ -1598,19 +1602,23 @@ semantics, including preflight-skipped licensing.
 Coverage gap `error_classes` group operation rows by their owning `collector`,
 including required collectors, rather than by operation `name`.
 
-The by-design `exchange_policy.protectionAlerts` IPPS skip has coverage status
-`skipped`, `section_scoped: true` and reason/error class `ipps_session_not_opened`.
-It leaves collector/run status `ok` when other reads succeed, while section gaps,
-collection gaps, handoff, explorer and AI context retain the limitation. Offline
-replay preserves explicit skips; historical session failures remain failures.
+The Security & Compliance reads of `exchange_policy` (`protectionAlerts`, `dlpLicense`,
+`dlpCompliancePolicies`, `dlpComplianceRules`) run only in an app-only certificate run, in their own
+`Connect-IPPSSession -AccessToken` session. Their coverage rows are always `section_scoped: true`. Without that
+session each has coverage status `skipped` and reason/error class `ipps_session_not_opened`; a connect that fails
+marks that read `failed` with the same reason and the later reads `skipped`, never invoked. A licence probe count of
+0 marks the two DLP reads `skipped` with reason `dlp_licence_not_detected` and error class `license_required`. These
+gaps leave collector/run status `ok` when the Exchange reads succeed, while section gaps, collection gaps, handoff,
+explorer and AI context retain the limitation. Offline replay preserves the explicit `protectionAlerts` skip;
+historical session failures remain failures.
 Real Exchange/DNS failures remain partial, with collection exit 0 when these are
 the only failures; partial runs still block coverage gates by default.
 
 Explicitly array-wrapped Exchange policy list reads serialise zero rows as `[]`.
 Only lists that can legitimately be empty use this wrapper: transport rules,
 inbound/outbound connectors, forwarding mailboxes, Defender assignment/preset
-rules and optional Safe Attachments/Safe Links policies. The unused protection-alert
-command remains wrapped but is never invoked. Accepted/remote domains, default
+rules, optional Safe Attachments/Safe Links policies, and the Security & Compliance alert
+and DLP policy and rule reads. Accepted/remote domains, default
 sharing and malware policies, DKIM signing configuration, default anti-phish,
 hosted content/connection filter policies and the ATP organisation setting stay
 unwrapped; missing output is a failure, as it is for scalar and count reads.

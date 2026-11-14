@@ -267,6 +267,7 @@ _CONTENT_EXPAND_FIELDS = frozenset(
 )
 _EXPAND_NAME = re.compile(r"[A-Za-z_]+")
 _CMDLET = re.compile(r"^[A-Za-z]+-[A-Za-z0-9]+$")
+_POWERSHELL_TOKEN_SPLIT = re.compile(r"[\s,|;(){}\[\]=@]+")
 
 
 def _is_identifier(segment: str) -> bool:
@@ -397,14 +398,24 @@ def _adapter_for(details: Mapping[str, Any]) -> str:
     return {"pwsh": "powershell_graph", "m365": "m365_cli"}.get(executable, executable or "unknown")
 
 
+def _cmdlet_tokens(command_text: str) -> list[str]:
+    """Cmdlet-shaped tokens of PowerShell text, split at whitespace and PowerShell punctuation.
+
+    A collection read is written ``,@(Get-X | Select-Object ...)``: splitting at whitespace alone would glue ``,@(`` to
+    its first cmdlet, so the declared family would read ``select-object`` and the observed read would look undeclared.
+    """
+    found = [item.strip("'\"") for item in _POWERSHELL_TOKEN_SPLIT.split(command_text)]
+    return [item for item in found if _CMDLET.match(item)]
+
+
 def _logged_words(adapter: str, command: str) -> list[str]:
-    """Command words recovered from logged text, for events from a build that did not record them."""
+    """Command words recovered from logged or declared text, for events from a build that did not record them."""
     if adapter == "m365_cli":
         try:
             return list(check_m365_command(command, adapter=adapter))
         except CommandRefused:
             return m365_command_words(command) or ["unparsed"]
-    return [item.strip("'\"") for item in command.split() if _CMDLET.match(item.strip("'\""))] or ["unparsed"]
+    return _cmdlet_tokens(command) or ["unparsed"]
 
 
 def _text_words_are_read(adapter: str, words: list[str], command_text: str) -> bool:
@@ -420,8 +431,7 @@ def _text_words_are_read(adapter: str, words: list[str], command_text: str) -> b
     if adapter == "m365_cli":
         return [item.lower() for item in m365_command_words(command_text)] == [item.lower() for item in words]
     if adapter in {"powershell_graph", "m365dsc"}:
-        found = [item.strip("'\"") for item in re.split(r"[\s,|;(){}\[\]=]+", command_text)]
-        cmdlets = [item for item in found if _CMDLET.match(item)]
+        cmdlets = _cmdlet_tokens(command_text)
         if not words_are_read(adapter, cmdlets):
             return False
         return {item.lower() for item in words} <= {item.lower() for item in cmdlets}

@@ -387,6 +387,9 @@ def test_more_forwarding_mailboxes_than_the_bound_is_a_gap_and_the_rule_is_not_a
 
     snapshot, findings, rules = _pipeline("exchange_policy", result, findings_from_snapshot=False)
     assert [(item["collector"], item["list"], item["reason"]) for item in snapshot["collection_gaps"]["records"]] == [
+        ("exchange_policy", "dlpCompliancePolicies", "ipps_session_not_opened"),
+        ("exchange_policy", "dlpComplianceRules", "ipps_session_not_opened"),
+        ("exchange_policy", "dlpLicense", "ipps_session_not_opened"),
         ("exchange_policy", "mailboxForwarding", "fanout_limit"),
         ("exchange_policy", "protectionAlerts", "ipps_session_not_opened"),
     ]
@@ -401,8 +404,12 @@ def test_forwarding_mailboxes_within_the_bound_are_a_clean_read(monkeypatch: pyt
     assert row["status"] == "ok" and "collection_truncated" not in row and row["item_count"] == 3
     snapshot, _findings, _rules = _pipeline("exchange_policy", result, findings_from_snapshot=False)
     gaps = snapshot["collection_gaps"]["records"]
-    assert [(row["list"], row["reason"]) for row in gaps] == [("protectionAlerts", "ipps_session_not_opened")]
-    assert gaps[0]["section_scoped"] is True and result.status == "ok"
+    # The Security & Compliance reads (no certificate session here) are section-scoped gaps; the collector stays ok.
+    assert [(row["list"], row["reason"]) for row in gaps] == [
+        (name, "ipps_session_not_opened")
+        for name in ("dlpCompliancePolicies", "dlpComplianceRules", "dlpLicense", "protectionAlerts")
+    ]
+    assert all(row["section_scoped"] is True for row in gaps) and result.status == "ok"
 
 
 def test_a_forwarding_contact_address_is_normalised() -> None:

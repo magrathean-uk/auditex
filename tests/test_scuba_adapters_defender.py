@@ -11,7 +11,12 @@ from pathlib import Path
 import pytest
 
 from auditex.rule_assessment import canonical
-from auditex.scuba_adapters_defender import ADAPTERS, DEFENDER_ADAPTERS, SECTION_KEYS
+from auditex.scuba_adapters_defender import (
+    ADAPTERS,
+    DEFENDER_ADAPTERS,
+    IPPS_SECTION_KEYS,
+    SECTION_KEYS,
+)
 from auditex.scuba_projection import (
     NOT_COLLECTED,
     PACK_SHAPE_DIGESTS,
@@ -51,6 +56,16 @@ CONTRACT = {
     "admin_audit_log_config": ("adminAuditLogConfig", ("Identity", "UnifiedAuditLogIngestionEnabled")),
 }
 LIST_SECTIONS = tuple(CONTRACT)
+# Security & Compliance session reads (M08-T05): constructed rows below, no pack row is stored for them.
+IPPS_CONTRACT = {
+    "protection_alerts": ("protectionAlerts", ("Name", "Disabled")),
+    "dlp_compliance_policies": ("dlpCompliancePolicies", (
+        "Name", "Enabled", "Mode", "Workload", "ExchangeLocation", "SharePointLocation", "OneDriveLocation",
+        "TeamsLocation", "EndpointDlpLocation")),
+    "dlp_compliance_rules": ("dlpComplianceRules", (
+        "Name", "ParentPolicyName", "Disabled", "IsAdvancedRule", "AdvancedRule", "ContentContainsSensitiveInformation",
+        "BlockAccess", "BlockAccessScope", "NotifyUser", "NotifyUserType")),
+}
 UNOBSERVED = {"version": 1, "state": "not_collected"}
 
 
@@ -163,8 +178,9 @@ def test_registration_and_exact_collector_field_contract(cases):
     assert "defender_license" in module.ADAPTERS
     assert DEFENDER_ADAPTERS is ADAPTERS
     assert SECTION_KEYS == CONTRACT
-    assert set(ADAPTERS) == set(CONTRACT) | {"defender_license"}
-    assert len(ADAPTERS) == 17
+    assert IPPS_SECTION_KEYS == IPPS_CONTRACT
+    assert set(ADAPTERS) == set(CONTRACT) | set(IPPS_CONTRACT) | {"defender_license", "defender_dlp_license"}
+    assert len(ADAPTERS) == 21
     assert not set(ADAPTERS) & PACK_SHAPE_DIGESTS.keys()
     assert "accepted_domains" not in ADAPTERS
     assert len({name for name, _ in CONTRACT.values()}) == 16
@@ -431,3 +447,133 @@ def test_anti_phish_adapter_keeps_settings_binds_the_summary_and_never_the_targe
     assert bound == known and bound is not known
     bundle.sensitive_users = PrivateSnapshot(("a@example.invalid", "b@example.invalid"), SensitiveUsersBinding(2, "cd" * 32), None)
     assert ADAPTERS["anti_phish_policies"](bundle)[1][COVERAGE_KEY] == {"version": 1, "state": "unusable"}
+
+
+# Security & Compliance sections (SS 3.1-3.4 and 4.1) --------------------------------------------------------------------
+
+REQUIRED_ALERTS = (
+    "Suspicious email sending patterns detected", "Suspicious connector activity", "Suspicious Email Forwarding Activity",
+    "Messages have been delayed", "Tenant restricted from sending unprovisioned email",
+    "Tenant restricted from sending email", "A potentially malicious URL click was detected",
+)
+DLP_POLICY = {
+    "Name": "P1", "Enabled": True, "Mode": "Enable",
+    "Workload": "Exchange, SharePoint, OneDriveForBusiness, Teams, EndpointDevices",
+    **{key: ["All"] for key in ("ExchangeLocation", "SharePointLocation", "OneDriveLocation", "TeamsLocation",
+                                "EndpointDlpLocation")},
+}
+DLP_RULE = {
+    "Name": "R1", "ParentPolicyName": "P1", "Disabled": False, "IsAdvancedRule": False, "AdvancedRule": None,
+    "ContentContainsSensitiveInformation": [{"name": name} for name in (
+        "U.S. Social Security Number (SSN)", "U.S. Individual Taxpayer Identification Number (ITIN)", "Credit Card Number")],
+    "BlockAccess": True, "BlockAccessScope": "All", "NotifyUser": ["recipient"], "NotifyUserType": "NotSet",
+}
+IPPS_POLICIES = ("MS.SECURITYSUITE.3.1v1", "MS.SECURITYSUITE.3.2v1", "MS.SECURITYSUITE.3.3v1",
+                 "MS.SECURITYSUITE.3.4v1", "MS.SECURITYSUITE.4.1v1")
+IPPS_SECTIONS = ("protection_alerts", "dlp_compliance_policies", "dlp_compliance_rules", "defender_dlp_license")
+DLP_READS_OPS = ("dlpCompliancePolicies", "dlpComplianceRules")
+
+
+@pytest.fixture
+def ipps_bundle(tmp_path):
+    write(tmp_path, "run-manifest.json", {"run_id": "synthetic-compliance", "platform": "m365"})
+    operation(tmp_path, "protectionAlerts", [
+        {"Name": name, "Disabled": False, "Severity": "Low", "Category": "ThreatManagement", "IsSystemRule": True}
+        for name in REQUIRED_ALERTS])
+    operation(tmp_path, "dlpLicense", [{"Count": 1}])
+    operation(tmp_path, "dlpCompliancePolicies", [DLP_POLICY])
+    operation(tmp_path, "dlpComplianceRules", [DLP_RULE])
+    return tmp_path
+
+
+def verdicts(root):
+    from auditex.scuba_projection import rule_policy_section
+    from azure_tenant_audit.value_rules import assess
+
+    p = project_run(root, redact=False)
+    out = {}
+    for policy in IPPS_POLICIES:
+        record = assess(policy, {s: rule_policy_section(p, policy, s) for s in (*IPPS_SECTIONS, "scuba_config")})
+        out[policy] = (record["verdict"], record["reason_code"])
+    return p, out
+
+
+def ipps_skip(root, names, reason="ipps_session_not_opened", error_class="ipps_session_not_opened"):
+    path = root / "raw/exchange_policy.json"
+    payload = json.loads(path.read_text())
+    for name in names:
+        payload[name] = {"command": "constructed", "value": [], "status": "skipped", "reason": reason,
+                         "error_class": error_class, "error": "constructed skip",
+                         **({"item_count": 0} if error_class == "license_required" else {})}
+    write(root, "raw/exchange_policy.json", payload)
+
+
+def test_compliance_reads_decide_the_five_rows_and_stay_out_of_the_model_view(ipps_bundle):
+    p, out = verdicts(ipps_bundle)
+    assert out == {
+        "MS.SECURITYSUITE.3.1v1": ("met", "all_types_protected"),
+        "MS.SECURITYSUITE.3.2v1": ("met", "all_locations_covered"),
+        "MS.SECURITYSUITE.3.3v1": ("met", "all_full_protection_rules_block"),
+        "MS.SECURITYSUITE.3.4v1": ("met", "all_full_protection_rules_notify"),
+        "MS.SECURITYSUITE.4.1v1": ("met", "required_alerts_enabled"),
+    }
+    assert p.rule_sections["protection_alerts"] == [{"Name": name, "Disabled": False} for name in REQUIRED_ALERTS]
+    assert p.report["sections"]["protection_alerts"]["ignored_fields"] == ["Category", "IsSystemRule", "Severity"]
+    assert p.rule_sections["dlp_compliance_policies"] == [DLP_POLICY]
+    assert p.rule_sections["dlp_compliance_rules"] == [DLP_RULE]
+    assert p.rule_sections["defender_dlp_license"] is True
+    for section in IPPS_SECTIONS:
+        assert p[section] == NOT_COLLECTED
+
+
+def test_a_disabled_required_alert_is_not_met(ipps_bundle):
+    alerts = [{"Name": name, "Disabled": name == "Messages have been delayed"} for name in REQUIRED_ALERTS]
+    operation(ipps_bundle, "protectionAlerts", alerts)
+    assert verdicts(ipps_bundle)[1]["MS.SECURITYSUITE.4.1v1"] == ("not_met", "required_alert_absent_or_disabled")
+
+
+def test_no_session_withholds_every_compliance_section_with_its_reason(ipps_bundle):
+    ipps_skip(ipps_bundle, ("protectionAlerts", "dlpLicense", "dlpCompliancePolicies", "dlpComplianceRules"))
+    p, out = verdicts(ipps_bundle)
+    assert set(out.values()) == {("not_assessed", "required_evidence_section_not_collected")}
+    for section in IPPS_SECTIONS:
+        assert p.rule_sections[section] == NOT_COLLECTED
+        assert p.report["sections"][section]["detail"] == {"error_class": "ipps_session_not_opened",
+                                                           "operation": "exchange_policy." + {
+                                                               "protection_alerts": "protectionAlerts",
+                                                               "dlp_compliance_policies": "dlpCompliancePolicies",
+                                                               "dlp_compliance_rules": "dlpComplianceRules",
+                                                               "defender_dlp_license": "dlpLicense"}[section]}
+
+
+def test_no_dlp_cmdlet_reads_as_licence_not_detected(ipps_bundle):
+    operation(ipps_bundle, "dlpLicense", [{"Count": 0}])
+    ipps_skip(ipps_bundle, DLP_READS_OPS, "dlp_licence_not_detected", "license_required")
+    p, out = verdicts(ipps_bundle)
+    assert p.rule_sections["defender_dlp_license"] is False
+    assert p.rule_sections["dlp_compliance_policies"] == p.rule_sections["dlp_compliance_rules"] == []
+    for policy in IPPS_POLICIES[:4]:
+        assert out[policy] == ("not_assessed", "data_unavailable_no_licence")
+    assert out["MS.SECURITYSUITE.4.1v1"] == ("met", "required_alerts_enabled")
+    assert "exchange_policy.dlpCompliancePolicies" in p.report["sections"]["dlp_compliance_policies"]["ignored_failures"]
+
+
+def test_a_licence_skip_never_reads_empty_when_the_licence_fact_is_true_or_unreadable(ipps_bundle):
+    ipps_skip(ipps_bundle, DLP_READS_OPS, "dlp_licence_not_detected", "license_required")
+    p = project_run(ipps_bundle, redact=False)
+    assert p.rule_sections["dlp_compliance_policies"] == p.rule_sections["dlp_compliance_rules"] == NOT_COLLECTED
+    operation(ipps_bundle, "dlpLicense", [{"Count": 0}])
+    write(ipps_bundle, "coverage.json", [{"collector": "exchange_policy", "name": "dlpLicense", "status": "failed"}])
+    p = project_run(ipps_bundle, redact=False)
+    assert p.rule_sections["defender_dlp_license"] == NOT_COLLECTED
+    assert p.rule_sections["dlp_compliance_policies"] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize("rows", [
+    [{"Count": "1"}], [{"Count": -1}], [{"Count": True}], [{}], [{"Count": 1}, {"Count": 1}],
+])
+def test_an_unreadable_licence_count_is_withheld(ipps_bundle, rows):
+    operation(ipps_bundle, "dlpLicense", rows)
+    p = project_run(ipps_bundle, redact=False)
+    assert p.rule_sections["defender_dlp_license"] == NOT_COLLECTED
+    assert p.report["sections"]["defender_dlp_license"]["reason"] == "incomplete_shape"

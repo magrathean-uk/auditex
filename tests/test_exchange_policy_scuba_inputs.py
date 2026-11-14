@@ -10,7 +10,10 @@ import pytest
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.adapters.read_guard import check_command
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
-from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
+from azure_tenant_audit.collectors.exchange_policy import (
+    IPPS_OPERATIONS,
+    ExchangePolicyCollector,
+)
 from azure_tenant_audit.detection_coverage import build_detection_signals
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
@@ -128,7 +131,7 @@ def test_sharing_policy_failure_is_isolated(monkeypatch):
     for name in complete.payload:
         if name != "sharingPolicy":
             assert failed.payload[name] == complete.payload[name]
-            assert coverage[name]["status"] == ("skipped" if name == "protectionAlerts" else "ok")
+            assert coverage[name]["status"] == ("skipped" if name in IPPS_OPERATIONS else "ok")
 
 
 def test_collector_output_reaches_rule_and_model_views(monkeypatch, tmp_path):

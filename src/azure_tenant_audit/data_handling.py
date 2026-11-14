@@ -16,8 +16,9 @@ def collector_activity_notices(collectors: list[str], mode: str) -> list[str]:
             "(Exchange.ManageAsApp plus Global Reader on the service principal). "
             "Interactive, delegated and access-token authentication cannot open this session; a fresh PowerShell "
             "process cannot inherit the signed-in operator's session. "
-            "Read-only Get-* commands; no Security & Compliance (IPPS) session. "
-            "Not assessed: alert policies need a Security & Compliance session, which Auditex does not open."
+            "Read-only Get-* commands. Alert and DLP policies are read in a Security & Compliance (IPPS) session, "
+            "opened only in app-only certificate runs (Exchange.ManageAsApp on Microsoft Exchange Online Protection "
+            "plus Global Reader); without it they are not assessed (ipps_session_not_opened)."
         )
     if "dns_posture" in collectors:
         from .dns_lookup import DEFAULT_DOH_ENDPOINT
@@ -36,7 +37,7 @@ def collector_activity_notices(collectors: list[str], mode: str) -> list[str]:
             "--exclude exchange_policy,dns_posture. --collectors replaces the selection; "
             "--collector-preset config-only omits both. Exchange/DNS failures leave dependent policies "
             "not assessed with a coverage-gap reason and overall status partial. "
-            "The by-design IPPS skip leaves the collector and run ok when other reads succeed."
+            "A skipped Security & Compliance read leaves the collector and run ok when other reads succeed."
         )
     return notices
 

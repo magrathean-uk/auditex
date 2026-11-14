@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Any
 
 from .collection_gaps import (
+    REASON_DLP_LICENCE_NOT_DETECTED,
+    REASON_IPPS_SESSION_NOT_OPENED,
     REASON_OPERATOR_LIMIT,
     REASON_UNKNOWN,
     SECTION_GAP_REASON_TEXT,
@@ -37,6 +39,7 @@ from .collection_gaps import (
     TRUNCATION_ERROR_CLASS,
     section_was_cut,
 )
+from .collectors.exchange_policy import DLP_READS, IPPS_OPERATIONS
 from .resources import resolve_resource_path
 
 OFFLINE_ROW_TYPE = "offline_sample"
@@ -162,8 +165,10 @@ def replay_coverage_rows(collector: str, payload: Mapping[str, Any]) -> list[dic
             collector == "teams_policy" and section.get("reason") in {
                 "teams_token_unavailable", "teams_powershell_not_supported",
             }
-        ) or (collector == "exchange_policy" and name == "protectionAlerts"
-              and section.get("reason") == "ipps_session_not_opened")
+        ) or (collector == "exchange_policy" and name in IPPS_OPERATIONS and (
+            section.get("reason") == REASON_IPPS_SESSION_NOT_OPENED
+            or (name in DLP_READS and section.get("reason") == REASON_DLP_LICENCE_NOT_DETECTED)
+        ))
         if (explicit_skip and section.get("status") == "skipped"
                 and section.get("reason") in SECTION_GAP_REASON_TEXT and not cut):
             rows.append({

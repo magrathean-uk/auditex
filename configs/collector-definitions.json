@@ -669,7 +669,7 @@
     },
     "exchange_policy": {
       "enabled": true,
-      "description": "Exchange transport, connector, domain, mailbox forwarding, malware filter, SMTP AUTH and DKIM signing, and audit/alerting (detection coverage) policy posture",
+      "description": "Exchange transport, connector, domain, mailbox forwarding, malware filter, SMTP AUTH and DKIM signing, and audit/alerting (detection coverage) policy posture, plus Security & Compliance alert and DLP policies (app-only certificate mode)",
       "required_permissions": [],
       "query_plan": [
         "transportRules",
@@ -683,6 +683,9 @@
         "organizationAuditConfig",
         "mailboxAuditBypass",
         "protectionAlerts",
+        "dlpLicense",
+        "dlpCompliancePolicies",
+        "dlpComplianceRules",
         "malwareFilterPolicy",
         "transportConfig",
         "casMailboxSmtpAuth",
@@ -778,6 +781,27 @@
           "category": "detection",
           "commands": [
             ",@(Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule)"
+          ]
+        },
+        {
+          "name": "dlpLicense",
+          "category": "policy",
+          "commands": [
+            "Get-Command Get-DlpCompliancePolicy -ErrorAction SilentlyContinue | Measure-Object | Select-Object Count"
+          ]
+        },
+        {
+          "name": "dlpCompliancePolicies",
+          "category": "policy",
+          "commands": [
+            ",@(Get-DlpCompliancePolicy | Select-Object Name,Enabled,Mode,Workload,@{Name='ExchangeLocation';Expression={[string[]]$_.ExchangeLocation}},@{Name='SharePointLocation';Expression={[string[]]$_.SharePointLocation}},@{Name='OneDriveLocation';Expression={[string[]]$_.OneDriveLocation}},@{Name='TeamsLocation';Expression={[string[]]$_.TeamsLocation}},@{Name='EndpointDlpLocation';Expression={[string[]]$_.EndpointDlpLocation}})"
+          ]
+        },
+        {
+          "name": "dlpComplianceRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-DlpComplianceRule | Select-Object Name,ParentPolicyName,Disabled,IsAdvancedRule,AdvancedRule,ContentContainsSensitiveInformation,BlockAccess,BlockAccessScope,NotifyUser,NotifyUserType)"
           ]
         },
         {

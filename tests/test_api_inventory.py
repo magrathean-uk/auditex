@@ -202,3 +202,42 @@ def test_api_inventory_recorder_maps_google_device_rows() -> None:
     assert call["required_permissions"] == [
         "https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly"
     ]
+
+
+def test_compliance_session_reads_are_declared_read_only_commands() -> None:
+    """M08-T05: each Security & Compliance read is on the read allow-list and inside the declared command set."""
+    from azure_tenant_audit.adapters.read_guard import check_command
+    from azure_tenant_audit.api_inventory import observe_audit_events
+    from azure_tenant_audit.collectors.exchange_policy import (
+        IPPS_OPERATIONS,
+        ExchangePolicyCollector,
+    )
+    from azure_tenant_audit.secret_hygiene import redact_command_string
+
+    commands = dict(ExchangePolicyCollector.command_collectors)
+    declared = [
+        {"collector": "exchange_policy", "type": "command", "name": name, "endpoint": name, "method": "COMMAND",
+         "command": command}
+        for name, command in commands.items()
+    ]
+    events = [
+        {"event": "command.started", "details": {
+            "adapter": "powershell_graph", "command": redact_command_string(commands[name]),
+            "command_words": list(check_command("powershell_graph", commands[name]))}}
+        for name in sorted(IPPS_OPERATIONS)
+    ]
+    ledger = observe_audit_events(events, declared_calls=declared)
+    executed = {row["family"]: row for row in ledger["commands"]["executed"]}
+    assert set(executed) == {"get-protectionalert", "get-command", "get-dlpcompliancepolicy", "get-dlpcompliancerule"}
+    assert all(row["read_only"] for row in executed.values())
+    assert ledger["commands"]["write_calls"] == [] and ledger["outside_declared"]["count"] == 0
+
+    # A write cmdlet in the same session is outside the declaration and is not a read.
+    write = "Set-DlpCompliancePolicy -Identity P1 -Mode Disable"
+    ledger = observe_audit_events(
+        [*events, {"event": "command.started", "details": {
+            "adapter": "powershell_graph", "command": write, "command_words": ["Set-DlpCompliancePolicy"]}}],
+        declared_calls=declared,
+    )
+    assert ledger["commands"]["write_calls"] == [{"adapter": "powershell_graph", "command": "Set-DlpCompliancePolicy"}]
+    assert ledger["outside_declared"]["commands"] == [{"adapter": "powershell_graph", "command": "Set-DlpCompliancePolicy"}]
