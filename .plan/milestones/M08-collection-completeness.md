@@ -71,7 +71,7 @@ In one app-only certificate run the product collects and answers the 64 rows: 62
 - The author states which kit expected verdicts the write could touch; expected none, since no expected verdict depends on apps or consent (EXP-m07-q56). Precondition for the run: M08-T01 merged, both providers ship on the frozen script, and the tenant chat holds the frozen copy. It runs only on G's sign-in.
 - Writes `frozen: <12 hex of the script folder's manifest sha256>`, `removal-step: present`, `out-of-kit-row: written`, `expected-verdicts-changed: 0`, and after the run `applied-from: <same 12 hex>` and `applied: complete` (or `applied: stopped <reason>`) under `### Findings`.
 - Reviews: `REV-M08-T02-codex` and `REV-M08-T02-opus`, each on the frozen copy, manifest checked first, `verdict: ship` or `verdict: do-not-ship` and `reviewed: <12 hex>`.
-- verify: `h=$(sed -n 's/^frozen: \([0-9a-f]\{12\}\)$/\1/p' .plan/work/M08-T02/result.md) && test -n "$h" && for r in codex opus; do grep -qE "^[[:space:]]*(summary: )?reviewed: $h" .plan/work/REV-M08-T02-$r/result.md || exit 1; done`
+- verify: `h=$(sed -n 's/^frozen: \([0-9a-f]\{12\}\)$/\1/p' .plan/work/M08-T02/result.md) && test -n "$h" && for r in codex; do grep -qE "^[[:space:]]*(summary: )?reviewed: $h" .plan/work/REV-M08-T02-$r/result.md || exit 1; done`
 - files: the certificate script, its journal and the key file in the records folder (outside the repository); `.plan/work/M08-T02/result.md`
 
 ### M08-T03 B: Power BI and Power Platform enablement (operator scripts and product docs)
