@@ -1,0 +1,1 @@
+--task CHK-M04-T06 --role terra --account claude-5 --readonly --sha task/M04-T06-withholding-reach --tags debug,risk:high --timeout 10800 --max-turns 120 --budget 12 --brief .plan/work/CHK-M04-T06/brief-src-3.md

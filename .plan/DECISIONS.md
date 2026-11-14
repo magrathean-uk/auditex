@@ -429,3 +429,12 @@
 - consequences: nothing in M03 moves and nothing of this amendment merges before G's words, sent by the manager. Release 1.5.0 is unaffected.
 - approver: pending (G, through the team-manager chat, DEC-036)
 
+## DEC-047 M04-T06: one last narrow round, then merged or stopped for 1.5.0
+- date: 2026-11-14
+- status: approved
+- decision: after its one review, one repair and one re-check, two points of M04-T06 remain (REV-M04-T06 at 4d93e40). B1: an attribute on a tag with no visible text that follows the unresolved name can keep a name part, which would be a step back from the whole-file withholding on main. B2: the backslash-escaped placeholder is hidden inside a raw HTML block in Markdown. One last round fixes exactly these two: B1 as the reviewer specifies, with the safe fallback first in mind (where the reach of the withheld stretch cannot be bounded, the whole text is withheld as main does today); B2 with a marker that shows in Markdown prose, raw HTML and HTML alike. Then the executing check and a Codex re-check of those two points only. Stop rule, binding: if either point is still open after that, M04-T06 is not merged for 1.5.0, main keeps the whole-file withholding with its stated limit, and the branch is kept for a later release; no further round and no further choice. When it is settled either way, M05-T04 and the release notes start.
+- options: A one last narrow round with the stop rule (chosen) | B do not merge M04-T06 for 1.5.0 | merge as it is (not offered: a readable name part in place of a blank is the wrong way round)
+- why: both fixes are small and specified, and the rest of the task is sound and tested.
+- consequences: if the task is stopped, its Definition of Done item and task row are dropped by a small plan change and the percentage is re-baselined.
+- approver: manager (team-manager chat, 14 Nov 2026, quoting its ruling: "A, one last round on M04-T06, B1 and B2 only"; under DEC-036)
+
