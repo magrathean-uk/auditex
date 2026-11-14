@@ -1,0 +1,2 @@
+--task REV-M08-T03-codex --role codex --account codex2 --readonly --tags review,risk:high --timeout 2400 --brief .plan/work/REV-M08-T03/brief-src-2.md
+--task REV-AMEND-7 --role codex --account codex --readonly --sha task/AMEND-7-amend-7 --tags review --timeout 1200 --brief .plan/work/REV-AMEND-7/brief-src-2.md

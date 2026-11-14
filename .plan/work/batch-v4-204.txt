@@ -1,0 +1,1 @@
+--task REV-M08-T03-opus --role sol --account claude-1 --readonly --tags hard,risk:high --timeout 2400 --max-turns 80 --budget 8 --brief .plan/work/REV-M08-T03/brief-src-2.md

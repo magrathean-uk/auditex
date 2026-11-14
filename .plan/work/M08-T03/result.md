@@ -1,0 +1,12 @@
+## RESULT M08-T03
+status: done
+summary: All five review fixes are made, the scripts parse cleanly and the mock harness passes 62 of 62. The scripts are re-frozen and the old manifest is kept as MANIFEST-1.sha256. No script assumes how many permissions the reader app has (DEC-068). Details are in .plan/work/M08-T03/notes.md under "Repair round 1".
+1: -Portal now needs a Fabric read sign-in. Before any write it checks and journals Fabric admin authority and that the setting is disabled with no groups; if the setting is already enabled it stops and creates no group (create-m08b-pbi-access.ps1:137-145, journal :155-163).
+2: Both routes require all eight watched settings and compare every field before and after; missing evidence refuses (m08b-common.ps1:344-385). On the portal route, -ReaderCheck reads the setting back through Fabric and compares all eight (create-m08b-pbi-access.ps1:65-84).
+3: The removal never looks a group up by name or time; a missing group id refuses and points to manual reconciliation (remove-m08b-pbi-access.ps1:43-52). It restores the setting only after confirming the run still owns it, re-reads it before the step, reads it back, then sets removed (:77-82, :104-117, :133). Undo cell rewritten at RECORD.md:93.
+4: Register the Power Platform app immediately before the power_platform collection and run the removal with -Apply straight after it (RECORD.md:16-25 and :110-118; create-m08b-pp-mgmtapp.ps1:18-20).
+5: draft/collector-post.patch:37-39 now uses listTenantSettings api-version 2020-10-01, with one test assertion pinning it (:259).
+changes: dt-live/m08-b (both Power BI scripts, m08b-common.ps1, create-m08b-pp-mgmtapp.ps1, RECORD.md, tests/run-tests.ps1, tests/mock.ps1, MANIFEST.sha256, new MANIFEST-1.sha256); .plan/work/M08-T03 (draft/collector-post.patch and admin-guide-section.md, old copies kept as -1 files; notes.md; progress.md)
+verification: parse through kit-7r pwsh-guarded, 8 files, 0 errors: pass; mock harness 62/62: pass; patch in a throwaway tree with no commit: the six verify test files exit 0 (679 passed), Ruff pass, git apply --check on current main pass; --no-verify not used. frozen: f37ffb67a06a
+risks: (1) The Fabric admin read and the portal read-back have not been tried on a live tenant; both routes now need a Fabric sign-in. (2) Kit settings are compared field by field, so a live field that changes on its own would stop a run safely. (3) The DEC-060 consent limit and the Power Platform administrator-level window are unchanged.
+questions_for_g: none
