@@ -177,8 +177,9 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "Graph dispatch: body-free GET, or POST only to /v1.0/$batch or /beta/$batch with GET-only "
             "sub-requests; its first statement is _enforce_read_only, which applies read_only_violation",
             guard="call:self._enforce_read_only"),
-    Allowed(_GRAPH, "GraphClient.get_batch", "self._request", "POST", 1, 3, "A6",
-            "the one $batch caller; it refuses non-GET specs and builds GET-only inner requests",
+    Allowed(_GRAPH, "GraphClient._post_batch", "self._request", "POST", 1, 3, "A6",
+            "the one $batch POST; it sends only the GET-only inner requests get_batch builds after refusing "
+            "non-GET specs, and _request re-checks them through the read guard",
             target_contains="/$batch"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "service_account.Credentials.from_service_account_file",
             TOKEN_POST, 1, 2, "A22",
@@ -1091,7 +1092,7 @@ def test_an_extra_non_get_site_in_an_allow_listed_function_fails() -> None:
 def test_the_batch_entry_does_not_cover_a_post_to_another_graph_path() -> None:
     source = (
         "class GraphClient:\n"
-        "    def get_batch(self):\n"
+        "    def _post_batch(self):\n"
         "        return self._request('POST', f'{GRAPH_ROOT}/users/u1/assignLicense', json={})\n"
     )
     assert unclassified(scan_source(source, _GRAPH))

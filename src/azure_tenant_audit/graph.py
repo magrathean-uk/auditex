@@ -685,12 +685,10 @@ class GraphClient:
         )
 
     def _request(self, method: str, url: str, *, wait_budget: _WaitBudget | None = None, **kwargs: Any) -> requests.Response:
-        """Send one Graph request, retrying 429 and 5xx answers within the throttle policy.
-
-        ``wait_budget`` is the shared retry-wait allowance of a ``$batch`` chunk: a retry whose wait would pass it is
-        not slept and the last answer is returned instead.
-        """
         self._enforce_read_only(method, url, kwargs)
+        # Send one Graph request, retrying 429 and 5xx answers within the throttle policy. The read guard above stays
+        # the first statement (tests/test_http_verb_allowlist.py). ``wait_budget`` is the shared retry-wait allowance
+        # of a ``$batch`` chunk: a retry whose wait would pass it is not slept and the last answer is returned instead.
         token = self.ensure_token()
         headers = kwargs.pop("headers", {})
         headers.update(
