@@ -456,3 +456,12 @@
 - consequences: no acceptance bar, scope or product behaviour changes.
 - approver: auto
 
+## DEC-050 M05-T04 also corrects the redaction note's vocabulary sentence
+- date: 2026-11-14
+- status: approved
+- decision: the note printed in reports says that vocabulary words are left as written elsewhere, which is untrue for a person whose name is such a word (found by the docs task; the privacy reference states it correctly). The one-sentence fix travelled with M04-T06, which is stopped for 1.5.0 (DEC-048). It is added to M05-T04, which already edits the same file: the sentence is corrected to match the privacy reference, the test that pins it is updated, and nothing else rides along. It is covered by M05-T04's review.
+- options: leave it in the backlog with the stopped branch | add it to M05-T04 (chosen)
+- why: a note printed in every report must not say something untrue about what was masked.
+- consequences: one criterion and one clause of the files line are added to M05-T04; the author gets one short follow-up run for it before the review.
+- approver: manager (team-manager chat, 14 Nov 2026, quoting its ruling: "add the note sentence to M05-T04"; under DEC-036)
+
