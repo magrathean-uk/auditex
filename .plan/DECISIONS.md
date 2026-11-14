@@ -552,7 +552,8 @@
 
 ## DEC-060 Reader app: the reviewers differ on the residual consent screen
 - date: 2026-11-14
-- status: pending (manager)
+- status: decided (manager, about 09:30 GMT, 14 Nov: option 1)
 - decision: after the second narrow fix both scripts sign in with no scopes and print a Cancel instruction first; a missing scope refuses before any write. Sol passes B1; Codex keeps it blocking because an interactive sign-in cannot stop an operator accepting a .default consent screen, which would write a grant before the journal. Both agree on the fact and that only the operator's Cancel prevents it. The phase E E7 lines need a doc fix either way.
 - options: accept as a stated limit (recommended) | change the sign-in to a first-party client that cannot show a consent screen (research, a third author round, both re-checks) | astra tie-break
+- ruling: accept the residual risk as a stated limit in the script header and the reader-app record; no third round and no tie-break. Condition: G's sheet tells him to accept permission pages in general, so for this step the instruction must be the opposite and unmistakable; the tenant chat changes Part 0 of G-SHEET.md and says it to him just before the window opens, and the E7 lines carry the same sentence: a permissions page here means Cancel, then tell the session. After the doc fix the reader app is ready: the tenant chat gets its go with the final script hash; the run waits for the manager to lift the network hold.
 - approver: manager (DEC-036)

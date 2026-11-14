@@ -4,7 +4,7 @@ overall: 84% (was 82%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 1d23071 2026-11-14T09:29:48Z
+last_checkpoint: b6409e9 2026-11-14T09:33:03Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -13,13 +13,13 @@ last_checkpoint: 1d23071 2026-11-14T09:29:48Z
 
 ## Blockers
 - Host (manager 09:26 GMT): sitting file `last` step 4 or lower and stopped null: heavy jobs through the slot (PLAN_LOAD_MAX=12) except VM boots and runs over 30 min (not the full kit suite); step 5 on or paused: no heavy start. No live tenant runs.
-- Track A: 1.5.0 is RELEASED and verified (DEC-052; M06 complete): tag v1.5.0 on a1c6b5e; https://github.com/magrathean-uk/auditex/releases/tag/v1.5.0 (wheel 81ea5c2f..., sdist 959e825f...). No new Track A or B work (manager).
+- Track A: 1.5.0 is RELEASED and verified (DEC-052; M06 complete): tag v1.5.0 on a1c6b5e; https://github.com/magrathean-uk/auditex/releases/tag/v1.5.0 (wheel 81ea5c2f..., sdist 959e825f...). Track A reopens only for M08 collection completeness (DEC-059; amendment 5 drafting).
 - Track B: stopped and on hold (DEC-053, G on 14 Nov: "master data collection etc first ... talk about training AFTER"). The pilot failed (M03-T06: 18 wins of 190, 139 needed; 5.57 GPU-hours). Nothing in M03 moves; amendment 4 (parked case) stays unmerged at bf19a3f. Training is discussed again after phase D. GPU-hours used: about 306 of 20,000.
 
 ## Pending G decisions
 - Questions go to the team-manager chat (DEC-036), never to G here; its rulings count as his. Messages only for decisions, blockers, G's hands or eyes, reserved actions, asked-for results.
-- Collection completeness (sent to the manager 09:40 GMT, 14 Nov): the first collection answers at most 67 of 102 rows (14 Teams, 5 Security Suite, 16 Power BI and Power Platform not collectable as set up; EXP-m07-teams). Recommended: a milestone A Teams certificate, B Power BI/Platform enablement, C Teams app settings, D compliance session; default: none.
-- Phase D (M07): STOPPED at its first look-up, no tenant write: kit fault (a Graph 404 with a null StatusCode is not read as "not found"; dt-live/phaseD/FAULT-7r-notfound.md). Round 7s (DEC-054), ahead of everything: M07-T18 author (sol on claude-4) delivers an un-gated candidate kit/20261111-kit-7s/dt-r7s-cand with CANDIDATE.sha256; send its path to the manager; the tenant chat runs read-only dry runs of every phase D script from it; fold findings in; one gate (both providers, full suite 9 of 9); freeze 7s; new hand-over. M07-T15 held.
+- Reader app (DEC-060, with the manager 09:29 GMT): sol passes B1, Codex keeps it (an operator could accept a consent screen); recommended: accept as a stated limit; doc fix of the E7 lines running.
+- Phase D (M07): STOPPED at its first look-up, no tenant write (Graph 404 with a null StatusCode; dt-live/phaseD/FAULT-7r-notfound.md). Round 7s (DEC-054): part 1 candidate kit/20261111-kit-7s/dt-r7s-cand d453c83ac710 (368 files) sent to the manager 09:33 GMT for read-only dry runs (wait for the network-hold lift); part 2a (compare.py, DEC-058) running on dt-r7s; part 2b folds dry-run findings; then the gate (both providers, full suite 9 of 9), freeze 7s, new hand-over. M07-T15 held.
 
 ## Re-baselines
 - from 100% (plan v3 closed at 1.4.0) to 4% (plan v4 scope and weights, DEC-001, approved by G on 11 Nov 2026)
