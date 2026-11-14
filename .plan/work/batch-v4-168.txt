@@ -1,0 +1,1 @@
+--task EXP-m07-q56 --role terra --account claude-4 --readonly --tags debug --timeout 2400 --max-turns 80 --budget 8 --brief .plan/work/EXP-m07-q56/brief-src.md

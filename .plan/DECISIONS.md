@@ -510,5 +510,15 @@
 - options: none offered; an instruction
 - why: G, typed in the team-manager chat on 14 Nov 2026, word for word: "i want everything develop until the stage it actually needs me to do stuff."
 - consequences: three read-only tasks run beside round 7s (REV-RAPP by both providers, EXP-m07-phaseE, EXP-m07-stub).
+- amendment (manager, 14 Nov about 08:45 GMT): no model step in phase E while Track B is stopped; `compare.py` scores the rule verdicts only, and the collected run is kept so it can be assessed later. The reader-app script's closing Disconnect-MgGraph (it deletes the SDK's saved sign-in) is taken as a finding into that script's review.
 - approver: G (through the team-manager chat, DEC-036; the reading of his go for the writes is the manager's)
+
+## DEC-056 The reader app before phase D, a first collection of the tenant as it stands, and a two-window cut in the verify
+- date: 2026-11-14
+- status: approved
+- decision: (1) the reader app (`dt-live/create-auditex-reader-app.ps1`) is created before phase D, once both providers' reviews approve, with the script as reviewed (its closing Disconnect-MgGraph dropped if the reviews agree) and a row in `dt-live/OUT-OF-KIT-WRITES.md` written at once (app, service principal, consents, the secret's expiry and file, the undo, and the delegated write grants the creating sign-in adds). The tenant chat then runs a first Auditex collection of the tenant as it stands, after the manager lifts the network hold, on one sign-in from G (his go taken as given): the variant without `--break-glass-accounts`. `dt-live/phaseE/PHASE-E-COMMANDS.md` says what this first run produces and where it is kept, so the run after phase D can be compared with it. (2) The second verify of phase E runs with `-Products AAD,EXO,SECURITYSUITE,TEAMS,POWERPLATFORM`, saving two sign-in windows (SharePoint, Power BI); the first verify stays whole; the exact command goes into the same file.
+- options: (1) the app only at phase E's audit step | before phase D (chosen); (2) both verifies whole | the two-window cut (chosen) | skip the first verify (rejected: it loses the baseline before the ScubaGear oracle)
+- why: G's first aim is to master data collection; the kit has no census of apps or consent and no expected verdict depends on them (EXP-m07-q56); the ScubaGear results the second verify exists for touch only those five products, and compare.py needs only EXO and the frozen DNS from it.
+- consequences: no kit guard, pre-flight count or expected verdict changes. The heavy-job hold for the WGEX sitting applies to anything these need.
+- approver: manager (team-manager chat, 14 Nov 2026, under DEC-036 and DEC-055)
 
