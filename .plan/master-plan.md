@@ -35,16 +35,16 @@ Dummy-tenant kit and trial tenant (M07, outside the repository; DEC-006, DEC-008
 - The trial tenant is written only from a kit round confirmed ship by both providers on its frozen copy and passing
   the full offline suite 9 of 9; the live kit folder holds that round with the previous state kept; phase D's gates
   and findings are recorded; the tenant is rolled back before the trial ends (DEC-008).
-Collection completeness (M08, DEC-059; amendment 5):
-- One app-only certificate run collects and answers the 35 rows the first collection cannot (14 Teams, 16 Power BI
-  and Power Platform, 5 Security Suite): the target is 33 of 35 rows decided or carrying a named reason the tenant
-  explains, none a product gap; PP 2.3 and PP 3.1 stay not assessed by product design, so B closes at most 14 of its
-  16 rows (DEC-061).
+Collection completeness (M08, DEC-059, DEC-068; amendments 5 and 7):
+- One app-only certificate run collects and answers 64 rows the first collection could not: the 35 of amendment 5
+  (14 Teams, 16 Power BI and Power Platform, 5 Security Suite) and 29 of amendment 7 (15 AAD, 6 EXO, 8 SharePoint);
+  the target is 62 of 64 decided or carrying a named reason the tenant explains (the six phase D rows decided), none
+  a product gap; PP 2.3 and PP 3.1 stay not assessed by product design (DEC-061).
   Product work passes its other-provider review and executing check; operator writes are approved by both providers,
   carry a removal step and an OUT-OF-KIT-WRITES row, run on G's sign-in and change no verdict the kit expects.
 
 ## Scope of 100 percent
-Track A: the 1.5.0 release from G's gate answers - the wider Ruff set, the contract-test and gate-doc fixes, keyed per-run D5 pseudonyms with the middle-initial and title follow-up, the scanner follow-ups, the small review follow-ups and the release, which stops at the approved candidate until G's yes names 1.5.0. Track B: the explainer model research from bring-up to G's pick of a judged build (or of none), one data round included (DEC-037). M07: the kit gate, the hand-over, phase D's record and the rollback. M08: certificate credentials for app-only tokens, Power BI and Power Platform enablement, the Teams app-settings read, the compliance session with its DLP and alert reads, and one live re-collection (DEC-059); no release. 100 percent means every DoD item in M00-M08 is ticked.
+Track A: the 1.5.0 release from G's gate answers - the wider Ruff set, the contract-test and gate-doc fixes, keyed per-run D5 pseudonyms with the middle-initial and title follow-up, the scanner follow-ups, the small review follow-ups and the release, which stops at the approved candidate until G's yes names 1.5.0. Track B: the explainer model research from bring-up to G's pick of a judged build (or of none), one data round included (DEC-037). M07: the kit gate, the hand-over, phase D's record and the rollback. M08: certificate credentials for app-only tokens, Power BI and Power Platform enablement, the Teams app-settings read, the compliance session with its DLP and alert reads (DEC-059), the one sign-in guard with Exchange kept (DEC-065, DEC-068), the first collection's fixes D1 to D5 and D7, the permission docs and config, the opt-in SharePoint admin read (D6, DEC-068), and one live re-collection; no release. 100 percent means every DoD item in M00-M08 is ticked.
 
 ## Non-goals
 - Shipping a model explainer, a model download or any model code in 1.5.0; product integration is a later G gate.
@@ -98,11 +98,8 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M07 | dummy-tenant-kit | 12 | 56 | planned |
 | M08 | collection-completeness | 14 | 0 | planned |
 <!-- milestones:end -->
-Weights after amendment 5 (proposed; the re-baseline applies them to the milestone frontmatter): M00 7 to 6, M01 13
-to 11, M02 14 to 11, M03 15, M04 16 to 13, M05 10 to 8, M06 13 to 10, M07 12, M08 0 to 14; overall 84% to 70%.
-M08 is about as large as M04 (four tier A parts and a live run), so its 14 points come from the done milestones in
-proportion, and the figure then shows the new work as work left; M03 and M07 keep their weights so their open
-items are not discounted.
+Weights after amendment 5 (applied): M00 7 to 6, M01 13 to 11, M02 14 to 11, M04 16 to 13, M05 10 to 8, M06 13 to 10,
+M08 0 to 14, from the done milestones in proportion. Amendment 7 keeps every weight: M08 grows by small fixes and one L.
 
 Priority (G): Track B gets worker seats first; Track A runs beside it as seats allow. Nothing starts before DEC-001.
 Track B: M01-T01 and M01-T03 in parallel; M01-T02 after G's login; then M01-T04 -> M01-T05. M02-T01 (CPU) may run
@@ -117,9 +114,10 @@ and M05.
 M07 (kit; the trial end bounds it, DEC-008): M07-T11 -> M07-T12 -> M07-T13 -> M07-T14 (done, superseded by 7s); then
 M07-T18 -> M07-T19 -> M07-T20 -> M07-T21 -> M07-T16 (phase D, tenant chat), with M07-T22 applied before M07-T16;
 M07-T15 after M07-T21 when no kit script runs; M07-T17 before the trial ends.
-M08 (DEC-059, order A, B, C, D, then E): M08-T01 beside M08-T03 (EXP-m08-pbpp first; a touched kit verdict stops
-it for the manager); M08-T02 after M08-T01 merges; M08-T04 after M08-T01; M08-T05 after M08-T04; M08-T06 after
-M07-T16, M08-T02 and M08-T03 applied and M08-T05 merged, before M07-T17 and the trial's end.
+M08 (DEC-059, order A, B, C, D, then E; DEC-068): M08-T01, M08-T03 (EXP-m08-pbpp first), M08-T08 and M08-T10 side
+by side; M08-T02 after M08-T01; M08-T07 after M08-T01 and M08-T10; M08-T09 after M08-T07; M08-T04 after M08-T03 and
+M08-T10; M08-T05 after M08-T04 and M08-T07; M08-T11 after M08-T05, M08-T08, M08-T09 and M08-T10; M08-T12 after
+M08-T11; M08-T06 after M07-T16, M08-T02 and M08-T03 applied and M08-T12 merged, before M07-T17 and the trial's end.
 
 ## Top risks
 1. Isambard-AI is aarch64 with unknown compute-node internet, wheel support for PEFT and bitsandbytes, and driver
@@ -141,8 +139,10 @@ M07-T16, M08-T02 and M08-T03 applied and M08-T05 merged, before M07-T17 and the 
    passed both confirmations and the full suite, a live defect stops phase D for a G change-round decision
    (DEC-014), and the rollback is planned before the trial ends (DEC-008), not after phase D finishes.
 9. M08 rests on facts unverified offline: the Teams admin API accepting a certificate token, the compliance session
-   in app mode with Global Reader, the Power BI setting's API route. A role beyond Global Reader or a touched kit
-   verdict stops the task for the manager; A1 ports from a branch far behind `main`; the trial's end bounds M08-T06.
+   in app mode with Global Reader, the Power BI setting's API route, the SharePoint admin route (D6, write-capable
+   scope, guard-tested no-write) and Exchange inside one delegated sign-in (M08-T07 stops and states a Microsoft
+   limit for G). A role beyond Global Reader or a touched kit verdict stops the task for the manager; A1 ports from
+   a branch far behind `main`; the trial's end bounds M08-T06.
 
 ## Links
 STATE.md, ARCHITECTURE.md, milestones/, BACKLOG.md, DECISIONS.md, CLEANUP.md, RETRO.md
