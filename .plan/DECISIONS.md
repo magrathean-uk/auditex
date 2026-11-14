@@ -640,3 +640,11 @@
 - options: build an app-only Teams PowerShell session for two unused operations (rejected: no row gains, a second session kind, more auth surface)
 - why: REV-M08-T01 item 2; the 11-row closure is unchanged.
 - approver: auto
+
+## DEC-071 New lead works by the WASTE-REVIEW-2026-11-14 rules
+- date: 2026-11-14
+- status: decided
+- decision: Lab kit rounds get one other-provider confirmation (Codex) only; the M07 round 7s DoD no longer needs an Opus re-confirmation. Repair 7s and F3 run as one author run with one re-freeze. A1 needs no author re-run (fix committed at 785f613, only its verify was left): the executing check CHK-M08-T01 runs the verify, beside one Codex re-check. Reviewer results that are clear but badly formatted are fixed in place.
+- options: keep both-provider confirmations and re-runs (rejected: G asked for a leaner chat; reviews outnumbered authoring runs)
+- why: G on 14 Nov, new lead chat; records WASTE-REVIEW-2026-11-14.md rules 2, 5, 7.
+- approver: auto
