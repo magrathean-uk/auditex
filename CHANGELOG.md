@@ -13,6 +13,16 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ### Collection
 
+- **Permission docs and config list exactly what the default collectors need.** `SharePointTenantSettings.Read.All` (SharePoint
+  and OneDrive tenant settings) and `DeviceManagementScripts.Read.All` (Intune script metadata; Auditex drops the body) are
+  now declared by the SharePoint, OneDrive and Intune collectors, `collector-definitions.json`, `collector-permissions.json`,
+  the profiles and the admin guide, each with its blast radius, beside `Sites.Read.All`. No write-capable scope is in the default
+  set. A parity test fails when a default collector's permission is missing from the config or the guide, or either lists one
+  no default collector needs. The stale notes (the rejected authentication-methods list read, the app-only site-permission read,
+  "no new scope is needed" for the Intune scripts) are removed.
+- Collection: the authentication methods read takes the method configurations from the inline array of the policy (the list endpoint Graph rejects is no longer called), a null `policyMigrationState` is projected and read as not assessed, a truncated derived fan-out (`servicePrincipalFanout`, `sitePermissionsFanout`) no longer withholds a section that does not read it, and app-only runs make no `/sites/{id}/permissions` read (recorded as a named skip) so the default collectors need no write-capable scope; the orphaned and weak-ownership site rules read not assessed (`site_permissions_not_read`) while that read is skipped.
+- Graph `$batch` reads now retry per item: an item answered 429, 503 or 504 is re-sent alone after its `Retry-After` (or the throttle mode's back-off), within the mode's attempt and total-wait bounds; an item still failing is reported as a gap, and the PIM role policy rule reads go five per batch so a large tenant's policy read completes (M08-T09).
+- Fixed: a tenant with no DKIM signing configuration, and a domain whose DMARC lookups all return NXDomain, are now assessed (MS.EXO.3.1v1 not met; MS.EXO.4.1v1 to 4.4v1 no DMARC record) instead of reading as not assessed. A failed or timed-out DMARC lookup stays not assessed.
 - **Security & Compliance alert and DLP policies (MS.SECURITYSUITE 3.1-3.4 and 4.1).** In an app-only run with a
   certificate, `exchange_policy` now opens Security & Compliance PowerShell with `Connect-IPPSSession -AccessToken`
   (a certificate token for the Microsoft Exchange Online Protection resource, minted silently from the run's certificate;

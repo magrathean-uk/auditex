@@ -51,6 +51,7 @@ class IntuneDepthCollector(Collector):
     required_permissions = [
         "DeviceManagementConfiguration.Read.All",
         "DeviceManagementApps.Read.All",
+        "DeviceManagementScripts.Read.All",
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:

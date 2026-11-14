@@ -25,6 +25,7 @@ class OneDrivePostureCollector(Collector):
     description = "OneDrive sharing posture and sampled personal site inventory."
     required_permissions = [
         "Sites.Read.All",
+        "SharePointTenantSettings.Read.All",
     ]
 
     def _derived_section(self, name: str, rows: list[dict[str, Any]], chunk_writer: Any) -> dict[str, Any]:

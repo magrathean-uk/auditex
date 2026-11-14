@@ -11,6 +11,7 @@ class SharePointCollector(Collector):
     description = "SharePoint and OneDrive tenant posture."
     required_permissions = [
         "Sites.Read.All",
+        "SharePointTenantSettings.Read.All",
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:

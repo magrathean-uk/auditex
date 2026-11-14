@@ -202,7 +202,8 @@
       "enabled": true,
       "description": "SharePoint and OneDrive tenant inventory posture",
       "required_permissions": [
-        "Sites.Read.All"
+        "Sites.Read.All",
+        "SharePointTenantSettings.Read.All"
       ],
       "query_plan": [
         "sharePointSettings",
@@ -213,7 +214,8 @@
       "enabled": true,
       "description": "SharePoint and OneDrive sharing posture plus sampled site permission inventory",
       "required_permissions": [
-        "Sites.Read.All"
+        "Sites.Read.All",
+        "SharePointTenantSettings.Read.All"
       ],
       "query_plan": [
         "sharePointSettings",
@@ -285,7 +287,8 @@
       "enabled": true,
       "description": "OneDrive sharing posture and sampled personal site inventory.",
       "required_permissions": [
-        "Sites.Read.All"
+        "Sites.Read.All",
+        "SharePointTenantSettings.Read.All"
       ],
       "query_plan": [
         "sharePointSettings",
@@ -441,7 +444,8 @@
       "description": "Deeper Intune policy, script metadata, app protection, Windows Update for Business update rings and update profiles, and sampled assignment inventory (groupPolicyConfigurations, deviceManagementScripts and the quality and feature update profiles use Graph beta; script bodies are never requested)",
       "required_permissions": [
         "DeviceManagementConfiguration.Read.All",
-        "DeviceManagementApps.Read.All"
+        "DeviceManagementApps.Read.All",
+        "DeviceManagementScripts.Read.All"
       ],
       "query_plan": [
         "deviceConfigurations",

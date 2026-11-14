@@ -117,7 +117,7 @@
         "Authentication Policy Administrator",
         "Security Reader"
       ],
-      "notes": "Authentication method policy and registration reports can require report-reading access. The registration report is read with a fixed $select of metadata fields (userType and isAdmin included) and returns no authentication method values. Policy.Read.All also reads whole typed authentication method configurations from /policies/authenticationMethodsPolicy/authenticationMethodConfigurations (v1.0); no per-user method values are read."
+      "notes": "Authentication method policy and registration reports can require report-reading access. The registration report is read with a fixed $select of metadata fields (userType and isAdmin included) and returns no authentication method values. Policy.Read.All also covers the typed authentication method configurations, which come inline in the policy read (the separate list endpoint is not called); no per-user method values are read."
     },
     "reports_usage": {
       "graph_scopes": [
@@ -197,27 +197,30 @@
     },
     "sharepoint": {
       "graph_scopes": [
-        "Sites.Read.All"
+        "Sites.Read.All",
+        "SharePointTenantSettings.Read.All"
       ],
       "minimum_role_hints": [
         "Global Reader",
         "SharePoint Administrator"
       ],
-      "notes": "SharePoint tenant settings and site inventory can vary by role and service readiness."
+      "notes": "SharePoint tenant settings (GET /admin/sharepoint/settings) need SharePointTenantSettings.Read.All; the site inventory needs Sites.Read.All. Both are read-only."
     },
     "sharepoint_access": {
       "graph_scopes": [
-        "Sites.Read.All"
+        "Sites.Read.All",
+        "SharePointTenantSettings.Read.All"
       ],
       "minimum_role_hints": [
         "Global Reader",
         "SharePoint Administrator"
       ],
-      "notes": "Sampled site permissions are attempted in a reader-first mode, but Graph site permission depth can require stronger SharePoint privileges or app-only escalation."
+      "notes": "Sampled site permissions (GET /sites/{id}/permissions) are read only in delegated runs; an app-only run records a named skip, so the default collectors need no write-capable scope."
     },
     "onedrive_posture": {
       "graph_scopes": [
-        "Sites.Read.All"
+        "Sites.Read.All",
+        "SharePointTenantSettings.Read.All"
       ],
       "minimum_role_hints": [
         "Global Reader",
@@ -367,14 +370,15 @@
     "intune_depth": {
       "graph_scopes": [
         "DeviceManagementConfiguration.Read.All",
-        "DeviceManagementApps.Read.All"
+        "DeviceManagementApps.Read.All",
+        "DeviceManagementScripts.Read.All"
       ],
       "minimum_role_hints": [
         "Intune Administrator",
         "Intune Reader",
         "Global Reader"
       ],
-      "notes": "Deeper Intune policy and assignment surfaces can still return empty or partial results when Intune is not licensed or the tenant does not use those workloads. groupPolicyConfigurations, deviceManagementScripts, windowsQualityUpdateProfiles and windowsFeatureUpdateProfiles are Graph beta endpoints; script metadata is read with a fixed $select that excludes scriptContent. Windows Update for Business update rings are read from the deviceConfigurations list already collected (type windowsUpdateForBusinessConfiguration, v1.0), and the assignments of each ring and update profile are read with GET .../assignments (DeviceManagementConfiguration.Read.All); no new scope is needed."
+      "notes": "Deeper Intune policy and assignment surfaces can still return empty or partial results when Intune is not licensed or the tenant does not use those workloads. groupPolicyConfigurations, deviceManagementScripts, windowsQualityUpdateProfiles and windowsFeatureUpdateProfiles are Graph beta endpoints; script metadata is read with a fixed $select that excludes scriptContent. Windows Update for Business update rings are read from the deviceConfigurations list already collected (type windowsUpdateForBusinessConfiguration, v1.0), and the assignments of each ring and update profile are read with GET .../assignments (DeviceManagementConfiguration.Read.All); deviceManagementScripts needs DeviceManagementScripts.Read.All (Auditex drops the script body)."
     },
     "exchange": {
       "graph_scopes": [],
@@ -480,8 +484,12 @@
     "Channel.ReadBasic.All",
     "Group.Read.All",
     "Sites.Read.All",
+    "SharePointTenantSettings.Read.All",
+    "DeviceManagementScripts.Read.All",
     "Policy.Read.PermissionGrant",
     "ReportSettings.Read.All",
-    "ConsentRequest.Read.All"
+    "Policy.Read.All",
+    "Reports.Read.All",
+    "MailboxSettings.Read"
   ]
 }
