@@ -2,7 +2,7 @@
 id: M06
 name: release-1-5-0
 weight: 13
-status: planned
+status: done
 ---
 # M06 release-1-5-0
 Track A. Starts after every M00, M04 and M05 DoD item is ticked; it does not wait for Track B, and no model explainer enters 1.5.0 (a later G gate). The version name and publication need G's explicit yes naming 1.5.0; the form stays a signed tag plus a GitHub release with the wheel and sdist, no PyPI (v2 DEC-001). Without that yes the milestone stops at the approved candidate. Build, gate and reproducibility checks run only in the candidate worktree (ARCHITECTURE.md candidate binding), never on a later `HEAD`; the orchestrator removes that worktree (`git worktree remove`, no `--force`) when M06 closes.
@@ -20,7 +20,7 @@ Track A. Starts after every M00, M04 and M05 DoD item is ticked; it does not wai
 - [x] Review: astra's pre-publication release gate returns ready on the full candidate sha, which is on `main`: `c=$(sed -n 's/^candidate: \([0-9a-f]\{40\}\)$/\1/p' .plan/work/M06-T02/result.md | head -1) && test -n "$c" && git merge-base --is-ancestor "$c" main && grep -qE "^[[:space:]]*(summary: )?reviewed: $c\$" .plan/work/M06-T03/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: ready$' .plan/work/M06-T03/result.md`
 - [x] Review: G's explicit yes naming 1.5.0 and the candidate sha is recorded in DECISIONS.md with approver G: `c=$(sed -n 's/^candidate: \([0-9a-f]\{40\}\)$/\1/p' .plan/work/M06-T02/result.md | head -1) && test -n "$c" && grep -A8 '^## DEC-[0-9]* Release 1.5.0' .plan/DECISIONS.md | grep -q '^- approver: G' && grep -A8 '^## DEC-[0-9]* Release 1.5.0' .plan/DECISIONS.md | grep -qx -- "- candidate: $c"`
 - [x] The signed tag `v1.5.0` verifies locally, points at the candidate, and `origin` carries the same tag object peeling to the same commit: `c=$(sed -n 's/^candidate: \([0-9a-f]\{40\}\)$/\1/p' .plan/work/M06-T02/result.md | head -1) && test -n "$c" && git tag -v v1.5.0 && test "$(git rev-parse 'v1.5.0^{commit}')" = "$c" && o=$(git rev-parse v1.5.0) && git ls-remote origin refs/tags/v1.5.0 'refs/tags/v1.5.0^{}' | awk -v o="$o" -v c="$c" '$2 == "refs/tags/v1.5.0" && $1 == o {a = 1} $2 == "refs/tags/v1.5.0^{}" && $1 == c {b = 1} END {exit !(a && b)}'` (evidence: .plan/work/M06-T04/result.md; on this machine `git tag -v` needs a per-command allowed-signers setting, as recorded there)
-- [ ] The GitHub release `v1.5.0` carries exactly the wheel and the sdist, and both, downloaded fresh, byte-match the hashes gated in M06-T02: `d=$(mktemp -d) && gh release download v1.5.0 --dir "$d" && test "$(ls "$d" | wc -l)" -eq 2 && grep -qx "wheel-sha256: $(shasum -a 256 "$d"/*.whl | cut -d' ' -f1)" .plan/work/M06-T02/result.md && grep -qx "sdist-sha256: $(shasum -a 256 "$d"/*.tar.gz | cut -d' ' -f1)" .plan/work/M06-T02/result.md && grep -qx 'published-artefacts: verified' .plan/work/M06-T05/result.md`
+- [x] The GitHub release `v1.5.0` carries exactly the wheel and the sdist, and both, downloaded fresh, byte-match the hashes gated in M06-T02: `d=$(mktemp -d) && gh release download v1.5.0 --dir "$d" && test "$(ls "$d" | wc -l)" -eq 2 && grep -qx "wheel-sha256: $(shasum -a 256 "$d"/*.whl | cut -d' ' -f1)" .plan/work/M06-T02/result.md && grep -qx "sdist-sha256: $(shasum -a 256 "$d"/*.tar.gz | cut -d' ' -f1)" .plan/work/M06-T02/result.md && grep -qx 'published-artefacts: verified' .plan/work/M06-T05/result.md`
 
 ## Tasks
 | id | title | owner | size | tags | status |
@@ -29,7 +29,7 @@ Track A. Starts after every M00, M04 and M05 DoD item is ticked; it does not wai
 | M06-T02 | Run the pre-publication gates on the release candidate | luna | S | - | done |
 | M06-T03 | Pre-publication release gate validation | astra | S | gate | done |
 | M06-T04 | Tag and publish 1.5.0 after G's yes | orchestrator | S | gate | done |
-| M06-T05 | Verify the published release | luna | S | - | todo |
+| M06-T05 | Verify the published release | luna | S | - | done |
 
 ## Acceptance criteria
 ### M06-T01 Write the 1.5.0 release notes and bump the version

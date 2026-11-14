@@ -109,7 +109,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M03 | explainer-training | 15 | 20 | active |
 | M04 | d5-keyed-pseudonyms | 16 | 100 | done |
 | M05 | scanners-and-hygiene | 10 | 100 | done |
-| M06 | release-1-5-0 | 13 | 90 | planned |
+| M06 | release-1-5-0 | 13 | 100 | done |
 | M07 | dummy-tenant-kit | 12 | 63 | planned |
 <!-- milestones:end -->
 

@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 82% (was 80%)
+overall: 84% (was 82%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: ea84365 2026-11-14T07:58:41Z
+last_checkpoint: 6b8f76f 2026-11-14T08:00:27Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -13,7 +13,7 @@ last_checkpoint: ea84365 2026-11-14T07:58:41Z
 
 ## Blockers
 - Host: quiet window until 00:30 GMT on 14 Nov (manager): until then nothing that takes a heavy slot. From 00:30 GMT heavy steps run again under the usual rule: one heavy slot through hostload.sh, load 12 or less (PLAN_LOAD_MAX=12).
-- Track A: 1.5.0 is RELEASED (DEC-052): signed tag v1.5.0 on a1c6b5e, pushed; GitHub release https://github.com/magrathean-uk/auditex/releases/tag/v1.5.0 with exactly the gated wheel (81ea5c2f...) and sdist (959e825f...); a fresh download matches. M06-T05 (independent check of the published files, install and version) is running; then tick M06 item 10 and close M06 with its retro.
+- Track A: 1.5.0 is RELEASED and verified (DEC-052; M06 complete): signed tag v1.5.0 on a1c6b5e; GitHub release https://github.com/magrathean-uk/auditex/releases/tag/v1.5.0 with exactly the gated wheel (81ea5c2f...) and sdist (959e825f...); fresh download, install and both CLIs report 1.5.0 (M06-T05). Manager order: stand still, no new Track A or B work; record the tenant chat's results the manager forwards.
 - Track B: stopped and on hold (DEC-053, G on 14 Nov: "master data collection etc first ... talk about training AFTER"). The pilot failed (M03-T06: 18 wins of 190, 139 needed; 5.57 GPU-hours). Nothing in M03 moves; amendment 4 (parked case) stays unmerged at bf19a3f. Training is discussed again after phase D. GPU-hours used: about 306 of 20,000.
 
 ## Pending G decisions
