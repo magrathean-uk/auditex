@@ -29,6 +29,9 @@ POLICY_RULES_FANOUT = f"{POLICY_RULES}Fanout"
 LICENCE_ERROR_CLASS = "license_required"
 # Every directory role (built in and custom) has one policy; a tenant with more roles than this gets a fan-out gap.
 POLICY_RULES_FANOUT_LIMIT = 250
+# The rule reads are paced: at most this many go in one $batch call, so a tenant with 149 policies is read in 30 small
+# batches that the per-item 429 retry of ``GraphClient.get_batch`` can finish, not eight full ones throttled together.
+POLICY_RULES_BATCH_SIZE = 5
 # The API requires both conditions to list the directory role policies.
 POLICY_ASSIGNMENT_FILTER = "scopeId eq '/' and scopeType eq 'DirectoryRole'"
 # Only the fields the normalized artefacts read are kept of a rule: the rest of a rule is the approvers' names and ids
@@ -125,8 +128,9 @@ class IdentityGovernanceCollector(Collector):
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         """Read the rules of every policy the assignment list names: one GET per policy, never more than the list holds.
 
-        The reads are GET-only, one request per distinct policy (through ``$batch`` when the client has it) and bounded by
-        ``POLICY_RULES_FANOUT_LIMIT``. ``/rules`` accepts no ``$top``. Nothing is requested, and no section is written,
+        The reads are GET-only, one request per distinct policy (through ``$batch`` when the client has it, at most
+        ``POLICY_RULES_BATCH_SIZE`` per call) and bounded by ``POLICY_RULES_FANOUT_LIMIT``. A read still throttled after the
+        client's retry bound is a failed read, so the fan-out is incomplete, never complete. ``/rules`` accepts no ``$top``. Nothing is requested, and no section is written,
         when the assignment list could not be read: that read already carries the failure. A policy that could not be read
         leaves the aggregate coverage row ``partial`` (``failed`` when none could be), so the collector is ``partial``.
         """
@@ -175,6 +179,7 @@ class IdentityGovernanceCollector(Collector):
             [POLICY_RULES_ENDPOINT.format(id=quote(policy_id, safe="")) for policy_id in targets],
             rows=True,
             top=None,
+            batch_size=POLICY_RULES_BATCH_SIZE,
         )
         values: list[dict[str, Any]] = []
         failures: list[ObjectRead] = []

@@ -123,33 +123,47 @@ def _read_one(client: Any, endpoint: str, *, api_version: str, rows: bool, top: 
 
 
 def read_endpoints(
-    client: Any, endpoints: Sequence[str], *, rows: bool, api_version: str = "v1.0", top: str | None = "50"
+    client: Any,
+    endpoints: Sequence[str],
+    *,
+    rows: bool,
+    api_version: str = "v1.0",
+    top: str | None = "50",
+    batch_size: int | None = None,
 ) -> list[ObjectRead]:
     """GET every endpoint in order. ``rows`` reads a collection (following a next-page link); otherwise one object.
 
     ``top`` is the ``$top`` each collection read asks for; ``None`` sends none, for a collection that does not accept it.
+    ``batch_size`` paces a large fan-out: at most that many endpoints go to one ``get_batch`` call (``None``: all of them).
     """
     if not endpoints:
         return []
-    results: list[ObjectRead] | None = None
-    if api_version == "v1.0" and hasattr(client, "get_batch"):
-        try:
-            batch = client.get_batch([{"path": endpoint, "params": {"$top": top} if rows and top else {}} for endpoint in endpoints])
-        except Exception:  # noqa: BLE001
-            batch = None
-        if isinstance(batch, list) and len(batch) == len(endpoints):
-            results = [_from_batch(item, endpoint, rows=rows) for item, endpoint in zip(batch, endpoints, strict=False)]
-            if rows:
-                for result in results:
-                    link = result.body.get("@odata.nextLink") if isinstance(result.body, dict) else None
-                    if result.status == STATUS_OK and isinstance(link, str) and link and hasattr(client, "iter_items"):
-                        try:
-                            result.rows = (result.rows or []) + [row for row in client.iter_items(link) if isinstance(row, dict)]
-                        except Exception as exc:  # noqa: BLE001
-                            result.status = STATUS_FAILED
-                            result.error_class, result.error = _classify_graph_error(exc)
-    if results is None:
-        results = [_read_one(client, endpoint, api_version=api_version, rows=rows, top=top) for endpoint in endpoints]
+    if not (api_version == "v1.0" and hasattr(client, "get_batch")):
+        return [_read_one(client, endpoint, api_version=api_version, rows=rows, top=top) for endpoint in endpoints]
+    size = batch_size if batch_size and batch_size > 0 else len(endpoints)
+    results: list[ObjectRead] = []
+    for offset in range(0, len(endpoints), size):
+        results.extend(_read_batch(client, list(endpoints[offset : offset + size]), rows=rows, top=top))
+    return results
+
+
+def _read_batch(client: Any, endpoints: list[str], *, rows: bool, top: str | None) -> list[ObjectRead]:
+    try:
+        batch = client.get_batch([{"path": endpoint, "params": {"$top": top} if rows and top else {}} for endpoint in endpoints])
+    except Exception:  # noqa: BLE001
+        batch = None
+    if not (isinstance(batch, list) and len(batch) == len(endpoints)):
+        return [_read_one(client, endpoint, api_version="v1.0", rows=rows, top=top) for endpoint in endpoints]
+    results = [_from_batch(item, endpoint, rows=rows) for item, endpoint in zip(batch, endpoints, strict=False)]
+    if rows:
+        for result in results:
+            link = result.body.get("@odata.nextLink") if isinstance(result.body, dict) else None
+            if result.status == STATUS_OK and isinstance(link, str) and link and hasattr(client, "iter_items"):
+                try:
+                    result.rows = (result.rows or []) + [row for row in client.iter_items(link) if isinstance(row, dict)]
+                except Exception as exc:  # noqa: BLE001
+                    result.status = STATUS_FAILED
+                    result.error_class, result.error = _classify_graph_error(exc)
     return results
 
 

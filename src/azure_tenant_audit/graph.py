@@ -112,6 +112,8 @@ def graph_api_version(url: str) -> str:
         return "beta"
     return "v1.0"
 GRAPH_BATCH_CHUNK_SIZE = 20
+# Per-item answers inside a $batch response that are re-sent (only those items) after the item's Retry-After.
+BATCH_RETRY_STATUSES = frozenset({429, 503, 504})
 TOKEN_URL_TEMPLATE = "{authority}{tenant_id}/oauth2/v2.0/token"
 
 
@@ -200,6 +202,8 @@ class ThrottlePolicy:
     server_error_retries: int
     permission_stop_after: int
     base_backoff_seconds: float
+    # Total time a $batch call may spend waiting to re-send its throttled or unavailable items.
+    max_retry_wait_seconds: float = 120.0
 
 
 THROTTLE_POLICIES: dict[str, ThrottlePolicy] = {
@@ -210,6 +214,7 @@ THROTTLE_POLICIES: dict[str, ThrottlePolicy] = {
         server_error_retries=2,
         permission_stop_after=0,
         base_backoff_seconds=1.0,
+        max_retry_wait_seconds=30.0,
     ),
     "safe": ThrottlePolicy(
         min_delay_seconds=0.2,
@@ -218,6 +223,7 @@ THROTTLE_POLICIES: dict[str, ThrottlePolicy] = {
         server_error_retries=3,
         permission_stop_after=2,
         base_backoff_seconds=1.5,
+        max_retry_wait_seconds=120.0,
     ),
     "ultra-safe": ThrottlePolicy(
         min_delay_seconds=0.75,
@@ -226,8 +232,24 @@ THROTTLE_POLICIES: dict[str, ThrottlePolicy] = {
         server_error_retries=4,
         permission_stop_after=1,
         base_backoff_seconds=2.0,
+        max_retry_wait_seconds=300.0,
     ),
 }
+
+
+@dataclass
+class _WaitBudget:
+    """The seconds one ``$batch`` chunk may still spend waiting to retry, shared by its item and transport retries."""
+
+    remaining: float
+    spent: float = 0.0
+
+    def allows(self, seconds: float) -> bool:
+        return math.isfinite(seconds) and seconds <= self.remaining
+
+    def take(self, seconds: float) -> None:
+        self.remaining -= seconds
+        self.spent += seconds
 
 
 class GraphError(RuntimeError):
@@ -265,6 +287,15 @@ class GraphClient:
     _public_app: Any = field(default=None, init=False, repr=False, compare=False)
     _interactive_lock: Any = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
     interactive_prompts: int = field(default=0, init=False, compare=False)
+    # Injected clock for tests: a monotonic reading and a wait; None uses time.monotonic and time.sleep.
+    clock: Callable[[], float] | None = field(default=None, repr=False, compare=False)
+    sleep: Callable[[float], None] | None = field(default=None, repr=False, compare=False)
+
+    def _sleep(self, seconds: float) -> None:
+        (self.sleep or time.sleep)(seconds)
+
+    def _monotonic(self) -> float:
+        return (self.clock or time.monotonic)()
 
     def _emit(self, event: str, message: str, details: dict[str, Any] | None = None) -> None:
         if self.audit_event is None:
@@ -306,7 +337,7 @@ class GraphClient:
         return "/".join(part.split("(", 1)[0] for part in parts[:2]) if parts else "root"
 
     def _apply_pacing(self, *, method: str, url: str, attempt: int) -> None:
-        now = time.monotonic()
+        now = self._monotonic()
         if self._next_request_not_before <= now:
             return
         wait_seconds = round(self._next_request_not_before - now, 3)
@@ -323,7 +354,7 @@ class GraphClient:
                 "mode": self.auth.throttle_mode,
             },
         )
-        time.sleep(wait_seconds)
+        self._sleep(wait_seconds)
         self._next_request_not_before = 0.0
 
     def _arm_next_request_delay(self) -> None:
@@ -331,15 +362,18 @@ class GraphClient:
         delay_seconds = policy.min_delay_seconds
         if policy.jitter_seconds > 0:
             delay_seconds += random.uniform(0.0, policy.jitter_seconds)
-        self._next_request_not_before = time.monotonic() + delay_seconds
+        self._next_request_not_before = self._monotonic() + delay_seconds
 
     def _retry_delay(self, attempt: int, *, retry_after: str | None = None) -> float:
         policy = self._throttle_policy()
         if retry_after:
             try:
-                return max(float(retry_after), policy.base_backoff_seconds)
+                seconds = float(retry_after)
             except ValueError:
-                pass
+                seconds = math.nan
+            # An HTTP date, NaN or infinity is not a usable delay: the policy back-off applies instead.
+            if math.isfinite(seconds):
+                return max(seconds, policy.base_backoff_seconds)
         return round(policy.base_backoff_seconds * (2 ** max(0, attempt - 1)), 2)
 
     def _authority(self) -> str:
@@ -650,7 +684,12 @@ class GraphClient:
             error_code=READ_ONLY_VIOLATION,
         )
 
-    def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+    def _request(self, method: str, url: str, *, wait_budget: _WaitBudget | None = None, **kwargs: Any) -> requests.Response:
+        """Send one Graph request, retrying 429 and 5xx answers within the throttle policy.
+
+        ``wait_budget`` is the shared retry-wait allowance of a ``$batch`` chunk: a retry whose wait would pass it is
+        not slept and the last answer is returned instead.
+        """
         self._enforce_read_only(method, url, kwargs)
         token = self.ensure_token()
         headers = kwargs.pop("headers", {})
@@ -725,6 +764,9 @@ class GraphClient:
 
             if response.status_code == 429 and attempt <= self._throttle_policy().rate_limit_retries:
                 retry_after = self._retry_delay(attempt, retry_after=response.headers.get("Retry-After"))
+                if self._over_wait_budget(wait_budget, retry_after, method=method, url=url, attempt=attempt):
+                    self._arm_next_request_delay()
+                    return response
                 LOG.warning("Graph rate limit. Retry in %s seconds.", retry_after)
                 self._emit(
                     "graph.request.retry",
@@ -738,10 +780,13 @@ class GraphClient:
                         "reason": "rate_limit",
                     },
                 )
-                time.sleep(retry_after)
+                self._take_wait(wait_budget, retry_after)
                 continue
             if response.status_code >= 500 and attempt <= self._throttle_policy().server_error_retries:
                 backoff_seconds = self._retry_delay(attempt)
+                if self._over_wait_budget(wait_budget, backoff_seconds, method=method, url=url, attempt=attempt):
+                    self._arm_next_request_delay()
+                    return response
                 LOG.warning(
                     "Graph server error (%s). Retrying (%s/%s).",
                     response.status_code,
@@ -760,10 +805,34 @@ class GraphClient:
                         "reason": "server_error",
                     },
                 )
-                time.sleep(backoff_seconds)
+                self._take_wait(wait_budget, backoff_seconds)
                 continue
             self._arm_next_request_delay()
             return response
+
+    def _over_wait_budget(
+        self, wait_budget: _WaitBudget | None, seconds: float, *, method: str, url: str, attempt: int
+    ) -> bool:
+        if wait_budget is None or wait_budget.allows(seconds):
+            return False
+        self._emit(
+            "graph.request.retry_budget_exhausted",
+            "Retry wait would pass the $batch wait bound; not retrying",
+            {
+                "method": method,
+                "url": url,
+                "attempt": attempt,
+                "backoff_seconds": seconds,
+                "remaining_seconds": wait_budget.remaining,
+                "mode": self.auth.throttle_mode,
+            },
+        )
+        return True
+
+    def _take_wait(self, wait_budget: _WaitBudget | None, seconds: float) -> None:
+        self._sleep(seconds)
+        if wait_budget is not None:
+            wait_budget.take(seconds)
 
     def _follow_redirects(
         self, response: requests.Response, method: str, url: str, headers: dict[str, str]
@@ -947,6 +1016,14 @@ class GraphClient:
         return batch_path
 
     def get_batch(self, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """GET each request through ``$batch``, in chunks of ``GRAPH_BATCH_CHUNK_SIZE``; one result per request, in order.
+
+        An item answered 429, 503 or 504 is re-sent alone (with the other failed items of its chunk) after its
+        ``Retry-After``, or the throttle policy's back-off when it has none. The attempts are bounded like a single
+        request (``rate_limit_retries`` for 429, ``server_error_retries`` for 503 and 504) and the total wait by
+        ``max_retry_wait_seconds``, which the transport retries of the chunk's POSTs share. An item whose delay would
+        pass the remaining wait, or whose re-send fails, is returned with ``retry_exhausted`` set; settled answers stay.
+        """
         if not requests:
             return []
 
@@ -972,71 +1049,172 @@ class GraphClient:
                         ),
                     }
                 )
-
-            response = self._request("POST", f"{GRAPH_ROOT}/$batch", json={"requests": batch_requests})
-            if response.status_code >= 400:
-                payload: dict[str, Any]
-                error_code: str | None = None
-                reason = response.text
-                try:
-                    payload = response.json()
-                except ValueError:
-                    payload = {}
-                if isinstance(payload, dict):
-                    error = payload.get("error")
-                    if isinstance(error, dict):
-                        error_code = error.get("code")
-                        reason = str(error.get("message") or reason)
-                    elif isinstance(error, str):
-                        reason = error
-                raise GraphError(reason, status=response.status_code, request=response.url, error_code=error_code)
-
-            payload = response.json()
-            if not isinstance(payload, dict):
-                raise GraphError("Graph batch returned a non-dict payload.", request=response.url)
-            responses = payload.get("responses")
-            if not isinstance(responses, list):
-                raise GraphError("Graph batch returned no responses array.", request=response.url)
-
-            responses_by_id: dict[str, dict[str, Any]] = {}
-            for response_item in responses:
-                if isinstance(response_item, dict):
-                    response_id = response_item.get("id")
-                    if response_id is not None:
-                        responses_by_id[str(response_id)] = response_item
-
-            for index, request_spec in enumerate(chunk):
-                response_item = responses_by_id.get(str(index))
-                if not isinstance(response_item, dict):
-                    results.append(
-                        {
-                            "request": request_spec,
-                            "status": 502,
-                            "body": {},
-                            "error_code": "BatchMissingResponse",
-                            "error": "Graph batch response was missing an entry.",
-                        }
-                    )
-                    continue
-
-                status = response_item.get("status")
-                body = response_item.get("body")
-                entry: dict[str, Any] = {
-                    "request": request_spec,
-                    "status": status if isinstance(status, int) else 0,
-                    "body": body if isinstance(body, dict) else body,
-                }
-                if isinstance(body, dict):
-                    error = body.get("error")
-                    if isinstance(error, dict):
-                        error_code = error.get("code")
-                        error_message = error.get("message")
-                        if error_code is not None:
-                            entry["error_code"] = error_code
-                        if error_message is not None:
-                            entry["error"] = str(error_message)
-                    elif isinstance(error, str):
-                        entry["error"] = error
-                results.append(entry)
-
+            results.extend(self._run_batch_chunk(chunk, batch_requests))
         return results
+
+    def _run_batch_chunk(self, chunk: list[dict[str, Any]], batch_requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        policy = self._throttle_policy()
+        budget = _WaitBudget(policy.max_retry_wait_seconds)
+        entries: list[dict[str, Any]] = [{} for _ in chunk]
+        pending = list(range(len(chunk)))
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                responses_by_id = self._post_batch([batch_requests[index] for index in pending], wait_budget=budget)
+            except Exception as exc:  # noqa: BLE001
+                if attempt == 1:
+                    raise  # nothing settled yet: the caller decides how to read the chunk
+                # The re-send failed: the settled answers stay, and only the pending items become named gaps.
+                for index in pending:
+                    entries[index]["error"] = f"{entries[index].get('error') or ''} Retry request failed: {exc}".strip()
+                self._emit(
+                    "graph.batch.retry_failed",
+                    "The re-sent $batch request failed; its items were not read",
+                    {"attempt": attempt, "urls": [batch_requests[index]["url"] for index in pending], "error": str(exc)},
+                )
+                break
+            retry: list[int] = []
+            for index in pending:
+                entry = self._batch_entry(chunk[index], responses_by_id.get(str(index)))
+                if attempt > 1:
+                    entry["attempts"] = attempt
+                entries[index] = entry
+                if self._batch_item_retryable(entry["status"], attempt, policy):
+                    retry.append(index)
+            # Each item waits its own delay: one whose delay passes the remaining budget is left as a gap and does
+            # not hold back the others, which are re-sent after the longest delay among them.
+            delays = {
+                index: self._retry_delay(attempt, retry_after=_header(entries[index].get("headers"), "Retry-After"))
+                for index in retry
+            }
+            retry = [index for index in retry if budget.allows(delays[index])]
+            if not retry:
+                break
+            wait = max(delays[index] for index in retry)
+            self._emit(
+                "graph.batch.retry",
+                "Retrying throttled or unavailable $batch items",
+                {
+                    "attempt": attempt,
+                    "item_count": len(retry),
+                    "urls": [batch_requests[index]["url"] for index in retry],
+                    "statuses": sorted({entries[index]["status"] for index in retry}),
+                    "wait_seconds": wait,
+                    "waited_seconds": budget.spent,
+                    "mode": self.auth.throttle_mode,
+                },
+            )
+            LOG.warning("Graph batch: %s items throttled or unavailable. Retry in %s seconds.", len(retry), wait)
+            self._take_wait(budget, wait)
+            pending = retry
+        exhausted = [index for index, entry in enumerate(entries) if entry.get("status") in BATCH_RETRY_STATUSES]
+        for index in exhausted:
+            entry = entries[index]
+            entry["retry_exhausted"] = True
+            entry["error"] = (
+                f"Graph batch item still answered HTTP {entry['status']} after {entry.get('attempts', 1)} attempts"
+                f" (retry bound of throttle mode '{self.auth.throttle_mode}'); not read. "
+                + str(entry.get("error") or "")
+            ).strip()
+        if exhausted:
+            self._emit(
+                "graph.batch.retry_exhausted",
+                "Throttled or unavailable $batch items were not read within the retry bound",
+                {
+                    "item_count": len(exhausted),
+                    "urls": [batch_requests[index]["url"] for index in exhausted],
+                    "statuses": sorted({entries[index]["status"] for index in exhausted}),
+                    "attempts": attempt,
+                    "waited_seconds": budget.spent,
+                    "mode": self.auth.throttle_mode,
+                },
+            )
+        return entries
+
+    @staticmethod
+    def _batch_item_retryable(status: Any, attempt: int, policy: ThrottlePolicy) -> bool:
+        if status == 429:
+            return attempt <= policy.rate_limit_retries
+        if status in BATCH_RETRY_STATUSES:
+            return attempt <= policy.server_error_retries
+        return False
+
+    def _post_batch(
+        self, batch_requests: list[dict[str, Any]], *, wait_budget: _WaitBudget | None = None
+    ) -> dict[str, dict[str, Any]]:
+        response = self._request("POST", f"{GRAPH_ROOT}/$batch", wait_budget=wait_budget, json={"requests": batch_requests})
+        if response.status_code >= 400:
+            payload: Any
+            error_code: str | None = None
+            reason = response.text
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {}
+            if isinstance(payload, dict):
+                error = payload.get("error")
+                if isinstance(error, dict):
+                    error_code = error.get("code")
+                    reason = str(error.get("message") or reason)
+                elif isinstance(error, str):
+                    reason = error
+            raise GraphError(reason, status=response.status_code, request=response.url, error_code=error_code)
+
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise GraphError("Graph batch returned a non-dict payload.", request=response.url)
+        responses = payload.get("responses")
+        if not isinstance(responses, list):
+            raise GraphError("Graph batch returned no responses array.", request=response.url)
+
+        responses_by_id: dict[str, dict[str, Any]] = {}
+        for response_item in responses:
+            if isinstance(response_item, dict):
+                response_id = response_item.get("id")
+                if response_id is not None:
+                    responses_by_id[str(response_id)] = response_item
+        return responses_by_id
+
+    @staticmethod
+    def _batch_entry(request_spec: dict[str, Any], response_item: Any) -> dict[str, Any]:
+        if not isinstance(response_item, dict):
+            return {
+                "request": request_spec,
+                "status": 502,
+                "body": {},
+                "error_code": "BatchMissingResponse",
+                "error": "Graph batch response was missing an entry.",
+            }
+        status = response_item.get("status")
+        body = response_item.get("body")
+        entry: dict[str, Any] = {
+            "request": request_spec,
+            "status": status if isinstance(status, int) else 0,
+            "body": body,
+        }
+        headers = response_item.get("headers")
+        if isinstance(headers, dict) and headers:
+            entry["headers"] = headers
+        if isinstance(body, dict):
+            error = body.get("error")
+            if isinstance(error, dict):
+                error_code = error.get("code")
+                error_message = error.get("message")
+                if error_code is not None:
+                    entry["error_code"] = error_code
+                if error_message is not None:
+                    entry["error"] = str(error_message)
+            elif isinstance(error, str):
+                entry["error"] = error
+        return entry
+
+
+def _header(headers: Any, name: str) -> str | None:
+    """A header of a ``$batch`` item, matched without regard to case."""
+    if not isinstance(headers, dict):
+        return None
+    for key, value in headers.items():
+        if str(key).casefold() == name.casefold():
+            return str(value)
+    return None

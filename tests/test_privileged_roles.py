@@ -734,3 +734,95 @@ def test_a_complete_artefact_and_a_failed_or_missing_read_record_no_withheld_gap
         collector_payloads={"identity": {"roleDefinitions": {"value": [{"id": GA, "displayName": "Global Administrator"}]}},
                             "identity_governance": payload})
     assert "privileged_roles" not in normalized and "collection_gaps" not in normalized
+
+
+class _ThrottlingTenant:
+    """A Graph transport for the whole collector: 149 directory role policies, rule reads throttled per item.
+
+    ``throttle(policy, send)`` returns the Retry-After of a 429 answer for that send of the policy's rules, or None.
+    """
+
+    def __init__(self, throttle: Any, count: int = 149) -> None:
+        self.ids = [f"pol-{index:03d}" for index in range(count)]
+        self.throttle = throttle
+        self.batch_sizes: list[int] = []
+        self.sends: dict[str, int] = {}
+
+    def request(self, method: str, url: str, **kwargs: Any) -> Any:
+        from support import graph_response
+
+        if method == "POST":
+            inner = kwargs["json"]["requests"]
+            assert all(item["method"] == "GET" for item in inner)
+            self.batch_sizes.append(len(inner))
+            answers = []
+            for item in inner:
+                policy = item["url"].split("/")[3]
+                self.sends[policy] = self.sends.get(policy, 0) + 1
+                retry_after = self.throttle(policy, self.sends[policy])
+                if retry_after is None:
+                    answers.append({"id": item["id"], "status": 200, "body": {"value": [{"id": f"rule-{policy}", "isExpirationRequired": True}]}})
+                else:
+                    answers.append({"id": item["id"], "status": 429, "headers": {"Retry-After": retry_after},
+                                    "body": {"error": {"code": "TooManyRequests", "message": "Too many requests."}}})
+            return graph_response(200, {"responses": answers})
+        if ASSIGNMENTS_PATH in url:
+            return graph_response(200, {"value": [{"id": f"a-{pid}", "policyId": pid, "scopeId": "/", "scopeType": "DirectoryRole"}
+                                                  for pid in self.ids]})
+        return graph_response(200, {"value": []})
+
+
+def _throttled_collect(tenant: _ThrottlingTenant) -> tuple[Any, list[float], list[tuple[str, dict]]]:
+    from support import graph_auth
+
+    from azure_tenant_audit.graph import GraphClient
+
+    now = [0.0]
+    waits: list[float] = []
+    events: list[tuple[str, dict]] = []
+
+    def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        now[0] += seconds
+
+    client = GraphClient(graph_auth(throttle_mode="safe"), session=tenant, clock=lambda: now[0], sleep=sleep,  # type: ignore[arg-type]
+                         audit_event=lambda name, _message, details: events.append((name, details or {})))
+    return governance.IdentityGovernanceCollector().run({"client": client, "top": None}), waits, events
+
+
+def test_the_149_policy_rule_read_is_paced_and_completes_through_per_item_429s() -> None:
+    # Every third policy is throttled on its first send, with a Retry-After of two seconds.
+    tenant = _ThrottlingTenant(lambda policy, send: "2" if send == 1 and int(policy[-3:]) % 3 == 0 else None)
+
+    result, waits, events = _throttled_collect(tenant)
+
+    rules = result.payload[governance.POLICY_RULES]
+    assert result.status == "ok"
+    assert {row["policyId"] for row in rules["value"]} == set(tenant.ids)
+    assert rules["fanout"]["fanout_complete"] is True and rules["fanout"]["failed_operation_count"] == 0
+    assert max(tenant.batch_sizes) <= governance.POLICY_RULES_BATCH_SIZE
+    assert sum(tenant.batch_sizes) == 149 + 50
+    assert 2.0 in waits
+    retried = [url for name, details in events if name == "graph.batch.retry" for url in details["urls"]]
+    assert len(retried) == 50 and len(set(retried)) == 50
+
+
+def test_a_policy_still_throttled_after_the_bound_is_a_named_gap_never_a_pass() -> None:
+    tenant = _ThrottlingTenant(lambda policy, send: "1" if policy == "pol-042" else None)
+
+    result, _, events = _throttled_collect(tenant)
+
+    rules = result.payload[governance.POLICY_RULES]
+    rows = {row["name"]: row for row in result.coverage}
+    assert result.status == "partial"
+    assert "pol-042" not in {row["policyId"] for row in rules["value"]} and len(rules["value"]) == 148
+    assert rules["fanout"]["fanout_complete"] is False and rules["fanout"]["failed_operation_count"] == 1
+    assert rows[governance.POLICY_RULES]["status"] == "partial"
+    assert rows[governance.POLICY_RULES]["error_class"] == "graph_http_429"
+    assert "still answered HTTP 429 after 5 attempts" in rows[governance.POLICY_RULES]["error"]
+    assert rows[governance.POLICY_RULES_FANOUT]["status"] == "partial"
+    assert rows[governance.POLICY_RULES_FANOUT]["error_class"] == "incomplete_evidence"
+    assert tenant.sends["pol-042"] == 5
+    assert [details["urls"] for name, details in events if name == "graph.batch.retry_exhausted"] == [
+        ["/policies/roleManagementPolicies/pol-042/rules"]
+    ]
