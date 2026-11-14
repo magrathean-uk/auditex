@@ -725,3 +725,24 @@
 - decision: M08-T04 also owns the count asserts its eighth Teams coverage row changes in tests/test_api_observed_ledger.py, tests/test_cli.py, tests/test_collection_gaps.py, tests/test_enterprise_depth_collectors.py, tests/test_external_sharing.py, tests/test_review_v3_run_level.py and tests/test_teams_policy_projection_join.py (count updates only, as in its nonowned-tests.patch), and the teams_policy query_plan entry in configs/collector-definitions.json. No open task writes them; M08-FIX1 may touch the same files and merges first, so T04 rebases onto it.
 - why: M08-T04 stopped blocked only on ownership; the edits are mechanical consequences of the accepted row.
 - approver: auto (to be listed for the manager)
+
+## DEC-083 One sign-in per service per sitting; no separate rehearsal (manager ruling)
+- date: 2026-11-14
+- status: decided
+- decision: Before the phase D sitting, the sign-in count drops: one sign-in per service per sitting reused by writes, connection checks, verify runs and ScubaGear; each script's read-only preflight then its write in one session (no rehearsal sitting; Part 0 and Part 1 were already done on 14 Nov: reader app, first collection, 7s candidate dry runs); one or two fresh sign-ins prove the strict rules after -Enforce; break-glass keeps its two passkey set-ups with the proof folded in; portal visits done by the lead in the browser pane where possible. Without reopening the 7s write logic. Design and build: M07-SIT (sol), then one Codex review; a kit session change, if any, re-freezes and reruns the full suite overnight. G-SHEET.md is rewritten to match.
+- why: G on the WGEX sitting, relayed: "ran it but you should delegate it."; G-SHEET counted about 25 plus 19 touches.
+- approver: manager (engineering ruling, reported)
+
+## DEC-084 No break-glass passkeys: fallback guest GA, Conditional Access stays report-only for now
+- date: 2026-11-14
+- status: decided
+- decision: G will not set up the break-glass passkeys; on his word a guest Global Administrator was invited instead (OUT-OF-KIT-WRITES row 12). The kit's -Enforce guard (10-conditional-access.ps1, lines 10-21) requires two break-glass USER accounts with a phishing-resistant method and an operator who satisfies every enforced strength, so step 9b (-Enforce) is not run: phase D runs every other step with all DT Conditional Access policies report-only. Cost against the blueprint: MS.AAD 1.1, 2.1, 3.2, 3.6, 3.7, 3.9 and 9.1 are seeded report-only, not enforced, so they read not met in the collection; the tenant has 4 direct Global Administrators against the blueprint's 3 (still inside SCuBA's 2 to 8). Reversible: if passkeys for dt.bg1 and dt.bg2 are registered before the trial ends, -Enforce can still run later. The kit is unchanged.
+- why: G via the manager, 14 Nov 18:10 GMT, quoted: "instead, just create another global admin, <a personal mail address>" (address kept out of the repository); manager ruling: decide placement as auto, keep the tenant close to the plan, note the cost.
+- approver: auto (G's instruction relayed by the manager)
+
+## DEC-085 Kit round 7t is the 05 null-migration fix only; the sitting driver's kit change is parked
+- date: 2026-11-14
+- status: decided
+- decision: The live 05-entra-settings run stopped on MS.AAD.3.4 (policyMigrationState stays null after an accepted PATCH; Microsoft retired the legacy MFA and SSPR policies). Round 7t (M07-K7T) changes 05 only, from dt-r7s-ro, then one Codex confirmation and the full kit suite; 05 reruns from 7t. M07-SIT's driver and its session change (20261111-kit-7s/dt-r7t, f692ea3eca22) are parked: G now lets the lead click the account pickers, so the driver saves only the lead's clicks and would add a tier A session change (DEC-010). Phase D steps that do not depend on 05 may run from 7s meanwhile; M07-T16 records which copy each script ran from.
+- why: live finding 14 Nov 18:02 GMT; manager ruling: keep the rework to what saves G's touches, do not over-build.
+- approver: auto
