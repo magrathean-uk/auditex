@@ -1,0 +1,1 @@
+--task M06-T05 --role luna --account claude-1 --readonly --timeout 1200 --max-turns 40 --budget 3 --brief .plan/work/M06-T05/brief-src.md

@@ -483,6 +483,7 @@
 - why: all seven pre-publication gates pass on the candidate (M06-T02) and the release validation says ready (M06-T03).
 - consequences: G accepts the four points the validation listed: the stated masking limits, whole-text withholding in rare cases, the thin margin on the HTML peak benchmark, and the tag day of 14 Nov 2026 (the changelog heading's date).
 - approver: G ("Yes, release 1.5.0", at 07:45 GMT on 14 Nov 2026, in answer to the team-manager chat's question "Release Auditex 1.5.0 today at the approved commit a1c6b5e?", relayed word for word by that chat; DEC-036)
+- amendment (2026-11-14, about 08:00 GMT; the manager's ruling after the release step's rebuild gave a wheel hash different from the gated one, the sdist unchanged): (1) if a clean build of the candidate (a fresh detached copy, no leftover build folder, the gate's own build tools and clock setting) gives the gated wheel, tag and publish as approved; (2) if the gated wheel cannot be reproduced and the commit is unchanged, name the cause, run one fresh gate on a reproducible wheel and publish on the new gated hashes without asking again, recording old and new hashes side by side (the manager's reading: G's yes names 1.5.0 and the commit, not the hashes); (3) if any repository file must change, so the commit changes, stop and send the manager the new sha and why: G's yes does not cover another commit. The manager is told before the signing step only if it needs G's touch or passphrase.
 
 ## DEC-053 The model track waits for the trial tenant's data collection
 - date: 2026-11-14
