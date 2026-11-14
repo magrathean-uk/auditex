@@ -1,0 +1,1 @@
+--task AMEND-5 --role sol --account claude-5 --branch --slug amend-5 --tags cross-cutting --timeout 2400 --max-turns 80 --budget 8 --brief .plan/work/AMEND-5/fix-1.md
