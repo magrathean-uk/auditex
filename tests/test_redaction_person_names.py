@@ -253,7 +253,7 @@ def test_a_spelling_the_matcher_cannot_follow_is_reported() -> None:
         "display_name"] == _prose(name="Kovalenko (Priya)")
 
 
-def test_privacy_item_1_a_separator_spelling_in_another_record_is_reported() -> None:
+def test_a_separator_spelling_in_another_record_is_reported() -> None:
     reference = {"initiatedBy": {"user": {"id": "u1", "displayName": "Kovalenko (Priya)", "userPrincipalName": UPN}}}
     context = _context(_user(id="u1"), reference)
     assert context.unmatched_names == (("separator", 1),)
@@ -261,11 +261,13 @@ def test_privacy_item_1_a_separator_spelling_in_another_record_is_reported() -> 
     assert out.startswith("Updated by Kovalenko (Priya); User ")  # readable, and never with an empty count
 
 
-def test_privacy_item_2_the_note_is_true_for_every_reason() -> None:
+def test_the_note_is_true_for_every_reason() -> None:
     for reason in redaction.D5_REASONS:
         note = redaction.unmatched_names_note(RedactionContext(unmatched_names=((reason, 1),)))
         assert note.startswith("Name masking: 1 directory people have names that cannot be matched safely in free text")
         assert f"({reason} 1)" in note and "too short or too common" not in note
+        assert "a person whose name is a vocabulary word is still masked in values and free text." in note
+        assert "left as written" not in note
 
 
 def test_distinct_namesakes_are_two_people() -> None:
@@ -292,7 +294,7 @@ def test_repeated_references_to_one_person_count_once() -> None:
     assert context.unmatched_names == (("too_short", 1),)
 
 
-def test_codex_item_4_two_object_ids_sharing_a_upn_are_two_people() -> None:
+def test_two_object_ids_sharing_a_upn_are_two_people() -> None:
     reused = "bo@contoso.example"
     context = _context(_user("Bo", reused, id="obj-1"), _user("Bo", reused, id="obj-2"))
     assert context.unmatched_names == (("too_short", 2),)
@@ -302,7 +304,7 @@ def test_codex_item_4_two_object_ids_sharing_a_upn_are_two_people() -> None:
     assert ambiguous.unmatched_names == (("too_short", 3),)
 
 
-def test_codex_item_3_a_upn_only_reference_joins_the_object_id_person() -> None:
+def test_a_upn_only_reference_joins_the_object_id_person() -> None:
     separator = "Kovalenko (Priya)"
     records = [
         _user(id="obj-1"),  # matched
@@ -317,7 +319,7 @@ def test_codex_item_3_a_upn_only_reference_joins_the_object_id_person() -> None:
     assert _context(*records, unknown).unmatched_names == (("separator", 2),)
 
 
-def test_codex_item_3_three_merged_runs_keep_the_alias_links(tmp_path: Path) -> None:
+def test_three_merged_runs_keep_the_alias_links(tmp_path: Path) -> None:
     separator = "Kovalenko (Priya)"
     full = _run(tmp_path / "a", [_user(id="obj-1")])
     by_id = _run(tmp_path / "b", [_user(), {"principalType": "User", "principalId": "obj-1", "roles": ["Reader"],
@@ -347,7 +349,7 @@ def test_two_run_merge_counts_each_person_once(tmp_path: Path) -> None:
     assert redaction.context_for_runs([full, other]).unmatched_names == (("too_short", 1),)
 
 
-def test_codex_item_2_a_privileged_person_is_one_entry_through_context_for_run(tmp_path: Path) -> None:
+def test_a_privileged_person_is_one_entry_through_context_for_run(tmp_path: Path) -> None:
     def admin(name: str, **extra: object) -> dict:
         return {"principalType": "User", "principalId": "obj-9", "roles": ["Reader"], "displayName": name, **extra}
 
@@ -365,7 +367,7 @@ def test_codex_item_2_a_privileged_person_is_one_entry_through_context_for_run(t
     assert redact_output("Bodil Ostergaard", context=given) == _prose(given.key, "Bodil Ostergaard")
 
 
-def test_codex_item_1_key_saturation_keeps_the_required_forms_and_reports_limit() -> None:
+def test_key_saturation_keeps_the_required_forms_and_reports_limit() -> None:
     ids = {f: f"priya.kovalenko{n}@d{n}.example" for n, f in enumerate(
         ("user_principal_name", "primary_email", "mail", "mail_nickname", "on_premises_sam_account_name"))}
     user = _user("Kovalenko, Priya", UPN, full_name="Priya Q Kovalenko", given_name="Priya", surname="Kovalenko", **ids)

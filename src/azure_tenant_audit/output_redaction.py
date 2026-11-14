@@ -415,10 +415,6 @@ def scrub_run_paths(text: str, roots: Iterable[str]) -> str:
 # -- identities found in the data ---------------------------------------------------------------------------------
 
 
-def _is_privileged_user(record: Mapping[Any, Any]) -> bool:
-    return _privileged_keys({_norm(k): v for k, v in record.items()})
-
-
 def _privileged_keys(keys: Mapping[str, Any]) -> bool:
     if str(keys.get("principaltype", "")).lower() in _NOT_USER_TYPES:
         return False
@@ -1579,7 +1575,7 @@ def unmatched_names_note(context: RedactionContext) -> str:
     reasons = ", ".join(f"{reason} {count}" for reason, count in counts)
     return (
         f"Name masking: {total} directory people have names that cannot be matched safely in free text "
-        f"({reasons}); their name fields are pseudonymised, the same words elsewhere are left as written."
+        f"({reasons}); their name fields are pseudonymised; a person whose name is a vocabulary word is still masked in values and free text."
     )
 
 
@@ -1949,11 +1945,11 @@ class _Redactor:
             if self.ids else None
         )
     # -- text ---------------------------------------------------------------------------------------------
-    def text(self, value: str, *, names: bool = True, key: bool = False) -> str:
+    def text(self, value: str, *, key: bool = False) -> str:
         """``value`` as text. ``key`` is a mapping key: identifiers, credential assignments and person names (unless
-        the whole key is a product identifier), no immutable-id substitution, no embedded JSON. ``names=False`` marks a
-        controlled-vocabulary value (finding id, setting name, reason code, status); since D5 person names are masked
-        in it too (their guard keeps vocabulary words readable) and identifiers in it are still masked."""
+        the whole key is a product identifier), no immutable-id substitution, no embedded JSON.
+        Person names and identifiers are masked in controlled-vocabulary values too (the guard keeps vocabulary
+        words readable)."""
         if not value:
             return value
         if self.blank and not key:
@@ -2031,7 +2027,7 @@ class _Redactor:
     # -- structure ----------------------------------------------------------------------------------------
     def walk(self, value: Any, controlled: bool = False) -> Any:
         if isinstance(value, str):
-            return self.text(value, names=not controlled)
+            return self.text(value)
         if not isinstance(value, (Mapping, list, tuple, set, frozenset)):
             return value
         self.depth += 1
@@ -2084,11 +2080,11 @@ class _Redactor:
                 elif person is not None and norm in _D5_NAME_PART_FIELDS:
                     item = TEXT_PLACEHOLDER
                 elif group and norm == "displayname":
-                    item = self.text(item, names=False)
+                    item = self.text(item)
                 elif str(key).lower() in TENANT_TEXT_KEYS:
                     item = TEXT_PLACEHOLDER
                 else:
-                    item = self.text(item, names=not controlled and norm not in _CONTROLLED_KEYS)
+                    item = self.text(item)
             elif str(key).lower() in TENANT_TEXT_KEYS:
                 # Every string below a free-text key is replaced, but the value still goes through the ordinary walk:
                 # its mapping keys are masked and a credential key still replaces its whole value.

@@ -337,7 +337,7 @@ class PrivateSnapshot:
 
     ``addresses`` and ``binding`` come from the same admitted capture, so SS 2.1's private configuration and the
     anti-phish coverage check can never disagree. ``reason`` is ``None`` on success, else the closed
-    ``operator_input_required`` or ``oversize``. No repr; never serialised; never in a model view.
+    ``operator_input_required`` or ``oversize``. No repr; never serialised; never in a projected view.
     """
 
     addresses: tuple[str, ...] = ()
@@ -1181,9 +1181,9 @@ def _tenant(bundle: Bundle, manifest: dict[str, Any]) -> Any:
 #                      MS.AAD.7.4v1; SCUBA_CONFIG_EXCLUSION_KEYS names the entries that differ from the policy id).
 #   MS.EXO.1.1v2       null: no allowed forwarding domains, ScubaGear's default.
 #   MS.TEAMS.*         {"M365Environment": <environment>}.
-#   MS.SECURITYSUITE.* model views remain not collected (``operator_input_required``). Verified SensitiveUsers are
+#   MS.SECURITYSUITE.* projected views remain not collected (``operator_input_required``). Verified SensitiveUsers are
 #                      supplied to SS 2.1's private rule view; independently verified PartnerDomains feed SS 2.3.
-# Each model view passes the collected-section shape gate. Private operator views never enter that gate.
+# Each projected view passes the collected-section shape gate. Private operator views never enter that gate.
 SCUBA_CAP_EXCLUSION_POLICIES = frozenset({
     "MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1", "MS.AAD.3.7v1",
     "MS.AAD.3.8v1", "MS.AAD.3.9v1", "MS.AAD.9.1v1"})
@@ -1316,7 +1316,7 @@ def _break_glass(bundle: Bundle, manifest: dict[str, Any]) -> tuple[dict[str, li
 def _operator_config_views(*, sensitive_users: tuple[str, ...] | None = None,
                            partner_domains: tuple[str, ...] | None = None,
                            sensitive_users_binding: SensitiveUsersBinding | None = None) -> dict[str, Any]:
-    """Private rule configuration; neither list may enter model views or the shape gate.
+    """Private rule configuration; neither list may enter projected views or the shape gate.
 
     SensitiveUsers (SS 2.1) and PartnerDomains (SS 2.3) are separate slots, each fed
     by its own verified snapshot, so supplying one never enables the other (or SS 3.2).
@@ -1357,7 +1357,7 @@ def _partner_domains_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[st
 
 def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str, Any],
                   max_items: int, max_chars: int) -> tuple[Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Default config, per-policy model views, synthesis record and private rule views."""
+    """Default config, per-policy projected views, synthesis record and private rule views."""
     bundle.sources.append("run-manifest.json")
     environment, environment_basis = _environment(bundle)
     exclusions, break_glass_summary = _break_glass(bundle, manifest)

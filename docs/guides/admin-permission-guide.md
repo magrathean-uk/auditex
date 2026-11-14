@@ -63,7 +63,7 @@ direct ScubaGear configuration with no usable SensitiveUsers entries.
 Changing or clearing the list on resume invalidates old membership reuse.
 SS 2.3 uses the separate
 `PartnerDomains` input in its own private rule view, independently of
-SensitiveUsers. Neither input enters model views or prompts.
+SensitiveUsers. Neither input enters projected views or prompts.
 
 ### Local partner domains for SS 2.3
 

@@ -235,3 +235,36 @@ def test_unrelated_state_field_is_still_compared(tmp_path, capsys):
 def test_docstring_does_not_point_at_the_archived_design():
     assert ".plan/work" not in (cro.__doc__ or "")
     assert ".plan/work" not in SCRIPT.read_text(encoding="utf-8")
+
+
+def _recorded(tmp_path: Path, mutate) -> Path:
+    base = _make_tree(tmp_path / "a", stamp="11")
+    digests = tmp_path / "digests.json"
+    cro.main(["--write", str(digests), str(base)])
+    payload = json.loads(digests.read_text(encoding="utf-8"))
+    mutate(payload["runs"])
+    digests.write_text(json.dumps(payload), encoding="utf-8")
+    return digests
+
+
+def test_baseline_missing_a_run_fails(tmp_path, capsys):
+    digests = _recorded(tmp_path, lambda runs: runs.pop("ci-partial"))
+    capsys.readouterr()
+    assert cro.main(["--digests", str(digests), str(tmp_path / "a")]) == 2
+    assert "ci-partial: run missing from the baseline" in capsys.readouterr().err
+
+
+def test_baseline_with_an_unknown_run_or_artefact_fails(tmp_path, capsys):
+    def mutate(runs):
+        runs["ci-extra"] = dict(runs["ci-partial"])
+        runs["ci-google"]["summary.md"] = runs["ci-google"].pop("summary.md")
+        runs["ci-google"]["extra.json"] = "0" * 64
+        runs["ci-admin-set"].pop("summary.json")
+
+    digests = _recorded(tmp_path, mutate)
+    capsys.readouterr()
+    assert cro.main(["--digests", str(digests), str(tmp_path / "a")]) == 2
+    err = capsys.readouterr().err
+    assert "ci-extra: run not digested by this script" in err
+    assert "ci-google/extra.json: artefact not digested by this script" in err
+    assert "ci-admin-set/summary.json: artefact missing from the baseline" in err

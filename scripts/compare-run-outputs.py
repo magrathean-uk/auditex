@@ -157,6 +157,26 @@ def _run_ids(run: Path) -> list[str]:
     return sorted(ids, key=len, reverse=True)
 
 
+def expected_artefacts(run_name: str) -> frozenset[str]:
+    """The artefact names the digest of ``run_name`` must carry."""
+    names = set(JSON_ARTEFACTS) | set(TEXT_ARTEFACTS)
+    if run_name == PROJECTION_RUN:
+        names |= {ASSESSMENT, "projection:project_run.report", "explainer:policy_explanations"}
+    return frozenset(names)
+
+
+def inventory_problems(runs: dict[str, Any]) -> list[str]:
+    """Where the baseline's run and artefact inventory departs from the runs and artefacts this script digests."""
+    problems = [f"{name}: run missing from the baseline" for name in RUNS if name not in runs]
+    problems += [f"{name}: run not digested by this script" for name in sorted(runs) if name not in RUNS]
+    for name in RUNS:
+        if isinstance(runs.get(name), dict):
+            want, have = expected_artefacts(name), set(runs[name])
+            problems += [f"{name}/{art}: artefact missing from the baseline" for art in sorted(want - have)]
+            problems += [f"{name}/{art}: artefact not digested by this script" for art in sorted(have - want)]
+    return problems
+
+
 def digest_run(run: Path) -> dict[str, str | None]:
     """Return artefact name -> digest, or None when the artefact is missing or unreadable."""
     prefixes = _path_prefixes(run)
@@ -234,6 +254,10 @@ def compare_digests(digest_file: Path, rundir: Path) -> int:
             raise ValueError("no digests recorded")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"digest file {digest_file} is empty or unreadable: {exc}", file=sys.stderr)
+        return 2
+    inventory = inventory_problems(runs)
+    if inventory:
+        print(f"digest file {digest_file} does not match the expected inventory:\n  " + "\n  ".join(inventory), file=sys.stderr)
         return 2
     problems: list[str] = []
     for name, artefacts in sorted(runs.items()):

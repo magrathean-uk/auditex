@@ -28,7 +28,7 @@ Treat every bundle as confidential.
 Value-rule records carry policy, cell, code, section names and controlled reason
 text, not tenant evidence values. Serving rules read a separate in-memory view
 on both the run-bundle and internal ScubaGear export paths after source, ledger,
-collector-error, qualifier and scan checks, before pruning and the model view's
+collector-error, qualifier and scan checks, before pruning and the projected view's
 shape, size and redaction gates. The rule view retains unredacted
 e-mail addresses and display names so rules can distinguish users; it is never
 serialised into prompts, assessment files, sidecars or logs. This includes
@@ -39,7 +39,7 @@ The model layer is removed: assessment makes no network request and no model end
 redaction options (exit 2) and reads no `AUDITEX_MODEL_*` or `AUDITEX_DISABLE_VALUE_RULES` setting;
 redaction is always on. Each view uses its own per-policy `scuba_config` synthesis outcome: an unprojected
 view receives the not-collected marker. The private rule view can retain recognised
-government environments while the model view remains withheld.
+government environments while the projected view remains withheld.
 Conditional Access policy display names in `scope_post_check` are retained as
 tenant configuration metadata, with e-mail local parts masked, as specified in
 the output contract. Administrators can put personal names in those labels;
@@ -559,8 +559,8 @@ The unmatched note: a person whose names cannot all be followed safely is
 counted, never named. When any such person exists, shareable HTML and Markdown
 reports (and so a customer pack's Markdown report) end with one line,
 `Name masking: N directory people have names that cannot be matched safely in
-free text (reason count, ...); their name fields are pseudonymised, the same
-words elsewhere are left as written.` People are counted once each (by object
+free text (reason count, ...); their name fields are pseudonymised; a person
+whose name is a vocabulary word is still masked in values and free text.` People are counted once each (by object
 id, else principal name), under the first applicable reason:
 
 | Reason | Meaning |
@@ -664,9 +664,8 @@ the table above.
   spellings the index does not support can stay readable (for `separator` and
   `limit`, every other accepted spelling is still masked), and the name fields
   are pseudonymised.
-- The note's fixed wording ("the same words elsewhere are left as written") is
-  generic. For a person counted as `vocabulary` only the mapping key stays
-  readable; the name is still masked in values and free text, as above.
+- For a person counted as `vocabulary`, only the mapping key stays readable;
+  the name is still masked in values and free text, as the note says.
 - Over-masking: an ordinary word equal to a person's name and outside the
   common-word and vocabulary lists is masked too.
 - Immutable-ID matching is unchanged and is one alternation over every

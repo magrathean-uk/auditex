@@ -53,7 +53,7 @@ sections or the provider ledger exists on the run-bundle path; that path
 continues to supply not-collected evidence for them.
 
 DNS `log` survives privately on both paths, when saved by the source. The
-run adapter removes it from the model view after capture; the export adapter
+run adapter removes it from the projected view after capture; the export adapter
 already captures it before proof pruning. This does not add a DNS collector
 read or reconstruct records that the collector did not save. Preserving the
 log does not itself implement the successful-empty-answer rule (spec Q12).

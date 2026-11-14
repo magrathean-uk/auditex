@@ -17,13 +17,13 @@ def archive(path, entries):
             tar.addfile(info, io.BytesIO(content))
 
 
-def gz_archive(path, entries, mtime, mode=0o644, owner=0):
+def gz_archive(path, entries, mtime, mode=0o644, owner=0, member_mtime=None):
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode='w') as tar:
         for name, content in entries:
             info = tarfile.TarInfo(name)
             info.size = len(content)
-            info.mtime = mtime
+            info.mtime = mtime if member_mtime is None else member_mtime
             info.mode = mode
             info.uid = info.gid = owner
             tar.addfile(info, io.BytesIO(content))
@@ -36,8 +36,8 @@ def test_identical_members_with_different_gzip_headers_are_different_bytes(tmp_p
     a, b = tmp_path / 'x' / 'a.tar.gz', tmp_path / 'y' / 'a.tar.gz'
     a.parent.mkdir()
     b.parent.mkdir()
-    gz_archive(a, [('a', b'one')], mtime=1)
-    gz_archive(b, [('a', b'one')], mtime=2)
+    gz_archive(a, [('a', b'one')], mtime=1, member_mtime=0)
+    gz_archive(b, [('a', b'one')], mtime=2, member_mtime=0)
     assert repro.sdist_members(a) == repro.sdist_members(b)
     assert repro.differences(a, a, a, b) == [f'sdist bytes differ: {a.name}']
     assert repro.differences(a, a, a, a) == []

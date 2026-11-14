@@ -8,7 +8,7 @@ whose ``input_count`` and ``input_hmac_sha256`` bind it to the run's verified pr
 (``run-manifest.json`` ``operator_inputs.sensitive_users``). ``membership_from_coverage`` checks that binding and
 never falls back to a literal list. The check is consistency with the private list and key, not authenticity.
 
-Everything here is local evidence: the summary and the binding never enter a model view or a shareable output.
+Everything here is local evidence: the summary and the binding never enter a projected view or a shareable output.
 """
 from __future__ import annotations
 
