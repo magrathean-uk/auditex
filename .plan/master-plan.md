@@ -95,7 +95,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M04 | d5-keyed-pseudonyms | 13 | 100 | done |
 | M05 | scanners-and-hygiene | 8 | 100 | done |
 | M06 | release-1-5-0 | 10 | 100 | done |
-| M07 | dummy-tenant-kit | 12 | 63 | planned |
+| M07 | dummy-tenant-kit | 12 | 56 | planned |
 | M08 | collection-completeness | 14 | 0 | planned |
 <!-- milestones:end -->
 Weights after amendment 5 (proposed; the re-baseline applies them to the milestone frontmatter): M00 7 to 6, M01 13
