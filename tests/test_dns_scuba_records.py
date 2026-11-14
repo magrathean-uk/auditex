@@ -17,6 +17,7 @@ from azure_tenant_audit.collection_gaps import (
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.collectors import dns_posture as collector
 from azure_tenant_audit.graph import GraphError
+from azure_tenant_audit.value_rules import assess
 
 OPERATIONS = ('spf_records', 'dkim_records', 'dmarc_records')
 VECTORS = json.loads((Path(__file__).parent / 'fixtures/collect-exchange/dns-vectors-v39.json').read_text())
@@ -234,7 +235,6 @@ class Session:
     ({'Status': 0}, 'empty', []), ({'Status': 3}, 'nxdomain', []),
     ({'Status': 0, 'Answer': [{'data': 5}]}, 'empty', []),
     ({'Status': 3, 'Answer': [{'data': '"x"'}]}, 'nxdomain', ['x']),
-    ({'Status': 2, 'Answer': [{'data': '"x"'}]}, 'answers', ['x']),
 ])
 def test_doh_query_detailed_agrees(payload, outcome, records):
     client = dns.DohClient(session=Session(payload))
@@ -247,6 +247,7 @@ def test_doh_query_detailed_agrees(payload, outcome, records):
     ({'Status': True}, None), ({'Status': 'bogus'}, None),
     ({'Status': 0, 'TC': True}, None), ({'Status': 3, 'TC': True}, None),
     *[({'Status': n}, None) for n in (1, 2, 4, 5, 99)],
+    ({'Status': 2, 'Answer': [{'data': '"x"'}]}, None),
 ])
 def test_doh_query_errors_agree(payload, stage):
     client = dns.DohClient(session=Session(payload, stage))
@@ -623,7 +624,7 @@ def test_fixture_projection_round_trip(tmp_path, vector):
             assert report['sections'][name]['status'] != 'projected'
         else:
             assert projected == [{k: v for k, v in row.items() if k in
-                                  {'domain', 'doamin', 'rdata', 'compliant', 'message'}} for row in rows]
+                                  {'domain', 'doamin', 'rdata', 'compliant', 'message', 'log'}} for row in rows]
 
 
 @pytest.mark.parametrize('vector', [v for v in VECTORS if 'dmarc_records' in v['sections']], ids=lambda v: v['vector_id'])
@@ -642,6 +643,34 @@ def test_fixture_dmarc_collector_round_trip(vector):
         domain = row['domain']
         result = run(Resolver({f'_dmarc.{domain}': valid}), domains=(domain,))
         assert result.payload['dmarc_records']['value'][0]['rdata'] == records
+
+
+class FailingDetailedResolver(DetailedResolver):
+    def query_detailed(self, name, record_type):
+        value = super().query_detailed(name, record_type)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+@pytest.mark.parametrize('vector', [v for v in VECTORS if v['family'] == 'failed_lookup_step'], ids=lambda v: v['vector_id'])
+def test_fixture_failed_lookup_witness(tmp_path, vector):
+    # D5: a failed step stays unusable; the collector withholds the section, which projects as not collected.
+    row = vector['sections']['dmarc_records'][0]
+    assert [s['outcome'] for s in row['log']] == ['nxdomain', 'failed']
+    record = assess(vector['policy'], vector['sections'])
+    assert (record['verdict'], record['cell']) == ('not_assessed', 'domain_unusable.rdata_empty')
+    answers = {s['query_name']: dns.DnsAnswer([], 'nxdomain') if s['outcome'] == 'nxdomain'
+               else dns.DohError(s['query_result']) for s in row['log']}
+    result = run(FailingDetailedResolver(answers), domains=(row['domain'],))
+    envelope = result.payload['dmarc_records']
+    assert envelope == {'value': [], 'status': 'failed', 'error_class': 'dns_resolver_error',
+                        'error': row['log'][-1]['query_result']}
+    projection, report = bundle(tmp_path, result.payload, result.coverage)
+    assert projection.rule_sections['dmarc_records'] == NOT_COLLECTED
+    assert report['sections']['dmarc_records']['reason'] == 'collector_error'
+    projected = assess(vector['policy'], {'dmarc_records': projection.rule_sections['dmarc_records']})
+    assert (projected['verdict'], projected['cell']) == ('not_assessed', 'section_not_collected')
 
 
 def test_dmarc_ambiguous_parent_keeps_previous_policy():
@@ -695,7 +724,7 @@ def test_existing_posture_and_https_order_preserved():
 
 def test_record_domain_limit_is_200_and_fixture_is_bounded():
     assert collector.MAX_RECORD_DOMAINS == 200
-    assert all(n <= 8 for n in Counter(v['policy'] for v in VECTORS).values())
+    assert all(n <= 11 for n in Counter(v['policy'] for v in VECTORS).values())
     assert len({v['policy'] for v in VECTORS}) == 6
     for vector in VECTORS:
         assert set(vector) == {'policy', 'vector_id', 'family', 'sections'}
@@ -775,7 +804,7 @@ def test_exchange_domain_spelling_matches_dkim_config(monkeypatch, tmp_path):
                     {'DomainName': 'Contoso.com', 'IsCoexistenceDomain': False},
                     {'DomainName': 'contoso.COM', 'IsCoexistenceDomain': False},
                 ]}
-            if command.startswith('Get-DkimSigningConfig '):
+            if 'Get-DkimSigningConfig ' in command:
                 return {'value': [{'Domain': 'Contoso.com', 'Enabled': True}]}
             return {'value': []}
 

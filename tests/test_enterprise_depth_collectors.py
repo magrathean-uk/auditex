@@ -792,7 +792,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count": {
                 "value": [{"Count": 0}]
             },
-            "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status": {
+            ",@(Get-DkimSigningConfig | Select-Object Domain,Enabled,Status)": {
                 "value": [{"Domain": "example.invalid", "Enabled": True, "Status": "Valid"}]
             },
             ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},

@@ -107,12 +107,27 @@ def test_stage4_vectors_and_every_cell(policy, vectors):
         assert reached == set(cells_for(policy))
 
 
+@pytest.mark.parametrize("policy", ["MS.EXO.4.1v1", "MS.EXO.4.2v1", "MS.EXO.4.3v1", "MS.EXO.4.4v1"])
+def test_failed_lookup_witnesses_are_not_assessed(vectors, policy):
+    # D5: a SERVFAIL or timed-out step beside NXDomain steps never reads no record; the failed collection itself
+    # projects the section as not collected.
+    witnesses = [row for row in vectors[policy] if ":rdata_empty_failed_step_" in row["vector_id"]]
+    assert sorted(row["vector_id"].rsplit("_", 1)[1] for row in witnesses) == ["servfail", "timeout"]
+    for row in witnesses:
+        steps = row["sections"]["dmarc_records"][0]["log"]
+        assert [s["outcome"] for s in steps][0] == "nxdomain" and steps[-1]["outcome"] in {"servfail", "timeout"}
+        record = assess(policy, row["sections"])
+        assert (record["verdict"], record["cell"]) == ("not_assessed", "domain_unusable.rdata_empty"), row["vector_id"]
+    projected = assess(policy, {"dmarc_records": {"collection_status": "not_collected"}})
+    assert (projected["verdict"], projected["cell"]) == ("not_assessed", "section_not_collected")
+
+
 def test_fixture_manifest_and_exclusions(vectors):
     manifest = json.loads((FIXTURES / "manifest-s4.json").read_text())[FIXTURE.name]
     rows = [row for group in vectors.values() for row in group]
     assert sha256(FIXTURE.read_bytes()).hexdigest() == manifest["sha256"]
     assert manifest["spec_version"] == "v3.9.1"
-    assert len(rows) == manifest["rows"] == 1687
+    assert len(rows) == manifest["rows"] == 1707
     assert set(vectors) == POLICIES
     assert dict(Counter(row["policy"] for row in rows)) == manifest["by_policy"]
     assert dict(Counter(f"{row['policy']}:{row['rule_cell']}" for row in rows)) == manifest["by_cell"]

@@ -6308,7 +6308,7 @@
           ],
           "reason_code": "data_unavailable_dns_answer_empty",
           "reason_texts": [
-            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record instead); the policy was not assessed."
           ],
           "recommendations": [
             "recollect_unusable_evidence"
@@ -6583,7 +6583,7 @@
           ],
           "reason_code": "data_unavailable_dns_answer_empty",
           "reason_texts": [
-            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record instead); the policy was not assessed."
           ],
           "recommendations": [
             "recollect_unusable_evidence"
@@ -6827,7 +6827,7 @@
           ],
           "reason_code": "data_unavailable_dns_answer_empty",
           "reason_texts": [
-            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record instead); the policy was not assessed."
           ],
           "recommendations": [
             "recollect_unusable_evidence"
@@ -7061,7 +7061,7 @@
           ],
           "reason_code": "data_unavailable_dns_answer_empty",
           "reason_texts": [
-            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record instead); the policy was not assessed."
           ],
           "recommendations": [
             "recollect_unusable_evidence"
@@ -7333,7 +7333,7 @@
           ],
           "reason_code": "data_unavailable_dns_answer_empty",
           "reason_texts": [
-            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record instead); the policy was not assessed."
           ],
           "recommendations": [
             "recollect_unusable_evidence"

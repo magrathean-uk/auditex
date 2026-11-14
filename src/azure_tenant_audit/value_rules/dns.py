@@ -127,12 +127,22 @@ def _need_contacts(tags):
 _NEEDS = {"dmarc_published": _need_published, "dmarc_reject": _need_reject, "dmarc_dhs_rua": _need_dhs, "dmarc_agency_contacts": _need_contacts}
 
 
+def _all_nxdomain(log):
+    if not isinstance(log, list) or not log:
+        return False
+    return all(isinstance(step, dict) and step.get("outcome") == "nxdomain" for step in log)
+
+
 def _dmarc_domain(entry, need):
     rd = entry.get("rdata", None) if "rdata" in entry else None
     if not isinstance(rd, list) or any(type(x) is not str for x in rd):
         return "unusable", "rdata_unusable"
     if not rd:
-        return "unusable", "rdata_empty"     # v3.1 ruling 3 (D29): an empty answer is not distinguishable from a failed lookup in the evidence
+        # Reverses v3.1 ruling 3 (D29) where the entry says why it is empty: when every tree-walk step in its log is an
+        # authoritative NXDomain no record is published (no_record). A failed, SERVFAIL or timed-out step never reaches an
+        # entry, and an entry without step outcomes (an older bundle, the v3.9.1 replay) still cannot tell nothing
+        # published from a failed lookup, so it stays unusable.
+        return ("bad", "no_record") if _all_nxdomain(entry.get("log")) else ("unusable", "rdata_empty")
     cands = [p for p in (parse_dmarc(x) for x in rd) if p is not None]
     if not cands:
         return "bad", "no_record"
@@ -196,7 +206,7 @@ def _scan_domains(policy_id, name, results, what, cited, need=None):
     empty = [r for r in un if r[1] in ("rdata_empty", "dkim_rdata_empty")]
     if un and empty and un[0] is empty[0]:
         return _A(policy_id, "data_unavailable_dns_answer_empty",
-                  "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed.",
+                  "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record instead); the policy was not assessed.",
                   "domain_unusable." + empty[0][1], cited)
     if un:
         return _A(policy_id, "data_unusable_dns_record", f"Data unusable: a DNS record could not be read exactly ({un[0][1]}); the policy was not assessed.",
@@ -214,12 +224,20 @@ def _parser(policy_id, sp, sections):
         res = [(*_dmarc_domain(e, need), type(e.get("domain")) is str) for e in items]
         return _scan_domains(policy_id, name, res, sp["what"], [name], need)
     for name in ("dkim_config", "dkim_records", "spf_records"):
+        # An empty dkim_config answer is a tenant with no signing configuration (the collector wraps the command so an
+        # empty answer is an empty list): each domain then reads no_signing_config. A list with no object stays unusable.
+        if name == "dkim_config" and sections[name] == []:
+            continue
         out, _ = _list_state(policy_id, sections, name)
         if out:
             return out
     cfg = [e for e in sections["dkim_config"] if isinstance(e, dict)]
     recs = [e for e in sections["dkim_records"] if isinstance(e, dict)]
     coexist = {c["Domain"] for c in cfg if type(c.get("Domain")) is str and c["Domain"].endswith(".mail.onmicrosoft.com")}
+    if not cfg:
+        # No signing configuration at all: the coexistence suffix is the only way to tell such a domain (it cannot sign) apart.
+        coexist |= {e["domain"] for e in sections["spf_records"] if isinstance(e, dict) and type(e.get("domain")) is str
+                    and e["domain"].endswith(".mail.onmicrosoft.com")}
     # Indexed once, keyed exactly as the loop compared (== on a string domain, input order kept per domain): the per-domain
     # list scans were quadratic in the number of domains.
     cfg_by_domain, rec_by_domain = {}, {}

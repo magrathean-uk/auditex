@@ -75,7 +75,7 @@ class DohClient:
         if payload.get("TC") is True:
             # The resolver cut the answer short: records may be missing from it, so nothing can be called absent.
             raise DohError(f"DoH response was truncated (TC) for {record_type} {name}")
-        if rcode not in _ABSENT_RCODES and not payload.get("Answer"):
+        if rcode not in _ABSENT_RCODES:
             # SERVFAIL (2), REFUSED (5) and the other failure codes say the resolver could not answer; they
             # are not evidence that the record does not exist, so the domain reads unknown, never "missing".
             raise DohError(f"DoH resolver could not answer {record_type} {name}: {_RCODE_NAMES.get(rcode, f'rcode {rcode}')}")
@@ -158,6 +158,15 @@ def _dns_log(name: str, answer: DnsAnswer) -> dict[str, Any]:
             "query_answers": answer.records}
 
 
+def _dmarc_log(name: str, answer: DnsAnswer) -> dict[str, Any]:
+    """The step's log line plus its outcome (answers, empty or nxdomain), which the DMARC value rule reads.
+
+    A step the resolver failed on or timed out on raises ``DohError`` and never reaches an entry, so an entry's outcomes
+    are all answered steps.
+    """
+    return {**_dns_log(name, answer), "outcome": answer.outcome}
+
+
 def scuba_spf_record(domain: str, resolver: DnsResolver) -> dict[str, Any]:
     answer = _record_ask(resolver, domain)
     # SG-P:520-545: case-sensitive prefix and substring checks, all TXT answers retained.
@@ -223,7 +232,7 @@ def _dmarc_walk(domain: str, resolver: DnsResolver, log: list[dict[str, Any]]) -
         name = f"_dmarc.{parent}"
         answer = _record_ask(resolver, name)
         queries += 1
-        log.append(_dns_log(name, answer))
+        log.append(_dmarc_log(name, answer))
         valid = _valid_dmarc(answer.records)
         # SG-P:724-730: zero or multiple valid answers do not end discovery.
         if len(valid) != 1:
@@ -246,7 +255,7 @@ def scuba_dmarc_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | N
         return None
     name = f"_dmarc.{domain}"
     answer = _record_ask(resolver, name)
-    log = [_dns_log(name, answer)]
+    log = [_dmarc_log(name, answer)]
     valid = _valid_dmarc(answer.records)
     # SG-P:674-696: only one author policy wins; other TXT does not block parents.
     records = valid if len(valid) == 1 else _dmarc_walk(domain, resolver, log)

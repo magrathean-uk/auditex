@@ -543,6 +543,13 @@ citation order for the three SS 7.x `preset_rule_unusable` cells. Every not-asse
 reason code; the closed text lists that name any subset (missing sections, AAD 3.5v2 methods, SS 3.2 locations, SS 4.1
 alerts) hold every reachable text. Other codes, texts, citation lists and citation orders are rejected; the former
 separate `cell_contracts` table and `rule_failure` entry are rejected too.
+Value-rule spec ruling D29 (v3.1 ruling 3: an empty DNS answer is not distinguishable from a failed lookup) is reversed for
+`dmarc_records`: each tree-walk step in an entry's `log` carries an `outcome` (`answers`, `empty` or `nxdomain`), and an entry
+with empty `rdata` whose every step is `nxdomain` reads `no_record` (not met) for MS.EXO.4.1v1 to 4.4v1. A failed, SERVFAIL or
+timed-out step raises in the collector and never reaches an entry; an `empty` step, or an entry without step outcomes (older
+bundles, the v3.9.1 replay), still reads `domain_unusable.rdata_empty`. The cell's reason text names the NXDomain exception for those cases. An
+empty `dkim_config` list (the collector wraps `Get-DkimSigningConfig` so an empty answer is a list) reads `no_signing_config`
+for MS.EXO.3.1v1.
 A met or not-met answer confirms the
 requirement and cites every section in the model case; not-met recommends baseline
 review. The validator checks the inventory, sections, claims and text but cannot

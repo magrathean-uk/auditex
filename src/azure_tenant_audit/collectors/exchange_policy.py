@@ -161,7 +161,8 @@ class ExchangePolicyCollector(Collector):
             "casMailboxSmtpAuth",
             "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count",
         ),
-        ("dkimSigningConfig", "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"),
+        # Wrapped so a tenant with no signing configuration answers an empty list, not an empty output read as a failed command.
+        ("dkimSigningConfig", ",@(Get-DkimSigningConfig | Select-Object Domain,Enabled,Status)"),
         *DEFENDER_COMMANDS,
     ]
 
