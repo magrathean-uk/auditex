@@ -590,3 +590,11 @@
 - decision: the tenant chat ("Auditex tenant sitting", archived with the manager) is unarchived and runs, in order: the read-only dry runs of every phase D script from the 7s candidate (d453c83ac710), the reader app (E7, with the Cancel instruction in G-SHEET Part 0), and the first collection `pre-d` (E7b to E8b). It reports to the lead. Phase D writes wait for the gated, frozen 7s copy and a new hand-over note.
 - why: G, answering "Unarchive the tenant chat so the reader app, pre-d collection and 7s dry runs can run?" at about 10:25 GMT on 14 Nov: "Yes, unarchive it". His WGEX sitting has stopped (state file, step 2d), so the manager's network hold no longer applies.
 - approver: G
+
+## DEC-065 Product rule: one sign-in per audit
+- date: 2026-11-14
+- status: approved
+- decision: the shipped product asks the user to sign in at most once per audit run, and not at all in app-only mode; every service token (Graph, Exchange, compliance, Teams, Power BI, Power Platform) comes silently from that one sign-in or credential. Every collector, auth and setup change is reviewed against it; a design that adds a second prompt comes to G. M08 gains a "Review:" Definition of Done item for it, and a read-only check (EXP-m08-signin) counts today's prompts per mode and service and says what each M08 task must do.
+- why: G, typed in this chat at about 10:30 GMT on 14 Nov 2026, word for word: "just for future, when this ships, we cannot prompt the user 100x to sign in. it must be done one."
+- consequences: M08's milestone gets one more Definition of Done item; the lab kit is not the shipped product, but fewer windows there is still preferred.
+- approver: G
