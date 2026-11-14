@@ -1,0 +1,1 @@
+--task EXP-m06-wheel --role terra --account claude-5 --readonly --tags debug --timeout 3600 --max-turns 100 --budget 10 --brief .plan/work/EXP-m06-wheel/brief-src.md

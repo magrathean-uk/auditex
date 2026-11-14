@@ -422,7 +422,7 @@
 
 ## DEC-046 Plan amendment 4, prepared for the parked case only
 - date: 2026-11-13
-- status: prepared and reviewed (one review, one repair, re-check approve at bf19a3f on `task/AMEND-4-amend-4`); not merged; waits for G's choice between parking the model track and revisiting rule 2 of the bar
+- status: prepared and reviewed (re-check approve at bf19a3f on `task/AMEND-4-amend-4`); not merged and on hold: G chose neither option for now (DEC-053); the branch is kept
 - decision: the pilot failed after its one revision (M03-T06: 6, then 18 both-order wins of 190, about 139 needed; filtered preference 0.5112, then 0.5337, against 0.729), so the data round stopped as DEC-037 requires. For the case that G parks the model track, an amendment is drafted in advance: M03 closes with a written finding and a checkable reopening condition (a new example writer must first pass the same pilot check), the tasks that need a trained model are dropped, and the weights are re-set so the progress figure stays honest. The architect drafts it from `.plan/work/AMEND-4/brief-src.md`.
 - options: B revisit rule 2 of the bar | C park the model track (the orchestrator's and the manager's recommendation) - G's choice, not made
 - why: three measurements of the example writer (0.4757, 0.5112, 0.5337) sit far below the bar, and the judge is right about the added text; the manager asked for the parked-case amendment to be ready.
@@ -483,4 +483,13 @@
 - why: all seven pre-publication gates pass on the candidate (M06-T02) and the release validation says ready (M06-T03).
 - consequences: G accepts the four points the validation listed: the stated masking limits, whole-text withholding in rare cases, the thin margin on the HTML peak benchmark, and the tag day of 14 Nov 2026 (the changelog heading's date).
 - approver: G ("Yes, release 1.5.0", at 07:45 GMT on 14 Nov 2026, in answer to the team-manager chat's question "Release Auditex 1.5.0 today at the approved commit a1c6b5e?", relayed word for word by that chat; DEC-036)
+
+## DEC-053 The model track waits for the trial tenant's data collection
+- date: 2026-11-14
+- status: approved
+- decision: G answered the open choice after the failed pilot (park the model track, or revisit rule 2 of the bar) with neither. The model track stays stopped as it is: nothing in M03 moves, amendment 4 (DEC-046) is not merged and its branch is kept, and no rule of the bar is revisited. The trial tenant comes first: its data collection is mastered and the tenant fully populated (M07, phase D) before training is discussed again. The manager's ruling beside it: release 1.5.0 first, unchanged; after it M07 has first call on seats and review quota (DEC-020).
+- options: B revisit rule 2 | C park the model track | neither for now, the tenant first (G's answer)
+- why: G, typed in the team-manager chat at about 07:48 GMT on 14 Nov 2026, word for word: "lets discuss auditex model and where we are now. 1: the 30 day trial on the tenant is running, we should master data collection etc first, 2: has that been populated fully? 3: talk about training AFTER"
+- consequences: M03 stays at its present figure; the progress percentage does not move for it. The training discussion is taken up after phase D, with the pilot finding (M03-T06), the reopening rule drafted in amendment 4 and the collection gap in BACKLOG (126 of 501 held-out rows are sections the product does not collect) as its inputs.
+- approver: G (through the team-manager chat, DEC-036; the reading "neither B nor C, tenant first" is the manager's and matches his words)
 

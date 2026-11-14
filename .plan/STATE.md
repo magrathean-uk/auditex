@@ -4,7 +4,7 @@ overall: 80% (was 78%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 1b85ec3 2026-11-14T07:46:44Z
+last_checkpoint: b0f17ff 2026-11-14T07:53:01Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -14,11 +14,11 @@ last_checkpoint: 1b85ec3 2026-11-14T07:46:44Z
 ## Blockers
 - Host: quiet window until 00:30 GMT on 14 Nov (manager): until then nothing that takes a heavy slot. From 00:30 GMT heavy steps run again under the usual rule: one heavy slot through hostload.sh, load 12 or less (PLAN_LOAD_MAX=12).
 - Track A: 1.5.0 is at an approved candidate, a1c6b5e6e54e1fcc8fb224868a7e8467c723d262: every task merged, all seven pre-publication gates pass (M06-T02; wheel 81ea5c2f..., sdist 959e825f...), and the release validation says ready (M06-T03). M04 and M05 are complete. STOP: the signed tag and the GitHub release (M06-T04, M06-T05) need G's yes naming 1.5.0 and that sha, through the manager. The changelog heading is dated 14 Nov and must equal the tag day; another day means a one-line fix, a new candidate and fresh gates. Keep the candidate worktree and its `.venv` link.
-- Track B: the pilot FAILED and the data round has stopped (M03-T06 done, verified: attempt 1 6 wins of 190, attempt 2 18 of 190, 139 needed; filtered preference 0.5112 then 0.5337 against 0.729; unfiltered losses rose from 42 to 73). M03-T07, M03-T02 and M03-T03 do not run. The choice (revisit rule 2 of the bar, or park the model track) is G's, taken to him by the manager; nothing in M03 moves before his answer (he is back at 07:00 GMT on 14 Nov; the manager recommends parking, as I do). Amendment 4 for the parked case is being prepared as AMEND-4 and is not merged without his words (DEC-046). GPU-hours: basecmp 235.67 of 1,024, large 2.78 of 2,048, dataround 5.57 of 160.
+- Track B: stopped and on hold (DEC-053, G on 14 Nov: "master data collection etc first ... talk about training AFTER"). The pilot failed (M03-T06: 18 wins of 190, 139 needed; 5.57 GPU-hours). Nothing in M03 moves; amendment 4 (parked case) stays unmerged at bf19a3f. Training is discussed again after phase D. GPU-hours used: about 306 of 20,000.
 
 ## Pending G decisions
 - Questions go to the team-manager chat with a recommendation and an evidence path, never to G here (DEC-036); its rulings and relayed words count as his. It wants messages only for decisions, blockers, G's hands or eyes, reserved actions and results it asked for.
-- Phase D: kit 7r is accepted (manifest 510f26e348fd). The manager asks G for a slot and opens the tenant chat (start it in this checkout, no worktree, no /plan); nothing moves there until it says so.
+- Phase D (M07) has first call after the release (DEC-020, DEC-053): kit 7r accepted (manifest 510f26e348fd); the manager asks G for a sitting and opens the tenant chat (in this checkout, no worktree, no /plan). When the tenant chat has the note, record M07-T14 (`handover: kit/20261111-kit-7r/dt-r7r-ro 510f26e348fd`). The tenant is not populated yet: only read-only checks have run.
 
 ## Re-baselines
 - from 100% (plan v3 closed at 1.4.0) to 4% (plan v4 scope and weights, DEC-001, approved by G on 11 Nov 2026)
@@ -29,11 +29,11 @@ last_checkpoint: 1b85ec3 2026-11-14T07:46:44Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 55% orchestrator
+claude 57% orchestrator
 claude-1 73% ok
 claude-2 50% shared
 claude-3 69% ok
-claude-4 39% ok
+claude-4 40% ok
 claude-5 76% ok
 codex 93% hot
 codex2 89% hot
