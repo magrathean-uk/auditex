@@ -39,7 +39,7 @@ The trial tenant is seeded only from a kit round that passed its tier A gate (co
 | M07-T13 | Run the full offline suite on the confirmed round 7r | orchestrator | S | risk:low | done |
 | M07-T14 | Hand the accepted folder and manifest hash to the tenant chat | orchestrator | S | risk:low | done |
 | M07-T18 | Kit round 7s: the Graph 404 shape, compare.py and the dry-run findings (DEC-054, DEC-058) | sol | M | risk:high | done |
-| M07-T19 | Confirm round 7s by both providers, diff-scoped | codex, sol | S | gate risk:high | todo |
+| M07-T19 | Confirm round 7s by both providers, diff-scoped | codex, sol | S | gate risk:high | done |
 | M07-T20 | Run the full offline suite on the confirmed round 7s | orchestrator | S | risk:low | todo |
 | M07-T21 | Hand the 7s folder and manifest hash to the tenant chat | orchestrator | S | risk:low | todo |
 | M07-T22 | The lab Fabric operator app for phase D's Power BI step (DEC-066) | sol | M | gate risk:high | todo |

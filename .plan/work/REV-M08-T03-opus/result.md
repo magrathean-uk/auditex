@@ -1,14 +1,12 @@
 ## RESULT REV-M08-T03-opus
 status: done
-summary: verdict: ship - all five repair items pass and no new blocking defect was found; the files match the new manifest 9/9. Three non-blocking notes are in .plan/work/REV-M08-T03-opus/notes.md (Round 2).
-reviewed: f37ffb67a06a
-changes: .plan/work/REV-M08-T03-opus/notes.md (Round 2 section added), progress.md
-verification: shasum -a 256 -c MANIFEST.sha256: pass (9/9); nothing else run (read-only brief: no PowerShell, network or tenant)
-risks: (1) The portal check compares a journal snapshot that went through JSON with a live read; a serialisation difference stops it safely with status failed. (2) The Fabric admin read and the portal read-back are still unproven on a live tenant.
+summary: verdict: ship; the update answer and every list read now go through Get-M8SettingList (the fix-2 rule), a refusal there is journalled and the removal works; tests are added, none weakened. Notes: .plan/work/REV-M08-T03-opus/notes.md
+reviewed: 96aee184809c
+changes: none (review notes only, in .plan/work/REV-M08-T03-opus/)
+verification: shasum -c MANIFEST.sha256 9/9 pass; manifest hashes 96aee184809c and b02012a51eb7 confirmed; read the code and the author's harness outputs (new 79/79, previous 74/79, all 5 failures new); scripts not run (read-only)
+risks: no byte copy of the b02012a51eb7 files survives, so changes inside each file were checked by reading, not by a byte diff; runtime is mock-only
 questions_for_g: none
 ### Findings
-1 pass: both routes verify the Fabric admin authority and that the setting is off with no groups, and journal both, before any write (create-m08b-pbi-access.ps1:137-163). An enabled setting refuses, so no group is created (:143-145).
-2 pass: all eight settings are required, and every field is compared on both routes (m08b-common.ps1:365-385; create-m08b-pbi-access.ps1:146,211-212,65,74-76,84). Missing evidence refuses.
-3 pass: a missing group id refuses with no name or time lookup (remove-m08b-pbi-access.ps1:43-51). Restore needs current ownership and a re-read before the step (:80-82,104-105) and a read-back (:113-118). Status removed is written only at :133 (RECORD.md:93).
-4 pass: RECORD.md:22-24,86-87,110-117 and create-m08b-pp-mgmtapp.ps1:18-20 say register immediately before the power_platform collection and remove straight after it.
-5 pass: .plan/work/M08-T03/draft/collector-post.patch:39 uses api-version 2020-10-01, and :259 pins it.
+1 PASS: m08b-common.ps1:323-329 Get-M8SettingList holds the rule (via Assert-M8SameSettingLists :330-344) and is called by both reads, Get-M8TenantSettings :316 and the update answer at create-m08b-pbi-access.ps1:202. A refusal at :202 throws inside the try (:52) and reaches Save-M8Failure (:221). The update answer at remove-m08b-pbi-access.ps1:111 is thrown away and the setting is read again through Get-M8TenantSettings.
+2 PASS: tests/mock.ps1:111-122 adds updateShape and keeps tenantSettings alone as the default. tests/run-tests.ps1:261-279 covers both lists, value alone, a count difference, a name difference, an enabled difference and neither list, each with the journal marked failed and the removal run. The 69 earlier checks remain (79 minus 10 new) and pass on the previous scripts.
+3 PASS (file level): against MANIFEST-3 only m08b-common.ps1, create-m08b-pbi-access.ps1, tests/mock.ps1 and tests/run-tests.ps1 changed. The other 5 files, RECORD.md included, are hash-identical, and what changed inside the 4 files matches the author's account.

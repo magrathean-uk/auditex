@@ -1,18 +1,19 @@
 ## RESULT M08-T03
 status: done
-summary: Get-M8TenantSettings now accepts the two-list reply only when both lists match on count, settingName set and `enabled` for each setting. It then reads `tenantSettings`; any difference refuses, one list alone works as before, and neither still refuses. By default the Fabric mock now answers with both lists. Seven new cases were added and the harness passes 69/69. Re-frozen, with MANIFEST-2.sha256 kept. Details: .plan/work/M08-T03/notes.md, "Repair round 2".
-changes: dt-live/m08-b (m08b-common.ps1, tests/mock.ps1, tests/run-tests.ps1, RECORD.md, MANIFEST.sha256, new MANIFEST-2.sha256); .plan/work/M08-T03 (notes.md, progress.md)
-verification: harness through kit-7r pwsh-guarded 69/69: pass; new harness against the f37ffb67a06a copy: 30 fail, including the equal-lists case ("neither or both"): fails as expected; parse through pwsh-guarded, 8 files, 0 errors: pass; new manifest check, 0 mismatches: pass
-risks: (1) Not tried on a live tenant; the Power BI reader read uses the same rule. (2) A setting name repeated within one list now refuses. (3) The harness work folder must be on the internal disk because of the scripts' preflight.
+summary: New shared Get-M8SettingList in m08b-common.ps1 applies the fix-2 rule; Get-M8TenantSettings and the update answer in create-m08b-pbi-access.ps1 both use it. The removal script ignores the update answer and the Power Platform checks use a different API, so no other envelope reads exist. A refused update answer follows the existing failure path: the journal is marked failed and the removal script can undo the run. The harness was offered to hostload twice and deferred both times (both slots held), so it ran directly at low priority as a light mock run, about 3 minutes.
+changes: kit m08-b folder (m08b-common.ps1, create-m08b-pbi-access.ps1, tests/mock.ps1, tests/run-tests.ps1, new MANIFEST.sha256, MANIFEST-3.sha256 kept); .plan/work/M08-T03 (notes.md, progress.md, harness-3-new.txt, harness-3-prev.txt)
+verification: parse through kit-7r pwsh-guarded 8 files 0 errors pass; mock harness 79/79 pass; previous scripts with new tests 74/79 (5 new checks fail, as intended); shasum -c against new manifest pass; repository git status clean
+risks: runtime untested against a live update answer (mock only)
 questions_for_g: none
 ### Findings
-fix: m08b-common.ps1:316-318 (helper :326-340)
-new-cases: 7 fail-on-previous 5
-harness: pass 69/69
-changed-files: RECORD.md, m08b-common.ps1, tests/mock.ps1, tests/run-tests.ps1
-frozen: b02012a51eb7
+fix: m08b-common.ps1:323 (Get-M8SettingList), called at m08b-common.ps1:316 and create-m08b-pbi-access.ps1:202
+new-cases: 10 fail-on-previous 5
+harness: pass 79/79
+changed-files: m08b-common.ps1, create-m08b-pbi-access.ps1, tests/mock.ps1, tests/run-tests.ps1 (RECORD.md, three other scripts, tests/parse.ps1 hash-identical)
+frozen: 96aee184809c
 pbpp-check: EXP-m08-pbpp
 pbi-readonly-admin-setting: AllowServicePrincipalsUseReadAdminAPIs
 pp-tenant-settings-method: POST
 removal-step: present
+out-of-kit-row: written
 expected-verdicts-changed: 0

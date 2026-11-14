@@ -571,3 +571,28 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-14T11:33:14Z	REV-AMEND-7	codex	codex	gpt-6.1-sol	medium	readonly	3	30		malformed	task/AMEND-7-amend-7	v4
 2026-11-14T13:21:56Z	M08-T03	sol	claude-5	claude-opus-5-5	high	readonly	0	332	1.4255	done	e123578	v4
 2026-11-14T13:22:25Z	CHK-M08-T01	terra	claude-3	claude-sonnet-5-5	high	readonly	0	484	1.1562	done	task/M08-T01-certauth-teams	v4
+2026-11-14T14:24:14Z	M08-T08	terra	claude-3	claude-sonnet-5-5	medium	branch	0	448	0.9053	done	task/M08-T08-graph-fixes	v4
+2026-11-14T14:27:51Z	M08-T10	terra	claude-1	claude-sonnet-5-5	medium	branch	0	665	1.4204	done	task/M08-T10-dkim-dmarc	v4
+2026-11-14T14:32:36Z	REV-M08-T01	codex	codex	gpt-6.1-sol	high	readonly	0	152		done	task/M08-T01-certauth-teams	v4
+2026-11-14T14:33:41Z	REV-M08-T03-codex	codex	codex	gpt-6.1-sol	high	readonly	0	217		done	8808afc	v4
+2026-11-14T14:34:22Z	REV-M08-T10	codex	codex	gpt-6.1-sol	high	readonly	0	185		done	task/M08-T10-dkim-dmarc	v4
+2026-11-14T14:35:03Z	REV-M08-T08	codex	codex	gpt-6.1-sol	high	readonly	0	226		done	task/M08-T08-graph-fixes	v4
+2026-11-14T14:37:44Z	M08-T01	sol	claude-4	claude-opus-5-5	high	branch	1	172	0.4468	partial	task/M08-T01-certauth-teams	v4
+2026-11-14T14:41:14Z	M08-T10	terra	claude-1	claude-sonnet-5-5	medium	branch	0	350	0.5500	done	task/M08-T10-dkim-dmarc	v4
+2026-11-14T14:41:47Z	M08-T08	terra	claude-3	claude-sonnet-5-5	medium	branch	0	382	0.7960	done	task/M08-T08-graph-fixes	v4
+2026-11-14T14:44:09Z	REV-M08-T08	codex	codex	gpt-6.1-sol	high	readonly	0	132		done	task/M08-T08-graph-fixes	v4
+2026-11-14T14:44:33Z	REV-M08-T10	codex	codex	gpt-6.1-sol	high	readonly	0	156		done	task/M08-T10-dkim-dmarc	v4
+2026-11-14T14:47:59Z	M08-T03	sol	claude-3	claude-opus-5-5	high	readonly	0	787	1.7193	done	8808afc	v4
+2026-11-14T14:51:02Z	REV-M08-T03-codex	codex	codex	gpt-6.1-sol	high	readonly	0	146		done	8808afc	v4
+2026-11-14T14:51:08Z	REV-M08-T01	codex	codex	gpt-6.1-sol	high	readonly	0	151		done	task/M08-T01-certauth-teams	v4
+2026-11-14T14:51:11Z	M08-T08	sol	claude-4	claude-opus-5-5	high	branch	0	380	0.7923	done	task/M08-T08-graph-fixes	v4
+2026-11-14T14:54:47Z	M07-T18	sol	claude-4	claude-opus-5-5	high	branch	0	2308	1.5617	done	task/M07-T18-kit-round-7s	v4
+2026-11-14T14:58:21Z	REV-M07-T18-codex	codex	codex	gpt-6.1-sol	high	readonly	3	199		malformed	8808afc	v4
+2026-11-14T14:59:36Z	M08-T10	sol	claude-4	claude-opus-5-5	high	branch	1	885	1.7332	partial	task/M08-T10-dkim-dmarc	v4
+2026-11-14T15:01:04Z	REV-M08-T03-opus	sol	claude-5	claude-opus-5-5	high	readonly	0	747	1.0172	done	8808afc	v4
+2026-11-14T15:01:26Z	REV-M08-T08	codex	codex	gpt-6.1-sol	high	readonly	0	102		done	task/M08-T08-graph-fixes	v4
+2026-11-14T15:01:59Z	REV-M08-T10	codex	codex	gpt-6.1-sol	high	readonly	0	135		done	task/M08-T10-dkim-dmarc	v4
+2026-11-14T15:44:12Z	CHK-M08-T01	terra	claude-1	claude-sonnet-5-5	high	readonly	0	3322	0.3520	done	task/M08-T01-certauth-teams	v4
+2026-11-14T15:48:25Z	M07-T18	sol	claude-4	claude-opus-5-5	high	branch	0	2976	2.0975	done	task/M07-T18-kit-round-7s	v4
+2026-11-14T15:48:41Z	M08-T07	codex	codex	gpt-6.1-sol	high	branch	2	51		blocked	task/M08-T07-one-sign-in	v4
+2026-11-14T15:50:15Z	REV-M07-T18-codex	codex	codex	gpt-6.1-sol	high	readonly	0	91		done	45d4836	v4

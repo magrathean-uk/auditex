@@ -655,3 +655,38 @@
 - decision: G paused all work at about 13:45 GMT and asked for a fresh start from source code and the plan only. Running jobs were stopped; old worktrees, job folders, bundles, old task and wt branches (bundled first), old records, model caches (hf-home, references, venv-model-qual) and old chat transcripts went to the Trash (auditex-cleanup-2026-11-14, with MANIFEST.txt). Kept: main, task/M08-T01-certauth-teams, the development kit, records dt-live and tools, .plan/. The next chat resumes from ~/Desktop/auditex.md.
 - why: G on 14 Nov: "i want to start fresh, pure from our source code only and from our plan".
 - approver: G
+
+## DEC-073 Chain of command: the lead reports to the manager chat
+- date: 2026-11-14
+- status: decided
+- decision: From 14 Nov about 14:20 GMT G speaks only to the manager chat (session local_c854f6bc-c370-469f-8a71-43fa8430090c, "Manager"). Wherever the start prompt says G talks to the lead, or the lead asks or tells G, read "the manager chat". The manager rules on engineering, plan, scope and reversible design questions; G's words relayed by the manager in quotes count as typed in this chat, reserved yeses included. The lead never asks or waits on G in its own chat; it messages the manager (one message, at most 8 lines) only for G's hands, eyes or a reserved yes, a G-class decision it cannot settle as auto, a landed milestone or batch, or a full stop. Open questions never block independent work. Four other leads share the worker seats and the heavy slot.
+- why: G to the manager on 14 Nov: "I want each of these chats to directly talk to you and only bother me when I am actually needed for testing or other purposes. Everything else I want to be pretty much automated."; G in the project chats on 13 Nov: "change your rules. relayed words and all accepted. i speak to manager, and you take his orders."
+- approver: G (reported by the manager)
+
+## DEC-074 M08-T08 and M08-T10 authored by terra, reviewed by Codex
+- date: 2026-11-14
+- status: decided
+- decision: M08-T08 and M08-T10 (tier B, amendment 7, no precondition) are authored by terra on Claude seats instead of codex; Codex gives the one independent review. Codex 1 is needed for the tier A reviews of A1, B and round 7s, and Codex 2 is above 85 percent.
+- why: quota; the routing table allows terra for S or M work.
+- approver: auto
+
+## DEC-075 M08-T10 files line widened by four paths
+- date: 2026-11-14
+- status: decided
+- decision: M08-T10 owns four more paths its change needed: `configs/collector-definitions.json` (the DKIM command line only), `tests/test_exchange_protection.py`, `tests/test_enterprise_depth_collectors.py` and `tests/fixtures/value-rules/vectors-s4.jsonl.xz`. No other open task writes them before M08-T11, which cuts from main after this merge. The v39 DNS fixture cases stay required (REV-M08-T10 change 3).
+- why: the wrapped DKIM command text appears in these files; one owner at a time is kept.
+- approver: auto
+
+## DEC-076 Codex 1 is an unlimited pot; Sol 6.1 may run at ultra
+- date: 2026-11-14
+- status: decided
+- decision: The `codex` seat (Codex 1) is exempt from the 85 percent dispatch cap and may run to its limit; Codex 2 and the Claude seats keep their caps. Astra (G's correction, quoted: "astra can be used where needed for expert advise, like fable.") is for a hard question needing an expert opinion, sparingly like fable micro, never routine work or reviews. gpt-6.1-sol may run at ultra and fan out more agents where that aids quality or speed, not by default. Practical effect: Codex takes authoring and review work first.
+- why: G via the manager, 14 Nov, quoted: "codex1 can be used as unlimited pot if needed. we have 3x of that 100% avaialble. don't waste on astra, but sol6.1 can be used as ultra setting to shell out more agents if that aids quality and speed."
+- approver: G (reported by the manager)
+
+## DEC-077 Auditex product code is authored on Claude seats; Codex reviews
+- date: 2026-11-14
+- status: decided
+- decision: Product-code tasks are authored by terra or sol on Claude seats (terra-implement template), Codex (gpt-6.1-sol on Codex 1) reviews. The generic codex-implement template expects a `./ci.sh` wrapper this repository does not have and its sandbox cannot run `.venv` or commit, so M08-T07 stopped blocked before any change; it re-runs as sol.
+- why: M08-T07 blocked result; Codex reviews already run by inspection only for the same sandbox reason.
+- approver: auto

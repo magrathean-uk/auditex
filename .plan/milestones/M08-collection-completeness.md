@@ -42,16 +42,16 @@ In one app-only certificate run the product collects and answers the 64 rows: 62
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M08-T01 | A1: certificate credentials for app-only tokens, Teams collection in app mode | sol | M | hard risk:high | todo |
+| M08-T01 | A1: certificate credentials for app-only tokens, Teams collection in app mode | sol | M | hard risk:high | done |
 | M08-T02 | A2: the reader app's certificate key credential (operator script) | sol | S | risk:high | todo |
 | M08-T03 | B: Power BI and Power Platform enablement (operator scripts and product docs) | sol | M | risk:high | todo |
 | M08-T04 | C: the Teams app-settings read and adapter | codex | M | risk:high | todo |
 | M08-T05 | D: the compliance session, DLP and alert-policy reads and adapters | sol | L | hard risk:high | todo |
 | M08-T06 | E: one app-only re-collection of the 64 rows and the kit's comparison (run by the tenant chat) | orchestrator | M | risk:high | todo |
 | M08-T07 | One sign-in guard (DEC-065), Exchange kept in the guided delegated path (DEC-068) | codex | M | risk:high | todo |
-| M08-T08 | D1, D3, D7: auth-methods read and adapter, the withheld classifications section, site-permission reads | codex | M | - | todo |
+| M08-T08 | D1, D3, D7: auth-methods read and adapter, the withheld classifications section, site-permission reads | codex | M | - | done |
 | M08-T09 | D2: per-item batch 429 retry with pacing | sol | M | risk:high | todo |
-| M08-T10 | D4, D5: the DKIM empty answer and DMARC NXDomain (value rule) | codex | M | - | todo |
+| M08-T10 | D4, D5: the DKIM empty answer and DMARC NXDomain (value rule) | codex | M | - | done |
 | M08-T11 | Permission docs and config list exactly what the default collectors need | codex | M | - | todo |
 | M08-T12 | D6: the SharePoint admin read for SPO 1.2, 2.1, 2.2, 3.1-3.3 | sol | L | hard risk:high | todo |
 
@@ -138,7 +138,7 @@ In one app-only certificate run the product collects and answers the 64 rows: 62
 - The changelog line goes to `.plan/work/M08-T10/changelog.md`.
 - Tier B (collector and value rule): one independent review (`REV-M08-T10`); the rule checks and `make contract-smoke`.
 - verify: `.venv/bin/python -m pytest tests/test_dkim_empty_answer.py tests/test_dmarc_nxdomain.py tests/test_dns_scuba_records.py tests/test_dns_lookup_parsers.py tests/test_dns_posture_collector.py tests/test_exchange_policy_scuba_inputs.py tests/test_value_rules_vectors.py tests/test_value_rules_s4.py tests/test_value_rules_contract.py tests/test_explainer_catalogue_drift.py && python3 scripts/generate-rule-packs.py --check && make contract-smoke`
-- files: `src/azure_tenant_audit/collectors/exchange_policy.py`, `src/azure_tenant_audit/value_rules/dns.py`, `src/azure_tenant_audit/dns_lookup.py`, `src/azure_tenant_audit/collectors/dns_posture.py`, `configs/scuba-value-rules.json`, `configs/rule-packs.json`, `configs/explainer-template.json`, `configs/explainer-what-to-collect.json`, `docs/reference/output-contract.md`, `tests/fixtures/collect-exchange/dns-vectors-v39.json`, `tests/fixtures/value-rules/vectors-v39.jsonl.xz`, `tests/fixtures/value-rules/manifest-s4.json`, `tests/test_dkim_empty_answer.py` (new), `tests/test_dmarc_nxdomain.py` (new), `tests/test_dns_scuba_records.py`, `tests/test_dns_posture_collector.py`, `tests/test_exchange_policy_scuba_inputs.py`, `tests/test_value_rules_vectors.py`, `tests/test_value_rules_s4.py`; `.plan/work/M08-T10/changelog.md`
+- files: `src/azure_tenant_audit/collectors/exchange_policy.py`, `src/azure_tenant_audit/value_rules/dns.py`, `src/azure_tenant_audit/dns_lookup.py`, `src/azure_tenant_audit/collectors/dns_posture.py`, `configs/scuba-value-rules.json`, `configs/rule-packs.json`, `configs/explainer-template.json`, `configs/explainer-what-to-collect.json`, `docs/reference/output-contract.md`, `tests/fixtures/collect-exchange/dns-vectors-v39.json`, `tests/fixtures/value-rules/vectors-v39.jsonl.xz`, `tests/fixtures/value-rules/manifest-s4.json`, `tests/test_dkim_empty_answer.py` (new), `tests/test_dmarc_nxdomain.py` (new), `tests/test_dns_scuba_records.py`, `tests/test_dns_posture_collector.py`, `tests/test_exchange_policy_scuba_inputs.py`, `tests/test_value_rules_vectors.py`, `tests/test_value_rules_s4.py`, `tests/fixtures/value-rules/vectors-s4.jsonl.xz`, `configs/collector-definitions.json` (the DKIM command line only), `tests/test_exchange_protection.py`, `tests/test_enterprise_depth_collectors.py` (DEC-075); `.plan/work/M08-T10/changelog.md`
 
 ### M08-T11 Permission docs and config list exactly what the default collectors need
 - Precondition: M08-T05, M08-T08, M08-T09 and M08-T10 merged.
