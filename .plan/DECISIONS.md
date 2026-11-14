@@ -648,3 +648,10 @@
 - options: keep both-provider confirmations and re-runs (rejected: G asked for a leaner chat; reviews outnumbered authoring runs)
 - why: G on 14 Nov, new lead chat; records WASTE-REVIEW-2026-11-14.md rules 2, 5, 7.
 - approver: auto
+
+## DEC-072 Pause and fresh start
+- date: 2026-11-14
+- status: decided
+- decision: G paused all work at about 13:45 GMT and asked for a fresh start from source code and the plan only. Running jobs were stopped; old worktrees, job folders, bundles, old task and wt branches (bundled first), old records, model caches (hf-home, references, venv-model-qual) and old chat transcripts went to the Trash (auditex-cleanup-2026-11-14, with MANIFEST.txt). Kept: main, task/M08-T01-certauth-teams, the development kit, records dt-live and tools, .plan/. The next chat resumes from ~/Desktop/auditex.md.
+- why: G on 14 Nov: "i want to start fresh, pure from our source code only and from our plan".
+- approver: G

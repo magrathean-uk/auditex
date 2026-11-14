@@ -569,3 +569,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-14T11:32:12Z	REV-M08-T03-codex	codex	codex2	gpt-6.1-sol	high	readonly	3	111		malformed	8c5b183	v4
 2026-11-14T11:32:50Z	REV-M08-T03-opus	sol	claude-1	claude-opus-5-5	xhigh	readonly	0	151	1.0858	done	8c5b183	v4
 2026-11-14T11:33:14Z	REV-AMEND-7	codex	codex	gpt-6.1-sol	medium	readonly	3	30		malformed	task/AMEND-7-amend-7	v4
+2026-11-14T13:21:56Z	M08-T03	sol	claude-5	claude-opus-5-5	high	readonly	0	332	1.4255	done	e123578	v4
+2026-11-14T13:22:25Z	CHK-M08-T01	terra	claude-3	claude-sonnet-5-5	high	readonly	0	484	1.1562	done	task/M08-T01-certauth-teams	v4

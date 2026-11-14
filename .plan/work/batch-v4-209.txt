@@ -1,0 +1,1 @@
+--task M08-T03 --role sol --account claude-5 --readonly --tags size:S,risk:high --timeout 3600 --max-turns 100 --budget 12 --rounds-ok "live two-list Fabric reply found by the tenant chat (F3 in B), DEC-071" --brief .plan/work/M08-T03/fix-2.md

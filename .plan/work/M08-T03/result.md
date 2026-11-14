@@ -1,12 +1,18 @@
 ## RESULT M08-T03
 status: done
-summary: All five review fixes are made, the scripts parse cleanly and the mock harness passes 62 of 62. The scripts are re-frozen and the old manifest is kept as MANIFEST-1.sha256. No script assumes how many permissions the reader app has (DEC-068). Details are in .plan/work/M08-T03/notes.md under "Repair round 1".
-1: -Portal now needs a Fabric read sign-in. Before any write it checks and journals Fabric admin authority and that the setting is disabled with no groups; if the setting is already enabled it stops and creates no group (create-m08b-pbi-access.ps1:137-145, journal :155-163).
-2: Both routes require all eight watched settings and compare every field before and after; missing evidence refuses (m08b-common.ps1:344-385). On the portal route, -ReaderCheck reads the setting back through Fabric and compares all eight (create-m08b-pbi-access.ps1:65-84).
-3: The removal never looks a group up by name or time; a missing group id refuses and points to manual reconciliation (remove-m08b-pbi-access.ps1:43-52). It restores the setting only after confirming the run still owns it, re-reads it before the step, reads it back, then sets removed (:77-82, :104-117, :133). Undo cell rewritten at RECORD.md:93.
-4: Register the Power Platform app immediately before the power_platform collection and run the removal with -Apply straight after it (RECORD.md:16-25 and :110-118; create-m08b-pp-mgmtapp.ps1:18-20).
-5: draft/collector-post.patch:37-39 now uses listTenantSettings api-version 2020-10-01, with one test assertion pinning it (:259).
-changes: dt-live/m08-b (both Power BI scripts, m08b-common.ps1, create-m08b-pp-mgmtapp.ps1, RECORD.md, tests/run-tests.ps1, tests/mock.ps1, MANIFEST.sha256, new MANIFEST-1.sha256); .plan/work/M08-T03 (draft/collector-post.patch and admin-guide-section.md, old copies kept as -1 files; notes.md; progress.md)
-verification: parse through kit-7r pwsh-guarded, 8 files, 0 errors: pass; mock harness 62/62: pass; patch in a throwaway tree with no commit: the six verify test files exit 0 (679 passed), Ruff pass, git apply --check on current main pass; --no-verify not used. frozen: f37ffb67a06a
-risks: (1) The Fabric admin read and the portal read-back have not been tried on a live tenant; both routes now need a Fabric sign-in. (2) Kit settings are compared field by field, so a live field that changes on its own would stop a run safely. (3) The DEC-060 consent limit and the Power Platform administrator-level window are unchanged.
+summary: Get-M8TenantSettings now accepts the two-list reply only when both lists match on count, settingName set and `enabled` for each setting. It then reads `tenantSettings`; any difference refuses, one list alone works as before, and neither still refuses. By default the Fabric mock now answers with both lists. Seven new cases were added and the harness passes 69/69. Re-frozen, with MANIFEST-2.sha256 kept. Details: .plan/work/M08-T03/notes.md, "Repair round 2".
+changes: dt-live/m08-b (m08b-common.ps1, tests/mock.ps1, tests/run-tests.ps1, RECORD.md, MANIFEST.sha256, new MANIFEST-2.sha256); .plan/work/M08-T03 (notes.md, progress.md)
+verification: harness through kit-7r pwsh-guarded 69/69: pass; new harness against the f37ffb67a06a copy: 30 fail, including the equal-lists case ("neither or both"): fails as expected; parse through pwsh-guarded, 8 files, 0 errors: pass; new manifest check, 0 mismatches: pass
+risks: (1) Not tried on a live tenant; the Power BI reader read uses the same rule. (2) A setting name repeated within one list now refuses. (3) The harness work folder must be on the internal disk because of the scripts' preflight.
 questions_for_g: none
+### Findings
+fix: m08b-common.ps1:316-318 (helper :326-340)
+new-cases: 7 fail-on-previous 5
+harness: pass 69/69
+changed-files: RECORD.md, m08b-common.ps1, tests/mock.ps1, tests/run-tests.ps1
+frozen: b02012a51eb7
+pbpp-check: EXP-m08-pbpp
+pbi-readonly-admin-setting: AllowServicePrincipalsUseReadAdminAPIs
+pp-tenant-settings-method: POST
+removal-step: present
+expected-verdicts-changed: 0
