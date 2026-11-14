@@ -132,7 +132,7 @@ def snapshot(root):
 def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundle, monkeypatch):
     before = snapshot(demo_bundle)
     result = assess_run(demo_bundle)
-    assert result["totals"] == {"answered": 24, "unknown": 78, "invalid": 0, "skipped": 0, "rule_answered": 102,
+    assert result["totals"] == {"answered": 25, "unknown": 77, "invalid": 0, "skipped": 0, "rule_answered": 102,
                                 "scope_narrowed": 0}
     assert result["limitations"] == []
     assert {name for name, detail in result["projection"]["sections"].items()

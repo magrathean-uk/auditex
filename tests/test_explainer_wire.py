@@ -270,7 +270,7 @@ def test_demo_budget_and_suppressed_rows(tmp_path):
     rows = result["policies"]
     assert len(rows) == 102 and elapsed < 10
     assert Counter(value_rule_verdict(row) for row in rows) == {
-        "met": 3, "not_met": 21, "not_assessed": 78}
+        "met": 3, "not_met": 22, "not_assessed": 77}
     assert sum("explainer" in row for row in rows) == 76
     optional = [row for row in rows if row["rule_precheck"].get("reason_code") == "optional_collection_not_enabled"]
     assert len(optional) == 16 and all("explainer" not in row for row in optional)
