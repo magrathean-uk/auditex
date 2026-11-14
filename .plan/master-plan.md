@@ -2,32 +2,15 @@
 <!-- Hub document, max 150 lines. sol-architect writes it, the orchestrator makes small edits, G approves scope. -->
 
 ## Vision
-Auditex 1.5.0 is the release in which an IT administrator or consultant can hand a shareable report to a third
-party without that party being able to confirm a guessed name from the run folder name: pseudonyms come from a
-private per-run key, and names written with middle initials or titles are masked too. The boundary scanners that
-prove the tool never writes to a tenant or reads content close the limits plan v3 named, the codebase is held to a
-wider lint rule set, and the release stays read-only, deterministic and byte-reproducible. Beside it, the Isambard-AI
-allocation is put to use on the job G chose for a model: writing fuller explanations and remediation for verdicts
-the value rules already gave. That track ends with a judged build, a measured comparison of bases and a written
-recommendation, so G can decide on evidence whether a model explainer ever reaches the product.
+Auditex 1.5.0 is the release in which an IT administrator or consultant can hand a shareable report to a third party without that party being able to confirm a guessed name from the run folder name: pseudonyms come from a private per-run key, and names written with middle initials or titles are masked too. The boundary scanners that prove the tool never writes to a tenant or reads content close the limits plan v3 named, the codebase is held to a wider lint rule set, and the release stays read-only, deterministic and byte-reproducible. Beside it, the Isambard-AI allocation is put to use on the job G chose for a model: writing fuller explanations and remediation for verdicts the value rules already gave. That track ends with a judged build, a measured comparison of bases and a written recommendation, so G can decide on evidence whether a model explainer ever reaches the product.
 
 ## Target user
-IT administrators and consultants auditing their own or a customer's Microsoft 365 or Google Workspace tenant
-who need defensible, reproducible evidence without write access (wording confirmed by G for 1.3.0).
+IT administrators and consultants auditing their own or a customer's Microsoft 365 or Google Workspace tenant who need defensible, reproducible evidence without write access (wording confirmed by G for 1.3.0).
 
 ## Success criteria
 Track A, product release 1.5.0:
-- `make lint` enforces Ruff E4, E7, E9, F, W, I, B and UP over the whole repository, and `make lint`, `make test`,
-  `make contract-smoke`, `make acceptance` (full v3.9.1 replay, no skips, the value-rule contract test included),
-  `make release-check` and `make audit-deps` exit 0 on the release commit; two plain `make dist` builds are
-  byte-identical; the contract-smoke digest comparison passes and no digest depends on the run date (`--as-of` on
-  every offline smoke run, DEC-005); M04-T03 changes only DEC-004's two label-only digest entries.
-- Shareable output pseudonyms come from a private per-run key made at collection (older runs are masked with a
-  temporary key until `auditex report prepare-key`): knowing the run path reproduces no pseudonym, no read path
-  writes a run, and the key appears in no report, pack, export, notification, MCP output or log; G approved the
-  design (DEC-004) and its six amendments are tested; privacy reviews by both providers approve the merged heads;
-  `CONTRACT_VERSION`, schemas and the output contract change together and the notes say what it means for 1.4.0
-  bundles.
+- `make lint` enforces Ruff E4, E7, E9, F, W, I, B and UP over the whole repository, and `make lint`, `make test`, `make contract-smoke`, `make acceptance` (full v3.9.1 replay, no skips, the value-rule contract test included), `make release-check` and `make audit-deps` exit 0 on the release commit; two plain `make dist` builds are byte-identical; the contract-smoke digest comparison passes and no digest depends on the run date (`--as-of` on every offline smoke run, DEC-005); M04-T03 changes only DEC-004's two label-only digest entries.
+- Shareable output pseudonyms come from a private per-run key made at collection (older runs are masked with a temporary key until `auditex report prepare-key`): knowing the run path reproduces no pseudonym, no read path writes a run, and the key appears in no report, pack, export, notification, MCP output or log; G approved the design (DEC-004) and its six amendments are tested; privacy reviews by both providers approve the merged heads; `CONTRACT_VERSION`, schemas and the output contract change together and the notes say what it means for 1.4.0 bundles.
 - Names with middle initials or titles and name-equal mapping keys are masked or counted, with probes at most
   tokens x 6 and the 90,000-record HTML peak within the baseline plus 15 percent.
 - The v3 DEC-008 and DEC-009 scanner limits are closed for planted cases under the fail-closed rule; any other class
@@ -52,22 +35,24 @@ Dummy-tenant kit and trial tenant (M07, outside the repository; DEC-006, DEC-008
 - The trial tenant is written only from a kit round confirmed ship by both providers on its frozen copy and passing
   the full offline suite 9 of 9; the live kit folder holds that round with the previous state kept; phase D's gates
   and findings are recorded; the tenant is rolled back before the trial ends (DEC-008).
+Collection completeness (M08, DEC-059; amendment 5):
+- One app-only certificate run collects and answers the 35 rows the first collection cannot (14 Teams, 16 Power BI
+  and Power Platform, 5 Security Suite): the target is 33 of 35 rows decided or carrying a named reason the tenant
+  explains, none a product gap; PP 2.3 and PP 3.1 stay not assessed by product design, so B closes at most 14 of its
+  16 rows (DEC-061).
+  Product work passes its other-provider review and executing check; operator writes are approved by both providers,
+  carry a removal step and an OUT-OF-KIT-WRITES row, run on G's sign-in and change no verdict the kit expects.
 
 ## Scope of 100 percent
-Track A: the 1.5.0 release from G's gate answers - the wider Ruff set, the contract-test and gate-doc
-fixes, keyed per-run D5 pseudonyms with the middle-initial and title follow-up, the scanner follow-ups, the small
-review follow-ups and the release, which stops at the approved candidate until G's yes names 1.5.0. Track B: the
-explainer model research from bring-up to G's pick of a judged build (or of none), one data round included (DEC-037). M07: the kit gate, the hand-over,
-phase D's record and the rollback. 100 percent means every DoD item in M00-M07 is ticked; the release waits for
-neither Track B nor M07.
+Track A: the 1.5.0 release from G's gate answers - the wider Ruff set, the contract-test and gate-doc fixes, keyed per-run D5 pseudonyms with the middle-initial and title follow-up, the scanner follow-ups, the small review follow-ups and the release, which stops at the approved candidate until G's yes names 1.5.0. Track B: the explainer model research from bring-up to G's pick of a judged build (or of none), one data round included (DEC-037). M07: the kit gate, the hand-over, phase D's record and the rollback. M08: certificate credentials for app-only tokens, Power BI and Power Platform enablement, the Teams app-settings read, the compliance session with its DLP and alert reads, and one live re-collection (DEC-059); no release. 100 percent means every DoD item in M00-M08 is ticked.
 
 ## Non-goals
 - Shipping a model explainer, a model download or any model code in 1.5.0; product integration is a later G gate.
 - Any verdict from a model; widening the rules' scope beyond the 102 SCuBA policies.
 - Training code in the product repository (v3 DEC-005); a new repository; the Hugging Face upload (parked until a
   build passes its bar and G says yes); paid API runs; base snapshots on the workstation (they are fetched straight onto Isambard-AI).
-- Live-tenant work outside M07 (phase D and the rollback are run by the tenant chat on G's sign-ins and only recorded
-  here); kit rounds 7m, 7n and 7o and the shared sign-in opener; answering the SCuBA Google Workspace baselines.
+- Live-tenant work outside M07 and M08 (phase D, the rollback, M08's operator writes and re-collection are run by the
+  tenant chat on G's sign-ins and only recorded here); a release from M08 (its own gate, G's yes); kit rounds 7m, 7n and 7o and the shared sign-in opener; answering the SCuBA Google Workspace baselines.
 - Hosted CI; merging `wt/github-build-tags-20261108`; PyPI or any registry upload; any tenant write path.
 - A Ruff format hook; deleting kit folders, `wt/*` branches or worktrees; workstation tooling (clean-development).
 - Edits to G-owned legal files except text G approves verbatim.
@@ -111,7 +96,13 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M05 | scanners-and-hygiene | 10 | 100 | done |
 | M06 | release-1-5-0 | 13 | 100 | done |
 | M07 | dummy-tenant-kit | 12 | 63 | planned |
+| M08 | collection-completeness | 0 | 0 | planned |
 <!-- milestones:end -->
+Weights after amendment 5 (proposed; the re-baseline applies them to the milestone frontmatter): M00 7 to 6, M01 13
+to 11, M02 14 to 11, M03 15, M04 16 to 13, M05 10 to 8, M06 13 to 10, M07 12, M08 0 to 14; overall 84% to 70%.
+M08 is about as large as M04 (four tier A parts and a live run), so its 14 points come from the done milestones in
+proportion, and the figure then shows the new work as work left; M03 and M07 keep their weights so their open
+items are not discounted.
 
 Priority (G): Track B gets worker seats first; Track A runs beside it as seats allow. Nothing starts before DEC-001.
 Track B: M01-T01 and M01-T03 in parallel; M01-T02 after G's login; then M01-T04 -> M01-T05. M02-T01 (CPU) may run
@@ -125,6 +116,9 @@ time after M00; M05-T03 after M05-T01, M05-T02 and M04-T05; M05-T04 after M04-T0
 and M05.
 M07 (kit; the trial end bounds it, DEC-008): M07-T11 -> M07-T12 -> M07-T13 -> M07-T14 -> M07-T16 (phase D, tenant
 chat); M07-T15 after M07-T14 when no kit script runs; M07-T17 before the trial ends.
+M08 (DEC-059, order A, B, C, D, then E): M08-T01 beside M08-T03 (EXP-m08-pbpp first; a touched kit verdict stops
+it for the manager); M08-T02 after M08-T01 merges; M08-T04 after M08-T01; M08-T05 after M08-T04; M08-T06 after
+M07-T16, M08-T02 and M08-T03 applied and M08-T05 merged, before M07-T17 and the trial's end.
 
 ## Top risks
 1. Isambard-AI is aarch64 with unknown compute-node internet, wheel support for PEFT and bitsandbytes, and driver
@@ -145,6 +139,9 @@ chat); M07-T15 after M07-T14 when no kit script runs; M07-T17 before the trial e
 8. The trial tenant cannot be reset and its trial ends (DEC-008): writes come only from a frozen copy that
    passed both confirmations and the full suite, a live defect stops phase D for a G change-round decision
    (DEC-014), and the rollback is planned before the trial ends (DEC-008), not after phase D finishes.
+9. M08 rests on facts unverified offline: the Teams admin API accepting a certificate token, the compliance session
+   in app mode with Global Reader, the Power BI setting's API route. A role beyond Global Reader or a touched kit
+   verdict stops the task for the manager; A1 ports from a branch far behind `main`; the trial's end bounds M08-T06.
 
 ## Links
 STATE.md, ARCHITECTURE.md, milestones/, BACKLOG.md, DECISIONS.md, CLEANUP.md, RETRO.md
