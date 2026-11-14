@@ -1,0 +1,1 @@
+--task REV-RAPP-codex --role codex --account codex2 --readonly --tags review,risk:high --timeout 2400 --brief .plan/work/REV-RAPP/brief-src-2.md

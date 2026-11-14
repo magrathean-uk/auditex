@@ -531,3 +531,12 @@
 - consequences: the first collection does not exercise the opt-in collectors (mailbox forwarding, risky users, consent requests, eDiscovery).
 - approver: auto
 
+
+## DEC-058 Phase E made runnable: compare.py into round 7s, a last narrow reader-app fix, the commands revised
+- date: 2026-11-14
+- status: decided
+- decision: (1) the phase E rehearsal found the kit's `compare.py` accepts only assessment schema 2026-10-29 and rejects the rule class `value_rule`, so it cannot read the released product's output; the fix goes into kit round 7s part 2 (tier A gate with the rest), and until the frozen 7s copy exists PHASE-E-COMMANDS.md keeps its stop gate and scratch-copy fallback. (2) Reader-app re-checks: sol approves; Codex is changes-required on one blocker (B1: `-AllowConsent` can add consent on the shared Graph client before intent is journalled). One last narrow author round removes `-AllowConsent` and folds in the cheap non-blocking items on the same lines (sol S3 to S6, Codex 17 and 18); both providers then re-check the diff only. (3) PHASE-E-COMMANDS.md is revised for DEC-056 (reader app and a first collection before phase D), DEC-057 (default collector permissions) and the r1 secret paths (sol S1, Codex 19). (4) A read-only look lists the SCuBA rows an app-only secret run cannot answer (Teams certificate token, alert-policy session) and what would close the gap, for the owner's question whether collection is complete.
+- options: a broader second author round (rejected: the owner's one-review-one-repair rule; the blocker is one flag)
+- why: makes phase E runnable from frozen kit files with no question from the tenant chat; keeps the reader app's authority to what was reviewed.
+- consequences: round 7s part 2 carries the compare.py fix beside the live dry-run findings; the reader app runs only after both re-checks approve.
+- approver: auto

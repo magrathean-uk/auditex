@@ -527,3 +527,6 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-14T08:47:00Z	EXP-m07-stub	terra	claude-5	claude-sonnet-5-5	high	readonly	0	567	1.0657	done	c6de3ee	v4
 2026-11-14T08:47:23Z	EXP-m07-phaseE	terra	claude-1	claude-sonnet-5-5	high	readonly	0	353	1.2679	done	c0abdf8	v4
 2026-11-14T08:52:03Z	REV-RAPP-sol	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	870	2.1148	done	c6de3ee	v4
+2026-11-14T09:09:15Z	RAPP-fix	sol	claude-5	claude-opus-5-5	xhigh	readonly	0	991	4.6620	done	704eda7	v4
+2026-11-14T09:12:56Z	REV-RAPP-codex	codex	codex2	gpt-6.1-sol	high	readonly	0	194		done	7592637	v4
+2026-11-14T09:15:52Z	REV-RAPP-sol	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	372	2.0948	done	7592637	v4
