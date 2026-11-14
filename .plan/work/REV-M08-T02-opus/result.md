@@ -1,6 +1,7 @@
 ## RESULT REV-M08-T02-opus
 status: done
-summary: verdict: ship. Before the PATCH, the stale-set check now compares every field the PATCH sends back, customKeyIdentifier included, on create and on removal. New tests change only that metadata on both paths, and nothing was weakened. The only files changed are common.ps1, mock.ps1, run-tests.ps1, RECORD.md and the manifests. Notes: .plan/work/REV-M08-T02-opus/result-3-notes.md
+summary: verdict: ship
+note: Before the PATCH, the stale-set check now compares every field the PATCH sends back, customKeyIdentifier included, on create and on removal. New tests change only that metadata on both paths, and nothing was weakened. The only files changed are common.ps1, mock.ps1, run-tests.ps1, RECORD.md and the manifests. Notes: .plan/work/REV-M08-T02-opus/result-3-notes.md (split by the lead: format fix in place, rule 7)
 reviewed: 4d5d1c62f086
 changes: none to the kit; wrote .plan/work/REV-M08-T02-opus/result-3-notes.md and progress.md
 verification: shasum -a 256 -c MANIFEST.sha256 pass 7/7; the r1-frozen copy checks pass 7/7 against MANIFEST-2.sha256; diff -u of r1 against the current files: create, remove and parse.ps1 are identical; static read only, with no pwsh and no harness run, because the brief is read-only

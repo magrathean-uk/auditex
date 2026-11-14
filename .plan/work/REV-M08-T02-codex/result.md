@@ -1,6 +1,7 @@
 ## RESULT REV-M08-T02-codex
 status: done
-summary: verdict: ship; customKeyIdentifier gap closed on create and removal; no safeguards weakened or unrelated changes found.
+summary: verdict: ship
+note: customKeyIdentifier gap closed on create and removal; no safeguards weakened or unrelated changes found. (split by the lead: format fix in place, rule 7)
 reviewed: 4d5d1c62f086
 changes: none
 verification: shasum PASS current and previous 7/7; full diff inspected; author harness log reports 79/79; execution prohibited by brief.
