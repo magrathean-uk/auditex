@@ -1,0 +1,3 @@
+--task EXP-m07-phaseE --role terra --account claude-1 --readonly --tags debug --timeout 3600 --max-turns 120 --budget 10 --brief .plan/work/EXP-m07-phaseE/brief-src.md
+--task EXP-m07-stub --role terra --account claude-5 --readonly --tags debug --timeout 2400 --max-turns 80 --budget 8 --brief .plan/work/EXP-m07-stub/brief-src.md
+--task REV-RAPP-sol --role sol --account claude-3 --readonly --tags hard,risk:high --timeout 2400 --max-turns 80 --budget 10 --brief .plan/work/REV-RAPP/brief-src.md

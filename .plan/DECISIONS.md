@@ -503,3 +503,12 @@
 - consequences: M07-T14's hand-over of 7r is superseded by a 7s hand-over; M07-T15 and the phase D record wait for the frozen 7s copy; the milestone rows for the round are added when the candidate is out. Replaces the manager's "stand still" for this work.
 - approver: manager (team-manager chat, 14 Nov 2026, under DEC-036; the read-only dry runs from an un-gated candidate are its decision)
 
+## DEC-055 Everything is developed up to the point that needs G; phase E made ready
+- date: 2026-11-14
+- status: approved
+- decision: nothing waits for G unless it needs his hands, a reserved yes or spend. Round 7s goes on as ruled (DEC-054); Track B stays stopped (DEC-053). Phase E is made ready to run without a question once phase D is done: a tier A review of `dt-live/create-auditex-reader-app.ps1` by both providers, and the Auditex collection run plus the kit's `compare.py` rehearsed offline with the exact commands written down for the tenant chat. One bounded look, no build: whether the kit's offline suite can drive the real Graph SDK against a local stub for the error paths, with a yes or no and the cost. G's go for phase D's writes, and for the reader app at the audit step, is given by his words below and by his "Yes, start" of 12 Nov (the manager's reading); he is needed only for sign-ins and passkeys. Writes still come only from the gated, frozen 7s copy.
+- options: none offered; an instruction
+- why: G, typed in the team-manager chat on 14 Nov 2026, word for word: "i want everything develop until the stage it actually needs me to do stuff."
+- consequences: three read-only tasks run beside round 7s (REV-RAPP by both providers, EXP-m07-phaseE, EXP-m07-stub).
+- approver: G (through the team-manager chat, DEC-036; the reading of his go for the writes is the manager's)
+
