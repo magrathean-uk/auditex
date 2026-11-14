@@ -1,12 +1,13 @@
 ## RESULT REV-M08-T03-opus
 status: done
-summary: verdict: ship; the update answer and every list read now go through Get-M8SettingList (the fix-2 rule), a refusal there is journalled and the removal works; tests are added, none weakened. Notes: .plan/work/REV-M08-T03-opus/notes.md
-reviewed: 96aee184809c
-changes: none (review notes only, in .plan/work/REV-M08-T03-opus/)
-verification: shasum -c MANIFEST.sha256 9/9 pass; manifest hashes 96aee184809c and b02012a51eb7 confirmed; read the code and the author's harness outputs (new 79/79, previous 74/79, all 5 failures new); scripts not run (read-only)
-risks: no byte copy of the b02012a51eb7 files survives, so changes inside each file were checked by reading, not by a byte diff; runtime is mock-only
+summary: verdict: ship
+reviewed: 521703f2826d
+changes: none in the kit; only my review notes, at .plan/work/REV-M08-T03-opus/notes-6.md and progress.md
+verification: all 9 files match the hashes in MANIFEST.sha256 (pass); a full diff of the removal script against a byte copy of the previous version (pass); mock and RECORD.md compared with the round-4 copy (pass). Harness not run because the brief forbids PowerShell.
+risks: I found no byte copy of the previous mock, run-tests or RECORD.md, so I judged those by content. If the group stays live past 5 minutes and then vanishes, the run stops at the first absent read without watching deleted items any longer (remove:198). It journals "not seen", so a re-run picks it up.
 questions_for_g: none
 ### Findings
-1 PASS: m08b-common.ps1:323-329 Get-M8SettingList holds the rule (via Assert-M8SameSettingLists :330-344) and is called by both reads, Get-M8TenantSettings :316 and the update answer at create-m08b-pbi-access.ps1:202. A refusal at :202 throws inside the try (:52) and reaches Save-M8Failure (:221). The update answer at remove-m08b-pbi-access.ps1:111 is thrown away and the setting is read again through Get-M8TenantSettings.
-2 PASS: tests/mock.ps1:111-122 adds updateShape and keeps tenantSettings alone as the default. tests/run-tests.ps1:261-279 covers both lists, value alone, a count difference, a name difference, an enabled difference and neither list, each with the journal marked failed and the removal run. The 69 earlier checks remain (79 minus 10 new) and pass on the previous scripts.
-3 PASS (file level): against MANIFEST-3 only m08b-common.ps1, create-m08b-pbi-access.ps1, tests/mock.ps1 and tests/run-tests.ps1 changed. The other 5 files, RECORD.md included, are hash-identical, and what changed inside the 4 files matches the author's account.
+1: remove:193-199 reads the live group and deleted items on every poll, 15 s apart. A sighting is checked (:201), purged and read back absent from both (:53-61). Not live and never seen after 5 minutes means removed with deleted-items: not seen in 5 min (:206-208).
+2: remove:68-97 re-runs over a removed journal with the Graph sign-in only, by the journalled id. A plan run writes nothing. A refusal keeps the status removed. With -Apply it adds a recheck-deleted-items removals entry, purges and journals removed.
+3: mock:92-93 adds a late deleted item (default off, run-tests:36). run-tests goes from 59 to 65 checks; the 6 new ones (:259-293) cover the late purge, never seen, re-check plan and apply, nothing to do, and a wrong-name refusal.
+4: No check is weaker; the temp-file refusal now also guards the removed path. Only the four files the manifests list changed, and RECORD.md only in its text at line 73.

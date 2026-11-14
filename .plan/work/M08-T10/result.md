@@ -1,10 +1,12 @@
 ## RESULT M08-T10
-status: partial
-summary: verify deferred: heavy slot busy. `make contract-smoke` was deferred twice by hostload, so it has not run on 1636755. Every other check passes.
-Review item 1 (REV-M08-T10 result-2) is fixed in 1636755. Both fixture sets now include failed-lookup witnesses, which the rule reads as not assessed. The DNS vectors gain `failed_lookup_step` for MS.EXO.4.1v1 to 4.4v1. The stage-4 vectors gain `rdata_empty_failed_step_servfail` and `rdata_empty_failed_step_timeout` per policy, and the manifest was rebuilt with the stage-4 builder: 1707 rows, 863 not_assessed, 160 cells.
-New tests run the failed collection end to end: resolver failure, failed envelope (`dns_resolver_error`), section projected as not collected (`collector_error`), then section_not_collected / not_assessed. A failed step's entry reads domain_unusable.rdata_empty. The DNS per-policy bound went from 10 to 11 and the stage-4 row count from 1699 to 1707.
-D4 and D5 were met in earlier commits (199ba30, ccfd544, e398ba3), and the reviewer confirmed them by inspection.
-changes: tests/fixtures/collect-exchange/dns-vectors-v39.json, tests/fixtures/value-rules/vectors-s4.jsonl.xz, tests/fixtures/value-rules/manifest-s4.json, tests/test_dns_scuba_records.py, tests/test_value_rules_s4.py (commit 1636755 on task/M08-T10-dkim-dmarc)
-verification: `.venv/bin/python -m pytest` over the ten criteria test files on 1636755: pass (749 passed, 14 skipped). `python3 scripts/generate-rule-packs.py --check`: pass ("rule packs up to date (39 packs)") when run with `.venv/bin` first on PATH; the bare homebrew python3 fails with ModuleNotFoundError: requests, which is an environment gap, not drift. `make contract-smoke`: not run, hostload deferred twice (slots held by M07-T18/hub-app-build, then INT-B10/M04-T02). `make lint`: pass ("All checks passed!"). Negative case: with `_all_nxdomain` changed to also accept failed/servfail/timeout steps, the new witness tests fail with `AssertionError: assert ('not_met', '...nt.no_record') == ('not_assesse....rdata_empty')`; source restored afterwards. gitleaks on staged changes: no leaks found. `git status --porcelain`: empty.
-risks: contract-smoke still needs one run under hostload on 1636755 before merge. The verify command's bare `python3` needs `requests` (or the venv on PATH) to run generate-rule-packs. The manifest's `source_sha256` now hashes a temp source rebuilt from the fixture; the test excludes that field, as it did before.
+status: done
+summary: `dkimSigningConfig` was still listed as a required answer in `_REQUIRED_ANSWERS` in `tests/test_exchange_session.py`. M08-T10 made an empty DKIM answer a legitimate empty list, so the product code is right and the test was out of date. I removed the entry. The change is uncommitted in the worktree. The `.venv` link has been removed.
+changes: tests/test_exchange_session.py
+verification: `pytest tests/test_exchange_session.py` pass; M08-T10 verify pytest list pass, `generate-rule-packs.py --check` pass (39 packs, run with `.venv/bin/python`), `make contract-smoke` pass; `make lint` pass
+risks: none
 questions_for_g: none
+### Findings
+cause: `dkimSigningConfig` was still pinned as a required answer, but M08-T10 wraps it as `,@(...)` so an empty answer is an empty list
+fix: tests/test_exchange_session.py:136
+exchange-session-tests: pass 105/105
+m08-t10-verify: pass

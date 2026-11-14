@@ -1,12 +1,12 @@
 ## RESULT REV-M08-T03-codex
 status: done
-summary: verdict: ship; the update-response bypass is fixed without weakening earlier checks.
-reviewed: 96aee184809c
+summary: verdict: ship
+reviewed: 521703f2826d
 changes: none; progress file skipped because sandbox is read-only
-verification: shasum PASS 9/9; reverse-delta hashes PASS 4/4; static inspection only
-risks: PowerShell and harness not rerun, as constrained
+verification: shasum PASS 9/9; manifest fingerprints PASS; previous-byte reconstruction PASS for all four changed files
+risks: runtime checks prohibited; supplied harness reports 94/94
 questions_for_g: none
 ### Findings
-1 PASS: m08b-common.ps1:323 shares the fix-2 check across reads; create-m08b-pbi-access.ps1:202 uses it, :222 journals refusal; remove-m08b-pbi-access.ps1:104 preserves removal.
-2 PASS: tests/run-tests.ps1:261 adds ten checks covering acceptance, refusal, journalling and removal; earlier tests and mock behaviour remain intact.
-3 PASS: MANIFEST.sha256:2,3,7,9 identify exactly four intended file changes; reversing those changes reproduces every previous hash; five other files are identical.
+PASS remove-m08b-pbi-access.ps1:193 watches both locations for five minutes; :206 journals never-seen; :53 purges with absence read-back.
+PASS remove-m08b-pbi-access.ps1:68 re-checks removed journals; :78 validates identity; :91 purges only the journalled id.
+PASS tests/mock.ps1:92 and tests/run-tests.ps1:259 cover late visibility, never-seen and re-check paths; earlier safeguards/tests preserved; other changes limited to RECORD.md:73 and manifests.

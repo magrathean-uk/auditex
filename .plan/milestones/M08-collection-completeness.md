@@ -43,14 +43,14 @@ In one app-only certificate run the product collects and answers the 64 rows: 62
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M08-T01 | A1: certificate credentials for app-only tokens, Teams collection in app mode | sol | M | hard risk:high | done |
-| M08-T02 | A2: the reader app's certificate key credential (operator script) | sol | S | risk:high | todo |
+| M08-T02 | A2: the reader app's certificate key credential (operator script) | sol | S | risk:high | done |
 | M08-T03 | B: Power BI and Power Platform enablement (operator scripts and product docs) | sol | M | risk:high | todo |
 | M08-T04 | C: the Teams app-settings read and adapter | codex | M | risk:high | todo |
 | M08-T05 | D: the compliance session, DLP and alert-policy reads and adapters | sol | L | hard risk:high | todo |
 | M08-T06 | E: one app-only re-collection of the 64 rows and the kit's comparison (run by the tenant chat) | orchestrator | M | risk:high | todo |
-| M08-T07 | One sign-in guard (DEC-065), Exchange kept in the guided delegated path (DEC-068) | codex | M | risk:high | todo |
+| M08-T07 | One sign-in guard (DEC-065), Exchange kept in the guided delegated path (DEC-068) | codex | M | risk:high | done |
 | M08-T08 | D1, D3, D7: auth-methods read and adapter, the withheld classifications section, site-permission reads | codex | M | - | done |
-| M08-T09 | D2: per-item batch 429 retry with pacing | sol | M | risk:high | todo |
+| M08-T09 | D2: per-item batch 429 retry with pacing | sol | M | risk:high | done |
 | M08-T10 | D4, D5: the DKIM empty answer and DMARC NXDomain (value rule) | codex | M | - | done |
 | M08-T11 | Permission docs and config list exactly what the default collectors need | codex | M | - | todo |
 | M08-T12 | D6: the SharePoint admin read for SPO 1.2, 2.1, 2.2, 3.1-3.3 | sol | L | hard risk:high | todo |
@@ -88,7 +88,7 @@ In one app-only certificate run the product collects and answers the 64 rows: 62
 - Precondition: M08-T01 merged (the certificate token), M08-T10 merged (output contract) and B complete (M08-T03, as Order and file ownership states). A read-only GET for the tenant app settings is added to the Teams admin REST read paths (transport class 1, the read guard and the API inventory allow-list), collected by `teams_policy` in app mode with a named skip when it cannot be read; a `tenant_app_settings` adapter in `scuba_adapters_teams.py` feeds the existing rule sections. The source endpoint is pinned from a primary source and cited in the API call catalogue. No value-rule change is expected; if one is needed, the rule checks (`generate-rule-packs.py --check`, focused rule and vector tests) apply.
 - Closes MS.TEAMS 5.1-5.3 (3 rows). Tier A (network read): review by the other provider (`REV-M08-T04`) plus an executing check (`CHK-M08-T04`) on the same head; focused tests and `make contract-smoke`.
 - verify: `.venv/bin/python -m pytest tests/test_teams_app_settings.py tests/test_scuba_adapters_teams.py tests/test_teams_admin_rest.py tests/test_teams_policy_collector.py tests/test_api_inventory.py && make contract-smoke`
-- files: `src/azure_tenant_audit/adapters/teams_admin_rest.py`, `src/azure_tenant_audit/collectors/teams_policy.py`, `src/azure_tenant_audit/api_inventory.py`, `src/auditex/scuba_adapters_teams.py`, `configs/collector-permissions.json`, `docs/reference/api-call-catalog.md`, `docs/reference/output-contract.md`, `CHANGELOG.md`, `tests/test_teams_app_settings.py` (new), `tests/test_scuba_adapters_teams.py`, `tests/test_teams_admin_rest.py`, `tests/test_teams_policy_collector.py`, `tests/test_api_inventory.py`
+- files: `src/azure_tenant_audit/adapters/teams_admin_rest.py`, `src/azure_tenant_audit/collectors/teams_policy.py`, `src/azure_tenant_audit/api_inventory.py`, `src/auditex/scuba_adapters_teams.py`, `configs/collector-permissions.json`, `docs/reference/api-call-catalog.md`, `docs/reference/output-contract.md`, `CHANGELOG.md`, `tests/test_teams_app_settings.py` (new), `tests/test_scuba_adapters_teams.py`, `tests/test_teams_admin_rest.py`, `tests/test_teams_policy_collector.py`, `tests/test_api_inventory.py`, the count asserts in `tests/test_api_observed_ledger.py`, `tests/test_cli.py`, `tests/test_collection_gaps.py`, `tests/test_enterprise_depth_collectors.py`, `tests/test_external_sharing.py`, `tests/test_review_v3_run_level.py`, `tests/test_teams_policy_projection_join.py` and the teams_policy query_plan in `configs/collector-definitions.json` (DEC-082)
 
 ### M08-T05 D: the compliance session, DLP and alert-policy reads and adapters
 - Precondition: M08-T01 merged, M08-T04 merged (shared docs and catalogue files), M08-T07 merged (`powershell_graph.py`, `exchange_policy.py`). A Security and Compliance session kind in the guarded PowerShell prelude (app-only, certificate credential; a secret-minted token only if a primary source shows it is accepted), the hard skip of `protectionAlerts` removed, and read-only cmdlets for alert policies, DLP compliance policies and rules and the DLP licence fact, each on the API inventory read allow-list; adapters for `protection_alerts`, `dlp_compliance_policies`, `dlp_compliance_rules` and `defender_dlp_license`. A session that cannot open records a named reason (`ipps_session_not_opened` or a new code in `collection_gaps.py`), never a pass.

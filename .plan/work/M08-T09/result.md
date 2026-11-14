@@ -1,0 +1,9 @@
+## RESULT M08-T09
+status: partial
+summary: verify deferred: heavy slot busy (hostload exit 75 twice, both slots held by M07-T20 and M08-FIX1); make lint and make contract-smoke not run.
+Review REV-M08-T09 round 1: item 1 fixed (an item whose delay is over the remaining budget becomes a gap; the others are still retried), item 2 fixed (one wait budget shared by item retries and the POST's own retries; a wait over budget is not slept), item 3 fixed (a failed retry POST keeps settled answers; only pending items become named gaps, so the endpoint reader re-reads nothing).
+Criteria otherwise as the reviewer recorded them as met at 1a826cb; changelog unchanged at .plan/work/M08-T09/changelog.md.
+changes: src/azure_tenant_audit/graph.py, tests/test_graph_batch_retry.py (commit 9bda880)
+verification: .venv/bin/python -m pytest tests/test_graph_batch_retry.py: pass (22 passed, run directly, outside the slot). Negative case: the same file against the reviewed head's graph.py: fail, 3 failed: "FAILED test_one_item_over_the_wait_budget_does_not_hold_back_the_others (assert (429 == 200))", "FAILED test_transport_retries_of_a_re_send_share_the_wait_budget (GraphError: slow down)", "FAILED test_a_failed_re_send_keeps_the_settled_answers_and_reads_nothing_twice (RequestException: connection reset)". Full verify command (focused tests && make lint && make contract-smoke): deferred, not run. git status --porcelain: empty.
+risks: The rest of the verify set (test_graph, test_graph_read_only, test_graph_streaming, test_privileged_roles), lint and contract-smoke have not run against 9bda880. `_request` has a new keyword-only parameter `wait_budget` (default None, so existing callers are unaffected). A first-send POST failure still goes to the per-endpoint fallback, as before.
+questions_for_g: none

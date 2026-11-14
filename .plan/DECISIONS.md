@@ -690,3 +690,38 @@
 - decision: Product-code tasks are authored by terra or sol on Claude seats (terra-implement template), Codex (gpt-6.1-sol on Codex 1) reviews. The generic codex-implement template expects a `./ci.sh` wrapper this repository does not have and its sandbox cannot run `.venv` or commit, so M08-T07 stopped blocked before any change; it re-runs as sol.
 - why: M08-T07 blocked result; Codex reviews already run by inspection only for the same sandbox reason.
 - approver: auto
+
+## DEC-078 M08-T10 follow-up: the Exchange session test it broke
+- date: 2026-11-14
+- status: decided
+- decision: `tests/test_exchange_session.py` has two dkimSigningConfig failures on main since M08-T10 (its verify did not include that file; found by the M08-T07 author). One terra run on a new branch from main fixes it within M08-T10's scope, tier B, one Codex review, merged before M08-T07 so T07 rebases onto it.
+- why: keep main green; the full suite runs once per batch.
+- approver: auto
+
+## DEC-079 One fix task makes the full suite green after the M08 merges
+- date: 2026-11-14
+- status: decided
+- decision: The batch's full suite on main 45d4836 failed 63 tests (53 in test_aad_policy_collectors.py; the rest in guard inventories, the value-rule replay, explainer integration and mutation checks). One sol run (M08-FIX1, brief in .plan/work/M08-FIX1/) attributes and fixes them without weakening tests; one Codex review; merged before M08-T09 and M08-T04, which rebase onto it. Lesson: a task's verify must include the suites that pin the behaviour it changes; the full suite now runs once per merged batch as the project requires.
+- why: main must stay green; project rule "Merging into main also runs make test once per batch".
+- approver: auto
+
+## DEC-080 Tenant scripts: resumable, minute-scale waits, fewest sign-ins (manager ruling)
+- date: 2026-11-14
+- status: decided
+- decision: Before phase D, tenant scripts adopt a wanted state already present instead of needing undo and redo, wait minutes with polling for directory propagation, and reuse one sign-in per resource for a sitting where the design allows it safely. Applied first to the m08-b scripts (fix-4: Entra replication lag on group members; soft-deleted security groups now land in deleted items and are purged by the removal). The kit's phase D scripts are assessed against it before the phase D sitting.
+- why: the 14 Nov sitting: A2 applied; B stopped on a 60 s member wait, and its removal stopped on a group in deleted items; G gave four extra sign-ins for nothing.
+- approver: manager (engineering ruling, reported)
+
+## DEC-081 Phase D runs on the frozen kit with minute-scale waits set by environment
+- date: 2026-11-14
+- status: decided
+- decision: Phase D runs dt-r7s-ro as frozen (no kit change, so the M07-T20 suite stays valid) with `DT_CONFIRM_DELAY_SEC=75` (4 read-backs over 5 minutes) and `DT_REPLICATION_WAIT_SEC=120` exported for the sitting; both are existing overrides (_common.ps1:33, 00-identity.ps1:270). To cut G's sign-ins, a records-folder helper (outside the kit) mints the SharePoint, Power BI, Power Platform and Fabric REST tokens from as few sign-ins as safe and exports them as DT_TOKEN_SPO, DT_TOKEN_PBI, DT_TOKEN_PP, DT_TOKEN_FABRIC, which Get-DtToken already accepts with its tenant and expiry checks (_common.ps1:2851, 2987-2990, 3040-3045). Exchange, Teams and the 9b check keep their per-script sign-ins (DEC-010). Rollback then re-apply may meet same-name groups in deleted items: a stated limit for the contingency path.
+- why: EXP-phaseD-signins against DEC-080: about 15 to 20 browser sign-ins otherwise; a 20 s member read-back is the m08-b failure.
+- approver: auto
+
+## DEC-082 M08-T04 files line widened by the coverage-count tests and the query plan
+- date: 2026-11-14
+- status: decided
+- decision: M08-T04 also owns the count asserts its eighth Teams coverage row changes in tests/test_api_observed_ledger.py, tests/test_cli.py, tests/test_collection_gaps.py, tests/test_enterprise_depth_collectors.py, tests/test_external_sharing.py, tests/test_review_v3_run_level.py and tests/test_teams_policy_projection_join.py (count updates only, as in its nonowned-tests.patch), and the teams_policy query_plan entry in configs/collector-definitions.json. No open task writes them; M08-FIX1 may touch the same files and merges first, so T04 rebases onto it.
+- why: M08-T04 stopped blocked only on ownership; the edits are mechanical consequences of the accepted row.
+- approver: auto (to be listed for the manager)

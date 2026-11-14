@@ -10,4 +10,4 @@ questions_for_g: none
 - 2: remove script works from the journal only: deletes each grant by id, then the app, then purges both from deleted items; refuses on any mismatch. Record has the row 9 text, the M07-T17 line, the blast radius (delegated only, the signed-in admin's own Fabric rights) and M08 Part B reuse.
 - 3: parse 0/0 errors; mocks 68/68 cover the happy path, all refusals, a 403 on consent, lagging reads, paging, an interrupted then resumed removal and adoption of ids. Evidence in .plan/work/FAPP/evidence.md.
 - kit-needs: http://localhost under Mobile and desktop (README.md:49; sends http://localhost:<port>/ at _common.ps1:3028) | https://api.fabric.microsoft.com/.default + offline_access openid profile, scp Tenant.ReadWrite.All (_common.ps1:2847, 3038, 3063) | https://api.fabric.microsoft.com or Power BI Service 00000009-0000-0000-c000-000000000000 (_common.ps1:2847); also FabricClientId string (_common.ps1:2846)
-- frozen: b2b71ace7241
+frozen: b2b71ace7241
