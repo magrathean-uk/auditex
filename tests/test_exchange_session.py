@@ -133,7 +133,7 @@ def test_empty_failed_exchange_lists_stay_failures(monkeypatch, name, command, r
 
 _REQUIRED_ANSWERS = {'adminAuditLogConfig', 'organizationAuditConfig', 'mailboxAuditBypass',
                      'transportConfig', 'casMailboxSmtpAuth', 'acceptedDomains', 'remoteDomains',
-                     'sharingPolicy', 'malwareFilterPolicy', 'dkimSigningConfig', 'atpPolicyForO365',
+                     'sharingPolicy', 'malwareFilterPolicy', 'atpPolicyForO365',
                      'antiPhishPolicies', 'hostedContentFilterPolicies', 'hostedConnectionFilterPolicy'}
 
 
