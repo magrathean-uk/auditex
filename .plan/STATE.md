@@ -4,7 +4,7 @@ overall: 82% (was 80%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 8abf9cb 2026-11-14T07:57:40Z
+last_checkpoint: ea84365 2026-11-14T07:58:41Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -18,7 +18,7 @@ last_checkpoint: 8abf9cb 2026-11-14T07:57:40Z
 
 ## Pending G decisions
 - Questions go to the team-manager chat with a recommendation and an evidence path, never to G here (DEC-036); its rulings and relayed words count as his. It wants messages only for decisions, blockers, G's hands or eyes, reserved actions and results it asked for.
-- Phase D (M07) has first call after the release (DEC-020, DEC-053): kit 7r accepted (manifest 510f26e348fd); the manager asks G for a sitting and opens the tenant chat (in this checkout, no worktree, no /plan). When the tenant chat has the note, record M07-T14 (`handover: kit/20261111-kit-7r/dt-r7r-ro 510f26e348fd`). The tenant is not populated yet: only read-only checks have run.
+- Phase D (M07): the tenant chat is open since about 07:55 GMT on 14 Nov (started by the manager on G's "Yes, open it now"; session "Auditex tenant sitting: phase D and collection", in this checkout). M07-T14 is done (handover recorded). M07-T15 (live folder to 7r) is HELD until the manager says the sitting has ended. The tenant chat reports gates and kit faults to the manager; a kit fault comes here as a kit round. M07-T16 is recorded from its reports.
 
 ## Re-baselines
 - from 100% (plan v3 closed at 1.4.0) to 4% (plan v4 scope and weights, DEC-001, approved by G on 11 Nov 2026)

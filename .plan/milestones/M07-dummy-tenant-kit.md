@@ -36,7 +36,7 @@ The trial tenant is seeded only from a kit round that passed its tier A gate (co
 | M07-T11 | Kit round 7r: the Graph request-context defect (DEC-014) | sol | M | risk:high | done |
 | M07-T12 | Confirm round 7r by both providers, diff-scoped | codex, sol | S | gate risk:high | done |
 | M07-T13 | Run the full offline suite on the confirmed round 7r | orchestrator | S | risk:low | done |
-| M07-T14 | Hand the accepted folder and manifest hash to the tenant chat | orchestrator | S | risk:low | todo |
+| M07-T14 | Hand the accepted folder and manifest hash to the tenant chat | orchestrator | S | risk:low | done |
 | M07-T15 | Bring the live kit folder to the accepted round, previous state kept | terra | S | risk:high | todo |
 | M07-T16 | Record phase D on the trial tenant (run by the tenant chat) | orchestrator | M | risk:high | todo |
 | M07-T17 | Record the rollback of the trial tenant before the trial ends | orchestrator | M | risk:high | todo |
