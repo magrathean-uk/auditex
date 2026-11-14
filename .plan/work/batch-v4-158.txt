@@ -1,0 +1,1 @@
+--task REV-M06-T01 --role codex --template codex-review --account codex2 --readonly --sha task/M06-T01-release-notes-1-5-0 --tags review,risk:high --timeout 3600 --var TASK=M06-T01 --var MILESTONE=.plan/milestones/M06-release-1-5-0.md --var BRANCH=task/M06-T01-release-notes-1-5-0
