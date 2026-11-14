@@ -247,3 +247,51 @@ Failure count: 8 non-zero attempts in the 65-row set, 11 across the 81 selected 
 - Honest partial reporting: M04-T06 and REV-M04-T02 say partial and name the deferred verify, rather than claiming a pass.
 - Small docs task at low cost: M04-T05 by terra (low, 49 seconds), reviewed by sol (97 seconds, exit 0).
 - Baseline re-record with the profile stated: M04-T02 records the peak, `unmasked_name_hits` 0 and an unchanged `workload_sha256`.
+
+## M06
+
+Scope: 21 ledger rows: `M06-` and `REV-M06-` ids (19 rows), plus EXP-m06-wheel and VAL-v4 (their results name M06-T tasks). The ids are shared by two plans: 14 rows are the earlier 1.4.0 milestone and VAL-v4 (no `plan_version`), 7 rows are the 1.5.0 run (`v4`). Seconds and costs as recorded. Evidence: `.plan/work/RETRO-M06/evidence.md`; analysis: `.plan/work/RETRO-M06/notes.md`.
+
+### Spend
+
+| launcher | runs | cost_usd | seconds | non-zero exits |
+|---|---|---|---|---|
+| claude-1 | 2 | 0.0299 | 92 | 0 |
+| claude-4 | 1 | 0.4061 | 185 | 1 |
+| claude-5 | 10 | 2.7994 | 12667 | 1 |
+| codex2 | 8 | no cost recorded | 1836 | 0 |
+| **total** | **21** | **3.2354** (8 rows blank) | **14780** | **2** |
+
+| role | runs | cost_usd | seconds | non-zero exits |
+|---|---|---|---|---|
+| terra | 11 | 3.2055 | 12852 | 2 |
+| luna | 2 | 0.0299 | 92 | 0 |
+| astra | 4 | no cost recorded | 1585 | 0 |
+| codex | 4 | no cost recorded | 251 | 0 |
+
+### Failures and retries
+
+| # | task (plan) | attempts | final status | cause | line |
+|---|---|---|---|---|---|
+| 1 | M06-T02 (v3, row 266) | 2 | done | unknown | Attempt 1 exited 1 after 25 s; the cause was not kept because result.md was overwritten. |
+| 2 | M06-T01 (v4, row 514) | 1 | partial | mechanical | `make test` and `make contract-smoke` deferred (exit 75, slot busy); ledger says exit 1. |
+| 3 | M06-T02 (v4, row 516) | 2 in-task | done | mechanical | Step 1 failed without `.venv` in the new worktree; fixed by symlink, log kept. |
+| 4 | M06-T04 (v4, no ledger row) | 2 builds | done | technical | `make dist` under umask 022 gave wheel 289508b7, not the gated 81ea5c2f; rebuilt under 077. M06-T05 confirms the published wheel is 81ea5c2f. |
+| 5 | REV-M06-T01 (v4, row 515) | 1 | done, approve | technical | Reviewer's sandbox blocked the verify wrapper; the merge gate must run `make test` and `make contract-smoke`. |
+
+Failure count: 5 (2 non-zero ledger exits; 3 recorded only in result.md). Ledger gaps: no v4 row for M06-T04; two v4 rows for M06-T05 (521, 522) with no retry note.
+
+### Proposed brief fixes
+
+- Candidate or release brief (M06-T02, M06-T04): link the main `.venv` into the candidate worktree before step 1. Problem: item 3.
+- Release brief (M06-T04): run `make dist` under `umask 077` and have the reproducible-build check build under two umasks. Problem: item 4; the check built twice in one shell and could not see the difference.
+- `_footer.md`: on verify deferred (exit 75), write 75 to the ledger and name the deferred command and slot holder in the summary. Problem: item 2 (ledger shows 1).
+- `_footer.md`: keep each failed attempt's summary before a retry overwrites result.md. Problem: item 1 (cause lost).
+
+### Keep
+
+- Frozen-candidate gates: M06-T02 ran all seven steps on one sha with hashes recorded; M06-T03 (astra) returned ready on it; M06-T05 matched the published hashes to that record.
+- Root cause by measurement: EXP-m06-wheel traced item 4 to umask member by member and proposed the smallest safe fix.
+- Honest partial: M06-T01 (v4) says partial and names the deferred checks instead of passing them.
+- Cheap verification: M06-T05 by luna (claude-1) cost $0.0299 across two runs.
+- Other-provider review: REV-M06-T01 (codex2) and M06-T03 (astra, codex2).

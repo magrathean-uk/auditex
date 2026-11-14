@@ -520,3 +520,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-14T07:55:26Z	EXP-m06-wheel	terra	claude-5	claude-sonnet-5-5	high	readonly	0	190	0.4535	done	b0f17ff	v4
 2026-11-14T07:58:24Z	M06-T05	luna	claude-1	claude-haiku-5-5	medium	readonly	0	53	0.0188	done	8abf9cb	v4
 2026-11-14T07:59:18Z	M06-T05	luna	claude-1	claude-haiku-5-5	medium	readonly	0	39	0.0111	done	ea84365	v4
+2026-11-14T08:01:24Z	RETRO-M06	luna	claude-2	claude-haiku-5-5	medium	inplace	0	87	0.0292	done	main	v4

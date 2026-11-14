@@ -494,3 +494,12 @@
 - consequences: M03 stays at its present figure; the progress percentage does not move for it. The training discussion is taken up after phase D, with the pilot finding (M03-T06), the reopening rule drafted in amendment 4 and the collection gap in BACKLOG (126 of 501 held-out rows are sections the product does not collect) as its inputs.
 - approver: G (through the team-manager chat, DEC-036; the reading "neither B nor C, tenant first" is the manager's and matches his words)
 
+## DEC-054 Kit round 7s: a Graph 404 is not read as "not found"; live dry runs before the gate
+- date: 2026-11-14
+- status: approved; part 1 running
+- decision: phase D stopped at its first look-up with no tenant write (dt-live/phaseD/FAULT-7r-notfound.md): with the Graph SDK 2.25.0 a real 404 carries a null StatusCode and the status only in Response.StatusCode, and the kit's not-found check reads StatusCode by existence, so every absence read throws. Round 7s, ahead of everything: (1) one author fixes the classifier through the existing status helper or the same value logic, sweeps every status read off an exception, makes the mock throw the live 404 shape, and delivers an un-gated candidate folder with a hash list; (2) the tenant chat then runs read-only dry runs of every phase D script from that candidate, to find further live-only faults today: dry runs only, no -Apply, the journal must stay empty; whatever they find is folded into the same round; (3) then one gate as before (both providers, the full offline suite 9 of 9), a frozen 7s copy and a new hand-over. Tenant writes only from that frozen copy.
+- options: a narrow fix gated alone, then phase D again (rejected: each live fault would cost a full gate) | live dry runs from an un-gated candidate first, one gate for everything (chosen)
+- why: the first fault was invisible offline because the mock threw a different shape; read-only dry runs on the live tenant find the rest cheaply.
+- consequences: M07-T14's hand-over of 7r is superseded by a 7s hand-over; M07-T15 and the phase D record wait for the frozen 7s copy; the milestone rows for the round are added when the candidate is out. Replaces the manager's "stand still" for this work.
+- approver: manager (team-manager chat, 14 Nov 2026, under DEC-036; the read-only dry runs from an un-gated candidate are its decision)
+
