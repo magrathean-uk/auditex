@@ -4,7 +4,7 @@ overall: 70% (was 84%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 2488588 2026-11-14T10:17:36Z
+last_checkpoint: dd2d8c1 2026-11-14T10:23:09Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -17,7 +17,7 @@ last_checkpoint: 2488588 2026-11-14T10:17:36Z
 - Track B: stopped and on hold (DEC-053, G on 14 Nov: "master data collection etc first ... talk about training AFTER"). The pilot failed (M03-T06: 18 wins of 190, 139 needed; 5.57 GPU-hours). Nothing in M03 moves; amendment 4 (parked case) stays unmerged at bf19a3f. Training is discussed again after phase D. GPU-hours used: about 306 of 20,000.
 
 ## Pending G decisions
-- Questions go to the team-manager chat (DEC-036), never to G here; its rulings count as his. Messages only for decisions, blockers, G's hands or eyes, reserved actions, asked-for results.
+- Approval channel: G in this chat (DEC-063, 14 Nov 10:22 GMT; the manager and tenant chats were archived about 10:07 GMT). DEC-036 to DEC-062 rulings stay.
 - Reader app READY (DEC-060 option 1, stated limit): go sent to the tenant chat 09:36 GMT, create script sha256 77bb50cc1c6d; it runs after the manager lifts the network hold, then the pre-d collection (DEC-056).
 - Phase D (M07): STOPPED at its first look-up, no tenant write (Graph 404 with a null StatusCode; dt-live/phaseD/FAULT-7r-notfound.md). Round 7s (DEC-054): part 1 candidate kit/20261111-kit-7s/dt-r7s-cand d453c83ac710 (368 files) sent to the manager 09:33 GMT for read-only dry runs (wait for the network-hold lift); part 2a done (compare.py reads 1.5.0: rc 0, 0 malformed; result-2a.md; its E11 gate line goes into PHASE-E-COMMANDS.md with the 7s hand-over); part 2b folds dry-run findings; then the gate (both providers, full suite 9 of 9), freeze 7s, new hand-over. M07-T15 held.
 

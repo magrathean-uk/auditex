@@ -575,3 +575,11 @@
 - why: the acceptance criteria cannot be met without them.
 - consequences: no change of owner, scope or acceptance.
 - approver: auto
+
+## DEC-063 The manager layer is retired: G is the approval channel in this chat
+- date: 2026-11-14
+- status: approved
+- decision: G speaks to the lead in this chat directly again. Questions, decisions and reserved actions come to him here, with a recommendation and an evidence path; reports stay short and only for decisions, blockers, things for his hands or eyes, reserved actions and results. Rulings recorded under DEC-036 before the manager chat was archived (about 10:07 GMT, 14 Nov) stay in force. The tenant chat was archived at the same time.
+- why: G, typed in this chat at about 10:22 GMT on 14 Nov 2026, word for word: "manager is no longer in place, talk to me."
+- consequences: replaces DEC-036. Held items go to G now: the network-hold lift for the tenant steps, the Power Platform registration's blast radius, the --no-verify note (DEC-062).
+- approver: G
