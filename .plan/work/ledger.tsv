@@ -561,3 +561,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-14T10:59:51Z	EXP-m07-pred-gaps	sol	claude-1	claude-opus-5-5	xhigh	readonly	0	766	5.5646	done	6786602	v4
 2026-11-14T11:01:24Z	REV-FAPP-opus	sol	claude-3	claude-opus-5-5	xhigh	readonly	0	270	2.2228	done	8e959da	v4
 2026-11-14T11:11:43Z	M08-T01	sol	claude-3	claude-opus-5-5	xhigh	branch	1	241	0.7129	partial	task/M08-T01-certauth-teams	v4
+2026-11-14T11:17:45Z	CHK-M08-T01	terra	claude-3	claude-sonnet-5-5	high	readonly	1	150	0.1710	partial	task/M08-T01-certauth-teams	v4
+2026-11-14T11:19:20Z	REV-M08-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	246		done	task/M08-T01-certauth-teams	v4

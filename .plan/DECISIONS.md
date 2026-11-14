@@ -632,3 +632,11 @@
 - decision: G's WGEX sitting stopped at step 2d (state file `stopped` set, BASELINE-FAIL), and the manager who set the hold is retired (DEC-063). Heavy jobs run again under the usual rule: one heavy slot through hostload.sh, PLAN_LOAD_MAX=12; the 7s full suite may start once both confirmations ship.
 - why: the hold protected an active sitting; none is active.
 - approver: auto
+
+## DEC-070 A1's Teams operations: the five the rows need
+- date: 2026-11-14
+- status: decided
+- decision: M08-T01's acceptance said `teams_policy` collects its seven operations with a certificate. Two of them (messagingPolicies, appSetupPolicies) have no REST route and would need a Teams PowerShell session, and no SCuBA row cites them (configs/scuba-policy-sections.json). The criterion becomes the five REST operations, covering every section the 11 rows cite; the two stay named skips, and the collector test is renamed to say so. A Teams PowerShell read for them is not planned.
+- options: build an app-only Teams PowerShell session for two unused operations (rejected: no row gains, a second session kind, more auth surface)
+- why: REV-M08-T01 item 2; the 11-row closure is unchanged.
+- approver: auto

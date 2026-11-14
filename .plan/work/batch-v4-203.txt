@@ -1,0 +1,1 @@
+--task M08-T01 --role sol --account claude-3 --branch --slug certauth-teams --tags size:M,hard,risk:high --timeout 9000 --max-turns 150 --budget 25 --rounds-ok "review repair (REV-M08-T01), DEC-070" --brief .plan/work/M08-T01/fix-2.md

@@ -1,0 +1,1 @@
+--task CHK-M08-T01 --role terra --account claude-3 --readonly --sha task/M08-T01-certauth-teams --tags risk:high --timeout 9000 --max-turns 120 --budget 12 --brief .plan/work/CHK-M08-T01/brief-src-2.md
