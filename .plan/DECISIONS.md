@@ -465,3 +465,12 @@
 - consequences: one criterion and one clause of the files line are added to M05-T04; the author gets one short follow-up run for it before the review.
 - approver: manager (team-manager chat, 14 Nov 2026, quoting its ruling: "add the note sentence to M05-T04"; under DEC-036)
 
+## DEC-051 M06-T02: the release gates run on terra, not luna
+- date: 2026-11-14
+- status: decided
+- decision: the task line names luna for the pre-publication gates. The run is a long chain of heavy steps whose hashes and counts gate the release, so it is given to terra with one step per command and saved logs. The candidate is a1c6b5e, the pushed head of main after M06-T01 merged. The same run closes item 19 of M04 and of M05 (the full suite, the contract smoke, the digest comparison and both acceptance suites), which are a subset of its steps on the same commit.
+- options: luna as planned (rejected: its output would need a terra re-run before it could gate a release) | terra (chosen)
+- why: routing only; one heavy pass instead of three.
+- consequences: no acceptance bar or scope changes.
+- approver: auto
+

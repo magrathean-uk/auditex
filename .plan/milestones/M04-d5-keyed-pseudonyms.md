@@ -2,7 +2,7 @@
 id: M04
 name: d5-keyed-pseudonyms
 weight: 16
-status: planned
+status: done
 ---
 # M04 d5-keyed-pseudonyms
 Track A. G approved the keyed per-run pseudonym scheme for 1.5.0 as its own milestone, with a privacy review by both providers (gate answers). That approves the bundle and `CONTRACT_VERSION` change in principle (v3 DEC-004); the design goes to G before implementation. M04-T01 may run during M00; M04-T02 onwards waits for M00.
@@ -16,7 +16,7 @@ Pseudonyms in shareable output come from a private per-run key instead of the ru
 - [x] `CONTRACT_VERSION` differs from 1.4.0's and contract smoke passes with the new schemas: `test "$(git show v1.4.0:src/azure_tenant_audit/contracts.py | grep '^CONTRACT_VERSION')" != "$(grep '^CONTRACT_VERSION' src/azure_tenant_audit/contracts.py)" && make contract-smoke`
 - [x] Middle initials, titles and name-equal mapping keys are masked or counted within the probe budget: `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_scan_budget.py -k 'initial or title or mapping_key or budget'`
 - [x] With the new scheme on, the shareable HTML report of the frozen 90,000-record workload contains no workload person name and its peak is within the baseline plus 15 percent: `.venv/bin/python benchmarks/html_peak.py --records 90000 --profile shareable --baseline benchmarks/html-peak-baseline.json --max-ratio 1.15 --require-masked`
-- [ ] Full suite, contract smoke, the digest comparison and both acceptance suites pass at milestone close: `make test && make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract && make acceptance`
+- [x] Full suite, contract smoke, the digest comparison and both acceptance suites pass at milestone close: `make test && make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract && make acceptance`
 - [x] Review: privacy reviews by both providers approve the plan v4 merges of M04-T03 and M04-T04 at the exact merged head (ARCHITECTURE.md review binding): `for T in M04-T03 M04-T04; do c=$(git log v1.4.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && for R in REV-$T REV-$T-privacy; do grep -qE "^[[:space:]]*(summary: )?reviewed: $s" ".plan/work/$R/result.md" && grep -qE '^[[:space:]]*(summary: )?verdict: approve' ".plan/work/$R/result.md" || exit 1; done || exit 1; done` Orchestrator check at close: the two reviews ran on launchers of different vendors, one of them the other vendor from the author's.
 - [x] Review: the privacy reference and the output contract describe the keyed scheme, every remaining salt scheme and the new masking boundary, and no longer carry the confirm-a-guess limit (terra read-through): `grep -qx 'read-through: complete' .plan/work/M04-T05/result.md`
 

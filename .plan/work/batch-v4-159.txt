@@ -1,0 +1,1 @@
+--task M06-T02 --role terra --account claude-5 --readonly --tags debug,risk:high --timeout 14400 --max-turns 150 --budget 15 --brief .plan/work/M06-T02/brief-src.md

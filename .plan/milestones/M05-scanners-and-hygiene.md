@@ -2,7 +2,7 @@
 id: M05
 name: scanners-and-hygiene
 weight: 10
-status: planned
+status: done
 ---
 # M05 scanners-and-hygiene
 Track A, after M00. M05-T01 and M05-T02 may run in parallel with each other and with M04 (disjoint files). The merge bar for both scanner tasks is set here, before any work, as v3 DEC-008 and DEC-009 did: the named limits closed for planted cases plus the fail-closed rule; any further bypass class a review finds is a named limit, not a blocker. Two repair rounds, then re-scope.
@@ -16,7 +16,7 @@ The read-boundary and HTTP scanner limits named in v3 DEC-008 and DEC-009 are cl
 - [x] Review: the limits tables in the privacy reference list only limits left open, each with its planted test or the word "named limit", and scanner citations say "v2 DEC-011" (terra read-through): `grep -qx 'read-through: complete' .plan/work/M05-T03/result.md`
 - [x] The plan v3 review follow-ups are closed: no "model view" wording for the projection, no dead `names` parameter on `Redactor.text`, and the follow-up tests pass: `! grep -rqi 'model view' docs src && ! grep -q 'def text(self.*names' src/azure_tenant_audit/output_redaction.py && .venv/bin/python -m pytest tests/test_compare_run_outputs.py tests/test_check_reproducible_build.py tests/test_redaction_person_names.py`
 - [x] The vendored microsoft-skills entries are settled by G's deletion-gate decision, and every path it approved for removal is gone: ``d=$(sed -n 's/^## \(DEC-[0-9]*\) M05 deletion gate.*/\1/p' .plan/DECISIONS.md) && test -n "$d" && P=$(awk -F'|' -v d="$d" '{gsub(/[ `]/,"",$2); gsub(/ /,"",$5)} $5==d {print $2}' .plan/CLEANUP.md) && for p in $P; do test ! -e "$p" || exit 1; done`` (evidence: DEC-017, G on 12 Nov 2026: keep all eight; no CLEANUP.md row, command exit 0)
-- [ ] Full suite, contract smoke, the digest comparison and both acceptance suites pass at milestone close: `make test && make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract && make acceptance`
+- [x] Full suite, contract smoke, the digest comparison and both acceptance suites pass at milestone close: `make test && make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract && make acceptance`
 
 ## Tasks
 | id | title | owner | size | tags | status |
