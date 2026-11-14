@@ -812,6 +812,22 @@ def _sharepoint_external_inputs_gap(snapshot: Mapping[str, Any] | None) -> str |
     return "tenant_domains_unknown"
 
 
+_SITE_OWNERSHIP_RULES = frozenset({"sharepoint.site_orphaned", "sharepoint.site_weak_ownership"})
+# Rules judged from the site permission reads: ownership, broad links and external principals.
+_SITE_PERMISSION_RULES = _SITE_OWNERSHIP_RULES | {"sharepoint.broad_link", "sharepoint.external_principal"}
+_SITE_PERMISSION_SOURCES = frozenset(
+    {"sharepoint_access.sitePermissions", "sharepoint_access.sitePermissionsFanout"}
+)
+
+
+def _site_permission_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
+    """A skipped or cut site permission read is not evidence of no owner, broad link or external principal."""
+    for record in _records(snapshot, "collection_gaps"):
+        if record.get("source") in _SITE_PERMISSION_SOURCES:
+            return "site_permissions_not_read"
+    return None
+
+
 def _google_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
     """A clean Google rule is a pass only when the list it reads was read in full (and, for the organisation 2-step policy, known)."""
     if snapshot is None:
@@ -1067,6 +1083,10 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
         return gap or _mfa_registration_inputs_gap(snapshot, rule_id)
     if rule_id in _ADMIN_SET_RULES:
         return _admin_set_inputs_gap(snapshot, rule_id)
+    if rule_id in _SITE_PERMISSION_RULES and (gap := _site_permission_inputs_gap(snapshot)):
+        return gap
+    if rule_id in _SITE_OWNERSHIP_RULES:
+        return None
     if rule_id == _SHAREPOINT_EXTERNAL_RULE:
         return _sharepoint_external_inputs_gap(snapshot)
     if rule_id == _RISKY_SIGNIN_RULE:

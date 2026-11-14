@@ -24,13 +24,6 @@ class AuthMethodsCollector(Collector):
                 "page": False,
                 "params": {},
             },
-            "authenticationMethodConfigurations": {
-                "endpoint": "/policies/authenticationMethodsPolicy/authenticationMethodConfigurations",
-                "apply_top": False,
-                "inline": True,
-                "validate_collection": True,
-                "params": {},
-            },
             "userRegistrationDetails": {
                 "endpoint": "/reports/authenticationMethods/userRegistrationDetails",
                 "params": {
@@ -49,9 +42,6 @@ class AuthMethodsCollector(Collector):
             page_size=page_size,
             chunk_writer=context.get("chunk_writer"),
             log_event=context.get("audit_logger"),
-        )
-        payload["authenticationMethodConfigurations"]["status"] = next(
-            row["status"] for row in coverage if row["name"] == "authenticationMethodConfigurations"
         )
         total = sum(item.get("item_count", 0) for item in coverage)
         partial = any(item.get("status") != "ok" for item in coverage)

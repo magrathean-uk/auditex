@@ -43,7 +43,9 @@ def _authentication_method(bundle: Bundle) -> Any:
     rows = bundle.operation("auth_methods", "authenticationMethodsPolicy")
     _require(len(rows) == 1)
     policy = rows[0]
-    _require(_text(policy.get("policyMigrationState")), "PolicyMigrationState", "invalid_type")
+    # Graph returns null until migration is configured; the rule reads null as not assessed.
+    _require("policyMigrationState" in policy and (policy["policyMigrationState"] is None or _text(policy["policyMigrationState"])),
+             "PolicyMigrationState", "invalid_type")
     try:
         configs = bundle.operation("auth_methods", "authenticationMethodConfigurations")
     except Unavailable as exc:

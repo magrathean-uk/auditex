@@ -9,13 +9,13 @@ class _AuthMethodsClient:
 
     def get_json(self, path, params=None, full_url=False):  # noqa: ANN001, ARG002
         if path == "/policies/authenticationMethodsPolicy":
-            return {"id": "policy-1", "state": "enabled"}
+            return {"id": "policy-1", "state": "enabled", "policyMigrationState": None,
+                "authenticationMethodConfigurations": [{"id": "MicrosoftAuthenticator", "state": "enabled"}]}
         raise AssertionError(f"unexpected path: {path}")
 
     def get_all(self, path, params=None):  # noqa: ANN001
-        if path == "/policies/authenticationMethodsPolicy/authenticationMethodConfigurations":
-            assert params == {}
-            return [{"id": "MicrosoftAuthenticator", "state": "enabled"}]
+        # Graph rejects the list endpoint; the configurations come inline in the policy.
+        assert "authenticationMethodConfigurations" not in path
         if path == "/reports/authenticationMethods/userRegistrationDetails":
             assert params["$top"] == "200"
             self.registration_params = dict(params)
@@ -35,3 +35,5 @@ def test_auth_methods_collector_collects_policy_and_registration_details() -> No
     selected = client.registration_params["$select"].split(",")
     assert {"isAdmin", "userType", "isMfaRegistered"} <= set(selected)
     assert not {"methodsRegistered", "defaultMfaMethod", "userPreferredMethodForSecondaryAuthentication"} & set(selected)
+    assert "authenticationMethodConfigurations" not in result.payload
+    assert result.payload["authenticationMethodsPolicy"]["authenticationMethodConfigurations"][0]["id"] == "MicrosoftAuthenticator"

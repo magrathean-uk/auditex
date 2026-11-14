@@ -3,7 +3,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ..collection_gaps import FANOUT_OBJECT_LIMIT, fanout_gap_row, section_total
+from ..collection_gaps import (
+    FANOUT_OBJECT_LIMIT,
+    SECTION_SCOPED,
+    fanout_gap_row,
+    section_total,
+)
 from ..graph import GraphClient, GraphError
 from ..normalize import _iter_permission_targets
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
@@ -80,6 +85,18 @@ def _summarize_permissions(permissions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+SITE_PERMISSIONS_APP_ONLY_REASON = "site_permissions_app_only_not_read"
+SITE_PERMISSIONS_APP_ONLY_TEXT = (
+    "not collected: /sites/{id}/permissions in app-only runs lists app grants, not user sharing, "
+    "and needs the write-capable Sites.FullControl.All"
+)
+
+
+def _app_only(client: Any) -> bool:
+    """True only when the client says it signs in as an application (client credentials)."""
+    return getattr(getattr(client, "auth", None), "auth_mode", None) == "app"
+
+
 class SharePointAccessCollector(Collector):
     name = "sharepoint_access"
     description = "SharePoint and OneDrive sharing posture plus sampled site permission inventory."
@@ -121,7 +138,24 @@ class SharePointAccessCollector(Collector):
 
         sampled_permissions: list[dict[str, Any]] = []
         fanout_specs: list[dict[str, Any]] = []
-        for site in site_rows[:FANOUT_OBJECT_LIMIT]:
+        app_only = _app_only(client)
+        if app_only:
+            coverage.append(
+                {
+                    "collector": self.name,
+                    "type": "graph",
+                    "name": "sitePermissions",
+                    "endpoint": "/sites/{id}/permissions",
+                    "status": "skipped",
+                    "item_count": 0,
+                    "duration_ms": 0.0,
+                    "reason": SITE_PERMISSIONS_APP_ONLY_REASON,
+                    SECTION_SCOPED: True,
+                    "error_class": None,
+                    "error": SITE_PERMISSIONS_APP_ONLY_TEXT,
+                }
+            )
+        for site in [] if app_only else site_rows[:FANOUT_OBJECT_LIMIT]:
             site_id = site.get("id")
             if not isinstance(site_id, str) or not site_id:
                 continue
@@ -222,7 +256,7 @@ class SharePointAccessCollector(Collector):
                     }
                 )
         else:
-            for site in site_rows[:FANOUT_OBJECT_LIMIT]:
+            for site in [] if app_only else site_rows[:FANOUT_OBJECT_LIMIT]:
                 site_id = site.get("id")
                 if not isinstance(site_id, str) or not site_id:
                     continue
@@ -276,14 +310,14 @@ class SharePointAccessCollector(Collector):
                     )
 
         site_total = section_total(payload.get("sites"), site_rows)
-        if site_total > FANOUT_OBJECT_LIMIT:
+        if site_total > FANOUT_OBJECT_LIMIT and not app_only:
             # Orphaned and weak-ownership findings read these permissions, so the rest of the sites are a gap.
             coverage.append(
                 fanout_gap_row(self.name, "sitePermissionsFanout", total=site_total, expanded=FANOUT_OBJECT_LIMIT, scope="Site permissions")
             )
         payload["sitePermissionsBySite"] = {"value": sampled_permissions}
         total = sum(item.get("item_count", 0) for item in coverage)
-        partial = any(item.get("status") != "ok" for item in coverage)
+        partial = any(item.get("status") not in {"ok", "skipped"} for item in coverage)
         return CollectorResult(
             name=self.name,
             status="partial" if partial else "ok",

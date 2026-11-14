@@ -301,7 +301,15 @@ PRIVILEGED_ROLES_READS = {"identity_governance": frozenset({"roleAssignmentSched
 # withholds a section that does not read it, the artefact's own section included (it stays ``missing_artifact``).
 # The identity collector's ``privilegedGroupFanout`` coverage row is derived the same way (a ledger diagnostic names it), so
 # a failed fan-out is recorded for the sections that do not read it (``tenant_id``) and withholds those that do.
-DERIVED_NAMES = {"identity_governance": frozenset({"privileged_roles"}), "identity": frozenset({"privilegedGroupFanout"})}
+# ``servicePrincipalFanout`` (owners and app role assignments) and ``sitePermissionsFanout`` are derived the same way: no section
+# that reads another operation of the collector (the delegated permission classifications, the site settings) is withheld by them,
+# while a section that reads the operation a fan-out names is.
+DERIVED_NAMES = {
+    "identity_governance": frozenset({"privileged_roles"}),
+    "identity": frozenset({"privilegedGroupFanout"}),
+    "app_consent": frozenset({"servicePrincipalFanout"}),
+    "sharepoint_access": frozenset({"sitePermissionsFanout"}),
+}
 # Reads a section can do without when the collector reports them refused for want of a licence (``license_required``) and
 # empty: privileged users come from the directory role assignments when PIM is not licensed, as the effective admin set
 # records (its schedule sources ``not_applicable``). The refused reads are listed under ``ignored_failures``.
