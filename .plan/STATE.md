@@ -17,9 +17,9 @@ last_checkpoint: 45d4836 2026-11-14T15:50:40Z
 - Track B: stopped and on hold (DEC-053, G on 14 Nov: "master data collection etc first ... talk about training AFTER"). The pilot failed (M03-T06: 18 wins of 190, 139 needed; 5.57 GPU-hours). Nothing in M03 moves; amendment 4 (parked case) stays unmerged at bf19a3f. Training is discussed again after phase D. GPU-hours used: about 306 of 20,000.
 
 ## Pending G decisions
-- PAUSED 14 Nov ~13:45 GMT on G (DEC-072): fresh start from source, .plan/ and ~/Desktop/auditex.md; nothing running. Resume list in the passover.
-- M07 7s: repair done, F3 applied in kit/20261111-kit-7s/dt-r7s but NOT checked or re-frozen (dt-r7s-ro = fb6160bf88e1, repair only). Phase D waits.
-- M08: A1 CHK pass on 785f613 (task/M08-T01-certauth-teams, kept); needs one Codex re-check then merge. B product part merged (30ba1f9); B scripts re-frozen b02012a51eb7 (two-list fix), need one Codex review, then the tenant runs Power BI on G Fabric sign-in.
+- Lead reports to the manager chat (DEC-073); Codex 1 unlimited (DEC-076); product code authored on Claude seats, Codex reviews (DEC-077).
+- M07 7s: confirmed, frozen dt-r7s-ro 6dae564ece2c (Codex ship). M07-T20 full kit suite queued in the heavy slot (kit 7s full-1-job). Then T21 hand-over and phase D on G's sign-in.
+- M08: A1 merged 45d4836; T08 0a8d8e8; T10 3f7f8f5 (main pushed). B scripts frozen 96aee184809c, Codex and Opus ship: Power BI run waits on G's Fabric sign-in. Running: T07 (sol), A2 T02 (sol). Next: T09 after T07; T04 after T07.
 
 ## Re-baselines
 - from 100% (plan v3 closed at 1.4.0) to 4% (plan v4 scope and weights, DEC-001, approved by G on 11 Nov 2026)
