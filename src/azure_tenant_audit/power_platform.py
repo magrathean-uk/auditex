@@ -1,4 +1,4 @@
-"""Thin, commercial-cloud client for Power Platform admin metadata reads."""
+"""Thin, commercial-cloud client for Power Platform admin metadata reads: GET, plus the one body-free POST read."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,6 +12,10 @@ POWER_PLATFORM_DEFAULT_API_VERSION = "2020-10-01"
 POWER_PLATFORM_DEFAULT_TIMEOUT = 15.0
 BAP_SCOPE = "https://service.powerapps.com//.default"
 ALLOWED_METHODS = frozenset({"GET"})
+# The one documented body-free POST read: Power Platform "List tenant settings" (Microsoft Learn, Power Platform API
+# 2020-10-01: "POST .../listtenantsettings", "Don't supply a request body for this method"). post_read sends it; any
+# other path is refused before the session is touched (DEC-061).
+POST_READ_PATHS = frozenset({"/providers/Microsoft.BusinessAppPlatform/listTenantSettings"})
 
 
 class PowerPlatformError(RuntimeError):
@@ -55,6 +59,29 @@ class PowerPlatformClient:
     def request(self, method: str, path: str, *, api_version: str | None = None) -> Any:
         if method not in ALLOWED_METHODS:
             raise PowerPlatformError("method refused")
+        url, params = self._target(path, api_version)
+        try:
+            response = self.session.request(
+                method, url, params=params, headers=self._headers(), timeout=self.timeout, allow_redirects=False,
+            )
+        except Exception:  # Transport exceptions can contain headers; never retain their text.
+            raise PowerPlatformError("Power Platform transport error") from None
+        return self._decode(response)
+
+    def post_read(self, path: str, *, api_version: str | None = None) -> Any:
+        """Send the one documented body-free POST read (List tenant settings); refuse every other path."""
+        if not isinstance(path, str) or urlsplit(path).path not in POST_READ_PATHS:
+            raise PowerPlatformError("POST read refused")
+        url, params = self._target(path, api_version)
+        try:
+            response = self.session.post(
+                url, params=params, headers=self._headers(), timeout=self.timeout, allow_redirects=False,
+            )
+        except Exception:  # Transport exceptions can contain headers; never retain their text.
+            raise PowerPlatformError("Power Platform transport error") from None
+        return self._decode(response)
+
+    def _target(self, path: str, api_version: str | None) -> tuple[str, dict[str, str] | None]:
         if not self.token:
             raise PowerPlatformError("missing Power Platform admin token", status=401)
         if self.root != POWER_PLATFORM_ROOT or not same_origin(path, self.root) or self.token in path:
@@ -63,14 +90,13 @@ class PowerPlatformClient:
         params = None if "api-version" in parse_qs(urlsplit(url).query) else {
             "api-version": api_version or self.api_version,
         }
-        try:
-            response = self.session.request(
-                method, url, params=params,
-                headers={"Authorization": f"Bearer {self.token}", "accept": "application/json"},
-                timeout=self.timeout, allow_redirects=False,
-            )
-        except Exception:  # Transport exceptions can contain headers; never retain their text.
-            raise PowerPlatformError("Power Platform transport error") from None
+        return url, params
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.token}", "accept": "application/json"}
+
+    @staticmethod
+    def _decode(response: Any) -> Any:
         if not 200 <= response.status_code < 300:
             raise PowerPlatformError("Power Platform HTTP request failed", status=response.status_code)
         if not response.content or not response.content.strip():
@@ -79,7 +105,6 @@ class PowerPlatformClient:
             return response.json()
         except ValueError:
             raise PowerPlatformError("invalid JSON from Power Platform") from None
-
 
 def http_error_class(status: int | None) -> str:
     if status in (401, 403):

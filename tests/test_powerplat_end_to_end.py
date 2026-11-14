@@ -131,8 +131,16 @@ class FakePowerPlatform:
         return deepcopy(response)
 
     def request(self, method, path, **kwargs):
-        assert method == "GET", "this proof does not authorise a POST"
+        assert method == "GET", "request() carries GET only; the one POST read goes through post_read"
         return self.get(path, **kwargs)
+
+    def post_read(self, path, *, api_version=None):
+        assert path == pp.TENANT_SETTINGS, "the only POST read is listTenantSettings (DEC-061)"
+        self.calls.append(("POST", path))
+        response = self.responses[path]
+        if isinstance(response, Exception):
+            raise response
+        return deepcopy(response)
 
 
 class FakePowerBI:
@@ -183,8 +191,9 @@ def collect_run(tmp_path, request):
              "status": "failed" if licence == "withheld" else "ok",
              "error_class": "insufficient_permissions" if licence == "withheld" else None},
         ])
-        assert all(method == "GET" for method, _ in platform.calls + bi.calls)
-        assert platform.calls.count(("GET", pp.TENANT_SETTINGS)) == int(tokens)
+        assert all(method == "GET" for method, path in platform.calls + bi.calls if path != pp.TENANT_SETTINGS)
+        assert platform.calls.count(("POST", pp.TENANT_SETTINGS)) == int(tokens)
+        assert ("GET", pp.TENANT_SETTINGS) not in platform.calls
         assert len(bi.calls) == int(tokens)
         return project_run(tmp_path, redact=False), pp_result, bi_result
     return run

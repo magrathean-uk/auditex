@@ -152,14 +152,13 @@ up the management-app registration and the Power BI security-group tenant settin
 see the [one-time setup steps](../guides/admin-permission-guide.md#power-platform-and-power-bi-optional).
 Fabric Administrator and Power Platform Administrator are write-capable admin roles
 used read-only, with tenant-wide administrative blast radius in their services.
-Power Platform management-app registration includes write privileges; the blast
-radius is UNKNOWN beyond that statement. The Power BI service-principal setting
+A Power Platform management-app registration makes the app equivalent to a Power
+Platform Administrator inside Power Platform (read and write; Microsoft Learn) until
+it is removed. The Power BI service-principal setting
 permits tenant-wide read-only admin metadata access for the selected group.
 Auditex performs no registration, role assignment, tenant-setting change or other
 tenant write and adds no Graph application permission. `Tenant.Read.All` must not
-be granted. `listTenantSettings` is a read pinned to GET (`2023-06-01`);
-POST is only a possible later fallback if GET is refused, to be decided after a
-playground check, and is not enabled. Environment display names are discarded
+be granted. `listTenantSettings` is a read sent as the documented body-free POST (`2020-10-01`); no other POST is sent. Environment display names are discarded
 because developer and trial environments can be named after people; DLP policy
 display names remain because the rules read them. No bodies or file content are read.
 

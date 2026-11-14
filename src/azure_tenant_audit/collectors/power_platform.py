@@ -17,11 +17,14 @@ from ..power_platform import (
 from .base import Collector, CollectorResult, record_truncation
 
 MAX_LIST_PAGES = 50
-TENANT_SETTINGS_METHOD = "GET"
+# listTenantSettings is a body-free POST read (Microsoft Learn, Power Platform API "List tenant settings"); the client's
+# post_read admits that one path only (DEC-061).
+TENANT_SETTINGS_METHOD = "POST"
 ENVIRONMENTS = "/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2023-06-01"
 DLP_POLICIES = "/providers/PowerPlatform.Governance/v2/policies?api-version=2020-10-01"
 DLP_SCOPES = "/providers/Microsoft.BusinessAppPlatform/scopes/admin/apiPolicies?api-version=2016-11-01"
-TENANT_SETTINGS = "/providers/Microsoft.BusinessAppPlatform/listTenantSettings?api-version=2023-06-01"
+# api-version 2020-10-01: the version Microsoft Learn documents for the listTenantSettings POST.
+TENANT_SETTINGS = "/providers/Microsoft.BusinessAppPlatform/listTenantSettings?api-version=2020-10-01"
 TENANT_ISOLATION = "/providers/PowerPlatform.Governance/v1/tenants/{TenantId}/tenantIsolationPolicy?api-version=2020-06-01"
 OPERATIONS = {
     "environments": ENVIRONMENTS, "dlpPolicies": DLP_POLICIES, "dlpPolicyScopes": DLP_SCOPES,
@@ -200,7 +203,12 @@ class PowerPlatformCollector(Collector):
         start = time.perf_counter()
         try:
             kwargs = {"api_version": api_version} if api_version is not None else {}
-            raw = client.get(path, **kwargs) if method is None else client.request(method, path, **kwargs)
+            if method is None:
+                raw = client.get(path, **kwargs)
+            elif method == "POST":
+                raw = client.post_read(path, **kwargs)
+            else:
+                raw = client.request(method, path, **kwargs)
             status = _status()
         except Exception as exc:
             raw = None

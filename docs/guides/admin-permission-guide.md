@@ -309,29 +309,55 @@ Microsoft Graph application permission is introduced by these collectors; the
 supporting organisation and service-plan reads use the existing `Directory.Read.All`.
 
 1. **Power BI service-principal route first:** create a plain Entra security group
-   without role assignment and add the customer-owned audit app's service principal.
-   In Power BI Admin portal, open Tenant settings > Admin API settings; enable
-   **Service principals can access read-only admin APIs** for **Specific security
-   groups**, selecting that group. Do not grant any Power BI API permission, and
-   never grant `Tenant.Read.All`. The setting permits the group's service principals
-   to read tenant-wide admin metadata; keep group membership restricted to the audit
-   app. The alternative operator role is Fabric Administrator with a Power BI or
-   Fabric licence and at least one prior sign-in to the Power BI portal. It is a
-   write-capable admin role used read-only, with tenant-wide Power BI/Fabric
-   administrative blast radius. This operator route is a prerequisite reference,
-   not a working delegated token path in Auditex.
-2. **Power Platform management-app route first:** an authorised customer
-   administrator signs in interactively with the Power Apps administration module
-   (`Add-PowerAppsAccount -Endpoint prod -TenantID <tenant id>`) and performs the
-   one-time registration
-   `New-PowerAppManagementApp -ApplicationId <app id>` for the customer-owned audit
-   app. This registration is a customer-side write. The upstream prerequisite states
-   that its Power Platform permissions **include write privileges**; the management
-   app's blast radius is **UNKNOWN** beyond that statement. The alternative operator
-   role is Power Platform Administrator with a Power Apps for Office 365 licence.
-   It is a write-capable admin role used read-only; it can administer environments
-   and policy across the tenant. Auditex itself writes nothing. This operator route
-   likewise does not supply a delegated token path in Auditex.
+   (security-enabled, not mail-enabled, not role-assignable) and add the customer-owned
+   audit app's service principal as its only member. In the Fabric admin portal, open
+   Tenant settings > Admin API settings; enable **Service principals can access read-only
+   admin APIs** (API setting name `AllowServicePrincipalsUseReadAdminAPIs`) for **Specific
+   security groups**, selecting that group only. This is not the MS.POWERBI.4.1 setting
+   **Service principals can call Fabric public APIs** (`ServicePrincipalAccessPermissionAPIs`);
+   leave that one as it is. Do not grant any Power BI API permission, and never grant
+   `Tenant.Read.All`: Microsoft requires that an app calling the read-only admin APIs this
+   way has no admin-consent-required Power BI permissions. Changes can take up to 15 minutes
+   to apply.
+   - **Blast radius:** the group's service principals get read-only access to all the
+     information the Power BI admin APIs expose, now and in future (Microsoft Learn: for
+     example user names and emails, semantic model and report detailed metadata). It
+     grants no write. Keep the group's membership to the audit app alone.
+   - **Exact removal:** in the same place set **Service principals can access read-only
+     admin APIs** back to **Disabled** (or, if other groups still need it, remove only the
+     audit group from **Specific security groups**), Apply; then delete the security group
+     in the Entra admin centre (Groups > the group > Delete). A deleted security group
+     is not kept in deleted items. With the Fabric admin API the same change is
+     `POST https://api.fabric.microsoft.com/v1/admin/tenantsettings/AllowServicePrincipalsUseReadAdminAPIs/update`
+     with `{"enabled": false, "enabledSecurityGroups": []}` (delegated `Tenant.ReadWrite.All`,
+     Fabric Administrator).
+   The alternative operator role is Fabric Administrator with a Power BI or Fabric licence
+   and at least one prior sign-in to the Power BI portal. It is a write-capable admin role
+   used read-only, with tenant-wide Power BI/Fabric administrative blast radius. This
+   operator route is a prerequisite reference, not a working delegated token path in Auditex.
+2. **Power Platform management-app route first:** an authorised customer administrator
+   (Global Administrator or Power Platform Administrator) signs in interactively with the
+   Power Apps administration module (`Add-PowerAppsAccount -Endpoint prod -TenantID <tenant id>`)
+   and performs the one-time registration
+   `New-PowerAppManagementApp -ApplicationId <app id>` for the customer-owned audit app
+   (REST: `PUT https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/adminApplications/<app id>?api-version=2020-10-01`,
+   no body). A service principal cannot register itself. This registration is a
+   customer-side write.
+   - **Blast radius:** Microsoft Learn states that a registered service principal is
+     "treated within Power Platform like how normal users are with the Power Platform
+     Administrator role assigned. Granular roles and permissions can't be assigned to
+     limit their capabilities." Anyone holding the audit app's credential can therefore
+     administer environments, data policies, tenant settings and Power Apps across the
+     tenant, read and write, until the registration is removed. It adds no Entra role
+     and no API permission. Auditex itself only reads.
+   - **Exact removal:** `Remove-PowerAppManagementApp -ApplicationId <app id>` in the same
+     signed-in session (REST: `DELETE https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/adminApplications/<app id>?api-version=2020-10-01`);
+   `Get-PowerAppManagementApps` then no longer lists it. Remove it when the audit is done,
+     and before deleting the app registration itself.
+   The alternative operator role is Power Platform Administrator with a Power Apps for
+   Office 365 licence. It is a write-capable admin role used read-only; it can administer
+   environments and policy across the tenant. Auditex itself writes nothing. This operator
+   route likewise does not supply a delegated token path in Auditex.
 
 In app mode each collector obtains its own token through `app_token_for`, using
 `https://service.powerapps.com//.default` (the double slash is intentional) and
@@ -341,7 +367,8 @@ See the selected collector notes in
 `auditex setup-guide m365 --collector-preset power-platform --plane inventory --mode app --format json`.
 The JSON guide includes these setup requirements only when the collectors are selected.
 
-Every request is GET only. Power Platform returns environment id/name, SKU, default
+Every request is a read: GET, plus one body-free POST for Power Platform
+`listTenantSettings`, which Microsoft documents as a POST with no request body. Power Platform returns environment id/name, SKU, default
 status and creation time; environment display names are discarded because developer
 and trial environments can be named after people and no rule reads that field. DLP
 policy display names remain because the rules read them. Other reads retain DLP
@@ -351,10 +378,10 @@ values and security-group ids, plus a local access-denial observation. Neither
 collector reads message bodies or file content. The exact endpoints, API versions
 and retained fields are in the [API call catalogue](../reference/api-call-catalog.md#optional-power-platform-and-power-bi).
 
-`listTenantSettings` is a read, pinned to GET with `api-version=2023-06-01` and
-`TENANT_SETTINGS_METHOD = "GET"`. A POST is only a possible later fallback if GET is
-refused, to be decided after a playground check. No POST or automatic fallback is
-currently enabled; whether the live endpoint accepts GET remains unverified.
+`listTenantSettings` is a read sent as a body-free POST with `api-version=2020-10-01`
+(`TENANT_SETTINGS_METHOD = "POST"`), as Microsoft documents it ("List tenant settings":
+POST, "Don't supply a request body for this method"). The client admits POST for that one
+path only and sends no body; every other Power Platform request is GET.
 
 Without the opt-in, optional Power BI / Power Platform collection was not enabled;
 these policies are not assessed: MS.POWERBI 1.1, 2.1, 3.1, 4.1, 4.2, 5.1, 6.1 and

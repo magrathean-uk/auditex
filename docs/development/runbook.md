@@ -139,8 +139,7 @@ Offline and mock-tenant checks do not verify live provider serialisation. Before
   The `org_config` adapter withholds an unreadable identity; do not substitute an assumed name.
 - Confirm unlicensed-tenant errors for the two ATP licence reads. Paired generic command failures are
   marked `licence_inferred`; the rule projection withholds them rather than asserting no licence.
-- Confirm Power Platform `listTenantSettings` accepts GET with `api-version=2023-06-01`.
-  POST and automatic fallback remain disabled.
+- Confirm Power Platform `listTenantSettings` accepts the body-free POST with `api-version=2020-10-01`, the version Learn documents.
 
 ### Entra Free directory fixtures
 

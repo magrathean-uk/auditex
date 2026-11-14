@@ -157,6 +157,7 @@ _GRAPH = "src/azure_tenant_audit/graph.py"
 _GOOGLE_AUTH = "src/auditex/google_workspace/auth.py"
 _GOOGLE_CLIENT = "src/auditex/google_workspace/client.py"
 _NOTIFY = "src/auditex/notify.py"
+_POWER_PLATFORM_CLIENT = "src/azure_tenant_audit/power_platform.py"
 
 # Frozen non-GET allow-list: transport-inventory section E (M01-T02, v2 DEC-006). Do not widen it
 # without a new inventory row and decision; a site outside the eight transport classes needs sol.
@@ -195,6 +196,9 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "per-user copy narrowed to the read scopes; lazy JWT bearer grant on first use"),
     Allowed(_GOOGLE_CLIENT, "GoogleWorkspaceClient._scoped_credentials", "with_scopes", TOKEN_POST, 1, 2, "A22",
             "credentials narrowed to one API's scopes; lazy token exchange on first use"),
+    Allowed(_POWER_PLATFORM_CLIENT, "PowerPlatformClient.post_read", "self.session.post", "POST", 1, 1, "A9b",
+            "the one documented body-free POST read, Power Platform List tenant settings (DEC-061); post_read opens "
+            "with the POST_READ_PATHS membership check and sends no body"),
     Allowed(_NOTIFY, "_send_webhook", "requests.post", "POST", 1, 5, "A14",
             "operator-configured Teams or Slack webhook, redacted"),
     Allowed(_NOTIFY, "_send_jira", "requests.post", "POST", 1, 5, "A16",
@@ -963,10 +967,12 @@ def test_every_allow_list_entry_names_a_transport_class_row_and_reason() -> None
     keys = [entry.key for entry in ALLOW_LIST]
     assert len(keys) == len(set(keys))
     for entry in ALLOW_LIST:
-        # Classes 2 token, 3 Graph $batch, 5 operator sink; class 1, 4 and 8 are GET or not HTTP,
-        # class 6 (the retired model endpoint) is gone, class 7 (lab response path) has no HTTP
-        # non-GET site today.
-        assert entry.transport_class in {2, 3, 5}, entry
+        # Classes 2 token, 3 Graph $batch, 5 operator sink; class 1 (tenant read) is GET except the one
+        # documented body-free POST read (A9b, DEC-061); 4 and 8 are GET or not HTTP, class 6 (the
+        # retired model endpoint) is gone, class 7 (lab response path) has no HTTP non-GET site today.
+        assert entry.transport_class in {1, 2, 3, 5}, entry
+        if entry.transport_class == 1:
+            assert (entry.path, entry.function) == (_POWER_PLATFORM_CLIENT, "PowerPlatformClient.post_read"), entry
         assert entry.method != UNRESOLVED, entry  # an unproved value is fixed, never allowed
         assert entry.rows.strip() and entry.reason.strip(), entry
 
@@ -1459,3 +1465,19 @@ def test_every_open_receiver_under_src_is_proved_or_classified() -> None:
     # A blind resolver would pass vacuously: the local-file opens under src/ are proved, not skipped.
     assert any(item.startswith("src/azure_tenant_audit/guarded_io.py:") for item in SCAN.proven)
     assert all(item.endswith(" os.open") for item in SCAN.proven)
+
+
+def test_the_power_platform_post_read_opens_with_its_path_guard_and_sends_no_body() -> None:
+    """A9b: the one POST site checks POST_READ_PATHS first and passes no body keyword."""
+    from azure_tenant_audit import power_platform
+
+    assert power_platform.POST_READ_PATHS == frozenset({"/providers/Microsoft.BusinessAppPlatform/listTenantSettings"})
+    tree = ast.parse((REPO_ROOT / _POWER_PLATFORM_CLIENT).read_text(encoding="utf-8"))
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "PowerPlatformClient")
+    fn = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "post_read")
+    first = fn.body[1] if isinstance(fn.body[0], ast.Expr) and isinstance(fn.body[0].value, ast.Constant) else fn.body[0]
+    assert isinstance(first, ast.If) and isinstance(first.body[0], ast.Raise)
+    assert "POST_READ_PATHS" in ast.unparse(first.test) and "not in" in ast.unparse(first.test)
+    posts = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and ast.unparse(n.func) == "self.session.post"]
+    assert len(posts) == 1
+    assert not {kw.arg for kw in posts[0].keywords} & {"data", "json", "files", None}

@@ -11,6 +11,7 @@ from azure_tenant_audit.collectors.power_platform import PowerPlatformCollector
 from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.power_platform import (
     BAP_SCOPE,
+    POST_READ_PATHS,
     PowerPlatformClient,
     PowerPlatformError,
     power_platform_client_from,
@@ -71,6 +72,14 @@ class _FakeBapClient:
     def request(self, method, path):
         assert method == "GET"
         return self.get(path)
+
+    def post_read(self, path, *, api_version=None):
+        assert path == module.TENANT_SETTINGS
+        self.calls.append(("POST", path))
+        response = self.responses[path]
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def _run(bap=None, **kwargs):
@@ -133,9 +142,10 @@ def test_collector_returns_environments_and_dlp_policies():
     assert result.payload["dlpPolicyScopes"]["value"] == []
     assert result.payload["tenantIsolation"]["value"] == [{"properties": {"isDisabled": False}}]
     assert all(envelope["status"] == "ok" for envelope in result.payload.values())
-    assert client.calls.count(("GET", module.TENANT_SETTINGS)) == 1
-    assert module.TENANT_SETTINGS_METHOD == "GET"
-    assert len(client.calls) == 5 and all(method == "GET" for method, _ in client.calls)
+    assert client.calls.count(("POST", module.TENANT_SETTINGS)) == 1
+    assert module.TENANT_SETTINGS_METHOD == "POST"
+    assert len(client.calls) == 5
+    assert [call for call in client.calls if call[0] != "GET"] == [("POST", module.TENANT_SETTINGS)]
     assert all("api-version=" in row["endpoint"] for row in result.coverage)
     assert _coverage(result)["tenantIsolation"]["endpoint"] == module.TENANT_ISOLATION
     assert TENANT_ID not in json.dumps(result.coverage)
@@ -309,6 +319,13 @@ class _Session:
             raise self.response
         return self.response
 
+    def post(self, url, **kwargs):
+        assert not {"data", "json", "files"} & kwargs.keys()
+        self.calls.append(("POST", url, kwargs))
+        if isinstance(self.response, Exception):
+            raise self.response
+        return self.response
+
 
 def test_client_get_method_api_version_and_header_only_token():
     session = _Session(_Response({"value": []}))
@@ -333,6 +350,62 @@ def test_client_refuses_non_get_methods_before_touching_session(method, token):
     client = PowerPlatformClient(token=token, session=_UntouchedSession())
     with pytest.raises(PowerPlatformError, match="^method refused$"):
         client.request(method, module.TENANT_SETTINGS)
+
+
+def test_post_read_paths_are_exactly_list_tenant_settings():
+    assert POST_READ_PATHS == frozenset({"/providers/Microsoft.BusinessAppPlatform/listTenantSettings"})
+    assert module.TENANT_SETTINGS.split("?")[0] in POST_READ_PATHS
+    assert module.TENANT_SETTINGS.endswith("?api-version=2020-10-01")  # the version Microsoft Learn documents
+
+
+def test_client_post_read_sends_a_body_free_post_to_list_tenant_settings():
+    session = _Session(_Response({"isPowerAppsEnabled": True}))
+    client = PowerPlatformClient(token=CANARY, session=session)
+    assert client.post_read(module.TENANT_SETTINGS) == {"isPowerAppsEnabled": True}
+    method, url, kwargs = session.calls[0]
+    assert method == "POST" and url == "https://api.bap.microsoft.com" + module.TENANT_SETTINGS
+    assert kwargs == {"params": None, "headers": {"Authorization": "Bearer " + CANARY, "accept": "application/json"},
+                      "timeout": 15.0, "allow_redirects": False}
+
+
+@pytest.mark.parametrize("path", [
+    module.ENVIRONMENTS, module.DLP_POLICIES, module.DLP_SCOPES, module.TENANT_ISOLATION,
+    "/providers/Microsoft.BusinessAppPlatform/listTenantSettingsX",
+    "/providers/microsoft.businessappplatform/listtenantsettings",
+    "/providers/Microsoft.BusinessAppPlatform/listTenantSettings/",
+    "/providers/Microsoft.BusinessAppPlatform/listTenantSettings/../scopes/admin/environments",
+    "https://untrusted.invalid/providers/Microsoft.BusinessAppPlatform/listTenantSettings",
+    "//untrusted.invalid/providers/Microsoft.BusinessAppPlatform/listTenantSettings",
+    "http://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/listTenantSettings",
+    "/providers/Microsoft.BusinessAppPlatform/listTenantSettings?token=" + CANARY,
+])
+@pytest.mark.parametrize("token", [None, CANARY])
+def test_client_post_read_refuses_every_other_path_before_touching_session(path, token):
+    class _UntouchedSession:
+        def __getattribute__(self, name):
+            raise AssertionError("refused POST touched the session")
+
+    client = PowerPlatformClient(token=token, session=_UntouchedSession())
+    with pytest.raises(PowerPlatformError) as error:
+        client.post_read(path)
+    assert CANARY not in str(error.value)
+
+
+def test_client_post_read_errors_never_retain_token_or_body():
+    for response in (RuntimeError("Authorization: Bearer " + CANARY), _Response(ValueError(CANARY)), _Response({}, status=405)):
+        with pytest.raises(PowerPlatformError) as error:
+            PowerPlatformClient(token=CANARY, session=_Session(response)).post_read(module.TENANT_SETTINGS)
+        assert CANARY not in str(error.value)
+
+
+def test_collector_sends_list_tenant_settings_only_as_post_read():
+    class _NoRequest(_FakeBapClient):
+        def request(self, method, path):
+            raise AssertionError("tenant settings must not go through request()")
+    client = _NoRequest(tenant_settings={"isPowerAppsEnabled": True})
+    result = _run(client)
+    assert ("POST", module.TENANT_SETTINGS) in client.calls
+    assert _coverage(result)["tenantSettings"]["status"] == "ok"
 
 
 @pytest.mark.parametrize("path", ["https://untrusted.invalid/next", "//untrusted.invalid/next", "http://api.bap.microsoft.com/next",
@@ -388,7 +461,8 @@ def test_collector_builds_its_own_app_client_with_fake_http(monkeypatch, token):
         assert not session.calls and all(row["status"] == "skipped" for row in result.coverage)
     else:
         assert len(session.calls) == 5
-        assert all(method == "GET" for method, _, _ in session.calls)
+        assert [(method, url) for method, url, _ in session.calls if method != "GET"] == [
+            ("POST", "https://api.bap.microsoft.com" + module.TENANT_SETTINGS)]
         assert _coverage(result)["tenantIsolation"]["status"] == "ok"
     assert CANARY not in json.dumps([result.payload, result.coverage])
 
@@ -438,5 +512,5 @@ def test_each_list_pages_and_marks_a_cut(operation, last_page, monkeypatch):
         assert row["truncation_reason"] == ("pagination_failed" if last_page == "denied" else "pagination_not_followed")
         assert row["error_class"] == ("insufficient_permissions" if last_page == "denied" else "collection_limit")
         assert result.status == "partial"
-    assert all(method == "GET" for method, _ in client.calls)
+    assert all(method == "GET" for method, path in client.calls if path != module.TENANT_SETTINGS)
     assert CANARY not in json.dumps([result.payload, result.coverage])

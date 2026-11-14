@@ -5,6 +5,12 @@ All notable changes to Auditex are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The run-bundle contract has its own
 date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`).
 
+## [Unreleased]
+
+- Power Platform: `listTenantSettings` is now sent as the body-free POST Microsoft documents, instead of GET; the client admits POST
+  for that one path only. The admin guide states the exact removal and blast radius of the Power BI read-only admin API setting and the
+  Power Platform management-app registration.
+
 ## [1.5.0] - 2026-11-14
 
 Shareable output is masked with a private per-run key, middle initials and titles are masked, the lint rule set is
