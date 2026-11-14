@@ -114,8 +114,9 @@ Track A: M00-T05, then M00-T01 alone, then M00-T02 and M00-T03 in parallel, M00-
 M04-T03 (after G's design DEC) -> M04-T04 -> M04-T05; M05-T01 and M05-T02 in parallel beside M04; M05-T05 at any
 time after M00; M05-T03 after M05-T01, M05-T02 and M04-T05; M05-T04 after M04-T05 and M05-T03. M06 after M00, M04
 and M05.
-M07 (kit; the trial end bounds it, DEC-008): M07-T11 -> M07-T12 -> M07-T13 -> M07-T14 -> M07-T16 (phase D, tenant
-chat); M07-T15 after M07-T14 when no kit script runs; M07-T17 before the trial ends.
+M07 (kit; the trial end bounds it, DEC-008): M07-T11 -> M07-T12 -> M07-T13 -> M07-T14 (done, superseded by 7s); then
+M07-T18 -> M07-T19 -> M07-T20 -> M07-T21 -> M07-T16 (phase D, tenant chat), with M07-T22 applied before M07-T16;
+M07-T15 after M07-T21 when no kit script runs; M07-T17 before the trial ends.
 M08 (DEC-059, order A, B, C, D, then E): M08-T01 beside M08-T03 (EXP-m08-pbpp first; a touched kit verdict stops
 it for the manager); M08-T02 after M08-T01 merges; M08-T04 after M08-T01; M08-T05 after M08-T04; M08-T06 after
 M07-T16, M08-T02 and M08-T03 applied and M08-T05 merged, before M07-T17 and the trial's end.
