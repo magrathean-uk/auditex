@@ -126,11 +126,12 @@ def test_new_endpoint_specs_versions_selects_and_inline_minimisation():
     configs = [{"id": "MicrosoftAuthenticator", "@odata.type": "#microsoft.graph.microsoftAuthenticatorAuthenticationMethodConfiguration",
                 "featureSettings": {"displayAppInformationRequiredState": {"state": "enabled"}}, "isSoftwareOathEnabled": False}]
     chunks = []
-    client = FakeClient(lists={CONFIGURATIONS: configs})
+    # M08-T08: Graph rejects the list endpoint; the configurations come inline in the policy.
+    client = FakeClient(objects={"/policies/authenticationMethodsPolicy": {"id": "policy", "authenticationMethodConfigurations": configs}})
     auth = run(AuthMethodsCollector, client, top=200, page_size=17, chunk_writer=lambda *args: chunks.append(args))
-    assert ("GET", CONFIGURATIONS, {}) in client.calls
-    assert auth.payload["authenticationMethodConfigurations"]["value"] == configs
-    assert auth.payload["authenticationMethodConfigurations"]["status"] == "ok"
+    assert not any(path == CONFIGURATIONS for _, path, _ in client.calls)
+    assert "authenticationMethodConfigurations" not in auth.payload
+    assert auth.payload["authenticationMethodsPolicy"]["authenticationMethodConfigurations"] == configs
     assert not any(args[1] == "authenticationMethodConfigurations" for args in chunks)
 
     client = policies_client(objects={"/policies/defaultAppManagementPolicy": {"id": "default", "servicePrincipalRestrictions": {"mockField": "retained"}}})
@@ -568,7 +569,6 @@ def test_new_operations_are_declared_for_offline_replay_and_documented():
 STRICT_LISTS = [
     pytest.param(ConsentPolicyCollector, SETTINGS, "directorySettings", id="directory-settings"),
     pytest.param(ConsentPolicyCollector, POLICIES, "appManagementPolicies", id="app-policies"),
-    pytest.param(AuthMethodsCollector, CONFIGURATIONS, "authenticationMethodConfigurations", id="auth-configurations"),
 ]
 BAD_PAGES = [
     {}, None, [], "invalid", {"value": None}, {"value": {}}, {"value": "invalid"}, {"value": [None]},
@@ -664,7 +664,6 @@ def test_default_policy_accepts_valid_object_without_filtering_policy_fields(mon
 def cycling_client(monkeypatch, operation, *, rows, two_page=False, bounded=False):
     endpoints = {"settings": (ConsentPolicyCollector, SETTINGS, "directorySettings"),
                  "policies": (ConsentPolicyCollector, POLICIES, "appManagementPolicies"),
-                 "configurations": (AuthMethodsCollector, CONFIGURATIONS, "authenticationMethodConfigurations"),
                  "lookup": (AppConsentCollector, "/servicePrincipals", CLASSIFICATIONS),
                  "classifications": (AppConsentCollector, classification_path(0), CLASSIFICATIONS)}
     collector, endpoint, name = endpoints[operation]
@@ -680,7 +679,7 @@ def cycling_client(monkeypatch, operation, *, rows, two_page=False, bounded=Fals
     return collector, name, client
 
 
-@pytest.mark.parametrize("operation", ["settings", "policies", "configurations", "lookup", "classifications"])
+@pytest.mark.parametrize("operation", ["settings", "policies", "lookup", "classifications"])
 @pytest.mark.parametrize("rows", [False, True], ids=["empty", "nonempty"])
 @pytest.mark.parametrize("two_page", [False, True], ids=["self-cycle", "two-page-cycle"])
 def test_real_client_cycles_withhold_whole_section(monkeypatch, operation, rows, two_page):
@@ -699,7 +698,7 @@ def test_real_client_cycles_withhold_whole_section(monkeypatch, operation, rows,
     assert len(set(cycle_calls)) == len(cycle_calls)
 
 
-@pytest.mark.parametrize("operation", ["settings", "policies", "configurations", "lookup", "classifications"])
+@pytest.mark.parametrize("operation", ["settings", "policies", "lookup", "classifications"])
 @pytest.mark.parametrize("rows", [False, True], ids=["empty", "nonempty"])
 @pytest.mark.parametrize("bound_source", ["client", "strict"])
 def test_real_client_page_bound_withholds_whole_section(monkeypatch, operation, rows, bound_source):

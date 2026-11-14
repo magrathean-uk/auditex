@@ -84,10 +84,13 @@ def test_cli_path_flag_inventory_covers_the_public_parsers() -> None:
                 for action in parser._actions for option in action.option_strings}
     assert set(_FILE_FLAGS) == _PATH_FLAGS
     assert _PATH_FLAGS <= declared
-    # Auth file routes are expressly outside the descriptor guard; the other
-    # entries mention a file or path in help but do not select an input file.
-    excluded = {"--oauth-client", "--service-account-key", "--token-cache", "--token-file"}
-    non_paths = {"--domain", "--path-prefix", "--projection-scan-max-bytes", "--tenant-name", "--token", "--top"}
+    # Auth file routes are expressly outside the descriptor guard (the certificate key and
+    # password files are read by certificate_auth's own owner-only reader and are in the argv
+    # redaction list); the other entries mention a file or path in help but do not select an input file.
+    excluded = {"--certificate-password-file", "--certificate-path", "--oauth-client", "--service-account-key",
+                "--token-cache", "--token-file"}
+    non_paths = {"--certificate-thumbprint", "--domain", "--path-prefix", "--projection-scan-max-bytes", "--tenant-name",
+                 "--token", "--top"}
     for builder in BUILDERS:
         for parser in _parsers(builder()):
             for action in parser._actions:

@@ -187,8 +187,14 @@ def test_gap_record_holds_the_pre_migration_measure_and_the_live_residual_exactl
     assert before["product_only_wrapper"]["rule_failure"]["cell"] == "rule_evaluation_failed"
 
 
+D29_CELLS = {"MS.EXO.3.1v1": ("domain_unusable.dkim_rdata_empty",),
+             **{f"MS.EXO.4.{n}v1": ("domain_unusable.rdata_empty",) for n in range(1, 5)}}
+
+
 def test_residual_differences_are_only_the_documented_classes():
     """What the shipped catalogue keeps from product, each consistent with v3.9.1, A1 and A2."""
+    from test_value_rules_replay import D29_PRODUCT_TEXT, D29_V391_TEXT
+
     residual = catalogue_gap(json.loads((ROOT / "configs/scuba-value-rules.json").read_text()), CAT)
     assert residual["product_spec"] == "v3.9.1" and residual["missing_policies"] == residual["extra_policies"] == []
     assert residual["missing_cells"] == residual["extra_cells"] == []
@@ -202,6 +208,9 @@ def test_residual_differences_are_only_the_documented_classes():
                 if key == "cited":  # the spec's own words for the dynamic list: unavailable sections, in order
                     assert cell == "section_not_collected" and diff["product"] == T["policies"][pid]["sections"]
                     assert diff["v391"] == "the unavailable sections of `sections`, in section order"
+                elif key == "reason_texts" and cell in D29_CELLS.get(pid, ()):
+                    # M08-T10 reverses ruling D29 for DMARC: the one shared empty-answer text gains the reversal note.
+                    assert (diff["v391"], diff["product"]) == ([D29_V391_TEXT], [D29_PRODUCT_TEXT]), (pid, cell)
                 elif key == "reason_texts":  # closed lists naming any subset: the shipped list contains every text seen
                     assert set(diff["v391"]) < set(diff["product"])
                 elif key == "cited_variants":  # A2 and the three SS 7.x reference orders
@@ -210,7 +219,7 @@ def test_residual_differences_are_only_the_documented_classes():
                 else:
                     assert key in {"reason_texts_by_code"}, key
     assert {k: len(v) for k, v in kinds.items()} == {
-        "cited": 102, "reason_texts": 18, "cited_variants": 6, "reason_texts_by_code": 1}
+        "cited": 102, "reason_texts": 18 + 5, "cited_variants": 6, "reason_texts_by_code": 1}
     assert {pid for pid, _ in kinds["cited_variants"]} == {
         "MS.SECURITYSUITE.1.3v1", "MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1",
         "MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1"}

@@ -73,6 +73,7 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
         'azure_tenant_audit.power_bi:PowerBIClient.get',
     ),
     'azure_tenant_audit.power_platform:*': (
+        'azure_tenant_audit.power_platform:PowerPlatformClient.post_read',
         'azure_tenant_audit.power_platform:PowerPlatformClient.request',
     ),
     'azure_tenant_audit.private_io:*': (

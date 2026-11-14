@@ -119,6 +119,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("auditex.rule_assessment:assess_run", "private", "model assessment file; projected view is redacted by the projection input gate"),
     SinkEntry("auditex.rule_assessment:assess_scubagear_export", "private", "model assessment file for an imported export; as assess_run"),
     SinkEntry("azure_tenant_audit.adapters.powershell_graph:*", "private", "builds PowerShell text for a local command; no I/O of its own"),
+    SinkEntry("azure_tenant_audit.certificate_auth:_read_private_file", "private", "read-only O_RDONLY descriptor on the operator's certificate or password file; the scanner treats its flags as a write"),
     SinkEntry("azure_tenant_audit.cli:run_live", "private", "operator terminal: partial-workload notice contains only fixed collector names and status text"),
     SinkEntry("azure_tenant_audit.cli:run_offline", "private", "offline replay copy inside the run's raw directory"),
     SinkEntry("azure_tenant_audit.cli_guard:guarded_cli.wrapped", "private", "operator terminal: fixed path-free unsafe-input refusal"),

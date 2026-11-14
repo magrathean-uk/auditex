@@ -53,6 +53,15 @@ MANIFEST = FIXTURES / "manifest-v391-sample.json"
 POLICY_ITEMS = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
 FULL_ENV = "AUDITEX_TEST_VALUE_RULE_VECTORS_V391"
 ANSWER = ("verdict", "cell", "reason_code", "reason_text", "cited_sections")
+# M08-T10 reverses spec ruling D29 for DMARC (an all-NXDomain tree walk reads no record). An entry without step
+# outcomes, as every v3.9.1 vector is, keeps the spec's verdict, cell and reason code; only the shared reason text
+# gains the note on the reversal. This is the one documented reason-text class.
+D29_REASON_CODE = "data_unavailable_dns_answer_empty"
+D29_V391_TEXT = ("Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup "
+                 "succeeded or failed; the policy was not assessed.")
+D29_PRODUCT_TEXT = ("Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup "
+                    "succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record "
+                    "instead); the policy was not assessed.")
 
 
 def _lines(path: Path):
@@ -90,7 +99,11 @@ def replay_one(vector: dict, entry: dict | None, tally: Counter, reached: set) -
     checked(record)
     got = (record["verdict"], record["cell"], record["reason_code"], record["reason_text"],
            record["cited_sections"] or list(row["sections"]))
-    want = (vector["rule_verdict"], vector["rule_cell"], vector["rule_reason_code"], vector["rule_reason_text"],
+    want_text = vector["rule_reason_text"]
+    if vector["rule_reason_code"] == D29_REASON_CODE and want_text == D29_V391_TEXT:
+        want_text = D29_PRODUCT_TEXT
+        tally["reason_text_d29"] += 1
+    want = (vector["rule_verdict"], vector["rule_cell"], vector["rule_reason_code"], want_text,
             vector["rule_cited_sections"] or list(row["sections"]))
     assert got == want, vid
     assert detail["class"] == "value_rule" and detail["rule_id"] == row["rule_id"], vid
@@ -181,6 +194,7 @@ def test_sample_replay_agrees_with_the_spec_on_every_cell(sample):
     assert tally["vectors"] == len(sample) == 2233
     assert tally["a2_constructed"] == 3
     assert tally["a2_override_applied"] == len(overrides) == 3
+    assert tally["reason_text_d29"] == 10
     assert tally["rule_equals_gold"] + tally["a2_constructed"] + sum(
         n for k, n in tally.items() if k.startswith("expected_divergence:")) == len(sample)
     assert {k for k in tally if k.startswith("expected_divergence:")}, "no documented divergence class was exercised"
