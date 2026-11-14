@@ -509,3 +509,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-14T01:17:46Z	M04-T06	sol	claude-4	claude-opus-5-5	high	branch	1	470	1.4295	partial	task/M04-T06-withholding-reach	v4
 2026-11-14T01:20:02Z	REV-M04-T06	codex	codex2	gpt-6.1-sol	high	readonly	0	84		done	task/M04-T06-withholding-reach	v4
 2026-11-14T02:02:21Z	M05-T04	terra	claude-4	claude-sonnet-5-5	medium	branch	0	2451	0.6299	done	task/M05-T04-review-follow-ups	v4
+2026-11-14T02:04:35Z	M05-T04	terra	claude-4	claude-sonnet-5-5	low	branch	0	104	0.2256	done	task/M05-T04-review-follow-ups	v4
+2026-11-14T02:06:02Z	REV-M05-T04	codex	codex2	gpt-6.1-sol	medium	readonly	0	71		done	task/M05-T04-review-follow-ups	v4

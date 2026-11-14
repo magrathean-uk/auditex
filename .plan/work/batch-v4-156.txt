@@ -1,0 +1,1 @@
+--task REV-M05-T04 --role codex --template codex-review --account codex2 --readonly --sha task/M05-T04-review-follow-ups --tags review --timeout 3600 --var TASK=M05-T04 --var MILESTONE=.plan/milestones/M05-scanners-and-hygiene.md --var BRANCH=task/M05-T04-review-follow-ups
