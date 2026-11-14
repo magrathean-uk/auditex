@@ -583,3 +583,10 @@
 - why: G, typed in this chat at about 10:22 GMT on 14 Nov 2026, word for word: "manager is no longer in place, talk to me."
 - consequences: replaces DEC-036. Held items go to G now: the network-hold lift for the tenant steps, the Power Platform registration's blast radius, the --no-verify note (DEC-062).
 - approver: G
+
+## DEC-064 The tenant chat resumes: 7s dry runs, the reader app and the pre-d collection
+- date: 2026-11-14
+- status: approved
+- decision: the tenant chat ("Auditex tenant sitting", archived with the manager) is unarchived and runs, in order: the read-only dry runs of every phase D script from the 7s candidate (d453c83ac710), the reader app (E7, with the Cancel instruction in G-SHEET Part 0), and the first collection `pre-d` (E7b to E8b). It reports to the lead. Phase D writes wait for the gated, frozen 7s copy and a new hand-over note.
+- why: G, answering "Unarchive the tenant chat so the reader app, pre-d collection and 7s dry runs can run?" at about 10:25 GMT on 14 Nov: "Yes, unarchive it". His WGEX sitting has stopped (state file, step 2d), so the manager's network hold no longer applies.
+- approver: G

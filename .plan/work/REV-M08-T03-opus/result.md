@@ -1,0 +1,16 @@
+## RESULT REV-M08-T03-opus
+status: done
+summary: verdict: ship
+reviewed: 1960baf8e177
+All 9 files match the manifest. No defect blocks shipping: none writes the wrong thing, writes before the intent entry, exposes a secret or changes a kit verdict. Check 3 fails on documentation wording only. Check 5 flags the patch's api-version. Details in .plan/work/REV-M08-T03-opus/notes.md.
+changes: .plan/work/REV-M08-T03-opus/notes.md, progress.md (review output only)
+verification: shasum -a 256 -c MANIFEST.sha256: pass (9/9); no scripts or tests run (brief: read-only, no network, no PowerShell)
+risks: (1) The -Portal route takes no before-snapshot of the eight kit settings, so the scripts would not catch a mis-click on the 4.1 toggle in the portal (fix in notes, check 2). (2) listTenantSettings is unproven live at 2023-06-01; Learn documents 2020-10-01. (3) The Power Platform registration gives the reader app Power Platform Administrator equivalent authority until it is removed, so keep that window to the collection run.
+questions_for_g: none
+### Findings
+1 pass: no tenant write comes before the intent entry, and every refusal comes first. Power BI create: reads and sign-ins at :109-138, intent at :141. Power Platform create: :82-84, then :86. Removals: :94-102 and :54-59. The sign-in names only `.default` and has no consent call (m08b-common.ps1:259-262); the operator-consent risk stays the accepted DEC-060 limit.
+2 pass: the only setting write is AllowServicePrincipalsUseReadAdminAPIs (create-m08b-pbi-access.ps1:37,189). The group holds only the reader's service principal (:164-168). The eight kit settings, including the 4.1 toggle, are read before and after the write (:137,199-200), comparing every field the value rules read. The script refuses if the reader app requests or holds any Power BI permission (:115-120,76).
+3 fail (non-blocking): the blast radius is stated (create-m08b-pp-mgmtapp.ps1:14-18, RECORD.md:74-78), but RECORD.md:18 only says "before the collection". Fix: make RECORD.md:18 say "immediately before the power_platform collection, and remove-m08b-pp-mgmtapp.ps1 -Apply straight after it". Add both steps around the collection at RECORD.md:101 and "immediately" at create-m08b-pp-mgmtapp.ps1:18, then re-freeze.
+4 pass: both removals work from the journal (remove-m08b-pbi-access.ps1:36-85, remove-m08b-pp-mgmtapp.ps1:41-44). They refuse on a mismatch and leave the journal at removed or removal-failed. RECORD.md:84-85,93-95 match the scripts. Nit: :1 says "never by name" but :54-63 can adopt a group by name, under limits; say so in the RECORD.md:84 Undo cell.
+5 pass with flag: the settingName rests on Microsoft365DSC and a real export, and the script checks the live title before writing (:132). Learn documents both POSTs (listtenantsettings with no body; the Fabric update). The scripts use 2020-10-01, as Learn does (create-m08b-pp-mgmtapp.ps1:28). The draft patch keeps listTenantSettings at 2023-06-01; fix: change it to 2020-10-01, or have CHK-M08-T03 prove 2023-06-01 live.
+6 pass: the secret is read only from the mode-600 file, cleared after use, and never printed or journalled (m08b-common.ps1:286-294). Errors carry the status and path only (:188-191). -Debug and -Verbose are refused. Nothing reads message bodies or file content.
