@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 67% (was 65%)
+overall: 71% (was 67%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 67ffc39 2026-11-14T02:52:57Z
+last_checkpoint: 4e65f59 2026-11-14T03:57:28Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -13,7 +13,7 @@ last_checkpoint: 67ffc39 2026-11-14T02:52:57Z
 
 ## Blockers
 - Host: quiet window until 00:30 GMT on 14 Nov (manager): until then nothing that takes a heavy slot. From 00:30 GMT heavy steps run again under the usual rule: one heavy slot through hostload.sh, load 12 or less (PLAN_LOAD_MAX=12).
-- Track A: M04-T04 (8a72e59), M04-T05 (afa6308) and M05-T04 (be9654d, with the corrected note sentence, DEC-050) are merged. M04-T06 is stopped for 1.5.0 (DEC-048; branch kept at ce543a5, BACKLOG Later). Next: M06-T01 (release notes and version bump; Claude author, Codex review at the exact merged head), the milestone-close suites of M04 and M05, then the M06 gates (M06-T02, M06-T03 astra). The tag and the GitHub release need G's yes naming 1.5.0 and the candidate sha. Codex seats may run to 98 per cent (DEC-041).
+- Track A: every 1.5.0 code and docs task is merged (M04-T04 8a72e59, M04-T05 afa6308, M05-T04 be9654d, M06-T01 4e65f59: version 1.5.0, notes dated 14 Nov; the date must equal the tag day). M04-T06 is stopped for 1.5.0 (DEC-048). Next: M06-T02, the pre-publication gates on the candidate (they also close item 19 of M04 and M05), then M06-T03 (astra release validation). Stop at an approved candidate: the tag and the GitHub release need G's yes naming 1.5.0 and the candidate sha, through the manager. No CI workflow exists, so a push publishes nothing.
 - Track B: the pilot FAILED and the data round has stopped (M03-T06 done, verified: attempt 1 6 wins of 190, attempt 2 18 of 190, 139 needed; filtered preference 0.5112 then 0.5337 against 0.729; unfiltered losses rose from 42 to 73). M03-T07, M03-T02 and M03-T03 do not run. The choice (revisit rule 2 of the bar, or park the model track) is G's, taken to him by the manager; nothing in M03 moves before his answer (he is back at 07:00 GMT on 14 Nov; the manager recommends parking, as I do). Amendment 4 for the parked case is being prepared as AMEND-4 and is not merged without his words (DEC-046). GPU-hours: basecmp 235.67 of 1,024, large 2.78 of 2,048, dataround 5.57 of 160.
 
 ## Pending G decisions
@@ -29,12 +29,12 @@ last_checkpoint: 67ffc39 2026-11-14T02:52:57Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 50% orchestrator
-claude-1 72% ok
+claude 51% orchestrator
+claude-1 73% ok
 claude-2 50% shared
 claude-3 68% ok
-claude-4 36% ok
+claude-4 37% ok
 claude-5 75% ok
 codex 93% hot
-codex2 87% hot
+codex2 88% hot
 <!-- quota:end -->
