@@ -1,7 +1,7 @@
 ---
 id: M04
 name: d5-keyed-pseudonyms
-weight: 16
+weight: 13
 status: done
 ---
 # M04 d5-keyed-pseudonyms

@@ -1,7 +1,7 @@
 ---
 id: M08
 name: collection-completeness
-weight: 0
+weight: 14
 status: planned
 ---
 # M08 collection-completeness

@@ -1,6 +1,8 @@
 ## RESULT REV-AMEND-5
 status: done
-summary: verdict: approve; reviewed: e92dddbf619114ba4b6b3f71ff75034fd472a7d2
+summary: verdict: approve
+reviewed: e92dddbf619114ba4b6b3f71ff75034fd472a7d2
+<!-- orchestrator: summary line split in two for merge.sh's format; content unchanged -->
 changes: none
 verification: git diff b39cae2..HEAD reviewed; percent.py --repo . --check PASS (84%)
 risks: Progress record skipped because filesystem access is read-only.

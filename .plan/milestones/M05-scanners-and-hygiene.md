@@ -1,7 +1,7 @@
 ---
 id: M05
 name: scanners-and-hygiene
-weight: 10
+weight: 8
 status: done
 ---
 # M05 scanners-and-hygiene

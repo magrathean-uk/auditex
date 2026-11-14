@@ -88,15 +88,15 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 <!-- milestones:begin -->
 | id | name | weight | % | status |
 |---|---|---|---|---|
-| M00 | foundation | 7 | 100 | done |
-| M01 | airr-bring-up | 13 | 100 | done |
-| M02 | explainer-data-and-judging | 14 | 100 | done |
+| M00 | foundation | 6 | 100 | done |
+| M01 | airr-bring-up | 11 | 100 | done |
+| M02 | explainer-data-and-judging | 11 | 100 | done |
 | M03 | explainer-training | 15 | 20 | active |
-| M04 | d5-keyed-pseudonyms | 16 | 100 | done |
-| M05 | scanners-and-hygiene | 10 | 100 | done |
-| M06 | release-1-5-0 | 13 | 100 | done |
+| M04 | d5-keyed-pseudonyms | 13 | 100 | done |
+| M05 | scanners-and-hygiene | 8 | 100 | done |
+| M06 | release-1-5-0 | 10 | 100 | done |
 | M07 | dummy-tenant-kit | 12 | 63 | planned |
-| M08 | collection-completeness | 0 | 0 | planned |
+| M08 | collection-completeness | 14 | 0 | planned |
 <!-- milestones:end -->
 Weights after amendment 5 (proposed; the re-baseline applies them to the milestone frontmatter): M00 7 to 6, M01 13
 to 11, M02 14 to 11, M03 15, M04 16 to 13, M05 10 to 8, M06 13 to 10, M07 12, M08 0 to 14; overall 84% to 70%.
