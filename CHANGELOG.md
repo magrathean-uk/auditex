@@ -5,7 +5,21 @@ All notable changes to Auditex are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The run-bundle contract has its own
 date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`).
 
-## [Unreleased]
+## [1.5.0] - 2026-11-14
+
+Shareable output is masked with a private per-run key, middle initials and titles are masked, the lint rule set is
+wider and the scanner limits found in 1.4.0 are closed. `CONTRACT_VERSION` moves from `2026-11-08` to `2026-11-11`.
+
+### Run-bundle contract
+
+- **`CONTRACT_VERSION` is `2026-11-11`.** The change is additive. A 1.5.0 run holds a private key file,
+  `operator-inputs/pseudonym.key`, which `bundle-hashes.json` lists under `excluded` with the reason
+  `redacted_operator_input` and which no report, pack, export or hash carries. The projection label is
+  `keyed-hmac-sha256-v1`; `schemas/model_assessment.schema.json` accepts it and the 1.4.0 label
+  `run-salted-sha256-v1`, and writers emit only the new one. A 1.4.0 reader can still read a 1.5.0 run, because the
+  key sits outside the folders it reads, but it rejects the run's `model_assessment.json`, so its render of that run
+  loses the policy explanations. It also masks with its own run-path salt, so its pseudonyms differ from 1.5.0
+  ones. A 1.5.0 reader reads a 1.4.0 bundle. See `docs/reference/output-contract.md`.
 
 ### Security and privacy
 
@@ -14,8 +28,40 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   pack, export or hash), so knowing the run folder no longer lets anyone confirm a guessed name. Pseudonyms from
   1.4.0 and earlier do not match. A run made before 1.5.0 (or copied without `operator-inputs/`, or sealed on
   storage without locking) is masked with a temporary key, and its output says so, until `auditex report
-  prepare-key RUN_DIR` is run once. A 1.4.0 reader loses the explanations of a 1.5.0 run. See
-  `docs/reference/security-privacy.md`.
+  prepare-key RUN_DIR` is run once. See `docs/reference/security-privacy.md`.
+- **Middle initials and titles are masked.** A recorded name also matches without its leading titles and middle
+  initials, and in text a middle initial between two parts of a name and a run of the listed titles (`Mr`, `Mrs`,
+  `Ms`, `Miss`, `Mx`, `Dr`, `Prof`, `Professor`, `Sir`, `Dame`, `Lord`, `Lady`, `Rev`, `Revd`) before a name are
+  masked with it. Mapping keys that equal a name are masked too. The boundary: a name with initials or a title that
+  cannot be resolved inside the scan budget is withheld with the placeholder `<redacted-text>` and never left
+  readable, and in rendered output that can be the whole text. The stated limits that stay open (a leading initial,
+  post-nominals, titles outside the list and others) are in `docs/reference/security-privacy.md`.
+- **The scanner limits found in 1.4.0 are closed.** `tests/test_read_boundaries.py` no longer trusts a read-only
+  hand-off or conversion name that the module rebinds, and it covers import, `with`, `def`, `class`, `except`,
+  `match` and comprehension-walrus bindings and class-body names. `tests/test_http_verb_allowlist.py` trusts a dotted
+  import origin only when nothing stores an attribute on it. Each has planted tests. The limits tables in
+  `docs/reference/security-privacy.md` list only the limits left open, as named limits (v2 DEC-011).
+
+### Added
+
+- **`auditex report prepare-key RUN_DIR`** creates the pseudonym key for a run that has none, prints `created` (or
+  `present`) and exits 0. It is not offered over MCP.
+- **`--as-of YYYY-MM-DD`** on both offline runs judges the date-derived checks at 12:00 UTC on that date, so a replay
+  reads the same on any day. A malformed date, or `--as-of` on a live run, exits 2. `make contract-smoke` passes a
+  fixed date.
+
+### Changed
+
+- **Ruff checks a wider rule set.** `make lint` selects `E4`, `E7`, `E9`, `F`, `W`, `I`, `B` and `UP` (was `E4`,
+  `E7`, `E9`, `F`), with the import sorter told the two first-party packages. Every finding is fixed.
+- The privacy and contract references call the projection the projected view throughout.
+- `make acceptance` reads the replay kit variable in the contract test. The contract-smoke digest comparison
+  normalises `expiry_state`, and its demo digests are refreshed.
+
+### Follow-ups closed
+
+- The plan v3 review follow-ups are closed, including a corrected sentence of the redaction note: a person whose
+  name is a vocabulary word is still masked in values and free text, and only the mapping key stays readable.
 
 ## [1.4.0] - 2026-11-10
 
