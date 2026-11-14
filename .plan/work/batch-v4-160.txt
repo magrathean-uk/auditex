@@ -1,0 +1,1 @@
+--task M06-T03 --role astra --account codex2 --readonly --sha a1c6b5e6e54e1fcc8fb224868a7e8467c723d262 --tags gate --timeout 3600 --brief .plan/work/M06-T03/brief-src.md
