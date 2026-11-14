@@ -9,6 +9,18 @@ from auditex import cli as auditex_cli
 from auditex import guided
 from auditex.guided import build_guided_parser
 
+_SAVED_AUTH_KEYS = (
+    "M365_CLI_APP_ID", "M365_CLI_CLIENT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET",
+    "AUDITEX_TENANT_ID", "AZURE_TENANT_ID", "AUDITEX_TENANT_NAME", "AUDITEX_M365_CONNECTION_NAME",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_saved_auth_values(monkeypatch):  # noqa: ANN001
+    """Guided runs save auth values into os.environ; each test starts without another test's saved app or tenant."""
+    for key in _SAVED_AUTH_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
 
 def _bundle(base, name: str = "run-a") -> str:
     """A real, contract-valid synthetic run bundle: the global run-dir guard stays on for dispatch tests."""
@@ -274,7 +286,7 @@ def test_guided_parser_accepts_flow_flag() -> None:
     assert args.flow == "ga-setup-app"
 
 
-def test_guided_run_requires_exchange_login_when_requested(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+def test_guided_run_delegated_exchange_needs_the_sign_in_app(monkeypatch, tmp_path, capsys) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         guided,
         "build_doctor_report",
@@ -285,8 +297,9 @@ def test_guided_run_requires_exchange_login_when_requested(monkeypatch, tmp_path
         },
     )
     monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
-    monkeypatch.setattr(guided, "_ensure_m365_login", lambda tenant_id, browser_command, **kwargs: 5)
-    monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no m365")))
+    monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no az")))
+    monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: pytest.fail("no run without a sign-in app"))
 
     rc = guided.run_guided(
         build_guided_parser().parse_args(
@@ -303,7 +316,8 @@ def test_guided_run_requires_exchange_login_when_requested(monkeypatch, tmp_path
         )
     )
 
-    assert rc == 5
+    assert rc == 2
+    assert "--flow ga-setup-app" in capsys.readouterr().out
 
 
 def test_guided_run_exchange_setup_adds_pwsh(monkeypatch, tmp_path) -> None:  # noqa: ANN001
@@ -321,12 +335,14 @@ def test_guided_run_exchange_setup_adds_pwsh(monkeypatch, tmp_path) -> None:  # 
     )
     monkeypatch.setattr(guided, "run_setup", lambda **kwargs: seen.update(kwargs) or 0)
     monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
-    monkeypatch.setattr(guided, "_ensure_m365_login", lambda tenant_id, browser_command, **kwargs: 0)
+    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no m365")))
     monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: 0)
 
     rc = guided.run_guided(
         build_guided_parser().parse_args(
             [
+                "--client-id",
+                "public-app",
                 "--tenant-id",
                 "contoso.onmicrosoft.com",
                 "--tenant-name",
@@ -515,8 +531,7 @@ def test_guided_run_app_audit_uses_saved_local_defaults(monkeypatch, tmp_path) -
     assert "saved-app-secret" in seen["argv"]
 
 
-def test_guided_run_delegated_relogs_when_azure_tenant_mismatched(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    seen: dict[str, object] = {}
+def test_guided_run_delegated_never_runs_az_login(monkeypatch, tmp_path, capsys) -> None:  # noqa: ANN001
 
     monkeypatch.setattr(
         guided,
@@ -527,8 +542,8 @@ def test_guided_run_delegated_relogs_when_azure_tenant_mismatched(monkeypatch, t
             "readiness": {"core_ready": True, "exchange_ready": True},
         },
     )
-    monkeypatch.setattr(guided, "_run_azure_login", lambda tenant_id, browser_command: seen.update({"tenant_id": tenant_id}) or 0)
-    monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no az login")))
+    monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: pytest.fail("no run without a sign-in"))
 
     rc = guided.run_guided(
         build_guided_parser().parse_args(
@@ -544,8 +559,8 @@ def test_guided_run_delegated_relogs_when_azure_tenant_mismatched(monkeypatch, t
         )
     )
 
-    assert rc == 0
-    assert seen["tenant_id"] == "contoso.onmicrosoft.com"
+    assert rc == 2
+    assert "az login --tenant contoso.onmicrosoft.com --allow-no-subscriptions once" in capsys.readouterr().out
 
 
 def test_guided_run_app_exchange_uses_secret_m365_login(monkeypatch, tmp_path) -> None:  # noqa: ANN001
@@ -737,6 +752,8 @@ def test_guided_run_reuses_saved_local_app_state(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no login")))
     monkeypatch.setattr(guided, "_offer_m365_setup", lambda *_: (_ for _ in ()).throw(AssertionError("no setup")))
     monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
+    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no m365")))
+    monkeypatch.setenv("M365_CLI_APP_ID", "saved-app-id")
     monkeypatch.setattr(
         guided.auditex_auth,
         "get_auth_status",
@@ -774,8 +791,12 @@ def test_guided_run_reuses_saved_local_app_state(monkeypatch, tmp_path) -> None:
     rendered = auth_env.read_text(encoding="utf-8")
     assert "M365_CLI_APP_ID=saved-app-id" in rendered
     assert "AUDITEX_TENANT_ID=contoso.onmicrosoft.com" in rendered
-    assert "AUDITEX_M365_CONNECTION_NAME=saved-conn" in rendered
-    assert "--include-exchange" in seen["argv"]
+    argv = seen["argv"]
+    # DEC-068: the saved app signs in once inside the run; Exchange comes from that sign-in, not the m365 CLI.
+    assert argv[argv.index("--client-id") + 1] == "saved-app-id"
+    assert "--interactive" in argv and "--use-azure-cli-token" not in argv
+    assert "--include-exchange" not in argv
+    assert "exchange_policy" in argv[argv.index("--collectors") + 1].split(",")
 
 
 def test_guided_no_exchange_excludes_policy_even_from_explicit_list(monkeypatch, tmp_path):
@@ -834,6 +855,8 @@ def test_guided_auth_mode_selection(monkeypatch, tmp_path, flow, include_exchang
             '--out', str(tmp_path), '--local-mode', '--skip-login-check', '--skip-tool-check']
     if flow == 'app-audit':
         argv += ['--client-id', 'constructed-app', '--client-secret', 'constructed-secret']
+    else:
+        argv += ['--client-id', 'constructed-public-app']
     if include_exchange:
         argv += ['--include-exchange']
     if non_interactive:
@@ -852,5 +875,13 @@ def test_guided_auth_mode_selection(monkeypatch, tmp_path, flow, include_exchang
             if '--auditor-profile' in selection:
                 assert 'exchange' in plan.selected_collectors
     else:
-        assert {'exchange_policy', 'dns_posture'}.isdisjoint(plan.selected_collectors)
-        assert ('exchange' in plan.selected_collectors) == (include_exchange or not non_interactive)
+        exchange = include_exchange or not non_interactive
+        assert args.interactive and args.client_id == 'constructed-public-app' and not args.use_azure_cli_token
+        assert 'dns_posture' not in plan.selected_collectors
+        if '--collectors' in selection:
+            # DEC-068: an explicit list keeps Exchange over the one sign-in, never through the m365 CLI collector.
+            assert plan.selected_collectors == (['identity', 'exchange_policy'] if exchange else ['identity'])
+        else:
+            # DEC-068: Exchange in a delegated run is exchange_policy over the one sign-in, never the m365 CLI collector.
+            assert ('exchange_policy' in plan.selected_collectors) == exchange
+            assert 'exchange' not in plan.selected_collectors

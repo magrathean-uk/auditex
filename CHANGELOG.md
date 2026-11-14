@@ -13,6 +13,16 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ### Collection
 
+- **One sign-in per audit run; Exchange kept in the guided delegated path (DEC-065, DEC-068).** A delegated
+  run with `--interactive --client-id` signs in once: one msal public client over one in-memory token cache, with
+  `acquire_token_silent` for every further resource; a second interactive prompt is refused with an error, and a
+  resource the sign-in cannot serve silently is a named gap. `exchange_policy` in that run connects with
+  `Connect-ExchangeOnline -AccessToken -UserPrincipalName`, the token minted silently from the same sign-in (needs
+  the delegated `Exchange.Manage` permission on the sign-in app). The guided `gr-audit` flow now signs in inside the
+  run when a sign-in app id is saved or passed, reads Exchange that way, and no longer runs `az login` or the
+  Microsoft 365 CLI browser sign-in; without an app id it reuses an existing Azure CLI sign-in and stops with a
+  hint instead of opening one, and Exchange then needs the app id. App-only runs stay at no interactive sign-in.
+  The setup and administrator permission guides state the sign-in count for every run mode and set-up step.
 - **Certificate credentials for app-only runs; Teams admin policies in app mode.** An app-mode run takes a
   certificate instead of a client secret: `--certificate-path` (a PEM or PFX private key file readable only by its
   owner) with `--certificate-thumbprint` (the SHA-1 thumbprint on the app registration), and for an encrypted key

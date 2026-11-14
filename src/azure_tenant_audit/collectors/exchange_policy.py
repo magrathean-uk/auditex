@@ -103,13 +103,23 @@ MAILBOX_FORWARDING_COMMAND = (
 
 
 def _exchange_session(client: Any, log_event: Any) -> dict[str, Any]:
-    """App-only Exchange Online session (token + initial domain), or a marker that no session is available.
+    """Exchange Online session (token plus initial domain or signed-in user), or a marker that none is available.
 
-    Needs the Exchange.ManageAsApp application permission and an Exchange-capable read role
+    App-only: needs the Exchange.ManageAsApp application permission and an Exchange-capable read role
     (for example Global Reader) assigned to the service principal:
     https://learn.microsoft.com/powershell/exchange/app-only-auth-powershell-v2
+    Delegated (DEC-068): the token is minted silently from the run's one sign-in (GraphClient.delegated_token_for)
+    and needs the delegated Office 365 Exchange Online permission Exchange.Manage with admin consent on the
+    sign-in app; it is passed with -UserPrincipalName, as the Connect-ExchangeOnline reference requires for a
+    delegated access token. No token means no session; Auditex never opens a second sign-in for Exchange.
     """
     token = client.app_token_for(EXCHANGE_ONLINE_SCOPE) if hasattr(client, "app_token_for") else None
+    if not token and hasattr(client, "delegated_token_for"):
+        delegated = client.delegated_token_for(EXCHANGE_ONLINE_SCOPE)
+        user = client.signed_in_username() if delegated and hasattr(client, "signed_in_username") else None
+        if delegated and user:
+            return {"kind": "exchange_online", "access_token": delegated, "user_principal_name": user}
+        return {"kind": "none"}
     organization = None
     if token and hasattr(client, "get_all"):
         try:

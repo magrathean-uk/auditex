@@ -12,7 +12,11 @@ from typing import Any
 from azure_tenant_audit import cli as tenant_cli
 from azure_tenant_audit.m365_home import m365_environment, m365_subprocess_kwargs
 from azure_tenant_audit.output_redaction import PROFILE_LOCAL
-from azure_tenant_audit.profiles import profile_choices
+from azure_tenant_audit.profiles import (
+    APP_MODE_ONLY_COLLECTORS,
+    PROFILES,
+    profile_choices,
+)
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 
 from . import auth as auditex_auth
@@ -126,7 +130,38 @@ class ProgressRenderer:
             print("Run complete")
 
 
+def _delegated_exchange_collectors(auditor_profile: str) -> str:
+    """The profile's delegated collectors plus exchange_policy, read over the run's one sign-in (DEC-068).
+
+    The Microsoft 365 CLI ``exchange`` collector is left out: it needs its own CLI sign-in, which this path no
+    longer opens. Explicit selection is the engine's only way to run exchange_policy outside app mode.
+    """
+    defaults = PROFILES[auditor_profile].default_collectors
+    names = [name for name in defaults if name not in APP_MODE_ONLY_COLLECTORS and name != "exchange"]
+    return ",".join([*names, "exchange_policy"])
+
+
+def _delegated_exchange_selection(collectors: str) -> str:
+    """An explicit collector list routed for Exchange over the run's one sign-in (DEC-068).
+
+    The Microsoft 365 CLI ``exchange`` collector is swapped out and exchange_policy added when missing, so an explicit
+    list never drops Exchange or reopens the separate CLI sign-in.
+    """
+    names: list[str] = []
+    for raw in collectors.split(","):
+        name = raw.strip()
+        if name and name != "exchange" and name not in names:
+            names.append(name)
+    if "exchange_policy" not in names:
+        names.append("exchange_policy")
+    return ",".join(names)
+
+
 def _run_azure_login(tenant_id: str, browser_command: str) -> int:
+    """One-time GA app setup only (ga-setup-app): the Microsoft 365 CLI setup signs in as Azure CLI.
+
+    Never called on an audit run's path; tests/test_single_sign_in.py checks that statically (DEC-065).
+    """
     env = os.environ.copy()
     env["BROWSER"] = browser_command
     return subprocess.run(
@@ -472,7 +507,11 @@ def run_guided(args: argparse.Namespace) -> int:
     tenant_name = args.tenant_name or _saved_value("AUDITEX_TENANT_NAME")
     browser_command = args.browser_command or _default_browser_command()
     include_exchange = args.include_exchange or plan.include_exchange
-    client_id = args.client_id or _saved_value("AZURE_CLIENT_ID", "M365_CLI_APP_ID", "M365_CLI_CLIENT_ID")
+    if auth_mode == "delegated":
+        # The sign-in app saved by ga-setup-app (a public client); its one sign-in serves Graph and Exchange.
+        client_id = args.client_id or _saved_value("M365_CLI_APP_ID", "M365_CLI_CLIENT_ID", "AZURE_CLIENT_ID")
+    else:
+        client_id = args.client_id or _saved_value("AZURE_CLIENT_ID", "M365_CLI_APP_ID", "M365_CLI_CLIENT_ID")
     certificate_argv = _certificate_argv(args)
     if certificate_argv and (args.client_secret or auth_mode != "app"):
         print("A certificate runs only in an app flow and never with a client secret")
@@ -538,21 +577,33 @@ def run_guided(args: argparse.Namespace) -> int:
         else:
             return 2
 
-    azure_state = (doctor.get("auth") or {}).get("azure_cli") or {}
-    azure_supported = (
-        azure_state.get("status") == "supported"
-        and _tenant_matches(str(azure_state.get("tenant_id") or ""), tenant_id)
-    )
-    if auth_mode == "delegated" and not args.local_mode and not args.skip_login_check and not azure_supported:
-        print("Azure login needed")
-        login_rc = _run_azure_login(tenant_id, browser_command)
-        if login_rc != 0:
-            return login_rc
+    # DEC-065: a delegated run signs in once, inside the engine (one msal sign-in with an in-memory cache) when a
+    # sign-in app id is known, else it reuses an existing Azure CLI sign-in. It never runs az login or m365 login.
+    one_sign_in = auth_mode == "delegated" and bool(client_id)
+    if auth_mode == "delegated" and not one_sign_in:
+        if include_exchange:
+            print(
+                "Exchange in a delegated run needs the sign-in app id: run --flow ga-setup-app once, or pass "
+                "--client-id. The run then signs in once for Microsoft Graph and Exchange."
+            )
+            return 2
+        azure_state = (doctor.get("auth") or {}).get("azure_cli") or {}
+        azure_supported = (
+            azure_state.get("status") == "supported"
+            and _tenant_matches(str(azure_state.get("tenant_id") or ""), tenant_id)
+        )
+        if not args.local_mode and not args.skip_login_check and not azure_supported:
+            print(
+                f"No sign-in available: run az login --tenant {tenant_id} --allow-no-subscriptions once, or run "
+                "--flow ga-setup-app once so the run can sign in itself."
+            )
+            return 2
 
     if include_exchange and not args.local_mode and not args.skip_login_check:
         module_rc = _ensure_exchange_module(non_interactive=args.non_interactive)
         if module_rc != 0:
             return module_rc
+    if include_exchange and auth_mode == "app" and not args.local_mode and not args.skip_login_check:
         m365_rc = _ensure_m365_login(
             tenant_id,
             browser_command,
@@ -580,7 +631,9 @@ def run_guided(args: argparse.Namespace) -> int:
     ]
     if args.top:
         argv.extend(["--top", str(args.top)])
-    if auth_mode == "delegated":
+    if one_sign_in:
+        argv.extend(["--interactive", "--client-id", client_id, "--browser-command", browser_command])
+    elif auth_mode == "delegated":
         argv.append("--use-azure-cli-token")
     elif certificate_argv:
         argv.extend(["--client-id", client_id, *certificate_argv])
@@ -588,10 +641,15 @@ def run_guided(args: argparse.Namespace) -> int:
         argv.extend(["--client-id", client_id, "--client-secret", client_secret])
     if args.run_name:
         argv.extend(["--run-name", args.run_name])
-    if args.collectors:
+    if args.collectors and include_exchange and auth_mode == "delegated":
+        argv.extend(["--collectors", _delegated_exchange_selection(args.collectors)])
+    elif args.collectors:
         argv.extend(["--collectors", args.collectors])
+    elif include_exchange and auth_mode == "delegated":
+        argv.extend(["--collectors", _delegated_exchange_collectors(args.auditor_profile)])
     if include_exchange:
-        argv.append("--include-exchange")
+        if auth_mode == "app":
+            argv.append("--include-exchange")
     elif flow == "gr-audit":
         argv.extend(["--exclude", "exchange,exchange_policy"])
     if args.probe_first:
@@ -609,15 +667,17 @@ def run_guided(args: argparse.Namespace) -> int:
     rc = tenant_cli.main(argv, event_listener=renderer, **input_kwargs)
     duration = round(time.time() - started, 2)
     print(f"Done in {duration}s")
-    if include_exchange:
+    if include_exchange and auth_mode == "app":
         m365_state = _current_m365_state()
         _persist_local_defaults(
             tenant_id=tenant_id,
             tenant_name=tenant_name,
-            app_id=client_id if auth_mode == "app" else str(m365_state.get("app_id") or "") or None,
-            client_secret=client_secret if auth_mode == "app" else None,
+            app_id=client_id,
+            client_secret=client_secret,
             connection_name=str(m365_state.get("active_connection") or "") or None,
         )
+    elif one_sign_in:
+        _persist_local_defaults(tenant_id=tenant_id, tenant_name=tenant_name, app_id=client_id)
     else:
         _persist_local_defaults(tenant_id=tenant_id, tenant_name=tenant_name)
     if args.report_format:

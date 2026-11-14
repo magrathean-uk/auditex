@@ -7,14 +7,18 @@ and `dns_posture` by default, as does the `full` preset. `app-readonly-full` als
 includes both. Profile defaults and presets omit both in interactive, delegated and access-token
 modes; DNS needs no Exchange session but follows this app-mode default boundary.
 Only an explicit `--collectors` list retains these collectors outside app mode.
-In delegated mode `--include-exchange` selects the working Microsoft 365 CLI
-`exchange` collector; it does not select `exchange_policy`.
+In delegated mode `--include-exchange` selects the Microsoft 365 CLI
+`exchange` collector; it does not select `exchange_policy`. The guided `gr-audit`
+flow with Exchange instead passes `exchange_policy` explicitly and reads it over the
+run's one sign-in (see Sign-ins per run below).
 `config-only` and `power-platform` retain their existing scopes. Power Platform
 and Power BI remain opt-in.
 
 A default app-mode run opens an Exchange Online PowerShell session for read-only
-`Get-*` policy reads. Interactive, delegated and access-token authentication cannot
-open this session; each fresh PowerShell process cannot inherit an operator's session.
+`Get-*` policy reads. A delegated run with one sign-in (`--interactive --client-id`)
+opens it with an Exchange token minted silently from that sign-in, given the delegated
+`Exchange.Manage` permission on the sign-in app; Azure CLI and access-token runs cannot
+open it, and each fresh PowerShell process cannot inherit an operator's session.
 For app access, install `pwsh` and `ExchangeOnlineManagement`, grant tenant admin
 consent to the **Office 365 Exchange Online** application permission
 `Exchange.ManageAsApp`, and assign **Global Reader only** to the service principal.
@@ -53,7 +57,9 @@ Add the usual tenant/auth/output arguments. These flags also work on
 `--collectors identity,conditional_access` replaces defaults;
 `--collector-preset config-only` omits both. Exclusions apply after profile, preset or explicit selection.
 In the guided `gr-audit` flow, answering No to Exchange excludes both Exchange collectors.
-Answering Yes selects the Microsoft 365 CLI `exchange` collector in delegated mode.
+Answering Yes reads `exchange_policy` over the run's one sign-in in delegated mode; it needs
+the sign-in app id (saved by `ga-setup-app` or passed with `--client-id`) and no longer opens
+a Microsoft 365 CLI browser sign-in.
 Guided `app-audit` keeps both default policy collectors and honours an explicitly
 named or profile-selected Microsoft 365 CLI `exchange` collector. Outside a
 `gr-audit` No answer, guided flows add no Exchange exclusion. Generated setup plans derive
@@ -154,7 +160,7 @@ auditex setup-guide m365 --mode delegated --auditor-profile global-reader --coll
 Admin flow:
 
 1. Assign the operator the read-only role shown in the guide.
-2. Sign in with Azure CLI.
+2. Sign in with Azure CLI once (`az login`), or use the one-sign-in route below.
 3. Run the generated probe command.
 4. Review `live-readiness.json`, `audit-plan.json`, and `diagnostics.json`.
 5. Add only the missing read permission or role justified by the probe.
@@ -174,6 +180,43 @@ App-only runs authenticate with a client secret or a certificate, never both. Th
 auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --client-id <app-id> \
   --certificate-path ~/audit-keys/auditex-reader.pem --certificate-thumbprint <sha1-thumbprint> \
   --certificate-password-file ~/audit-keys/auditex-reader.pass --auditor-profile global-reader --collector-preset full
+```
+
+### Sign-ins per run (one sign-in rule)
+
+Every service token a run uses comes from one credential or one sign-in: an audit run asks for at
+most one interactive sign-in, and none in app-only mode. Auditex never opens a second sign-in window during a
+run: when the one sign-in can no longer be refreshed silently the run stops with an error, and a service the
+sign-in cannot serve silently (no consent for it) is recorded as a named coverage gap.
+
+| Run mode | Interactive sign-ins per run | Service tokens |
+|---|---|---|
+| App-only, certificate (`--certificate-path`, `--certificate-thumbprint`) | 0 | All minted silently from the certificate: Microsoft Graph, Exchange Online, the Teams admin API, Power BI and Power Platform |
+| App-only, client secret (`--client-secret`) | 0 | Minted silently from the secret: Microsoft Graph, Exchange Online, Power BI and Power Platform; the Teams admin policies are skipped (`teams_token_unavailable`), never prompted |
+| Guided `app-audit` with Exchange | 0 | As app-only; the Microsoft 365 CLI signs in with the client secret, without a browser |
+| Delegated, one sign-in (`--interactive --client-id <sign-in app>`, and guided `gr-audit` when the sign-in app id is saved or passed) | 1 | Microsoft Graph from the sign-in; Exchange Online (`exchange_policy`) minted silently from the same sign-in. Teams admin, Power BI, Power Platform and Security & Compliance are not collected in delegated mode and never prompt |
+| Delegated, Azure CLI token (`--use-azure-cli-token`, and guided `gr-audit` without a sign-in app id and without Exchange) | 0 inside Auditex | Microsoft Graph from the operator's existing Azure CLI sign-in (one `az login` made before the run and reused until it expires). Auditex never runs `az login` during a run |
+| Access token (`--access-token`) | 0 | Microsoft Graph only |
+
+One-time set-up steps, each counted on its own:
+
+| Set-up step | Sign-ins (once) |
+|---|---|
+| App registration, permissions, admin consent, role assignment and certificate upload in the Microsoft Entra admin centre | 1 administrator sign-in covers all of them; creating the certificate and its key needs none |
+| Delegated Exchange permission on the sign-in app (`Exchange.Manage`, admin consent) | 0 when added in the same Entra admin centre session, otherwise 1 |
+| Guided `ga-setup-app` (saves the Microsoft 365 CLI app as the sign-in app) | At most 3 browser sign-ins: `az login` (skipped when Azure CLI is already signed in to the tenant), the Microsoft 365 CLI setup's own sign-in (it signs in as Azure CLI to create the app) and the `m365 login` check (skipped when the CLI is already signed in) |
+| Power BI read-only admin API setting (Fabric admin portal) | 1 sign-in to the Fabric admin portal |
+| Power Platform management-app registration (`Add-PowerAppsAccount`, `New-PowerAppManagementApp`) | 1 sign-in with the Power Apps administration module |
+| Installing `pwsh` and `ExchangeOnlineManagement` | 0 |
+
+Sign-in app for the one-sign-in delegated route, Exchange included: a public client with the **Mobile and
+desktop applications** redirect URI `http://localhost`, the delegated Graph permissions the selected
+collectors need, and the delegated `Exchange.Manage` permission on **Office 365 Exchange Online**, all with
+admin consent; `ExchangeOnlineManagement` 3.1.0 or later. Details and sources are in the
+[administrator permission guide](admin-permission-guide.md#exchange-online-in-a-delegated-run).
+
+```bash
+auditex guided-run --flow gr-audit --include-exchange --client-id <sign-in-app-id> --tenant-id contoso.onmicrosoft.com
 ```
 
 Sign-ins for the certificate route, counted apart:

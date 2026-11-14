@@ -15,6 +15,8 @@ from ..secret_hygiene import redact_command_string, redact_output
 from .base import Adapter, AdapterMetadata
 from .read_guard import CommandRefused, VettedCommand, check_command, refusal_response
 
+# A signed-in user name (UPN): plain address characters only; it travels in the environment, never in script text.
+_USER_PRINCIPAL_PATTERN = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _ORGANIZATION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.onmicrosoft\.(?:com|us|de|cn)")
 # Bounded reads for a sensitive command: stdout chunk size and the stderr kept for failure classification only.
 READ_CHUNK = 64 * 1024
@@ -182,12 +184,30 @@ class PowerShellGraphAdapter(Adapter):
 
     @staticmethod
     def _session_prelude(session: dict[str, Any] | None, env: dict[str, str]) -> str:
-        """Connect step for a fresh pwsh process. Tokens travel in the environment, never on the command line."""
+        """Connect step for a fresh pwsh process. Tokens travel in the environment, never on the command line.
+
+        Every connect passes an access token (DEC-065): an app-only token with -Organization, a delegated token
+        from the run's one sign-in with -UserPrincipalName. Without a usable token there is no connect at all.
+        """
         if not session or session.get("kind") != "exchange_online":
             return ""
         token = session.get("access_token")
+        if not token:
+            return ""
+        user = str(session.get("user_principal_name") or "")
         organization = str(session.get("organization") or "")
-        if not token or not _ORGANIZATION_PATTERN.fullmatch(organization):
+        if user:
+            if not _USER_PRINCIPAL_PATTERN.fullmatch(user):
+                return ""
+            env["AUDITEX_EXO_ACCESS_TOKEN"] = str(token)
+            env["AUDITEX_EXO_USER_PRINCIPAL_NAME"] = user
+            return (
+                "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "
+                "Connect-ExchangeOnline -AccessToken $env:AUDITEX_EXO_ACCESS_TOKEN "
+                "-UserPrincipalName $env:AUDITEX_EXO_USER_PRINCIPAL_NAME "
+                "-ShowBanner:$false -SkipLoadingFormatData -ErrorAction Stop | Out-Null; "
+            )
+        if not _ORGANIZATION_PATTERN.fullmatch(organization):
             return ""
         env["AUDITEX_EXO_ACCESS_TOKEN"] = str(token)
         return (

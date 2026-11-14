@@ -103,6 +103,33 @@ it checks consistency with the private files, not authenticity against someone
 able to rewrite them. The manifest schema defines this field; the output contract
 describes its constraints.
 
+### Sign-ins per run and per set-up step
+
+Every service token a run uses comes from one credential or one sign-in: an audit run asks for at
+most one interactive sign-in, and none in app-only mode. Auditex never opens a second sign-in window during a
+run: when the one sign-in can no longer be refreshed silently the run stops with an error, and a service the
+sign-in cannot serve silently (no consent for it) is recorded as a named coverage gap.
+
+| Run mode | Interactive sign-ins per run | Service tokens |
+|---|---|---|
+| App-only, certificate (`--certificate-path`, `--certificate-thumbprint`) | 0 | All minted silently from the certificate: Microsoft Graph, Exchange Online, the Teams admin API, Power BI and Power Platform |
+| App-only, client secret (`--client-secret`) | 0 | Minted silently from the secret: Microsoft Graph, Exchange Online, Power BI and Power Platform; the Teams admin policies are skipped (`teams_token_unavailable`), never prompted |
+| Guided `app-audit` with Exchange | 0 | As app-only; the Microsoft 365 CLI signs in with the client secret, without a browser |
+| Delegated, one sign-in (`--interactive --client-id <sign-in app>`, and guided `gr-audit` when the sign-in app id is saved or passed) | 1 | Microsoft Graph from the sign-in; Exchange Online (`exchange_policy`) minted silently from the same sign-in. Teams admin, Power BI, Power Platform and Security & Compliance are not collected in delegated mode and never prompt |
+| Delegated, Azure CLI token (`--use-azure-cli-token`, and guided `gr-audit` without a sign-in app id and without Exchange) | 0 inside Auditex | Microsoft Graph from the operator's existing Azure CLI sign-in (one `az login` made before the run and reused until it expires). Auditex never runs `az login` during a run |
+| Access token (`--access-token`) | 0 | Microsoft Graph only |
+
+One-time set-up steps, each counted on its own:
+
+| Set-up step | Sign-ins (once) |
+|---|---|
+| App registration, permissions, admin consent, role assignment and certificate upload in the Microsoft Entra admin centre | 1 administrator sign-in covers all of them; creating the certificate and its key needs none |
+| Delegated Exchange permission on the sign-in app (`Exchange.Manage`, admin consent) | 0 when added in the same Entra admin centre session, otherwise 1 |
+| Guided `ga-setup-app` (saves the Microsoft 365 CLI app as the sign-in app) | At most 3 browser sign-ins: `az login` (skipped when Azure CLI is already signed in to the tenant), the Microsoft 365 CLI setup's own sign-in (it signs in as Azure CLI to create the app) and the `m365 login` check (skipped when the CLI is already signed in) |
+| Power BI read-only admin API setting (Fabric admin portal) | 1 sign-in to the Fabric admin portal |
+| Power Platform management-app registration (`Add-PowerAppsAccount`, `New-PowerAppManagementApp`) | 1 sign-in with the Power Apps administration module |
+| Installing `pwsh` and `ExchangeOnlineManagement` | 0 |
+
 ### Delegated Read Login
 
 Use this when an operator signs in with a tenant account.
@@ -117,7 +144,14 @@ Useful narrower roles:
 - Reports Reader for usage and report surfaces.
 - Exchange admin or Exchange reader tooling only when Exchange command coverage is explicitly in scope.
 
-Command shape:
+Command shape, one sign-in inside the run (Exchange included when selected; sign-in app requirements under
+[Exchange Online in a delegated run](#exchange-online-in-a-delegated-run)):
+
+```bash
+auditex guided-run --flow gr-audit --include-exchange --client-id <sign-in-app-id> --tenant-id <tenant-id-or-domain>
+```
+
+Command shape with an existing Azure CLI sign-in (no Exchange; the operator runs `az login` once, before the run):
 
 ```bash
 auditex setup-guide m365 --mode delegated --auditor-profile global-reader --collector-preset full
@@ -293,6 +327,29 @@ If a permission name includes write capability but is required by a provider to 
 Exchange policy, audit, and forwarding checks run read-only `Get-*` cmdlets. In app mode Auditex requests an Exchange Online token for the audit app (`https://outlook.office365.com/.default`) and connects with `Connect-ExchangeOnline -AccessToken` against the tenant's initial `.onmicrosoft.com` domain; the token is passed to PowerShell through an environment variable, never on the command line. This needs the `Exchange.ManageAsApp` application permission on Office 365 Exchange Online plus a read role for the service principal, such as Global Reader ([Microsoft guidance](https://learn.microsoft.com/powershell/exchange/app-only-auth-powershell-v2)). Without them the checks are reported as `session_not_connected` or `command_not_authenticated` coverage gaps. `Get-ProtectionAlert` needs a Security & Compliance PowerShell session, which Auditex does not open, so alert policies stay a coverage gap in app mode; Security & Compliance DLP policy/rule and alert policy reads are not collected.
 
 The same Exchange session reads `Get-SharingPolicy` (`Name`, `Domains`), readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet. It uses the existing grants and reads partner-sharing configuration without message content. `Get-OrganizationConfig` includes `Identity`, `Name`, `AuditDisabled`; `Get-TransportConfig` includes `Name`, `SmtpClientAuthenticationDisabled`; `Get-TransportRule` includes `State`, `Mode`, `FromScope`, `PrependSubject` in its explicit configuration field list. The same session reads `Get-AcceptedDomain` with `Name`, `DomainName`, `DomainType`, `Default`, `IsCoexistenceDomain`. Complete same-run accepted-domain evidence supplies the SPF, DKIM and DMARC raw-record universe: domain names de-duplicated case-insensitively with the first-seen spelling retained and coexistence rows excluded. When both collectors are selected, `dns_posture` runs after `exchange_policy` and reuses that evidence without another tenant read or additional grants. Missing, failed, truncated or malformed evidence falls back to verified domains with the Email service; missing or non-list Graph `supportedServices` is kept. Coverage records `domain_universe` as `accepted_domains` or `graph_email_service`. These TXT lookups use public DNS without sign-in, retain the 200-domain record cap and fail-closed behaviour, and leave posture checks over all verified domains unchanged.
+
+### Exchange Online in a delegated run
+
+The one-sign-in delegated route needs a sign-in app registered in the customer tenant (the app
+`ga-setup-app` saves, or any app passed with `--client-id`): a public client with the **Mobile and desktop
+applications** redirect URI `http://localhost` (the sign-in opens the browser and returns to a local port), the
+delegated Microsoft Graph permissions the selected collectors need, with admin consent, and for Exchange the
+delegated permission `Exchange.Manage` on **Office 365 Exchange Online**, with admin consent. The run signs in once
+for Microsoft Graph, then asks the same in-memory token cache, silently, for an Exchange Online token for
+`https://outlook.office365.com/.default` and connects with
+`Connect-ExchangeOnline -AccessToken <token> -UserPrincipalName <signed-in user>`; the token and the user name
+reach PowerShell through environment variables, never the command line, and the cache is never written to disk.
+Sources: the [Connect-ExchangeOnline reference](https://learn.microsoft.com/powershell/module/exchangepowershell/connect-exchangeonline)
+(`-AccessToken`, module 3.1.0-Preview1 or later, used with `-Organization`, `-DelegatedOrganization` or
+`-UserPrincipalName` by token type) and the
+[Exchange Online token guidance](https://learn.microsoft.com/exchange/reference/admin-api-authentication)
+(the `https://outlook.office365.com/.default` scope, and the Exchange role the signed-in user needs);
+`Exchange.Manage` is the delegated permission the Office 365 Exchange Online API publishes, listed under
+API permissions > Office 365 Exchange Online > Delegated permissions in the Entra admin centre, and the
+token's `scp` claim must carry it. The signed-in user needs an Exchange read role such as Global Reader or
+View-Only Organization Management. Without the permission or the role, the Exchange checks are coverage gaps
+(`session_not_connected` or `command_not_authenticated`), never a second sign-in. `Get-ProtectionAlert` stays
+a named skip in delegated runs too.
 
 ## Power Platform and Power BI (optional)
 
