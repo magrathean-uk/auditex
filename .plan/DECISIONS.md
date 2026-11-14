@@ -474,3 +474,13 @@
 - consequences: no acceptance bar or scope changes.
 - approver: auto
 
+## DEC-052 Release 1.5.0
+- date: 2026-11-14
+- status: approved
+- candidate: a1c6b5e6e54e1fcc8fb224868a7e8467c723d262
+- decision: release Auditex 1.5.0 at the candidate above: the signed tag `v1.5.0` on that commit, the push of the tag to `origin`, and the GitHub release with exactly the wheel (sha256 81ea5c2f00bca2d0a880f4fe2527a7a917329396aaaba207c1da00f6ce444eba) and the sdist (sha256 959e825f2bcd769222789c1b5fc3fff8f2acbfc955ba6c9473c6807563b6ee1a) that M06-T02 gated. No PyPI. Nothing wider.
+- options: go today at this candidate (chosen) | a later day, which needs a changelog date fix, a new candidate and fresh gates | no-go
+- why: all seven pre-publication gates pass on the candidate (M06-T02) and the release validation says ready (M06-T03).
+- consequences: G accepts the four points the validation listed: the stated masking limits, whole-text withholding in rare cases, the thin margin on the HTML peak benchmark, and the tag day of 14 Nov 2026 (the changelog heading's date).
+- approver: G ("Yes, release 1.5.0", at 07:45 GMT on 14 Nov 2026, in answer to the team-manager chat's question "Release Auditex 1.5.0 today at the approved commit a1c6b5e?", relayed word for word by that chat; DEC-036)
+
