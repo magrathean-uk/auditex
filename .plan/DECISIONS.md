@@ -540,3 +540,19 @@
 - why: makes phase E runnable from frozen kit files with no question from the tenant chat; keeps the reader app's authority to what was reviewed.
 - consequences: round 7s part 2 carries the compare.py fix beside the live dry-run findings; the reader app runs only after both re-checks approve.
 - approver: auto
+
+## DEC-059 Collection completeness becomes milestone M08 (amendment 5)
+- date: 2026-11-14
+- status: approved
+- decision: a new milestone closes the 35 SCuBA rows an app-only secret collection cannot answer today (EXP-m07-teams; PHASE-E-COMMANDS.md section 5): A certificate credential for the Teams token (product, tier A, 11 rows), B Power BI and Power Platform enablement (operator scripts and docs, 16 rows), C the Teams app-settings read (product, tier A, 3 rows), D the compliance session with the DLP and alert adapters (product, tier A, 5 rows); order A, B, C, D, with A's product work and B's scripts and docs side by side. The first collection runs as reviewed. Reviews as the rules require; one repair round each, then to the manager. Tenant writes in A and B: G's go is given for reviewed scripts with a removal step and a row in OUT-OF-KIT-WRITES.md, needing only his sign-in, on condition that none changes a verdict the kit's blueprint expects; B is checked first against EXPECTED-VERDICTS and the kit's Power BI and Power Platform step, and if a verdict is touched the options go to the manager before a script is written. Amendment 5 drafts the milestone, the weights and the re-baseline.
+- options: record the 35 rows as known gaps and start no product work (the default, not chosen)
+- why: G, typed in the team-manager chat at about 07:48 GMT on 14 Nov: "the 30 day trial on the tenant is running, we should master data collection etc first"; the manager reads closing the 35 rows as that work, inside the product's stated scope of the 102 policies.
+- consequences: Track A reopens for collection work; a later release is its own gate (reserved, G's yes).
+- approver: G via manager (scope); the rest the manager (DEC-036)
+
+## DEC-060 Reader app: the reviewers differ on the residual consent screen
+- date: 2026-11-14
+- status: pending (manager)
+- decision: after the second narrow fix both scripts sign in with no scopes and print a Cancel instruction first; a missing scope refuses before any write. Sol passes B1; Codex keeps it blocking because an interactive sign-in cannot stop an operator accepting a .default consent screen, which would write a grant before the journal. Both agree on the fact and that only the operator's Cancel prevents it. The phase E E7 lines need a doc fix either way.
+- options: accept as a stated limit (recommended) | change the sign-in to a first-party client that cannot show a consent screen (research, a third author round, both re-checks) | astra tie-break
+- approver: manager (DEC-036)

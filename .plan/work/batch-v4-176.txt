@@ -1,0 +1,3 @@
+--task EXP-m07-phaseE --role terra --account claude-1 --readonly --tags debug --timeout 1800 --max-turns 50 --budget 5 --brief .plan/work/EXP-m07-phaseE/brief-src-3.md
+--task EXP-m08-pbpp --role terra --account claude-3 --readonly --tags debug --timeout 2400 --max-turns 80 --budget 8 --brief .plan/work/EXP-m08-pbpp/brief-src.md
+--task AMEND-5 --role sol --account claude-5 --branch --slug amend-5 --tags cross-cutting --timeout 3600 --max-turns 120 --budget 15 --brief .plan/work/AMEND-5/brief-src.md
