@@ -605,3 +605,11 @@
 - decision: the 7s dry runs (10:27-10:31 GMT) proved the 404 fix live and found no kit defect; 60-powerbi stops before any write because the operator's own Fabric client (`FabricClientId`, a README prerequisite) is not configured: the token it gets carries only `user_impersonation`, not delegated `Tenant.ReadWrite.All` (dt-live/phaseD/DRYRUN-FAULTS.md). Round 7s part 2b records this and freezes 7s meanwhile.
 - options: (a) a lab app registration with delegated `Tenant.ReadWrite.All`, admin consent and a localhost redirect, made by a reviewed script with a journal, a removal step and an OUT-OF-KIT-WRITES row, removed at rollback; delegated only, so it acts only while G is signed in; M08 Part B's Power BI step can reuse it (recommended) | (b) G sets the eight Power BI settings by hand in the Fabric portal and 60 is skipped
 - approver: G
+
+## DEC-067 One sign-in: what today's product does, and the guard task M08-T07
+- date: 2026-11-14
+- status: decided in part; one point pending (G)
+- decision: EXP-m08-signin found app-only runs (secret now, certificate on the A1 branch) mint every token with no prompt, and a delegated run prompts once per run. The one breach of DEC-065 is the guided delegated path with Exchange: an Azure command-line sign-in plus a Microsoft 365 command-line browser sign-in, two prompts. M08 gains M08-T07, a guard task: tests for zero interactive calls in app-only modes and at most one in a delegated run (one shared MSAL cache, silent tokens for every other resource), a static check that the run path never calls `Connect-*` without an access token or `az login`, and the sign-in count of every mode and setup step in the guides. D (M08-T05) opens the compliance session with a certificate access token, never a PowerShell sign-in, and its setup states the extra Exchange Online Protection consent. Pending G: how the guided delegated path gets to one sign-in; recommended: drop the Microsoft 365 command-line sign-in so Exchange stays app-only.
+- why: DEC-065 (G's rule).
+- consequences: M08 has seven tasks; the overall figure does not move (M08 is at 0%).
+- approver: G (DEC-065); the guided-path choice pending G

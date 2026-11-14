@@ -39,6 +39,7 @@ In one app-only certificate run the product collects and answers the 35 rows: 33
 | M08-T04 | C: the Teams app-settings read and adapter | codex | M | risk:high | todo |
 | M08-T05 | D: the compliance session, DLP and alert-policy reads and adapters | sol | L | hard risk:high | todo |
 | M08-T06 | E: one app-only re-collection and the kit's comparison (run by the tenant chat) | orchestrator | M | risk:high | todo |
+| M08-T07 | One sign-in guard (DEC-065) | codex | S | risk:high | todo |
 
 ## Acceptance criteria
 ### M08-T01 A1: certificate credentials for app-only tokens, Teams collection in app mode
@@ -88,3 +89,12 @@ In one app-only certificate run the product collects and answers the 35 rows: 33
 - Writes `product-commit: <40 hex>`, `run-mode: app-only certificate`, `run-manifest: <64 hex sha256 of the run's manifest>`, `rows-in-scope: 35`, `rows-decided: <n>`, `rows-named-tenant-reason: <n>`, `rows-product-design: <n>`, `rows-product-gap: <n>`, one `row: <policy id> <met|not-met|tenant-reason:<code>|product-design:<code>|product-gap:<code>> manifest:<first 12 hex of run-manifest>` line per scoped row read from that run, `kit-compare: recorded` and one `finding:` line per finding under `### Findings`; no tenant name, id, credential or workstation path.
 - verify: the M08-T06 Definition of Done command above.
 - files: `.plan/work/M08-T06/result.md`
+
+### M08-T07 One sign-in guard (DEC-065)
+- Precondition: M08-T01 merged (it owns `src/auditex/guided.py` until then). Facts: `.plan/work/EXP-m08-signin/result.md`.
+- Tests prove the rule on the run path: zero interactive token calls in app-only secret and certificate runs; at most one in a delegated run, with one shared in-memory MSAL cache and `acquire_token_silent` for every further resource; no `Connect-*` call without an access token and no `az login` anywhere on the run path (a static check over `src/`).
+- The guided delegated path with Exchange asks for one sign-in at most; how it gets there follows G's answer recorded in DEC-067 (the recommendation is to drop the second, Microsoft 365 command-line sign-in so Exchange stays app-only).
+- `docs/guides/admin-permission-guide.md` and `docs/guides/setup-guide.md` state the sign-in count for every run mode and for each one-time setup step.
+- Tier A (auth): review by the other provider (`REV-M08-T07`) plus an executing check (`CHK-M08-T07`) on the same head; focused tests and `make contract-smoke`.
+- verify: `.venv/bin/python -m pytest tests/test_single_sign_in.py tests/test_operator_flow.py tests/test_cli_extensions.py tests/test_cli.py && make lint && make contract-smoke`
+- files: `tests/test_single_sign_in.py` (new), `src/azure_tenant_audit/graph.py`, `src/auditex/guided.py`, `tests/test_operator_flow.py`, `tests/test_cli_extensions.py`, `docs/guides/admin-permission-guide.md`, `docs/guides/setup-guide.md`, `CHANGELOG.md`
