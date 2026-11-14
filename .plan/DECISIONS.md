@@ -722,7 +722,7 @@
 ## DEC-082 M08-T04 files line widened by the coverage-count tests and the query plan
 - date: 2026-11-14
 - status: decided
-- decision: M08-T04 also owns the count asserts its eighth Teams coverage row changes in tests/test_api_observed_ledger.py, tests/test_cli.py, tests/test_collection_gaps.py, tests/test_enterprise_depth_collectors.py, tests/test_external_sharing.py, tests/test_review_v3_run_level.py and tests/test_teams_policy_projection_join.py (count updates only, as in its nonowned-tests.patch), and the teams_policy query_plan entry in configs/collector-definitions.json. No open task writes them; M08-FIX1 may touch the same files and merges first, so T04 rebases onto it.
+- decision: M08-T04 also owns the count asserts its eighth Teams coverage row changes in tests/test_api_observed_ledger.py, tests/test_cli.py, tests/test_collection_gaps.py, tests/test_enterprise_depth_collectors.py, tests/test_external_sharing.py, tests/test_review_v3_run_level.py and tests/test_teams_policy_projection_join.py (count updates only, except one allowed semantic assertion in tests/test_teams_policy_projection_join.py that expects the certificate marker for the tenantAppSettings skip (REV-M08-T04 result-2 item 2); as in its nonowned-tests.patch), and the teams_policy query_plan entry in configs/collector-definitions.json. No open task writes them; M08-FIX1 may touch the same files and merges first, so T04 rebases onto it.
 - why: M08-T04 stopped blocked only on ownership; the edits are mechanical consequences of the accepted row.
 - approver: auto (to be listed for the manager)
 
@@ -745,4 +745,11 @@
 - status: decided
 - decision: The live 05-entra-settings run stopped on MS.AAD.3.4 (policyMigrationState stays null after an accepted PATCH; Microsoft retired the legacy MFA and SSPR policies). Round 7t (M07-K7T) changes 05 only, from dt-r7s-ro, then one Codex confirmation and the full kit suite; 05 reruns from 7t. M07-SIT's driver and its session change (20261111-kit-7s/dt-r7t, f692ea3eca22) are parked: G now lets the lead click the account pickers, so the driver saves only the lead's clicks and would add a tier A session change (DEC-010). Phase D steps that do not depend on 05 may run from 7s meanwhile; M07-T16 records which copy each script ran from.
 - why: live finding 14 Nov 18:02 GMT; manager ruling: keep the rework to what saves G's touches, do not over-build.
+- approver: auto
+
+## DEC-086 Every M08 product task owns its own guard-inventory entries
+- date: 2026-11-14
+- status: decided
+- decision: From M08-T05 on, a product task may add its own new product field names to `_D5_FIELD_NAMES` in `src/azure_tenant_audit/output_redaction.py` and classify its own new sinks and flags in `tests/sink_expansions.py`, `src/auditex/output_writers.py` and `tests/test_key_guard_cli_values.py` (entries for its change only), and runs `tests/test_redaction_person_names.py tests/test_writer_sinks_d3.py tests/test_key_guard_cli_values.py` with its verify. The reviewer judges those entries.
+- why: M08-T01, T07, T08, T09 and T04 each broke those inventories after merge (M08-FIX1, DEC-082).
 - approver: auto
