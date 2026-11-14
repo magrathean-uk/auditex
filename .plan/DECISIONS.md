@@ -557,3 +557,12 @@
 - options: accept as a stated limit (recommended) | change the sign-in to a first-party client that cannot show a consent screen (research, a third author round, both re-checks) | astra tie-break
 - ruling: accept the residual risk as a stated limit in the script header and the reader-app record; no third round and no tie-break. Condition: G's sheet tells him to accept permission pages in general, so for this step the instruction must be the opposite and unmistakable; the tenant chat changes Part 0 of G-SHEET.md and says it to him just before the window opens, and the E7 lines carry the same sentence: a permissions page here means Cancel, then tell the session. After the doc fix the reader app is ready: the tenant chat gets its go with the final script hash; the run waits for the manager to lift the network hold.
 - approver: manager (DEC-036)
+
+## DEC-061 Part B of M08 passes the verdict condition; 14 of its 16 rows can close
+- date: 2026-11-14
+- status: decided
+- decision: EXP-m08-pbpp found that the three tenant changes Part B needs (a security group holding only the reader's service principal, the Power BI admin setting letting service principals use the read-only admin APIs scoped to that group, and the Power Platform management-app registration) change no verdict the kit expects in either variant, and neither the kit's verify nor the ScubaGear cross-check reads them. DEC-059's condition is met, so B's scripts may be written without returning to the manager. Two points go into M08-T03 before any script: confirm the Power BI setting's API name is not the MS.POWERBI.4.1 toggle, and fix the product's Power Platform tenant-settings read if the API needs POST where the product sends GET. PP 2.3 (a constant not-assessed rule) and PP 3.1 (a never-configured tenant reads as unavailable) stay not assessed by product design, so B closes at most 14 rows.
+- options: scope 4.2 to a group (rejected: it would flip an expected verdict)
+- why: the manager's condition in DEC-059.
+- consequences: M08's target is 33 of 35 rows unless the two product rules change, which would be its own decision.
+- approver: auto

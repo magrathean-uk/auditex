@@ -1,0 +1,1 @@
+--task REV-AMEND-5 --role codex --account codex2 --readonly --sha task/AMEND-5-amend-5 --tags review --timeout 2400 --brief .plan/work/REV-AMEND-5/brief-src.md
