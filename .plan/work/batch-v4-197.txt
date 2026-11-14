@@ -1,0 +1,1 @@
+--task M07-T18 --role sol --brief .plan/work/M07-T18/brief-src-3.md --branch --slug kit-round-7s --tags hard --account claude-4 --max-turns 120 --timeout 5400 --budget 20 --rounds-ok "DEC-054: confirmation repair (REV-M07-T18-codex findings 1 and 5)"

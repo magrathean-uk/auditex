@@ -1,0 +1,2 @@
+--task M07-T18 --role sol --brief .plan/work/M07-T18/brief-src-3.md --branch --slug kit-round-7s --tags hard --account claude-4 --max-turns 120 --timeout 5400 --budget 20 --rounds-ok "DEC-054: confirmation repair, infra rerun after a session restart"
+--task M08-T01 --role sol --account claude-3 --branch --slug certauth-teams --tags size:M,hard,risk:high --timeout 5400 --max-turns 150 --budget 25 --rounds-ok "infra rerun after a session restart" --brief .plan/work/M08-T01/fix-1.md

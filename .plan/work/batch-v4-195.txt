@@ -1,0 +1,1 @@
+--task REV-FAPP-opus --role sol --account claude-3 --readonly --tags hard,risk:high --timeout 2400 --max-turns 80 --budget 10 --brief .plan/work/REV-FAPP/brief-src.md

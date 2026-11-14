@@ -1,0 +1,2 @@
+--task M08-T03 --role sol --account claude-5 --readonly --tags size:M,risk:high --timeout 3600 --max-turns 120 --budget 15 --brief .plan/work/M08-T03/fix-1.md
+--task AMEND-7 --role sol --account claude-1 --branch --slug amend-7 --tags cross-cutting --timeout 3600 --max-turns 120 --budget 15 --brief .plan/work/AMEND-7/brief-src.md
