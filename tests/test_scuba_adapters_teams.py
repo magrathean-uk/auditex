@@ -300,7 +300,7 @@ def test_enum_decisions_belong_to_rules(bundle, section, field):
 
 def test_area_hook_registration():
     assert ADAPTERS is TEAMS_ADAPTERS
-    assert set(TEAMS_ADAPTERS) == set(OPERATIONS)
+    assert set(TEAMS_ADAPTERS) == set(OPERATIONS) | {"tenant_app_settings"}  # M08-T04: tests/test_teams_app_settings.py
     assert not set(TEAMS_ADAPTERS) & (PS_SECTIONS.keys() | {"sharing_policy", "scuba_config", "tenant_id"})
     assert "meeting_policies" not in TEAMS_ADAPTERS
     assert AREA_ADAPTER_MODULES.count("auditex.scuba_adapters_teams") == 1

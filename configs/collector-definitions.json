@@ -318,7 +318,8 @@
         "appPermissionPolicies",
         "appSetupPolicies",
         "broadcastPolicies",
-        "clientConfiguration"
+        "clientConfiguration",
+        "tenantAppSettings"
       ],
       "command_collectors": [
         {

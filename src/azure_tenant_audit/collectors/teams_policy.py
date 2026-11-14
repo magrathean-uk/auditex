@@ -22,6 +22,14 @@ TEAMS_OPERATIONS: tuple[str, ...] = (
     "clientConfiguration",
 )
 
+# Org-wide unified app settings (MS.TEAMS 5.1-5.3). Kept out of ``command_collectors`` (the configured
+# PowerShell list): the cmdlet and its REST source (``teams_admin_rest.TEAMS_UNIFIED_READ_PATHS``) answer
+# only a user sign-in, so this app-only collector records the named skip and never sends the read. The
+# rule adapter then gives the rules ScubaGear's certificate-authentication input, and MS.TEAMS 5.1-5.3
+# are judged from appPermissionPolicies, as ScubaGear judges them with certificate authentication.
+APP_SETTINGS_OPERATION = "tenantAppSettings"
+APP_SETTINGS_COMMAND = "Get-M365UnifiedTenantSettings | Select-Object SettingName,SettingValue"
+
 
 class TeamsPolicyCollector(Collector):
     name = "teams_policy"
@@ -65,6 +73,7 @@ class TeamsPolicyCollector(Collector):
             TEAMS_ADMIN_BASE,
             TEAMS_ADMIN_SCOPE,
             TEAMS_READ_PATHS,
+            TEAMS_UNIFIED_BASE,
             certificate_token,
         )
         from ..graph import GRAPH_ROOT, GraphClient
@@ -87,8 +96,8 @@ class TeamsPolicyCollector(Collector):
         # Only a certificate credential mints the Teams admin token: GraphClient.app_token_for
         # returns None for it otherwise, and a run with a client secret never asks, so a
         # secret-only or delegated run records teams_token_unavailable below. In app mode with a
-        # certificate the five REST reads run; the two operations without a REST read path
-        # (messaging and app setup policies) stay named skips.
+        # certificate the five REST reads run; messaging and app setup policies (no REST read path)
+        # and the unified app settings (a user sign-in only) stay named skips.
         if not getattr(auth, "client_secret", None) and getattr(auth, "auth_mode", "app") == "app":
             if environment in TEAMS_ADMIN_BASE and hasattr(client, "app_token_for"):
                 try:
@@ -102,10 +111,11 @@ class TeamsPolicyCollector(Collector):
         coverage: list[dict[str, Any]] = []
         total = 0
 
-        for name, command in self.command_collectors:
+        for name, command in (*self.command_collectors, (APP_SETTINGS_OPERATION, APP_SETTINGS_COMMAND)):
             rest_read = name in TEAMS_READ_PATHS and bool(token)
             skipped = False
-            if name in TEAMS_READ_PATHS and environment and environment not in TEAMS_ADMIN_BASE:
+            bases = TEAMS_UNIFIED_BASE if name == APP_SETTINGS_OPERATION else TEAMS_ADMIN_BASE
+            if (name in TEAMS_READ_PATHS or name == APP_SETTINGS_OPERATION) and environment and environment not in bases:
                 response = {"error": "unsupported_environment", "error_class": "unsupported_environment"}
             elif not token:
                 # No adapter connects a Teams PowerShell session. An unavailable

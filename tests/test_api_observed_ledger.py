@@ -364,7 +364,7 @@ def test_teams_rest_run_writes_five_gets_and_statuses_without_token(monkeypatch,
         assert call["endpoint"] in expected
         assert call["status"] == ("ok" if expected[call["endpoint"]] == 200 else "failed")
     command_calls = [call for call in inventory["observed_calls"] if call["name"] not in TEAMS_READ_PATHS]
-    assert len(command_calls) == 2
+    assert len(command_calls) == 3  # messaging, app setup and the unified app settings (M08-T04)
     assert all(call["method"] == "COMMAND" and call["command"].startswith("Get-") for call in command_calls)
     markdown = render_api_call_inventory_markdown(inventory)
     assert "Observed Teams REST requests: 5" in markdown
@@ -657,7 +657,7 @@ def test_skipped_teams_reads_do_not_claim_transport_attempts(monkeypatch, tmp_pa
     inventory = json.loads(path.read_text())
     assert inventory["counts"]["observed_commands"] == 0
     assert inventory["counts"]["observed_teams_admin_rest_requests"] == 0
-    assert len(inventory["observed_calls"]) == 7
+    assert len(inventory["observed_calls"]) == 8
     assert all(row["status"] == "skipped" for row in inventory["observed_calls"])
     assert inventory["safety"]["read_only"] and inventory["safety"]["no_content_reads"]
 

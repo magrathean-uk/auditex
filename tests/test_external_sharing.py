@@ -339,7 +339,7 @@ def test_the_teams_collector_skips_reads_without_a_certificate_token(monkeypatch
     result = TeamsPolicyCollector().run({"client": TeamsClient(None), "audit_logger": None})
 
     assert commands.calls == [] and session.calls == []
-    assert len(result.coverage) == 7
+    assert len(result.coverage) == 8
     assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in result.coverage)
     assert result.payload["tenantFederationConfiguration"]["reason"] == "teams_token_unavailable"
 

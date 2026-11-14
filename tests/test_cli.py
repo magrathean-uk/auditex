@@ -341,7 +341,7 @@ def test_live_run_does_not_trust_teams_when_every_read_is_skipped(tmp_path: Path
     plan = json.loads((run_dir / "audit-plan.json").read_text())
     teams_rows = [row for row in coverage if row["collector"] == "teams_policy"]
 
-    assert len(teams_rows) == 7
+    assert len(teams_rows) == 8
     assert all(row["status"] == "skipped" and row["error_class"] == "teams_token_unavailable" for row in teams_rows)
     assert next(row for row in summary["collectors"] if row["name"] == "teams_policy")["status"] == "ok"
     assert summary["overall_status"] == "ok"

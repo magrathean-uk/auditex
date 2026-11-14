@@ -27,6 +27,18 @@ TEAMS_READ_PATHS = {
     "appPermissionPolicies": "/Skype.Policy/configurations/TeamsAppPermissionPolicy",
     "broadcastPolicies": "/Skype.Policy/configurations/TeamsMeetingBroadcastPolicy",
 }
+# Org-wide unified app settings (the source of Get-M365UnifiedTenantSettings): a separate host and token
+# audience, pinned from ScubaGear's API catalogue (Get-TeamsM365UnifiedTenantSettingsRest and
+# Get-TeamsUnifiedApiEndpoint). Microsoft serves it to a user sign-in only, so an app-only run never calls it.
+TEAMS_UNIFIED_SCOPE = "08ff1ce2-4973-4b08-86a3-ebed13badc7f/.default"
+TEAMS_UNIFIED_BASE = {
+    "commercial": "https://substrate.office.com",
+    "gcc": "https://substrate.office.com",
+}
+TEAMS_UNIFIED_READ_PATHS = {
+    "tenantAppSettings": "/AdminAppCatalog/ps/v2/admin/unifiedApp/settings",
+}
+_TEAMS_UNIFIED_AUDIENCES = frozenset({TEAMS_UNIFIED_SCOPE.removesuffix("/.default"), "https://substrate.office.com"})
 
 
 # Bounds apply to each operation, including both attempts and error bodies.
@@ -53,9 +65,14 @@ TEAMS_REQUIRED_FIELDS = {
         "GlobalCatalogAppsType": str, "PrivateCatalogAppsType": str,
     },
     "broadcastPolicies": {"Identity": str, "BroadcastRecordingMode": str},
+    "tenantAppSettings": {"SettingName": str},
 }
 TEAMS_FIELDS = {name: tuple(fields) for name, fields in TEAMS_REQUIRED_FIELDS.items()}
 TEAMS_FIELDS["tenantFederationConfiguration"] += ("AllowPublicUsers", "BlockedDomains")
+# The rules read SettingValue and judge a missing or non-string one themselves; Users and Groups are never kept.
+TEAMS_FIELDS["tenantAppSettings"] += ("SettingValue",)
+# Operations whose answer may be a bare JSON array and may be empty (no org-wide setting configured).
+_LIST_OPERATIONS = frozenset(TEAMS_UNIFIED_READ_PATHS)
 
 
 def certificate_token(token):
@@ -74,16 +91,30 @@ def certificate_token(token):
         return False
 
 
+def unified_settings_token(token):
+    """Audience gate for the unified app-settings host: no Teams admin or Graph token is ever sent there."""
+    try:
+        payload = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        return claims.get("aud") in _TEAMS_UNIFIED_AUDIENCES
+    except (AttributeError, IndexError, ValueError, TypeError, RecursionError):
+        return False
+
+
 def _rows(parsed, operation):
-    if not isinstance(parsed, dict) or "error" in parsed:
+    if operation in _LIST_OPERATIONS and isinstance(parsed, list):
+        rows = parsed
+    elif not isinstance(parsed, dict) or "error" in parsed:
         raise ValueError("unexpected_shape")
-    if "value" in parsed:
+    elif "value" in parsed:
         rows = parsed["value"]
+    elif operation in _LIST_OPERATIONS:
+        raise ValueError("unexpected_shape")
     else:
         rows = [parsed]
-    # Both configurations are singletons; each policy family includes Global.
-    # None of these five operations can legitimately return no rows.
-    if not isinstance(rows, list) or not rows:
+    # Both configurations are singletons; each policy family includes Global, so none of
+    # those five operations can legitimately return no rows. Unified settings may be empty.
+    if not isinstance(rows, list) or not rows and operation not in _LIST_OPERATIONS:
         raise ValueError("unexpected_shape")
     for row in rows:
         if not isinstance(row, dict) or "error" in row:
@@ -226,14 +257,17 @@ class TeamsAdminRestAdapter(Adapter):
         return True
 
     def get(self, operation, token, environment, log_event=None):
-        if operation not in TEAMS_READ_PATHS:
+        if operation in TEAMS_READ_PATHS:
+            bases, path, token_ok = TEAMS_ADMIN_BASE, TEAMS_READ_PATHS[operation], certificate_token
+        elif operation in TEAMS_UNIFIED_READ_PATHS:
+            bases, path, token_ok = TEAMS_UNIFIED_BASE, TEAMS_UNIFIED_READ_PATHS[operation], unified_settings_token
+        else:
             raise ValueError("Teams operation is not allowlisted")
-        if environment not in TEAMS_ADMIN_BASE:
+        if environment not in bases:
             return {"error": "unsupported_environment", "error_class": "unsupported_environment"}
-        if not certificate_token(token):
+        if not token_ok(token):
             return {"error": "teams_token_unavailable", "error_class": "command_not_authenticated"}
-        path = TEAMS_READ_PATHS[operation]
-        base = TEAMS_ADMIN_BASE[environment]
+        base = bases[environment]
         started = time.monotonic()
 
         def finish(error_class):

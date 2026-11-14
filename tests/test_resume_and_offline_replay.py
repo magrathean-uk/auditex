@@ -265,7 +265,7 @@ def test_teams_replay_preserves_new_skips_and_older_failures(tmp_path, monkeypat
     assert _manifest(run_dir)["overall_status"] == ("partial" if legacy_failed else "ok")
     assert json.loads((run_dir / "validation.json").read_text())["valid"] is True
     coverage = json.loads((run_dir / "coverage.json").read_text())
-    assert len(coverage) == (2 if mode == "certificate_token" else 7)
+    assert len(coverage) == (3 if mode == "certificate_token" else 8 if mode == "no_token" else 7)
     assert all(row["status"] == ("failed" if legacy_failed else "skipped") for row in coverage)
     assert _rule_statuses(run_dir)["teams.external_federation_open"] == (
         {"pass"} if mode == "certificate_token" else {"not_assessed"}
@@ -274,7 +274,7 @@ def test_teams_replay_preserves_new_skips_and_older_failures(tmp_path, monkeypat
         expected_reason = "teams_powershell_not_supported" if mode == "certificate_token" else "teams_token_unavailable"
         assert all(row["reason"] == expected_reason and row["section_scoped"] is True for row in coverage)
         if mode == "certificate_token":
-            assert {row["name"] for row in coverage} == {"messagingPolicies", "appSetupPolicies"}
+            assert {row["name"] for row in coverage} == {"messagingPolicies", "appSetupPolicies", "tenantAppSettings"}
         else:
             assert "certificate token for the Teams admin API not available" in str(_manifest(run_dir)["coverage_gaps"])
 

@@ -835,5 +835,5 @@ def test_teams_policy_collector_skips_command_sections_without_a_token(monkeypat
     result = collector.run({"audit_logger": None})
 
     assert result.status == "ok"
-    assert len(result.coverage) == 7 and result.item_count == 0
+    assert len(result.coverage) == 8 and result.item_count == 0
     assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in result.coverage)

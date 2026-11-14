@@ -8,6 +8,7 @@ import pytest
 from test_teams_admin_rest import Client
 
 from azure_tenant_audit.collectors.teams_policy import (
+    APP_SETTINGS_OPERATION,
     TEAMS_OPERATIONS,
     TeamsPolicyCollector,
 )
@@ -71,7 +72,7 @@ def test_command_list_matches_config() -> None:
         configured.append((entry["name"], entry["commands"][0]))
     assert TeamsPolicyCollector.command_collectors == configured
     assert TEAMS_OPERATIONS == tuple(name for name, _ in configured)
-    assert definition.query_plan == list(TEAMS_OPERATIONS)
+    assert definition.query_plan == [*TEAMS_OPERATIONS, APP_SETTINGS_OPERATION]
 
 
 def test_required_permissions_match_config_and_app_recommendation() -> None:
@@ -168,10 +169,11 @@ def test_failed_operation_marks_only_its_own_row(monkeypatch) -> None:
     result = TeamsPolicyCollector().run({"client": Client(), "audit_logger": None})
 
     assert result.status == "partial"
-    assert len(result.coverage) == 7
+    assert len(result.coverage) == 8
     assert {row["name"]: row["status"] for row in result.coverage} == {
         name: "failed" if name == "broadcastPolicies" else
-        "skipped" if name in {"messagingPolicies", "appSetupPolicies"} else "ok" for name in TEAMS_OPERATIONS
+        "skipped" if name in {"messagingPolicies", "appSetupPolicies", APP_SETTINGS_OPERATION} else "ok"
+        for name in (*TEAMS_OPERATIONS, APP_SETTINGS_OPERATION)
     }
     assert result.item_count == 4
     assert result.payload["broadcastPolicies"]["error"] == "Policy read failed"
@@ -197,8 +199,8 @@ def test_no_token_skips_all_seven_operations_without_loading_an_adapter(monkeypa
     result = TeamsPolicyCollector().run({"audit_logger": None})
 
     assert TEAMS_OPERATIONS == expected
-    assert tuple(result.payload) == expected
-    assert tuple(row["name"] for row in result.coverage) == expected
+    assert tuple(result.payload) == (*expected, APP_SETTINGS_OPERATION)
+    assert tuple(row["name"] for row in result.coverage) == (*expected, APP_SETTINGS_OPERATION)
     assert result.status == "ok"
     assert result.item_count == 0 and result.error is None
     assert all(row["status"] == "skipped" and row["item_count"] == 0 for row in result.coverage)
@@ -215,7 +217,7 @@ def test_no_token_skips_all_seven_operations_without_loading_an_adapter(monkeypa
     assert not snapshot.get("teams_policy_objects", {}).get("records")
     assert not [row for row in build_findings([], normalized_snapshot=snapshot) if row.get("collector") == "teams_policy"]
     gaps = snapshot["collection_gaps"]["records"]
-    assert len(gaps) == 7
+    assert len(gaps) == 8
     assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in gaps)
 
 
@@ -273,14 +275,16 @@ def test_certificate_app_run_reads_five_rest_operations_and_names_two_skips(monk
     result = TeamsPolicyCollector().run({"client": client, "audit_logger": None})
 
     assert [request["scope"] for request in entra.token_requests] == [TEAMS_ADMIN_SCOPE]
-    assert tuple(result.payload) == TEAMS_OPERATIONS and len(result.coverage) == 7
+    assert tuple(result.payload) == (*TEAMS_OPERATIONS, APP_SETTINGS_OPERATION) and len(result.coverage) == 8
     assert result.status == "ok" and result.item_count == 5
     statuses = {row["name"]: row["status"] for row in result.coverage}
     # DEC-070: five REST reads with the certificate token cover every section the SCuBA rows cite. Messaging
     # and app setup policies have no REST route and no row cites them, so they stay named skips
-    # (teams_powershell_not_supported), never teams_token_unavailable.
-    named_skips = {"messagingPolicies", "appSetupPolicies"}
-    assert statuses == {name: "skipped" if name in named_skips else "ok" for name in TEAMS_OPERATIONS}
+    # (teams_powershell_not_supported), never teams_token_unavailable. The unified app settings answer only a
+    # user sign-in, so the app-only run names the same skip and requests no token for them (M08-T04).
+    named_skips = {"messagingPolicies", "appSetupPolicies", APP_SETTINGS_OPERATION}
+    assert statuses == {name: "skipped" if name in named_skips else "ok"
+                        for name in (*TEAMS_OPERATIONS, APP_SETTINGS_OPERATION)}
     assert {row["name"]: row.get("reason") for row in result.coverage if row["name"] in named_skips} == {
         name: "teams_powershell_not_supported" for name in named_skips}
     assert sum(status == "ok" for status in statuses.values()) == 5
@@ -317,5 +321,5 @@ def test_secret_only_and_delegated_runs_record_teams_token_unavailable(monkeypat
     result = TeamsPolicyCollector().run({"client": client, "audit_logger": None})
 
     assert session.posts == []
-    assert result.status == "ok" and result.item_count == 0 and len(result.coverage) == 7
+    assert result.status == "ok" and result.item_count == 0 and len(result.coverage) == 8
     assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in result.coverage)

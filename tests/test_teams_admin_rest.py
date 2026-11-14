@@ -18,6 +18,7 @@ import requests
 from azure_tenant_audit.adapters import get_adapter, list_adapters
 from azure_tenant_audit.adapters import teams_admin_rest as rest
 from azure_tenant_audit.collectors.teams_policy import (
+    APP_SETTINGS_OPERATION,
     TEAMS_OPERATIONS,
     TeamsPolicyCollector,
 )
@@ -322,10 +323,10 @@ def test_collector_certificate_reads_five_and_skips_two_commands(monkeypatch):
     result = TeamsPolicyCollector().run({"client": client})
     assert len(session.calls) == 5 and commands.calls == []
     assert client.scopes == [rest.TEAMS_ADMIN_SCOPE]
-    assert tuple(result.payload) == TEAMS_OPERATIONS and len(result.coverage) == 7
+    assert tuple(result.payload) == (*TEAMS_OPERATIONS, APP_SETTINGS_OPERATION) and len(result.coverage) == 8
     assert result.status == "ok" and result.item_count == 5
     skipped = [row for row in result.coverage if row["status"] == "skipped"]
-    assert {row["name"] for row in skipped} == {"messagingPolicies", "appSetupPolicies"}
+    assert {row["name"] for row in skipped} == {"messagingPolicies", "appSetupPolicies", APP_SETTINGS_OPERATION}
     assert all(row["reason"] == row["error_class"] == "teams_powershell_not_supported" for row in skipped)
     assert all(row["section_scoped"] for row in skipped)
     for operation in rest.TEAMS_READ_PATHS:
@@ -340,7 +341,7 @@ def test_no_token_skips_every_read(monkeypatch, resource_token):
     session = connect(monkeypatch, [])
     result = TeamsPolicyCollector().run({"client": Client(resource_token)})
     assert result.status == "ok" and result.item_count == 0
-    assert len(result.coverage) == 7
+    assert len(result.coverage) == 8
     assert all(row["reason"] == "teams_token_unavailable" and row["status"] == "skipped" for row in result.coverage)
     assert session.calls == [] and commands.calls == []
 
@@ -355,7 +356,9 @@ def test_collector_unsupported_environment(monkeypatch, environment):
     for operation in rest.TEAMS_READ_PATHS:
         assert result.payload[operation]["error_class"] == "unsupported_environment"
     assert result.status == "partial"
-    assert all(row["status"] == ("failed" if row["name"] in rest.TEAMS_READ_PATHS else "skipped")
+    unsupported = {*rest.TEAMS_READ_PATHS, *rest.TEAMS_UNIFIED_READ_PATHS}
+    assert result.payload[APP_SETTINGS_OPERATION]["error_class"] == "unsupported_environment"
+    assert all(row["status"] == ("failed" if row["name"] in unsupported else "skipped")
                for row in result.coverage)
 
 

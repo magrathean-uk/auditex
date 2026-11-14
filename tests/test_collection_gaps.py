@@ -59,12 +59,12 @@ def test_skipped_teams_sections_name_the_certificate_gap_without_claiming_a_fail
     result = TeamsPolicyCollector().run({})
     collectors = [{"name": result.name, "status": result.status}]
     sections = section_gap_records(result.coverage)
-    assert len(sections) == 7
+    assert len(sections) == 8
     assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in sections)
     assert list_truncations(result.coverage) == []
     surfaces = build_surface_coverage_map(collector_rows=collectors, coverage_rows=result.coverage)
     gaps = build_coverage_gap_summary(surface_coverage=surfaces, collector_rows=collectors, coverage_rows=result.coverage)
-    assert gaps[0]["scope"] == "section" and len(gaps[0]["section_gaps"]) == 7
+    assert gaps[0]["scope"] == "section" and len(gaps[0]["section_gaps"]) == 8
     assert "not collected: certificate token for the Teams admin API not available" in gaps[0]["message"]
     assert build_diagnostics(collectors, result.coverage, {}, "app-readonly-full") == []
 

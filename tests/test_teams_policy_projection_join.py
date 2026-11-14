@@ -99,7 +99,9 @@ def test_collector_bundle_projects_all_five_sections(monkeypatch, tmp_path):
         expected = [{key: value for key, value in row.items() if key in FIELDS[section]} for row in rows[section]]
         assert projection.rule_sections[section] == expected
         assert all(set(row) == FIELDS[section] for row in projection.rule_sections[section])
-    assert projection.rule_sections["tenant_app_settings"] == NOT_COLLECTED
+    # App-only certificate run: the unified app settings are a named skip, read by the rules as ScubaGear's
+    # certificate-authentication input (M08-T04, tests/test_teams_app_settings.py).
+    assert projection.rule_sections["tenant_app_settings"] == [{"CertificateBasedAuth": True}]
     assert "tenant_app_settings" not in result.payload
     assert set(PS_SECTIONS["meeting_policies"][2]) == FIELDS["meeting_policies"]
 

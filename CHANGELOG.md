@@ -13,6 +13,13 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ### Collection
 
+- **Teams org-wide app settings (MS.TEAMS 5.1-5.3).** `teams_policy` records the unified app-settings read
+  (`tenantAppSettings`, the source of `Get-M365UnifiedTenantSettings`) as its own operation. Microsoft serves it only to a
+  user sign-in, so an app-only run names the skip (`teams_powershell_not_supported`) and sends no request; the new
+  `tenant_app_settings` rule adapter then gives the rules ScubaGear's certificate-authentication input, and the three
+  rows are decided from the app permission policies, as ScubaGear decides them with certificate authentication. The read
+  itself is pinned from ScubaGear's API catalogue (`GET https://substrate.office.com/AdminAppCatalog/ps/v2/admin/unifiedApp/settings`)
+  behind its own token audience, so no Teams admin or Graph token is ever sent to that host. No permission is added.
 - **One sign-in per audit run; Exchange kept in the guided delegated path (DEC-065, DEC-068).** A delegated
   run with `--interactive --client-id` signs in once: one msal public client over one in-memory token cache, with
   `acquire_token_silent` for every further resource; a second interactive prompt is refused with an error, and a

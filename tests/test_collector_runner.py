@@ -83,7 +83,7 @@ def test_runner_preserves_teams_skips_as_non_failing_coverage(monkeypatch):
     writer = _FakeWriter()
     output = CollectorRunner(writer).run(TeamsPolicyCollector(), CollectorRunContext(client=None, top=None))
     assert not output.crashed and output.result_row["status"] == "ok"
-    assert len(writer.coverage[0]) == 7
+    assert len(writer.coverage[0]) == 8
     assert all(row["status"] == "skipped" for row in writer.coverage[0])
     assert writer.checkpoints[0][1]["status"] == "ok"
     assert build_diagnostics([output.result_row], output.coverage_rows, {}, "app-readonly-full") == []
