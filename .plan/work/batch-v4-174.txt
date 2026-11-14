@@ -1,0 +1,1 @@
+--task REV-RAPP-sol --role sol --account claude-3 --readonly --tags hard,risk:high --timeout 2400 --max-turns 60 --budget 8 --brief .plan/work/REV-RAPP/brief-src-3.md
