@@ -1,0 +1,2 @@
+--task M08-T01 --role sol --account claude-3 --branch --slug certauth-teams --tags size:M,hard,risk:high --timeout 10800 --max-turns 300 --budget 50 --brief .plan/work/M08-T01/brief-src.md
+--task M08-T03 --role sol --account claude-5 --readonly --tags size:M,risk:high --timeout 7200 --max-turns 200 --budget 30 --brief .plan/work/M08-T03/brief-src.md
