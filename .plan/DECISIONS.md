@@ -623,3 +623,12 @@
 - consequences: an amendment adds D1-D7 to M08; the reader app's record (row 8) gains the added permissions; the removal script still removes everything with the app.
 - approver: G
 - DEC-068 applied (about 11:08-11:13 GMT, 14 Nov): the lead, in G's Chrome signed in as the lab operator, added to "Auditex Reader (lab)" Graph SharePointTenantSettings.Read.All, Graph DeviceManagementScripts.Read.All and SharePoint Sites.FullControl.All, and granted tenant admin consent (portal: "Successfully granted admin consent"); then opened app.powerbi.com once as the operator to activate Power BI for the 60-powerbi 401 (F2). G: "yes do it, it's a test tenant, don't ask me for permission."
+- DEC-066 follow-up (about 11:13 GMT, 14 Nov): with the Fabric app in place and Power BI activated, the 60-powerbi dry run gets its token and its first read, then refuses the reply (F3: `_common.ps1:2209`, Get-DtTenantSettingItems wants exactly one of `value` and `tenantSettings`; the live reply carries both). A kit defect: the tenant chat captures the reply's key shape read-only (`dt-live/phaseD/F3-shape.txt`), and the fix joins round 7s before its re-confirmation.
+- F3 fix design (auto, about 11:14 GMT): the live reply carries `tenantSettings` and `value`, each a list of 190 with the same item keys (dt-live/phaseD/F3-shape.txt). Where both are present the kit accepts the reply only if the two lists have equal counts, the same settingName set and the same `enabled` value per settingName, then reads `tenantSettings`; any difference refuses with nothing written. Same rule in Get-DtTenantSettingItems (_common.ps1 about 2202-2212) and 90-verify.ps1 (about 1024). Mock gains the live envelope.
+
+## DEC-069 The WGEX host hold is over
+- date: 2026-11-14
+- status: decided
+- decision: G's WGEX sitting stopped at step 2d (state file `stopped` set, BASELINE-FAIL), and the manager who set the hold is retired (DEC-063). Heavy jobs run again under the usual rule: one heavy slot through hostload.sh, PLAN_LOAD_MAX=12; the 7s full suite may start once both confirmations ship.
+- why: the hold protected an active sitting; none is active.
+- approver: auto

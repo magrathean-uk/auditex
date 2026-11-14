@@ -1,0 +1,1 @@
+--task CHK-M08-T01 --role terra --account claude-3 --template terra-check --readonly --sha task/M08-T01-certauth-teams --tags risk:high --var TASK=M08-T01 --var MILESTONE=.plan/milestones/M08-collection-completeness.md --var BRANCH=task/M08-T01-certauth-teams

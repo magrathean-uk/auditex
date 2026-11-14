@@ -1,0 +1,1 @@
+--task REV-M08-T01 --role codex --model gpt-6.1-sol --account codex2 --template codex-review --readonly --sha task/M08-T01-certauth-teams --tags debug,risk:high --var TASK=M08-T01 --var MILESTONE=.plan/milestones/M08-collection-completeness.md --var BRANCH=task/M08-T01-certauth-teams --var BASE=main

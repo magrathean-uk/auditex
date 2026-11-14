@@ -4,7 +4,7 @@ overall: 69% (was 70%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 8e959da 2026-11-14T11:13:51Z
+last_checkpoint: 4703cea 2026-11-14T11:15:29Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -12,7 +12,7 @@ last_checkpoint: 8e959da 2026-11-14T11:13:51Z
 - M03-T04 Write the recommendation and the product-integration options (sol)
 
 ## Blockers
-- Host (manager 09:26 GMT): sitting file `last` step 4 or lower and stopped null: heavy jobs through the slot (PLAN_LOAD_MAX=12) except VM boots and runs over 30 min (not the full kit suite); step 5 on or paused: no heavy start. No live tenant runs.
+- Host: the WGEX hold is over (DEC-069; sitting stopped at 2d); one heavy slot through hostload.sh, PLAN_LOAD_MAX=12.
 - Track A: 1.5.0 is RELEASED and verified (DEC-052; M06 complete): tag v1.5.0 on a1c6b5e; https://github.com/magrathean-uk/auditex/releases/tag/v1.5.0 (wheel 81ea5c2f..., sdist 959e825f...). Track A reopens only for M08 collection completeness (DEC-059; amendment 5 merged).
 - Track B: stopped and on hold (DEC-053, G on 14 Nov: "master data collection etc first ... talk about training AFTER"). The pilot failed (M03-T06: 18 wins of 190, 139 needed; 5.57 GPU-hours). Nothing in M03 moves; amendment 4 (parked case) stays unmerged at bf19a3f. Training is discussed again after phase D. GPU-hours used: about 306 of 20,000.
 
