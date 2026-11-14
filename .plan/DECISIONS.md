@@ -438,3 +438,21 @@
 - consequences: if the task is stopped, its Definition of Done item and task row are dropped by a small plan change and the percentage is re-baselined.
 - approver: manager (team-manager chat, 14 Nov 2026, quoting its ruling: "A, one last round on M04-T06, B1 and B2 only"; under DEC-036)
 
+## DEC-048 M04-T06 is stopped for 1.5.0 by its stop rule
+- date: 2026-11-14
+- status: decided under DEC-047
+- decision: the final bounded re-check of M04-T06 (REV-M04-T06 at ce543a5) closes B2 (the placeholder is now visible in Markdown prose, raw HTML blocks and HTML) and leaves B1 open: the tag recognisers end a tag at a quoted `>`, so an attribute or comment that holds `>` followed by a name part turns that part into visible text, where the whole-text rule on `main` withholds it. By the binding stop rule of DEC-047 the task is not merged for 1.5.0. Its task row is `dropped`, its Definition of Done item is removed, and the branch `task/M04-T06-withholding-reach` is kept at ce543a5 for a later release. `main` keeps the whole-text withholding with its stated limit. The executing check queued for that head was stopped unrun.
+- options: none left: the manager fixed the rule in advance (no further round, no further choice)
+- why: a readable name part in place of a blank is the wrong way round, and three author rounds did not close the last variant.
+- consequences: re-baseline from 64% to 65% (M04 has 8 items again, 7 ticked). M05-T04 and the release notes start now. A later release picks the branch up with a real HTML tokeniser for tag boundaries, or a whole-text fallback whenever a tag near the withheld stretch holds a quote; the note-sentence wording fix that travelled with this task goes with it or into a small follow-up (BACKLOG).
+- approver: manager (through the stop rule of DEC-047; team-manager chat, 14 Nov 2026, under DEC-036)
+
+## DEC-049 M05-T04: a Claude author, a Codex review
+- date: 2026-11-14
+- status: decided
+- decision: the task line names Codex as author. A Codex author cannot run lint or this task's verify in its sandbox in this repository (DEC-043 did not unblock it), so the lanes are swapped as for M05-T01 and M05-T02: a Claude author, the other-vendor review by Codex, and the verify with the full suite and the contract smoke at the merge gate.
+- options: a Codex author who can only run pytest (rejected: the verify needs `make test` and the contract smoke) | swap the lanes (chosen)
+- why: routing only; the author and the reviewer still come from different vendors.
+- consequences: no acceptance bar, scope or product behaviour changes.
+- approver: auto
+

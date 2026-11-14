@@ -19,7 +19,6 @@ Pseudonyms in shareable output come from a private per-run key instead of the ru
 - [ ] Full suite, contract smoke, the digest comparison and both acceptance suites pass at milestone close: `make test && make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract && make acceptance`
 - [x] Review: privacy reviews by both providers approve the plan v4 merges of M04-T03 and M04-T04 at the exact merged head (ARCHITECTURE.md review binding): `for T in M04-T03 M04-T04; do c=$(git log v1.4.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && for R in REV-$T REV-$T-privacy; do grep -qE "^[[:space:]]*(summary: )?reviewed: $s" ".plan/work/$R/result.md" && grep -qE '^[[:space:]]*(summary: )?verdict: approve' ".plan/work/$R/result.md" || exit 1; done || exit 1; done` Orchestrator check at close: the two reviews ran on launchers of different vendors, one of them the other vendor from the author's.
 - [x] Review: the privacy reference and the output contract describe the keyed scheme, every remaining salt scheme and the new masking boundary, and no longer carry the confirm-a-guess limit (terra read-through): `grep -qx 'read-through: complete' .plan/work/M04-T05/result.md`
-- [ ] In rendered output only the line or cell that could not be resolved is withheld, a name split across units is not left readable, and the note counts the withheld units (DEC-045): `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_scan_budget.py -k final_pass_unit`
 
 ## Tasks
 | id | title | owner | size | tags | status |
@@ -29,7 +28,7 @@ Pseudonyms in shareable output come from a private per-run key instead of the ru
 | M04-T03 | Implement keyed per-run pseudonyms and the contract change | codex | L | cross-cutting |done |
 | M04-T04 | Mask middle initials, titles and name-equal mapping keys | codex | M | - | done |
 | M04-T05 | Document the keyed scheme and the masking boundary | terra | S | - | done |
-| M04-T06 | Withhold the smallest unit in the final pass, and count it in the note | sol | M | risk:high | todo |
+| M04-T06 | Withhold the smallest unit in the final pass, and count it in the note | sol | M | risk:high | dropped |
 
 ## Acceptance criteria
 ### M04-T01 Design the keyed per-run pseudonym scheme
@@ -82,6 +81,7 @@ Pseudonyms in shareable output come from a private per-run key instead of the ru
 - files: `docs/reference/security-privacy.md` (the D5, salt and key passages and the design section 13 passages only), `CHANGELOG.md` (one entry under the next release heading), `docs/guides/product-manual.md` (one line for `auditex report prepare-key`), `docs/development/scubagear-export-adapter.md`
 
 ### M04-T06 Withhold the smallest unit in the final pass, and count it in the note
+- Dropped for 1.5.0 (DEC-048, the stop rule of DEC-047): after one review, one repair, one re-check and one last narrow round, the other-provider re-check at ce543a5 still finds a name part readable when a tag after the unresolved name carries a quoted `>` in an attribute or comment. `main` keeps withholding the whole text, which leaks nothing and is a stated limit in the privacy reference. The branch `task/M04-T06-withholding-reach` is kept for a later release; the criteria below stay as its record.
 - Added by DEC-045. Precondition: M04-T04 merged; M04-T05 merged before this task merges (its doc lines are edited here).
 - Tier A (privacy code): its own review by the other provider (`REV-M04-T06`) plus an executing check (`CHK-M04-T06`) on the same head; one review, one repair, one re-check, then the manager gets a choice (DEC-045). It holds no heavy slot before the manager releases the Mac.
 - In the final pass over rendered text (`markup=True`: Markdown, HTML, CSV, pack files), when an initial-bearing name start cannot be resolved inside the budget, only the line (Markdown, CSV, pack text) or cell (HTML td/th, CSV field) holding that unresolved extent becomes `<redacted-text>`; the rest of the file is returned as rendered. The structure pass (`markup=False`) keeps today's whole-string result.
