@@ -16,6 +16,10 @@ from azure_tenant_audit.secret_hygiene import redact_argv
 
 ROOT = Path(__file__).resolve().parents[1]
 CANARY = "constructed-canary-vendored-zz9"
+_VALUE_FLAGS = [
+    "--client-secret", "--access-token",
+    "--certificate-path", "--certificate-thumbprint", "--certificate-password-env", "--certificate-password-file",
+]
 
 
 @pytest.fixture
@@ -34,7 +38,7 @@ def engine_cli(monkeypatch, tmp_path):
     return cli
 
 
-@pytest.mark.parametrize("flag", ["--client-secret", "--access-token"])
+@pytest.mark.parametrize("flag", _VALUE_FLAGS)
 @pytest.mark.parametrize("inline", [False, True])
 def test_main_rejects_all_sensitive_abbreviations(engine_cli, flag, inline, capsys, tmp_path):
     assert engine_cli.build_parser().allow_abbrev is False
@@ -50,7 +54,7 @@ def test_main_rejects_all_sensitive_abbreviations(engine_cli, flag, inline, caps
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("flag", ["--client-secret", "--access-token"])
+@pytest.mark.parametrize("flag", _VALUE_FLAGS)
 @pytest.mark.parametrize("inline", [False, True])
 def test_full_flags_parse_and_scrub_with_prefix_parity(engine_cli, flag, inline):
     argv = [f"{flag}={CANARY}"] if inline else [flag, CANARY]
@@ -75,6 +79,37 @@ def test_ambiguous_sensitive_prefixes_are_redacted(engine_cli, monkeypatch):
     monkeypatch.setattr(auth_runtime, "SENSITIVE_CLI_ARGS", {"--client-secret", "--command-override"})
     assert auth_runtime.scrub_command_line(["--c", CANARY]) == ["--c", "***redacted***"]
     assert auth_runtime.scrub_command_line([f"--c={CANARY}"]) == ["--c=***redacted***"]
+
+
+@pytest.mark.parametrize("extra", [
+    ["--client-secret", CANARY],
+    ["--access-token", CANARY],
+    ["--interactive"],
+    ["--use-azure-cli-token"],
+    ["--auth-context", CANARY],
+    ["--offline"],
+    [],  # a certificate path without its thumbprint
+])
+def test_main_refuses_mixed_or_incomplete_certificate_credentials_before_any_run(engine_cli, extra, capsys, tmp_path):
+    argv = ["--certificate-path", f"/{CANARY}/key.pem", *extra]
+    if extra:
+        argv.extend(["--certificate-thumbprint", "A" * 40])
+    with pytest.raises(SystemExit) as exc:
+        engine_cli.main(argv)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert CANARY not in err and "A" * 40 not in err
+    assert "certificate" in err.lower()
+    assert not list(tmp_path.iterdir())
+
+
+def test_password_sources_are_mutually_exclusive_and_no_flag_takes_a_password(engine_cli, capsys):
+    parser = engine_cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--certificate-password-env", "NAME", "--certificate-password-file", CANARY])
+    assert CANARY not in capsys.readouterr().err
+    options = {option for action in parser._actions for option in action.option_strings}
+    assert not {"--certificate-password", "--certificate-key", "--private-key", "--password"} & options
 
 
 def test_the_bootstrap_forwarder_rejects_abbreviations_without_echo(tmp_path):

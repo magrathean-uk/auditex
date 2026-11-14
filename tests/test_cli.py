@@ -1403,3 +1403,138 @@ def test_required_preflight_skipped_licensing_keeps_existing_selected_contract(t
     plan = load(run_dir, "audit-plan.json")
     assert plan["selected_collectors"] == ["identity"]
     assert plan["evidence_gates"] == readiness["evidence_gates"]
+
+
+def _forbid_run(monkeypatch):
+    from azure_tenant_audit.output import AuditWriter
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a refused certificate credential must stop before the run folder or any request")
+
+    monkeypatch.setattr(AuditWriter, "__init__", forbidden)
+    monkeypatch.setattr(cli, "GraphClient", forbidden)
+
+
+@pytest.mark.parametrize("case", ["readable_by_group", "wrong_thumbprint", "missing_password", "missing_file"])
+def test_live_certificate_refusal_stops_before_run_folder_and_requests(
+    case, certificate_material, tmp_path: Path, monkeypatch, caplog,
+) -> None:
+    _forbid_run(monkeypatch)
+    path, thumbprint, extra = certificate_material.pem, certificate_material.thumbprint, []
+    if case == "readable_by_group":
+        path = tmp_path / "shared.pem"
+        path.write_bytes(certificate_material.pem.read_bytes())
+        path.chmod(0o644)
+    elif case == "wrong_thumbprint":
+        thumbprint = "0" * 40
+    elif case == "missing_password":
+        path, extra = certificate_material.pem_encrypted, ["--certificate-password-env", "AUDITEX_TEST_UNSET_PASSWORD"]
+    else:
+        path = tmp_path / "absent.pem"
+    rc = cli.main([
+        "--tenant-name", "constructed", "--tenant-id", "constructed.example", "--client-id", "constructed-app",
+        "--certificate-path", str(path), "--certificate-thumbprint", thumbprint, *extra, "--out", str(tmp_path / "runs"),
+    ])
+    assert rc == 2
+    assert not (tmp_path / "runs").exists()
+    assert str(path) not in caplog.text and thumbprint not in caplog.text
+    assert "certificate" in caplog.text.lower()
+
+
+@pytest.mark.parametrize("case", ["key_in_output", "key_named_summary_in_resume", "password_named_summary_in_resume",
+                                  "hard_link_in_resume", "output_named_through_link"])
+def test_live_certificate_sources_in_the_run_folder_are_refused_before_it_is_written(
+    case, certificate_material, tmp_path: Path, monkeypatch, caplog,
+) -> None:
+    """A key or password inside the output or resume folder would be kept in the bundle or replaced by an output."""
+    _forbid_run(monkeypatch)
+
+    def private(source: Path, target: Path) -> Path:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+        target.chmod(0o600)
+        return target
+
+    out = tmp_path / "runs"
+    resume = out / "constructed-run1"
+    resume.mkdir(parents=True)
+    key, extra, out_arg = certificate_material.pem, [], out
+    if case == "key_in_output":
+        key = private(certificate_material.pem, out / "key.pem")
+    elif case == "key_named_summary_in_resume":
+        key = private(certificate_material.pem, resume / "summary.json")
+        extra = ["--resume-from", str(resume)]
+    elif case == "password_named_summary_in_resume":
+        password = private(certificate_material.password_file, resume / "summary.json")
+        key, extra = certificate_material.pem_encrypted, ["--certificate-password-file", str(password),
+                                                          "--resume-from", str(resume)]
+    elif case == "hard_link_in_resume":
+        key = private(certificate_material.pem, tmp_path / "keys" / "key.pem")
+        (resume / "raw").mkdir()
+        __import__("os").link(key, resume / "raw" / "evidence.json")
+        extra = ["--resume-from", str(resume)]
+    else:
+        key = private(certificate_material.pem, out / "keys" / "key.pem")
+        (tmp_path / "runs-link").symlink_to(out, target_is_directory=True)
+        out_arg = tmp_path / "runs-link"
+    sources = {path: path.read_bytes() for path in out.rglob("*") if path.is_file()}
+    listing = sorted(path.relative_to(out) for path in out.rglob("*"))
+    argv = [
+        "--tenant-name", "constructed", "--tenant-id", "constructed.example", "--client-id", "constructed-app",
+        "--certificate-path", str(key), "--certificate-thumbprint", certificate_material.thumbprint, *extra,
+        "--out", str(out_arg),
+    ]
+    # The argv guard already refuses a linked --out and admits only a finalised run folder for --resume-from;
+    # the refusal must hold below it, in run_live itself.
+    rc = cli.main(argv) if case == "key_in_output" else cli.run_live(cli.build_parser().parse_args(argv))
+    assert rc == 2
+    assert "outside the output and resume folders" in caplog.text
+    assert str(key) not in caplog.text and str(tmp_path) not in caplog.text
+    # Nothing written, moved or replaced: the source files are byte-for-byte what they were.
+    assert sorted(path.relative_to(out) for path in out.rglob("*")) == listing
+    assert {path: path.read_bytes() for path in out.rglob("*") if path.is_file()} == sources
+
+
+def test_live_certificate_run_builds_an_app_auth_config_without_any_secret(
+    certificate_material, tmp_path: Path, monkeypatch,
+) -> None:
+    from azure_tenant_audit.certificate_auth import CertificateCredential
+
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def client(auth, **kwargs):
+        seen.append(auth)
+        raise Stop
+
+    monkeypatch.setattr(cli, "GraphClient", client)
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "constructed-saved-secret")
+    with pytest.raises(Stop):
+        cli.main([
+            "--tenant-name", "constructed", "--tenant-id", "constructed.example", "--client-id", "constructed-app",
+            "--certificate-path", str(certificate_material.pfx_plain),
+            "--certificate-thumbprint", certificate_material.thumbprint.lower(), "--out", str(tmp_path / "runs"),
+        ])
+    (auth,) = seen
+    assert auth.auth_mode == "app" and auth.client_secret is None and auth.access_token is None
+    assert isinstance(auth.certificate, CertificateCredential)
+    assert auth.certificate.thumbprint == certificate_material.thumbprint
+
+
+def test_secret_only_app_run_is_unchanged(tmp_path: Path, monkeypatch) -> None:
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def client(auth, **kwargs):
+        seen.append(auth)
+        raise Stop
+
+    monkeypatch.setattr(cli, "GraphClient", client)
+    with pytest.raises(Stop):
+        cli.main(["--tenant-name", "constructed", "--tenant-id", "constructed.example", "--client-id", "constructed-app",
+                  "--client-secret", "constructed-secret", "--out", str(tmp_path / "runs")])
+    assert seen[0].client_secret == "constructed-secret" and seen[0].certificate is None

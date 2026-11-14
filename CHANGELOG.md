@@ -11,6 +11,35 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   for that one path only. The admin guide states the exact removal and blast radius of the Power BI read-only admin API setting and the
   Power Platform management-app registration.
 
+### Collection
+
+- **Certificate credentials for app-only runs; Teams admin policies in app mode.** An app-mode run takes a
+  certificate instead of a client secret: `--certificate-path` (a PEM or PFX private key file readable only by its
+  owner) with `--certificate-thumbprint` (the SHA-1 thumbprint on the app registration), and for an encrypted key
+  `--certificate-password-env` (a variable name; the variable is removed once read) or
+  `--certificate-password-file`. No option takes the password or key text. Every app token (Graph, Exchange Online,
+  the Teams admin API, Power BI, Power Platform) is then minted from the key through
+  `msal.ConfidentialClientApplication`, and `teams_policy` reads its five REST policy surfaces; messaging and app
+  setup policies stay named skips. A secret-only run still records `teams_token_unavailable`, and a delegated run is
+  unchanged. A certificate with any other credential is refused before any request; a saved `AZURE_CLIENT_SECRET`
+  is ignored with a warning. The same options work through `auditex run`, `auditex guided-run` and the command
+  builder, and `auditex setup-guide m365 --mode app` prints an `app_run_certificate` command. `auditex probe live`
+  does not take a certificate yet.
+- **`teams_policy` joins the `global-reader` profile and the `full` preset** for app-mode runs. Generated delegated
+  set-up commands omit it with Exchange policy and DNS posture.
+
+### Security and privacy
+
+- The key file and password file are opened once through one descriptor and refused when they are not regular files,
+  are symbolic links, are larger than 64 KiB (4 KiB for a password) or are readable by group or others. A key under
+  2048 bits, a non-RSA key, a certificate that does not match the key or thumbprint, or one outside its validity
+  dates is refused before any request. Errors are fixed messages: never a path, password, thumbprint or service
+  diagnostic. The assertion goes only to an HTTPS Microsoft Entra authority.
+- The four `--certificate-*` flags are in every argv redaction set (the generic, engine, product, response and Google
+  redactors), so they are scrubbed from the run manifest, the audit log, MCP command output and diagnostics, and
+  every public parser refuses their abbreviations. PEM private key blocks and certificate field names are masked in
+  diagnostic text.
+
 ## [1.5.0] - 2026-11-14
 
 Shareable output is masked with a private per-run key, middle initials and titles are masked, the lint rule set is

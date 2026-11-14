@@ -851,3 +851,43 @@ def test_close_diagnostics_are_private(monkeypatch, caplog, capsys):
     captured = capsys.readouterr()
     assert response.closed
     assert TOKEN not in json.dumps(result) + caplog.text + captured.out + captured.err
+
+
+def test_certificate_graph_client_token_drives_the_five_rest_reads(monkeypatch, certificate_material, caplog):
+    from test_certificate_auth import CLIENT_ID, TENANT, FakeEntra
+
+    from azure_tenant_audit import certificate_auth
+    from azure_tenant_audit.config import AuthConfig
+    from azure_tenant_audit.graph import GraphClient
+
+    entra = FakeEntra(certificate_material)
+    real = certificate_auth.build_confidential_client
+    monkeypatch.setattr(certificate_auth, "build_confidential_client",
+                        lambda credential, **kwargs: real(credential, **{**kwargs, "http_client": entra}))
+    commands = command_reader(monkeypatch)
+    session = connect(monkeypatch, [Response() for _ in range(5)])
+    credential = certificate_auth.load_certificate_credential(certificate_material.pem, certificate_material.thumbprint)
+    client = GraphClient(AuthConfig(tenant_id=TENANT, client_id=CLIENT_ID, certificate=credential))
+
+    result = TeamsPolicyCollector().run({"client": client})
+
+    assert [request["scope"] for request in entra.token_requests] == [rest.TEAMS_ADMIN_SCOPE]
+    assert len(session.calls) == 5 and commands.calls == []
+    assert result.status == "ok" and result.item_count == 5
+    headers = [kwargs["headers"]["Authorization"] for _, kwargs in session.calls]
+    token = headers[0].removeprefix("Bearer ")
+    assert set(headers) == {f"Bearer {token}"} and rest.certificate_token(token)
+    assert token not in json.dumps([result.payload, result.coverage]) + caplog.text
+
+
+def test_secret_graph_client_never_requests_a_teams_admin_token():
+    from azure_tenant_audit.config import AuthConfig
+    from azure_tenant_audit.graph import GraphClient
+
+    class Session:
+        def post(self, *args, **kwargs):
+            raise AssertionError("a secret must never mint a Teams admin token")
+
+    client = GraphClient(AuthConfig(tenant_id="constructed.example", client_id="constructed-app",
+                                    client_secret="constructed-secret"), session=Session())
+    assert client.app_token_for(rest.TEAMS_ADMIN_SCOPE) is None

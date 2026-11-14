@@ -8,11 +8,16 @@ from typing import Any
 
 from . import auth_context
 from .graph import GraphClient
-from .secret_hygiene import redact_argv, redact_output, sanitize_token_claims
+from .secret_hygiene import (
+    CERTIFICATE_ARG_FLAGS,
+    redact_argv,
+    redact_output,
+    sanitize_token_claims,
+)
 
 SENSITIVE_CLI_ARGS = {
     "--client-secret", "--access-token", "--sensitive-users", "--partner-domains",
-    "--env", "--break-glass-accounts",
+    "--env", "--break-glass-accounts", *CERTIFICATE_ARG_FLAGS,
 }
 
 

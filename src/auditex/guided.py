@@ -311,6 +311,16 @@ def _ensure_m365_login(
     return 0
 
 
+def _certificate_argv(args: argparse.Namespace) -> list[str]:
+    """Pass the certificate options through to the engine unchanged; it loads and checks the key."""
+    argv: list[str] = []
+    for flag in ("--certificate-path", "--certificate-thumbprint", "--certificate-password-env", "--certificate-password-file"):
+        value = getattr(args, flag[2:].replace("-", "_"), None)
+        if value:
+            argv.extend([flag, str(value)])
+    return argv
+
+
 def build_guided_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(allow_abbrev=False, prog="auditex guided-run", description="Interactive guided tenant audit.")
     parser.add_argument("--flow", choices=flow_choices(), default="auto")
@@ -319,6 +329,15 @@ def build_guided_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auth-mode", choices=("delegated", "app"), default="delegated")
     parser.add_argument("--client-id", default=None)
     parser.add_argument("--client-secret", default=None)
+    parser.add_argument("--certificate-path", default=None, metavar="FILE",
+                        help="App mode: private key file (PEM or PFX, owner-only) of the certificate credential.")
+    parser.add_argument("--certificate-thumbprint", default=None, metavar="SHA1",
+                        help="SHA-1 thumbprint of the certificate on the app registration.")
+    certificate_password = parser.add_mutually_exclusive_group()
+    certificate_password.add_argument("--certificate-password-env", default=None, metavar="NAME",
+                                      help="Name of the environment variable holding the key password.")
+    certificate_password.add_argument("--certificate-password-file", default=None, metavar="FILE",
+                                      help="Owner-only file holding the key password.")
     parser.add_argument("--auditor-profile", default="global-reader", choices=profile_choices())
     parser.add_argument("--out", default="outputs/guided")
     parser.add_argument("--run-name", default=None)
@@ -454,7 +473,12 @@ def run_guided(args: argparse.Namespace) -> int:
     browser_command = args.browser_command or _default_browser_command()
     include_exchange = args.include_exchange or plan.include_exchange
     client_id = args.client_id or _saved_value("AZURE_CLIENT_ID", "M365_CLI_APP_ID", "M365_CLI_CLIENT_ID")
-    client_secret = args.client_secret or _saved_value("AZURE_CLIENT_SECRET")
+    certificate_argv = _certificate_argv(args)
+    if certificate_argv and (args.client_secret or auth_mode != "app"):
+        print("A certificate runs only in an app flow and never with a client secret")
+        return 2
+    # A saved secret is never read for, or passed beside, a certificate run.
+    client_secret = None if certificate_argv else args.client_secret or _saved_value("AZURE_CLIENT_SECRET")
 
     if not args.non_interactive:
         tenant_default = tenant_id or plan.tenant_default
@@ -462,7 +486,8 @@ def run_guided(args: argparse.Namespace) -> int:
         tenant_name = tenant_name or _prompt("Tenant label", default=_default_tenant_name(tenant_id))
         if plan.requires_app_credentials:
             client_id = client_id or _prompt("Client id")
-            client_secret = client_secret or _prompt("Client secret")
+            if not certificate_argv:
+                client_secret = client_secret or _prompt("Client secret")
         if flow == "gr-audit" and not args.include_exchange:
             include_exchange = _confirm("Include Exchange checks?", default=False)
     else:
@@ -471,8 +496,11 @@ def run_guided(args: argparse.Namespace) -> int:
     if plan.requires_real_tenant and (not tenant_id or tenant_id == "organizations"):
         print("Real tenant id or domain needed")
         return 2
-    if plan.requires_app_credentials and (not client_id or not client_secret):
+    if plan.requires_app_credentials and (not client_id or not (client_secret or certificate_argv)):
         print("App credentials missing")
+        return 2
+    if certificate_argv and include_exchange:
+        print("The Microsoft 365 CLI Exchange sign-in needs a client secret: run the certificate flow without --include-exchange")
         return 2
     if flow == "ga-setup-app":
         return _run_ga_setup_flow(
@@ -554,6 +582,8 @@ def run_guided(args: argparse.Namespace) -> int:
         argv.extend(["--top", str(args.top)])
     if auth_mode == "delegated":
         argv.append("--use-azure-cli-token")
+    elif certificate_argv:
+        argv.extend(["--client-id", client_id, *certificate_argv])
     else:
         argv.extend(["--client-id", client_id, "--client-secret", client_secret])
     if args.run_name:

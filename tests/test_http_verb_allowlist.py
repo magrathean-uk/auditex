@@ -170,6 +170,9 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "msal silent refresh of the interactive Graph token"),
     Allowed(_GRAPH, "GraphClient._interactive_token", "app.acquire_token_interactive", TOKEN_POST, 1, 2, "A3",
             "msal interactive sign-in token exchange"),
+    Allowed(_GRAPH, "GraphClient._certificate_exchange", "app.acquire_token_for_client", TOKEN_POST, 1, 2, "A1, A2",
+            "msal client-credentials token from the certificate credential for Graph and the resource scopes "
+            "(Exchange Online, Teams admin, Power BI, Power Platform); assertion only to a pinned Entra authority"),
     Allowed(_GRAPH, "GraphClient._request", "self.session.request", VARIABLE, 1, 3, "A4a, A4b",
             "Graph dispatch: body-free GET, or POST only to /v1.0/$batch or /beta/$batch with GET-only "
             "sub-requests; its first statement is _enforce_read_only, which applies read_only_violation",

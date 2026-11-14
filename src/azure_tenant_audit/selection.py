@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from .presets import resolve_collector_selection
+from .profiles import APP_MODE_ONLY_COLLECTORS
 
 
 def select_collectors(
@@ -26,7 +27,7 @@ def select_collectors(
         excluded_collectors=excluded_collectors,
     )
     if auth_mode != "app" and not explicit_collectors:
-        selected = [name for name in selected if name not in {"exchange_policy", "dns_posture"}]
+        selected = [name for name in selected if name not in APP_MODE_ONLY_COLLECTORS]
         if not selected:
             raise ValueError("No collectors selected for this authentication mode.")
     excluded = set(excluded_collectors or [])

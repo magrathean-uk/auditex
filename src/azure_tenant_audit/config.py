@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .selection import select_collectors
+
+MIXED_CREDENTIALS_MESSAGE = (
+    "Certificate authentication runs in app mode with a client ID and no other credential: "
+    "remove the client secret, access token, Azure CLI token or interactive sign-in."
+)
 
 
 @dataclass
@@ -13,13 +19,33 @@ class AuthConfig:
     tenant_id: str
     client_id: str | None
     auth_mode: str = "app"
-    client_secret: str | None = None
-    access_token: str | None = None
+    client_secret: str | None = field(default=None, repr=False)
+    access_token: str | None = field(default=None, repr=False)
     authority: str = "https://login.microsoftonline.com/"
     graph_scope: str = "https://graph.microsoft.com/.default"
     interactive_scopes: list[str] | None = None
     timeout_seconds: int = 60
     throttle_mode: str = "safe"
+    # A loaded azure_tenant_audit.certificate_auth.CertificateCredential; app mode only, never with a secret.
+    certificate: Any = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.certificate is not None:
+            check_single_credential(self)
+
+
+def check_single_credential(auth: AuthConfig) -> None:
+    """Refuse a certificate mixed with any other credential, before any request is made."""
+    if auth.certificate is None:
+        return
+    if (
+        auth.auth_mode != "app"
+        or auth.client_secret
+        or auth.access_token
+        or not isinstance(auth.client_id, str)
+        or not auth.client_id.strip()
+    ):
+        raise ValueError(MIXED_CREDENTIALS_MESSAGE)
 
 
 @dataclass

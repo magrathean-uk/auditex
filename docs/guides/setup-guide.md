@@ -168,6 +168,21 @@ auditex setup-guide m365 --mode app --auditor-profile app-readonly-full --collec
 
 The app registration must be customer-owned. Add only the listed Microsoft Graph application permissions and grant tenant-wide admin consent.
 
+App-only runs authenticate with a client secret or a certificate, never both. The Teams admin policies (`teams_policy`, selected by the `global-reader` profile and the `full` preset) need the certificate: the Teams admin API refuses a secret-minted token, so a secret-only run records `teams_token_unavailable` for them. Upload the certificate's public part to the app registration, keep its private key (PEM or PFX) in a file only you can read (mode `600`) and pass the SHA-1 thumbprint the portal shows. An encrypted key takes its password from a file or an environment variable, never from the command line:
+
+```bash
+auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --client-id <app-id> \
+  --certificate-path ~/audit-keys/auditex-reader.pem --certificate-thumbprint <sha1-thumbprint> \
+  --certificate-password-file ~/audit-keys/auditex-reader.pass --auditor-profile global-reader --collector-preset full
+```
+
+Sign-ins for the certificate route, counted apart:
+
+- Set-up (once): one administrator sign-in to the Microsoft Entra admin centre covers the app registration, the permissions and admin consent, the role assignment and the certificate upload. Creating the certificate and its key needs no sign-in.
+- Audit (every run): no interactive sign-in. An app-only certificate run mints every service token (Microsoft Graph, Exchange Online, the Teams admin API and the optional Power BI and Power Platform resources) silently from the certificate.
+
+Every app token then comes from the certificate; a saved `AZURE_CLIENT_SECRET` is ignored with a warning. `auditex setup-guide m365 --mode app` prints the same run as `app_run_certificate`, and `auditex guided-run --flow app-audit` takes the same four options. Set-up steps and the blast radius of the key credential are in the [administrator permission guide](admin-permission-guide.md#certificate-credential-for-app-only-runs).
+
 Emergency access accounts: tell the Conditional Access check which accounts they are, so that it does not rely on inference. Pass `--break-glass-accounts` to `auditex run` or `azure-tenant-audit` (comma-separated object IDs, user principal names, display names or group names, or `@file` with one per line; an entry is looked up in the full user and group lists, and one that matches nothing, or a display name two accounts share, is reported as unresolved and not judged) or set `AUDITEX_BREAK_GLASS_ACCOUNTS` for any entry point; the option wins over the variable. List the group your policies exclude when the accounts are excluded through it (membership is read only for role-assignable groups). The same list tells the MFA and legacy-authentication checks which exclusions are acceptable: a Conditional Access policy for all users that excludes anything else (an administrator role, a guest type, a staff group) reads "enforced with exclusions" and fails the CIS and ScubaGear controls, so list the accounts even when you do not need the break-glass finding. The finding `ca.break_glass_exclusion_missing` then names each enabled policy that requires MFA or blocks and excludes none of the listed accounts. Without a list the accounts are inferred (names containing break glass or emergency access, and Global Administrator role holders), and the finding is rated medium at most.
 
 ```bash

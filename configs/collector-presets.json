@@ -39,6 +39,7 @@
         "sharepoint_access",
         "onedrive_posture",
         "teams",
+        "teams_policy",
         "exchange_policy",
         "dns_posture"
       ],

@@ -14,7 +14,7 @@ from .capability_gate import (
 )
 from .collection_gaps import NON_FATAL_COLLECTORS, collector_gap_reason, sample_only
 from .config import CollectorConfig, RunConfig
-from .profiles import AuditProfile, get_profile
+from .profiles import APP_MODE_ONLY_COLLECTORS, AuditProfile, get_profile
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .scope_catalog import build_m365_scope_catalog
 from .selection import select_collectors
@@ -103,12 +103,12 @@ def build_live_run_plan(
             excluded_collectors=exclude_collector_names, include_exchange=args.include_exchange,
             auth_mode="app",
         )
-        omitted = [name for name in ("exchange_policy", "dns_posture") if name in app_selected and name not in selected]
+        omitted = [name for name in APP_MODE_ONLY_COLLECTORS if name in app_selected and name not in selected]
         if omitted:
             selection_notices = (
                 f"Defaults/preset did not select {', '.join(omitted)}: these defaults are app-mode only; "
                 "--include-exchange selects the Microsoft 365 CLI exchange collector in this mode. "
-                "Only --collectors explicitly selects Exchange policy or DNS posture outside app mode.",
+                "Only --collectors explicitly selects Exchange policy, DNS posture or Teams admin policies outside app mode.",
             )
 
     return LiveRunPlan(

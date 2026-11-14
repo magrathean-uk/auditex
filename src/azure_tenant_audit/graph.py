@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
+import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -11,11 +13,23 @@ from urllib.parse import urlencode, urljoin, urlparse
 import requests
 from requests.exceptions import RequestException
 
-from . import auth_context
-from .config import AuthConfig
+from . import auth_context, certificate_auth
+from .certificate_auth import CERTIFICATE_ERRORS, CertificateAuthError
+from .config import AuthConfig, check_single_credential
 from .versioning import package_user_agent
 
 LOG = logging.getLogger(__name__)
+# Teams admin API audience; its token is minted only from a certificate credential, never a secret.
+_TEAMS_ADMIN_AUDIENCE = "48ac35b8-9aa8-4d74-927d-1f4a14a0b239"
+_TEAMS_ADMIN_RESOURCES = frozenset({_TEAMS_ADMIN_AUDIENCE, "https://api.interfaces.records.teams.microsoft.com"})
+# A certificate token is refreshed this many seconds before msal says it expires.
+_CERTIFICATE_REFRESH_MARGIN_SECONDS = 300.0
+
+
+def _is_teams_admin_scope(scope: str) -> bool:
+    return str(scope).casefold().removesuffix("/.default").rstrip("/") in _TEAMS_ADMIN_RESOURCES
+
+
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 # Beta is opt-in per endpoint: only surfaces without a v1.0 equivalent use it, and
 # every beta call is recorded with api_version="beta" in coverage and the API ledger.
@@ -49,7 +63,8 @@ _DOWNLOAD_HOST_SUFFIXES = (
 #   POST only to /v1.0/$batch or /beta/$batch, every sub-request a body-free, relative GET
 #   (class 3 Graph $batch).
 # The only other non-GET calls in this module are token POSTs to the Entra authority (class 2:
-# app_token_for, _app_token, and msal in _interactive_token), which never pass through _request.
+# app_token_for, _app_token, msal in _interactive_token and msal in _certificate_exchange for a
+# certificate credential), which never pass through _request.
 # tests/test_http_verb_allowlist.py holds the frozen allow-list; a new non-GET site fails it.
 READ_ONLY_METHODS = frozenset({"GET"})
 _BATCH_ENVELOPE_KEYS = frozenset({"requests"})
@@ -241,6 +256,10 @@ class GraphClient:
     _next_request_not_before: float = field(default=0.0, init=False)
     _permission_failures: dict[str, int] = field(default_factory=dict, init=False)
     _token_claims: dict[str, Any] | None = field(default=None, init=False)
+    # Certificate credential runtime, process memory only: one msal app and scope -> (token, refresh deadline).
+    _certificate_app: Any = field(default=None, init=False, repr=False, compare=False)
+    _certificate_tokens: dict[str, tuple[str, float]] = field(default_factory=dict, init=False, repr=False, compare=False)
+    _certificate_lock: Any = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
 
     def _emit(self, event: str, message: str, details: dict[str, Any] | None = None) -> None:
         if self.audit_event is None:
@@ -323,6 +342,9 @@ class GraphClient:
         return f"{self.auth.authority.rstrip('/')}/{tenant_id}"
 
     def ensure_token(self) -> str:
+        if self.auth.certificate is not None:
+            # Certificate tokens carry a refresh deadline, so the cached _token is not trusted alone.
+            return self._certificate_token(self.auth.graph_scope)
         if self._token:
             return self._token
         if self.auth.access_token:
@@ -333,7 +355,21 @@ class GraphClient:
         return self._app_token()
 
     def app_token_for(self, scope: str) -> str | None:
-        """Client-credentials token for another resource (e.g. Exchange Online), or None outside app mode."""
+        """Client-credentials token for another resource (e.g. Exchange Online), or None outside app mode.
+
+        A certificate credential mints every app token through msal; a non-Graph token that cannot be
+        acquired is None (the collector records a named gap). The Teams admin token comes only from a
+        certificate: a secret-only, delegated or token run gets None and never a secret-minted token.
+        """
+        if self.auth.certificate is not None:
+            try:
+                return self._certificate_token(scope)
+            except GraphError:
+                if scope == self.auth.graph_scope:
+                    raise
+                return None
+        if _is_teams_admin_scope(scope):
+            return None
         if self.auth.access_token or self.auth.auth_mode == "interactive" or not self.auth.client_secret or not self.auth.client_id:
             return None
         cache = self.__dict__.setdefault("_resource_tokens", {})
@@ -367,7 +403,71 @@ class GraphClient:
         self._emit("graph.token.succeeded", "Resource token acquired", {"scope": scope, "status": response.status_code})
         return token
 
+    def _certificate_token(self, scope: str) -> str:
+        """An app token from the certificate credential, cached in memory until its refresh deadline."""
+        with self._certificate_lock:
+            cached = self._certificate_tokens.get(scope)
+            if cached is not None and time.monotonic() < cached[1]:
+                return cached[0]
+            self._certificate_tokens.pop(scope, None)
+            check_single_credential(self.auth)
+            started = time.monotonic()
+            # Events name the mode, endpoint and scope only: no assertion, key, token or vendor diagnostic.
+            self._emit(
+                "graph.token.requested",
+                "Requesting certificate app token",
+                {"mode": "certificate", "token_url": self._token_url(), "scope": scope},
+            )
+            token, lifetime, failure = self._certificate_exchange(scope)
+            duration_ms = round((time.monotonic() - started) * 1000, 2)
+            if failure is not None or token is None:
+                self._emit(
+                    "graph.token.failed",
+                    "Certificate token request failed",
+                    {"mode": "certificate", "scope": scope, "error_code": failure, "duration_ms": duration_ms},
+                )
+                # A GraphError, so each Graph read fails as it does for a refused secret, with a fixed message.
+                code = failure if failure == "certificate_authority_refused" else "certificate_token_failed"
+                raise GraphError(CERTIFICATE_ERRORS[code], error_code=code)
+            self._certificate_tokens[scope] = (token, started + max(0.0, lifetime - _CERTIFICATE_REFRESH_MARGIN_SECONDS))
+            if scope == self.auth.graph_scope:
+                self._token = token
+            self._emit(
+                "graph.token.succeeded",
+                "Certificate app token acquired",
+                {"mode": "certificate", "scope": scope, "duration_ms": duration_ms},
+            )
+            return token
+
+    def _certificate_exchange(self, scope: str) -> tuple[str | None, float, str | None]:
+        """Run msal inside one frame; every failure comes back as a fixed code, never an exception or body."""
+        try:
+            app = self._certificate_app
+            if app is None:
+                authority = certificate_auth.certificate_authority(self.auth.authority, self.auth.tenant_id)
+                app = certificate_auth.build_confidential_client(
+                    self.auth.certificate,
+                    client_id=self.auth.client_id,
+                    authority=authority,
+                    timeout=self.auth.timeout_seconds,
+                )
+                self._certificate_app = app
+            result = app.acquire_token_for_client(scopes=[scope])
+        except CertificateAuthError as exc:
+            return None, 0.0, exc.error_code
+        except Exception:  # noqa: BLE001 - msal and transport messages can carry request material
+            return None, 0.0, "certificate_token_failed"
+        token = result.get("access_token") if isinstance(result, dict) else None
+        if not isinstance(token, str) or not token:
+            return None, 0.0, certificate_auth.safe_oauth_error(result)
+        lifetime = result.get("expires_in")
+        if isinstance(lifetime, bool) or not isinstance(lifetime, (int, float)) or not math.isfinite(lifetime) or lifetime <= 0:
+            return None, 0.0, "certificate_token_failed"
+        return token, float(lifetime), None
+
     def _app_token(self) -> str:
+        if self.auth.certificate is not None:
+            return self._certificate_token(self.auth.graph_scope)
         if not self.auth.client_secret:
             raise GraphError("No client secret or access token provided.")
 

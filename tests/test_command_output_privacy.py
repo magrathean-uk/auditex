@@ -632,3 +632,20 @@ def test_output_mask_keeps_complete_tail_when_window_is_not_clipped() -> None:
 @pytest.mark.parametrize("token", ["eyJabc.def.ghi", "eyJabc.def.ghi_", "eyJabc.def.ghi-"])
 def test_output_mask_redacts_whole_jwt(token) -> None:
     assert redact_output(f"token: {token}") == "token: ***redacted-jwt***"
+
+
+@pytest.mark.parametrize("label", ["PRIVATE KEY", "RSA PRIVATE KEY", "ENCRYPTED PRIVATE KEY", "EC PRIVATE KEY"])
+@pytest.mark.parametrize("truncated", [False, True])
+def test_output_mask_removes_pem_private_key_blocks(label, truncated) -> None:
+    body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" + "constructedkeybody" * 4
+    block = f"-----BEGIN {label}-----\n{body}\n" + ("" if truncated else f"-----END {label}-----")
+    masked = redact_output(f"loaded {block} done", limit=None)
+    assert body not in masked and "PRIVATE KEY-----" not in masked.replace("***redacted-private-key***", "")
+    assert masked.startswith("loaded ***redacted-private-key***")
+
+
+@pytest.mark.parametrize("key", ["client_assertion", "private_key", "passphrase", "certificate_password_file",
+                                 "certificate-password-env", "certificate_path", "certificate_thumbprint"])
+def test_output_mask_redacts_certificate_credential_fields(key) -> None:
+    masked = redact_output(f'{{"{key}": "constructed-certificate-canary"}} {key}=constructed-inline-canary', limit=None)
+    assert "constructed-certificate-canary" not in masked and "constructed-inline-canary" not in masked

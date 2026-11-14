@@ -84,8 +84,11 @@ class TeamsPolicyCollector(Collector):
             environment = "unknown"
         auth = getattr(client, "auth", None)
         token = None
-        # The current GraphClient only mints secret-auth tokens. Do not try that
-        # unapproved credential path; a certificate-capable client can supply one.
+        # Only a certificate credential mints the Teams admin token: GraphClient.app_token_for
+        # returns None for it otherwise, and a run with a client secret never asks, so a
+        # secret-only or delegated run records teams_token_unavailable below. In app mode with a
+        # certificate the five REST reads run; the two operations without a REST read path
+        # (messaging and app setup policies) stay named skips.
         if not getattr(auth, "client_secret", None) and getattr(auth, "auth_mode", "app") == "app":
             if environment in TEAMS_ADMIN_BASE and hasattr(client, "app_token_for"):
                 try:

@@ -49,6 +49,12 @@ class AuditRunCommandSpec:
     access_token: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
+    # Certificate credential: the key file path, its SHA-1 thumbprint and at most one password source
+    # (an environment variable name or a file); never the password or key text itself.
+    certificate_path: str | None = None
+    certificate_thumbprint: str | None = None
+    certificate_password_env: str | None = None
+    certificate_password_file: str | None = None
     include_exchange: bool = False
     collectors: str | Sequence[str] | None = None
     since: str | None = None
@@ -56,6 +62,26 @@ class AuditRunCommandSpec:
     offline: bool = False
     sample_path: str = "examples/sample_audit_bundle/sample_result.json"
     python_executable: str | None = None
+
+
+def _certificate_options(spec: AuditRunCommandSpec) -> list[str]:
+    selected = any((spec.certificate_path, spec.certificate_thumbprint,
+                    spec.certificate_password_env, spec.certificate_password_file))
+    if not selected:
+        return []
+    if spec.client_secret or spec.access_token:
+        raise ValueError("A certificate credential is never combined with a client secret or access token.")
+    if not (spec.certificate_path and spec.certificate_thumbprint):
+        raise ValueError("A certificate credential needs both certificate_path and certificate_thumbprint.")
+    if spec.certificate_password_env and spec.certificate_password_file:
+        raise ValueError("Name one certificate password source: an environment variable or a file.")
+    options: list[str] = []
+    _add_option(options, "--client-id", spec.client_id)
+    _add_option(options, "--certificate-path", spec.certificate_path)
+    _add_option(options, "--certificate-thumbprint", spec.certificate_thumbprint)
+    _add_option(options, "--certificate-password-env", spec.certificate_password_env)
+    _add_option(options, "--certificate-password-file", spec.certificate_password_file)
+    return options
 
 
 def build_audit_run_command(spec: AuditRunCommandSpec) -> list[str]:
@@ -71,6 +97,10 @@ def build_audit_run_command(spec: AuditRunCommandSpec) -> list[str]:
     _add_option(command, "--until", spec.until)
     if spec.offline:
         command.extend(["--offline", "--sample", spec.sample_path])
+        return command
+    certificate = _certificate_options(spec)
+    if certificate:
+        command.extend(certificate)
         return command
     if spec.access_token:
         command.extend(["--access-token", spec.access_token])

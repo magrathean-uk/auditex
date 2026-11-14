@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from test_teams_admin_rest import Client
 
 from azure_tenant_audit.collectors.teams_policy import (
@@ -234,3 +235,87 @@ def test_operation_outside_rest_allowlist_never_loads_powershell(monkeypatch) ->
     assert result.payload["futurePolicy"]["status"] == "skipped"
     assert result.payload["futurePolicy"]["reason"] == "teams_powershell_not_supported"
     assert result.coverage[-1]["reason"] == "teams_powershell_not_supported"
+
+
+def _certificate_graph_client(monkeypatch, material):
+    from test_certificate_auth import CLIENT_ID, TENANT, FakeEntra
+
+    from azure_tenant_audit import certificate_auth
+    from azure_tenant_audit.config import AuthConfig
+    from azure_tenant_audit.graph import GraphClient
+
+    entra = FakeEntra(material)
+    real = certificate_auth.build_confidential_client
+    monkeypatch.setattr(certificate_auth, "build_confidential_client",
+                        lambda credential, **kwargs: real(credential, **{**kwargs, "http_client": entra}))
+    credential = certificate_auth.load_certificate_credential(material.pfx, material.thumbprint,
+                                                              password_file=material.password_file)
+    return GraphClient(AuthConfig(tenant_id=TENANT, client_id=CLIENT_ID, certificate=credential)), entra
+
+
+def test_certificate_app_run_reads_five_rest_operations_and_names_two_skips(monkeypatch, certificate_material) -> None:
+    from azure_tenant_audit.adapters.teams_admin_rest import (
+        TEAMS_ADMIN_SCOPE,
+        certificate_token,
+    )
+
+    tokens: list[str] = []
+
+    class Rest(_FakeAdapter):
+        def get(self, name, token, environment, **kwargs):
+            tokens.append(token)
+            assert environment == "commercial"
+            return super().get(name, token, environment, **kwargs)
+
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", lambda name: Rest())
+    client, entra = _certificate_graph_client(monkeypatch, certificate_material)
+
+    result = TeamsPolicyCollector().run({"client": client, "audit_logger": None})
+
+    assert [request["scope"] for request in entra.token_requests] == [TEAMS_ADMIN_SCOPE]
+    assert tuple(result.payload) == TEAMS_OPERATIONS and len(result.coverage) == 7
+    assert result.status == "ok" and result.item_count == 5
+    statuses = {row["name"]: row["status"] for row in result.coverage}
+    # DEC-070: five REST reads with the certificate token cover every section the SCuBA rows cite. Messaging
+    # and app setup policies have no REST route and no row cites them, so they stay named skips
+    # (teams_powershell_not_supported), never teams_token_unavailable.
+    named_skips = {"messagingPolicies", "appSetupPolicies"}
+    assert statuses == {name: "skipped" if name in named_skips else "ok" for name in TEAMS_OPERATIONS}
+    assert {row["name"]: row.get("reason") for row in result.coverage if row["name"] in named_skips} == {
+        name: "teams_powershell_not_supported" for name in named_skips}
+    assert sum(status == "ok" for status in statuses.values()) == 5
+    assert not any(row.get("reason") == "teams_token_unavailable" for row in result.coverage)
+    assert len(tokens) == 5 and len(set(tokens)) == 1 and certificate_token(tokens[0])
+    assert tokens[0] not in json.dumps([result.payload, result.coverage, result.message])
+
+
+class _NoTokenPosts:
+    def __init__(self) -> None:
+        self.posts: list[Any] = []
+
+    def post(self, *args, **kwargs):
+        self.posts.append(kwargs.get("data"))
+        raise AssertionError("no token request is expected")
+
+
+@pytest.mark.parametrize("auth", [
+    {"client_secret": "constructed-secret"},
+    {"auth_mode": "interactive"},
+    {"auth_mode": "access_token", "access_token": "constructed-token"},
+])
+def test_secret_only_and_delegated_runs_record_teams_token_unavailable(monkeypatch, auth) -> None:
+    from azure_tenant_audit.config import AuthConfig
+    from azure_tenant_audit.graph import GraphClient
+
+    def forbidden_adapter(name):
+        raise AssertionError(f"No adapter may be loaded without a certificate token: {name}")
+
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", forbidden_adapter)
+    session = _NoTokenPosts()
+    client = GraphClient(AuthConfig(tenant_id="constructed.example", client_id="constructed-app", **auth), session=session)
+
+    result = TeamsPolicyCollector().run({"client": client, "audit_logger": None})
+
+    assert session.posts == []
+    assert result.status == "ok" and result.item_count == 0 and len(result.coverage) == 7
+    assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in result.coverage)

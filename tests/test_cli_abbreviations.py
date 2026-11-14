@@ -246,3 +246,35 @@ def test_as_of_carries_no_secret_and_stays_out_of_every_redaction_set() -> None:
         assert redact_argv(argv, sensitive_flags=flags) == argv
         assert collect_sensitive_argv_values(argv, sensitive_flags=flags) == set()
     assert scrub_google_command_line(argv) == argv
+
+
+_CERTIFICATE_FLAGS = ("--certificate-path", "--certificate-thumbprint", "--certificate-password-env", "--certificate-password-file")
+
+
+def test_certificate_flags_are_in_the_redaction_inventory() -> None:
+    assert set(_CERTIFICATE_FLAGS) <= set(SENSITIVE_FLAGS)
+    assert set(_CERTIFICATE_FLAGS) <= SENSITIVE_ARG_FLAGS and set(_CERTIFICATE_FLAGS) <= SENSITIVE_CLI_ARGS
+
+
+@pytest.mark.parametrize("builder", [engine_cli.build_parser, build_guided_parser])
+@pytest.mark.parametrize("flag", _CERTIFICATE_FLAGS)
+def test_certificate_flags_parse_in_full_and_refuse_every_abbreviation(builder, flag, capsys) -> None:
+    parser = builder()
+    assert getattr(parser.parse_args([flag, "constructed-value"]), flag[2:].replace("-", "_")) == "constructed-value"
+    for length in range(3, len(flag)):
+        for extra in ([flag[:length], "constructed-canary-argv-zz9"], [f"{flag[:length]}=constructed-canary-argv-zz9"]):
+            with pytest.raises(SystemExit) as exc:
+                parser.parse_args(extra)
+            assert exc.value.code == 2
+            assert "constructed-canary-argv-zz9" not in capsys.readouterr().err
+
+
+def test_product_run_passes_certificate_flags_to_the_engine(monkeypatch) -> None:
+    captured = []
+    monkeypatch.setattr(product_cli, "tenant_audit_main", lambda argv: captured.append(argv) or 0)
+    argv = ["--certificate-path", "constructed.pem", "--certificate-thumbprint", "A" * 40,
+            "--certificate-password-file", "constructed.txt"]
+    assert product_cli.main(["run", *argv]) == 0
+    args = engine_cli.build_parser().parse_args(captured[-1])
+    assert (args.certificate_path, args.certificate_thumbprint, args.certificate_password_file) == (
+        "constructed.pem", "A" * 40, "constructed.txt")

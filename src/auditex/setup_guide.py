@@ -8,7 +8,7 @@ from typing import Any
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.data_handling import collector_activity_notices
 from azure_tenant_audit.presets import load_collector_presets
-from azure_tenant_audit.profiles import get_profile
+from azure_tenant_audit.profiles import APP_MODE_ONLY_COLLECTORS, get_profile
 from azure_tenant_audit.scope_catalog import (
     aggregate_catalog_rows,
     build_google_scope_catalog,
@@ -277,8 +277,8 @@ def build_m365_setup_guide(
         include_exchange=include_exchange, auth_mode="app",
     )
     # Generated delegated commands omit these app-only workloads.
-    delegated_omissions = [name for name in app_selection if name in {"exchange_policy", "dns_posture"}]
-    delegated_selection = [name for name in app_selection if name not in {"exchange_policy", "dns_posture"}]
+    delegated_omissions = [name for name in app_selection if name in APP_MODE_ONLY_COLLECTORS]
+    delegated_selection = [name for name in app_selection if name not in APP_MODE_ONLY_COLLECTORS]
     if mode != "app" and not delegated_selection:
         raise ValueError("No collectors selected for this authentication mode.")
     selections = {"app": app_selection}
@@ -369,7 +369,7 @@ def build_m365_setup_guide(
 
     if delegated_omissions or (mode != "app" and not collectors and not collector_preset):
         delegated_steps.append(
-            "Exchange policy and DNS posture are app-mode only in generated setup commands. "
+            "Exchange policy, DNS posture and Teams admin policies are app-mode only in generated setup commands. "
             "Delegated commands omit them, including explicitly selected names; DNS itself needs no Exchange session."
         )
     if delegated_selection:
@@ -382,6 +382,22 @@ def build_m365_setup_guide(
             + exchange_blast_radius
         )
 
+    if "teams_policy" in selections["app"]:
+        app_steps.append(
+            "Teams admin policies (teams_policy) need a certificate credential: the Teams admin API refuses a "
+            "secret-minted token, so a secret-only run records teams_token_unavailable. Add the certificate's "
+            "public part to the app registration, keep its private key in a file readable only by you, and run "
+            "with --certificate-path and --certificate-thumbprint (the key password, if any, through "
+            "--certificate-password-env or --certificate-password-file), never with --client-secret. "
+            "The private key can sign in as the app with every permission it holds; it is never copied into the run."
+        )
+    # DEC-065: the one-time set-up sign-ins are counted apart from the audit, which signs in to nothing.
+    app_steps.append(
+        "Sign-ins, certificate route: set-up takes one administrator sign-in to the Microsoft Entra admin centre "
+        "(app registration, permissions and admin consent, role assignment and the certificate upload in the same "
+        "session); creating the certificate and its key needs none. The audit itself takes no interactive sign-in: "
+        "an app-only certificate run mints every service token silently from the certificate."
+    )
     authentication_plans["app"]["setup_steps"] = app_steps
     if delegated_selection:
         authentication_plans["delegated"]["setup_steps"] = delegated_steps
@@ -420,6 +436,13 @@ def build_m365_setup_guide(
         "app_run": (
             f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
             f"--auditor-profile {auditor_profile} --plane {plane} --client-id <app-id> --client-secret <client-secret> "
+            f"--probe-first --throttle-mode safe{app_run_selection}"
+        ),
+        # Same run with a certificate credential: every app token, including the Teams admin token, from the key.
+        "app_run_certificate": (
+            f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
+            f"--auditor-profile {auditor_profile} --plane {plane} --client-id <app-id> "
+            "--certificate-path <private-key-file> --certificate-thumbprint <sha1-thumbprint> "
             f"--probe-first --throttle-mode safe{app_run_selection}"
         ),
     })

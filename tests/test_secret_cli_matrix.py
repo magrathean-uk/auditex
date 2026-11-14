@@ -1,6 +1,7 @@
 """Long and NUL-bearing secret arguments must not appear in CLI diagnostics."""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -27,10 +28,15 @@ _PRODUCT_FLAGS = (
     "--service-account-key", "--oauth-client", "--token-cache",
 )
 _GENERIC_FLAGS = (*_PRODUCT_FLAGS, "--secret", "--password")
+# Flags that name certificate key material or its location. They are members of the generic and engine
+# sets, and every other redactor (product, Google, response) redacts them through CERTIFICATE_ARG_FLAGS.
+_CERTIFICATE_FLAGS = (
+    "--certificate-path", "--certificate-thumbprint", "--certificate-password-env", "--certificate-password-file",
+)
 _REDACTION_CASES = [
     (name, flag)
     for name, flags in (
-        ("generic", _GENERIC_FLAGS), ("engine", _ENGINE_FLAGS),
+        ("generic", (*_GENERIC_FLAGS, *_CERTIFICATE_FLAGS)), ("engine", (*_ENGINE_FLAGS, *_CERTIFICATE_FLAGS)),
         ("product", _PRODUCT_FLAGS), ("google", _GOOGLE_FLAGS),
     )
     for flag in flags
@@ -68,7 +74,27 @@ def test_sensitive_flag_inventory_is_redacted(redactor: str, flag: str, abbrevia
     assert collect_sensitive_argv_values(argv, sensitive_flags=flags) == {CANARY}
 
 
-@pytest.mark.parametrize("flag", _PRODUCT_FLAGS)
+@pytest.mark.parametrize("redactor", ["product", "google", "response"])
+@pytest.mark.parametrize("flag", _CERTIFICATE_FLAGS)
+@pytest.mark.parametrize("inline", [False, True], ids=["separate", "equals"])
+def test_every_redactor_hides_certificate_flags(redactor: str, flag: str, inline: bool) -> None:
+    from auditex.command_runner import redact_command
+    from auditex.google_workspace.run import scrub_google_command_line
+    from azure_tenant_audit.response import (
+        _scrub_command_line as scrub_response_command_line,
+    )
+    from azure_tenant_audit.secret_hygiene import CERTIFICATE_ARG_FLAGS
+
+    assert set(_CERTIFICATE_FLAGS) == CERTIFICATE_ARG_FLAGS
+    scrub = {"product": redact_command, "google": scrub_google_command_line,
+             "response": scrub_response_command_line}[redactor]
+    argument = [f"{flag}={CANARY}"] if inline else [flag, CANARY]
+    expected = [f"{flag}=***redacted***"] if inline else [flag, "***redacted***"]
+    assert scrub(["auditex", *argument, "--tenant-name", "constructed-tenant"]) == [
+        "auditex", *expected, "--tenant-name", "constructed-tenant"]
+
+
+@pytest.mark.parametrize("flag", (*_PRODUCT_FLAGS, *_CERTIFICATE_FLAGS))
 @pytest.mark.parametrize("inline", [False, True])
 def test_command_runner_redacts_secret_values_echoed_by_child(flag: str, inline: bool, monkeypatch) -> None:
     from auditex.command_runner import run_cli_command
@@ -138,6 +164,115 @@ def test_guided_app_flow_keeps_secret_out_of_console_and_written_files(
         if path.is_file():
             assert CANARY.encode() not in path.read_bytes(), path.relative_to(tmp_path)
 
+
+
+def _certificate_run_fixtures(monkeypatch, certificate_material):
+    """Real engine parser, GraphClient (msal), Teams collector, event log and bundle writer; only the
+    Entra token endpoint and the Teams REST transport are fakes."""
+    from test_certificate_auth import FakeEntra
+
+    from azure_tenant_audit import certificate_auth
+    from azure_tenant_audit import cli as engine_cli
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+
+    entra = FakeEntra(certificate_material)
+    real = certificate_auth.build_confidential_client
+    monkeypatch.setattr(certificate_auth, "build_confidential_client",
+                        lambda credential, **kwargs: real(credential, **{**kwargs, "http_client": entra}))
+    seen_tokens: list[str] = []
+
+    class Rest:
+        def get(self, name, token, environment, **kwargs):
+            seen_tokens.append(token)
+            return {"value": [{"Identity": "Global"}], "duration_ms": 1.0}
+
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", lambda name: Rest())
+    monkeypatch.setattr(engine_cli, "REGISTRY", {"teams_policy": TeamsPolicyCollector()})
+    return entra, seen_tokens
+
+
+def _assert_no_certificate_material(root: Path, certificate_material, tokens: list[str], *texts: str) -> None:
+    secrets = [
+        certificate_material.password, certificate_material.thumbprint, certificate_material.thumbprint.lower(),
+        str(certificate_material.root), certificate_material.key_pem_text[40:120], "PRIVATE KEY", *tokens,
+    ]
+    for text in texts:
+        for secret in secrets:
+            assert secret not in text
+    for path in root.rglob("*"):
+        if path.is_file():
+            data = path.read_bytes()
+            for secret in secrets:
+                assert secret.encode() not in data, (path.relative_to(root), secret[:12])
+
+
+@pytest.mark.parametrize("password_source", ["env", "file"])
+def test_engine_certificate_run_keeps_key_material_out_of_ledger_and_bundle(
+    password_source: str, certificate_material, tmp_path: Path, monkeypatch, capsys, caplog,
+) -> None:
+    from azure_tenant_audit import cli as engine_cli
+
+    entra, seen_tokens = _certificate_run_fixtures(monkeypatch, certificate_material)
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", CANARY)  # ignored, never sent beside the certificate
+    password_args = ["--certificate-password-file", str(certificate_material.password_file)]
+    if password_source == "env":
+        monkeypatch.setenv("AUDITEX_TEST_PFX_PASSWORD", certificate_material.password)
+        password_args = ["--certificate-password-env", "AUDITEX_TEST_PFX_PASSWORD"]
+    argv = [
+        "--tenant-name", "CONSTRUCTED", "--tenant-id", "constructed.onmicrosoft.com", "--client-id", "constructed-app",
+        "--certificate-path", str(certificate_material.pfx), "--certificate-thumbprint", certificate_material.thumbprint,
+        *password_args, "--out", str(tmp_path / "runs"), "--run-name", "certificate", "--collectors", "teams_policy",
+        "--throttle-mode", "fast", "--no-probe-first",
+    ]
+    assert engine_cli.main(argv) == 0
+    assert "AUDITEX_TEST_PFX_PASSWORD" not in os.environ
+    assert [request["scope"] for request in entra.token_requests] == [
+        "https://graph.microsoft.com/.default", "48ac35b8-9aa8-4d74-927d-1f4a14a0b239/.default"]
+    assert len(seen_tokens) == 5
+    run_dir = tmp_path / "runs" / "CONSTRUCTED-certificate"
+    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    command_line = manifest["command_line"]
+    for flag in ("--certificate-path", "--certificate-thumbprint", password_args[0]):
+        assert command_line[command_line.index(flag) + 1] == "***redacted***"
+    # The run ledger is built from the audit log: two certificate token exchanges, no failure.
+    events = [json.loads(line) for line in (run_dir / "audit-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    token_events = [event for event in events if str(event.get("event", "")).startswith("graph.token.")]
+    assert [event["event"] for event in token_events].count("graph.token.succeeded") == 2
+    assert all(event["details"]["mode"] == "certificate" for event in token_events)
+    output = capsys.readouterr()
+    assert CANARY not in output.out + output.err + caplog.text
+    _assert_no_certificate_material(tmp_path, certificate_material, [*seen_tokens, CANARY],
+                                    output.out, output.err, caplog.text)
+
+
+def test_guided_certificate_flow_passes_through_and_keeps_key_material_out(
+    certificate_material, tmp_path: Path, monkeypatch, capsys, caplog,
+) -> None:
+    from auditex import guided
+
+    monkeypatch.setattr(guided, "build_doctor_report", lambda **kwargs: {
+        "system": {"os": "test", "machine": "test"}, "readiness": {"core_ready": True},
+    })
+    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(tmp_path / "local-auth.env"))
+    monkeypatch.setenv("AUDITEX_AUTH_CONTEXTS_PATH", str(tmp_path / "auth-contexts.json"))
+    monkeypatch.setenv("AUDITEX_M365_HOME", str(tmp_path / "m365-home"))
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", CANARY)  # a saved secret is never read for a certificate run
+    entra, seen_tokens = _certificate_run_fixtures(monkeypatch, certificate_material)
+    argv = [
+        "--flow", "app-audit", "--tenant-id", "constructed.onmicrosoft.com", "--tenant-name", "CONSTRUCTED",
+        "--client-id", "constructed-app", "--certificate-path", str(certificate_material.pem_encrypted),
+        "--certificate-thumbprint", certificate_material.thumbprint,
+        "--certificate-password-file", str(certificate_material.password_file),
+        "--out", str(tmp_path / "runs"), "--run-name", "guided-certificate", "--collectors", "teams_policy",
+        "--throttle-mode", "fast", "--no-probe-first", "--non-interactive", "--skip-login-check", "--skip-tool-check",
+    ]
+    assert guided.run_guided(guided.build_guided_parser().parse_args(argv)) == 0
+    assert len(entra.token_requests) == 2 and len(seen_tokens) == 5
+    output = capsys.readouterr()
+    manifest = (tmp_path / "runs" / "CONSTRUCTED-guided-certificate" / "run-manifest.json").read_text(encoding="utf-8")
+    assert "--certificate-path" in manifest and "--client-secret" not in manifest
+    _assert_no_certificate_material(tmp_path, certificate_material, [*seen_tokens, CANARY],
+                                    output.out, output.err, caplog.text)
 
 def _pythons() -> list[str]:
     candidates = [sys.executable, *(shutil.which(f"python3.{minor}") for minor in (11, 12, 13))]

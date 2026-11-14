@@ -67,3 +67,75 @@ def _no_operator_lists_from_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
 def _no_stale_sync_threshold_from_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
     """An operator's AUDITEX_STALE_SYNC_DAYS must not change the 14-day default a test expects."""
     monkeypatch.delenv("AUDITEX_STALE_SYNC_DAYS", raising=False)
+
+
+@pytest.fixture(scope="session")
+def certificate_material(_isolate_auditex_secrets):
+    """Throwaway certificate credentials, generated per session under the isolated secrets directory.
+
+    Never real key material: a fresh 2048-bit RSA key and a self-signed certificate for a constructed
+    subject, written owner-only (mode 600) as PEM and PFX files with and without a password.
+    """
+    import datetime as _dt
+    from types import SimpleNamespace
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+
+    root = Path(_isolate_auditex_secrets) / "certificates"
+    root.mkdir(mode=0o700)
+    password = "constructed-key-password-zz9"
+
+    def certificate(key, *, days_valid: int = 5, expired: bool = False):
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "constructed-auditex-test")])
+        now = _dt.datetime.now(_dt.UTC)
+        start = now - _dt.timedelta(days=10 if expired else 1)
+        end = now - _dt.timedelta(days=1) if expired else now + _dt.timedelta(days=days_valid)
+        return (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                .serial_number(x509.random_serial_number()).not_valid_before(start).not_valid_after(end)
+                .sign(key, hashes.SHA256()))
+
+    def write(name: str, data: bytes, mode: int = 0o600) -> Path:
+        path = root / name
+        path.write_bytes(data)
+        path.chmod(mode)
+        return path
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    cert = certificate(key)
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+    plain = serialization.NoEncryption()
+    locked = serialization.BestAvailableEncryption(password.encode())
+    pkcs8 = serialization.PrivateFormat.PKCS8
+    pem = serialization.Encoding.PEM
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    small_key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    ec_key = ec.generate_private_key(ec.SECP256R1())
+    expired_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    expired_cert = certificate(expired_key, expired=True)
+    paths = SimpleNamespace(
+        pem=write("key-and-cert.pem", key.private_bytes(pem, pkcs8, plain) + cert_pem),
+        pem_encrypted=write("key-and-cert-encrypted.pem", cert_pem + key.private_bytes(pem, pkcs8, locked)),
+        pem_key_only=write("key-only.pem", key.private_bytes(pem, pkcs8, plain)),
+        pfx=write("credential.pfx", pkcs12.serialize_key_and_certificates(b"constructed", key, cert, None, locked)),
+        pfx_plain=write("credential-plain.pfx", pkcs12.serialize_key_and_certificates(b"constructed", key, cert, None, plain)),
+        pem_other_cert=write("key-with-other-cert.pem", key.private_bytes(pem, pkcs8, plain)
+                             + certificate(other_key).public_bytes(pem)),
+        pem_expired=write("expired.pem", expired_key.private_bytes(pem, pkcs8, plain) + expired_cert.public_bytes(pem)),
+        pem_small=write("small.pem", small_key.private_bytes(pem, pkcs8, plain)),
+        pem_ec=write("ec.pem", ec_key.private_bytes(pem, pkcs8, plain)),
+        password_file=write("password.txt", (password + "\n").encode()),
+    )
+    return SimpleNamespace(
+        root=root,
+        key=key,
+        certificate=cert,
+        thumbprint=cert.fingerprint(hashes.SHA1()).hex().upper(),
+        password=password,
+        key_pem_text=key.private_bytes(pem, pkcs8, plain).decode(),
+        expired_thumbprint=expired_cert.fingerprint(hashes.SHA1()).hex().upper(),
+        **vars(paths),
+    )

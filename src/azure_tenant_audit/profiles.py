@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Profile and preset defaults that only an app-mode run can collect: Exchange policy (an app-only
+# Exchange session), DNS posture (paired with it) and Teams admin policies (a certificate-minted
+# Teams admin token). Generated delegated set-up commands omit them.
+APP_MODE_ONLY_COLLECTORS: tuple[str, ...] = ("exchange_policy", "dns_posture", "teams_policy")
+
 
 @dataclass(frozen=True)
 class AuditProfile:
@@ -72,6 +77,9 @@ PROFILES: dict[str, AuditProfile] = {
             "sharepoint_access",
             "onedrive_posture",
             "teams",
+            # App mode with a certificate credential reads the Teams admin policies; without one the
+            # collector records teams_token_unavailable as a named skip.
+            "teams_policy",
             "exchange_policy",
             "dns_posture",
         ),

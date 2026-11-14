@@ -12,11 +12,24 @@ from typing import Any
 
 from .argument_parser import DiagnosticRedactingArgumentParser, build_argument_parser  # noqa: F401 - re-exported for callers of this module
 
+# Flags that name certificate key material or its location (the key file, its password source and the
+# certificate's thumbprint). Every argv redactor treats them as sensitive whatever flag set its caller
+# passes, so no redactor (product, response, Google, bootstrap) can leak a key path or password source.
+CERTIFICATE_ARG_FLAGS = frozenset(
+    {
+        "--certificate-path",
+        "--certificate-thumbprint",
+        "--certificate-password-env",
+        "--certificate-password-file",
+    }
+)
+
 SENSITIVE_ARG_FLAGS = frozenset(
     {
         "--access-token",
         "--token",
         "--client-secret",
+        *CERTIFICATE_ARG_FLAGS,
         "--secret",
         "--password",
         "--command-override",
@@ -33,11 +46,17 @@ SENSITIVE_ARG_FLAGS = frozenset(
 )
 
 SENSITIVE_KEY_RE = re.compile(
-    r"(^|[_-])(access[_-]?token|refresh[_-]?token|token|secret|password|credential|authorization|raw[_-]?claims)([_-]|$)",
+    r"(^|[_-])(access[_-]?token|refresh[_-]?token|token|secret|password|passphrase|credential|authorization|raw[_-]?claims"
+    r"|private[_-]?key|client[_-]?assertion)([_-]|$)",
     re.IGNORECASE,
 )
 
 BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+# A PEM private key block (RSA, EC, ENCRYPTED or PKCS#8), including one cut off before its END line.
+PRIVATE_KEY_PEM_RE = re.compile(
+    r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----.*?(?:-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|\Z)",
+    re.DOTALL,
+)
 JWT_RE = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]++\.[A-Za-z0-9_-]++\.[A-Za-z0-9_-]+")
 # Include guest UPNs (#EXT#), Unicode local parts and single-label UPN suffixes.
 _OUTPUT_EMAIL_RE = re.compile(
@@ -75,7 +94,8 @@ _OUTPUT_SAMPLE_MARGIN = 2048
 # ``key=value``, ``key: value`` and the JSON forms ``"key": "value"`` / ``'key':'value'``: the closing quote of the
 # key and a quoted value (which may hold spaces) are part of the match, so a JSON-keyed secret is not left behind.
 INLINE_SECRET_RE = re.compile(
-    r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key)"
+    r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key"
+    r"|client[_-]?assertion|private[_-]?key|passphrase|certificate[_-]?(?:path|thumbprint|password(?:[_-]?(?:env|file))?))"
     r"[\"']?\s*[=:]\s*)(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;]+)",
     re.IGNORECASE,
 )
@@ -146,7 +166,7 @@ def collect_sensitive_argv_values(
     *,
     sensitive_flags: Iterable[str] = SENSITIVE_ARG_FLAGS,
 ) -> set[str]:
-    flags = set(sensitive_flags)
+    flags = set(sensitive_flags) | CERTIFICATE_ARG_FLAGS
     values: set[str] = set()
     skip_next = False
     for item in argv:
@@ -183,6 +203,7 @@ def redact_text(value: str, sensitive_values: Iterable[str] | None = None) -> st
     for sensitive in sorted({str(item) for item in sensitive_values or [] if item}, key=len, reverse=True):
         redacted = redacted.replace(sensitive, "***redacted***")
     redacted = BEARER_RE.sub("Bearer ***redacted***", redacted)
+    redacted = PRIVATE_KEY_PEM_RE.sub("***redacted-private-key***", redacted)
     redacted = JWT_RE.sub("***redacted-jwt***", redacted)
     redacted = INLINE_SECRET_RE.sub(lambda match: f"{match.group('prefix')}***redacted***", redacted)
     return redacted
@@ -235,7 +256,7 @@ def redact_argv(
     *,
     sensitive_flags: Iterable[str] = SENSITIVE_ARG_FLAGS,
 ) -> list[str]:
-    flags = set(sensitive_flags)
+    flags = set(sensitive_flags) | CERTIFICATE_ARG_FLAGS
     redacted: list[str] = []
     skip_next = False
     for item in argv:

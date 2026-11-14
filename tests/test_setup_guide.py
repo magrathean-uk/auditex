@@ -293,3 +293,16 @@ def test_setup_discloses_explicit_names_filtered_from_delegated_commands(collect
         args = tenant_cli.build_parser().parse_args(shlex.split(guide['commands']['delegated_run'])[2:])
         assert args.collectors == 'identity'
     assert 'app-mode only' in render_setup_guide_markdown(guide)
+
+
+def test_app_setup_counts_certificate_setup_sign_ins_apart_from_the_audit():
+    """DEC-065: the guide states the one-time set-up sign-in and the zero sign-ins of a certificate audit."""
+    guide = build_setup_guide(provider="m365", mode="app")
+    (step,) = [step for step in guide["authentication_plans"]["app"]["setup_steps"] if step.startswith("Sign-ins,")]
+    setup, audit = step.split("The audit itself", 1)
+    assert "one administrator sign-in to the Microsoft Entra admin centre" in setup
+    assert "certificate upload" in setup and "needs none" in setup
+    assert audit.startswith(" takes no interactive sign-in") and "silently from the certificate" in audit
+    assert step in guide["alternate_setup_steps"]["app"]
+    assert step in render_setup_guide_markdown(guide)
+    assert "--certificate-path" in guide["commands"]["app_run_certificate"]
