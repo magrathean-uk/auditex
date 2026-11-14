@@ -598,3 +598,10 @@
 - why: G, typed in this chat at about 10:30 GMT on 14 Nov 2026, word for word: "just for future, when this ships, we cannot prompt the user 100x to sign in. it must be done one."
 - consequences: M08's milestone gets one more Definition of Done item; the lab kit is not the shipped product, but fewer windows there is still preferred.
 - approver: G
+
+## DEC-066 Phase D's Power BI step needs a Fabric operator client (F1)
+- date: 2026-11-14
+- status: pending (G)
+- decision: the 7s dry runs (10:27-10:31 GMT) proved the 404 fix live and found no kit defect; 60-powerbi stops before any write because the operator's own Fabric client (`FabricClientId`, a README prerequisite) is not configured: the token it gets carries only `user_impersonation`, not delegated `Tenant.ReadWrite.All` (dt-live/phaseD/DRYRUN-FAULTS.md). Round 7s part 2b records this and freezes 7s meanwhile.
+- options: (a) a lab app registration with delegated `Tenant.ReadWrite.All`, admin consent and a localhost redirect, made by a reviewed script with a journal, a removal step and an OUT-OF-KIT-WRITES row, removed at rollback; delegated only, so it acts only while G is signed in; M08 Part B's Power BI step can reuse it (recommended) | (b) G sets the eight Power BI settings by hand in the Fabric portal and 60 is skipped
+- approver: G
