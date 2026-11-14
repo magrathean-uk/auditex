@@ -1,0 +1,1 @@
+--task REV-M04-T06 --role codex --account codex2 --readonly --sha task/M04-T06-withholding-reach --tags review,risk:high --timeout 3600 --brief .plan/work/REV-M04-T06/brief-src.md

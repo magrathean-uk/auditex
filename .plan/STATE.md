@@ -4,7 +4,7 @@ overall: 64% (was 62%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 16bb4fa 2026-11-13T23:54:29Z
+last_checkpoint: 9219099 2026-11-14T00:09:12Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -29,11 +29,11 @@ last_checkpoint: 16bb4fa 2026-11-13T23:54:29Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 45% orchestrator
+claude 46% orchestrator
 claude-1 71% ok
 claude-2 49% shared
 claude-3 67% ok
-claude-4 31% ok
+claude-4 32% ok
 claude-5 75% ok
 codex 92% hot
 codex2 87% hot
