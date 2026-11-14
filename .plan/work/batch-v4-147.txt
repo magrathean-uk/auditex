@@ -1,0 +1,1 @@
+--task REV-AMEND-4 --role sol --account claude-1 --readonly --sha task/AMEND-4-amend-4 --tags debug --timeout 2400 --max-turns 80 --budget 10 --brief .plan/work/REV-AMEND-4/brief-src-2.md
