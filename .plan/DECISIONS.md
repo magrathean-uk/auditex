@@ -566,3 +566,12 @@
 - why: the manager's condition in DEC-059.
 - consequences: M08's target is 33 of 35 rows unless the two product rules change, which would be its own decision.
 - approver: auto
+
+## DEC-062 M08 file lines widened within their owners; a --no-verify in a throwaway copy noted
+- date: 2026-11-14
+- status: decided
+- decision: M08-T01 (A1) needs `src/azure_tenant_audit/selection.py` and `run.py` (the delegated run must drop `teams_policy` like the other app-only collectors) and `tests/test_http_verb_allowlist.py` (an allow-list entry for the certificate token call); M08-T03 (B) part 2 needs `src/azure_tenant_audit/power_platform.py`, `tests/test_powerplat_end_to_end.py`, and the outdated lines in `docs/reference/security-privacy.md` and `docs/development/runbook.md`. All are the same engine, test and docs owners the tasks already hold, so the files lines are widened. The transport-class clause B names in `.plan/ARCHITECTURE.md` is the orchestrator's edit at B's merge. Separately, B part 1's worker made one local `git commit --no-verify` in a throwaway copy to get a diff base (nothing in the project, nothing pushed); the machine rule forbids it everywhere, and later briefs say so.
+- options: a separate task for the outside files (rejected: same owners, small, and the review covers them)
+- why: the acceptance criteria cannot be met without them.
+- consequences: no change of owner, scope or acceptance.
+- approver: auto
