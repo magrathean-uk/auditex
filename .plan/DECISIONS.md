@@ -522,3 +522,12 @@
 - consequences: no kit guard, pre-flight count or expected verdict changes. The heavy-job hold for the WGEX sitting applies to anything these need.
 - approver: manager (team-manager chat, 14 Nov 2026, under DEC-036 and DEC-055)
 
+## DEC-057 The reader app: default collectors only, the secret in a records-folder file
+- date: 2026-11-14
+- status: decided
+- decision: both providers' reviews of the reader-app script are changes-required (REV-RAPP-codex, REV-RAPP-sol). Where they differ: the app covers Auditex's default collector set only (the 25 Graph application roles plus Exchange.ManageAsApp, with Global Reader as its only role); the opt-in scopes (MailboxSettings.Read, IdentityRiskyUser.Read.All, ConsentRequest.Read.All, eDiscovery.Read.All) are not added and are recorded as exclusions in the script's header. The secret goes to a mode-600 file created privately in the records folder (dt-live), not 1Password, and expires no later than the trial's end. One author fixes everything both reviews require, writes a journalled removal script and the record rows, and both providers re-check.
+- options: add the opt-in scopes (rejected for the first collection: more tenant-wide read authority than the default run needs; they can be added with their own review) | default set only (chosen)
+- why: the least authority that still gives the first collection its full default coverage.
+- consequences: the first collection does not exercise the opt-in collectors (mailbox forwarding, risky users, consent requests, eDiscovery).
+- approver: auto
+

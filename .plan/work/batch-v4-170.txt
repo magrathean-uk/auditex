@@ -1,0 +1,1 @@
+--task RAPP-fix --role sol --account claude-5 --readonly --tags hard,risk:high --timeout 3600 --max-turns 120 --budget 15 --brief .plan/work/RAPP-fix/brief-src.md
