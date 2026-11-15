@@ -684,3 +684,10 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-15T08:05:49Z	M08-T14	sol	claude-3	claude-opus-5-5	high	branch	2	51	0.6590	blocked	task/M08-T14-role-instances	v4
 2026-11-15T08:09:55Z	REV-M07-T17-labsetup	codex	codex	gpt-6.1-sol	high	readonly	0	132		done	main	v4
 2026-11-15T08:12:42Z	REV-M07-T17-labsetup	codex	codex	gpt-6.1-sol	high	readonly	0	105		done	main	v4
+2026-11-15T08:23:44Z	M08-T14	sol	claude-3	claude-opus-5-5	high	branch	0	1041	4.7086	done	task/M08-T14-role-instances	v4
+2026-11-15T08:28:05Z	REV-M08-T14	codex	codex2	gpt-6.1-sol	high	readonly	1	226		partial	task/M08-T14-role-instances	v4
+2026-11-15T08:41:26Z	M03-T09	codex	codex	gpt-6.1-sol	xhigh	inplace	1	1191		partial	main	v4
+2026-11-15T08:46:40Z	REV-M03-T09	sol	claude-1	claude-opus-5-5	high	readonly	0	292	1.4344	done	main	v4
+2026-11-15T08:49:45Z	CHK-M08-T14	terra	claude-4	claude-sonnet-5-5	high	readonly	0	1521	0.5668	done	task/M08-T14-role-instances	v4
+2026-11-15T08:55:29Z	M03-T09	codex	codex	gpt-6.1-sol	xhigh	inplace	0	482		done	main	v4
+2026-11-15T09:01:39Z	REV-M03-T09	sol	claude-1	claude-opus-5-5	high	readonly	0	339	0.5953	done	main	v4

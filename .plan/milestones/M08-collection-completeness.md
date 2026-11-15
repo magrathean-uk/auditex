@@ -2,7 +2,7 @@
 id: M08
 name: collection-completeness
 weight: 14
-status: done
+status: planned
 ---
 # M08 collection-completeness
 Plan v4 amendment 5 (DEC-059, approver G via the manager). The first app-only collection of the trial tenant answers at most 67 of the 102 SCuBA policies: 35 rows end not assessed for a product or set-up reason, never a tenant one (EXP-m07-teams; PHASE-E-COMMANDS section 5). Fourteen are Teams (11 need a certificate token, 3 more also need the tenant app-settings read), sixteen are Power BI and Power Platform (opt-in collectors whose tenant enablement is not done) and five are Security Suite (the alert-policy row needs a Security and Compliance session, the four DLP rows have no read and no adapter). This milestone closes 33 of them in DEC-059's order: A, B, C, D, then E, one live re-collection; PP 2.3 and PP 3.1 stay not assessed by product design (DEC-061). Order and file ownership below states what runs side by side. The first collection (phase E step E8b) runs as reviewed and is not changed by this milestone. No release in M08: a later release is its own gate (reserved, G's yes). Weight 14 (amendment 5's re-baseline, applied; amendment 7 keeps it).
