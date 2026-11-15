@@ -35,6 +35,9 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T08 | Add the data-round checks to the kit verifier | sol | M | hard | done |
 | M03-T09 | Teacher prompt v3 seeded with real lab-run explanations, and the pilot-3 checks | codex | M | hard | done |
 | M03-T10 | Validation pilot 3 on the system (option 2, cap 20 GPU-hours) | terra | M | hard | done |
+| M03-T11 | Pilot 4 writer: choose, fetch and qualify a stronger example writer | codex | M | hard | todo |
+| M03-T12 | Validation pilot 4 on the system (changed writer) | terra | M | hard | todo |
+| M03-T13 | One-page proposal: a different job for the model | lead | S | - | todo |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
@@ -130,4 +133,22 @@ G has looked at the budget against the allocation balance before any M03 run; th
 
 ### Amendment 8 (DEC-098): option 3 widened to three base families
 - On `pilot: pass` in M03-T10, M03-T07 registers data v2 from the pilot-3 prompt; M03-T02 trains the explainer on three base families (a Qwen base: Qwen 4 if open weights are released and usable on the system when the task starts, else the M03-T01 Qwen candidate; a Mistral base; a Gemma base), three seeds each, the same data, recipe family and selection rule, base named only in config; M03-T03 builds and judges one build per family; M03-T04 compares them. The data and judging pipeline stays base-independent: adding a base is a config entry. Caps: `large` 6,500 and `build` 192 GPU-hours, with `dataround` 180, inside DEC-098's 7,000 for option 3 (more needs the manager). On `pilot: fail` none of this runs.
+
+### M03-T11 Pilot 4 writer: choose, fetch and qualify a stronger example writer (DEC-102)
+- Precondition: M03-T10 done (`pilot: fail`), the host sitting over (network stable), G's system sign-in valid.
+- Chooses the writer by the DEC-102 rule, from models whose open weights are on their publisher's hub now, naming each candidate considered, its size, licence, family and whether it fits one node; records the choice and why in `runs/data-round/pilot-4/writer-choice.md`. Fetches the snapshot onto the system only (never the workstation), qualifies load and a 5-row CPU-free smoke on the system, and writes `teacher-config.json` (reasoning on, four candidates per row, keep the first passing every frozen check; the judge never selects). Prompt v3, exemplars, pass rule, headroom, judge and judge config are byte copies of pilot 3. `kit-check dataround` accepts `pilot-4` under DEC-102 only after pilot 3 failed; tests cover it; the check change is reviewed by the other vendor (`REV-M03-T11`).
+- verify: `"$AIRR_KIT/bin/kit-check" selftest && test -s "$AIRR_KIT/runs/data-round/pilot-4/writer-choice.md" && grep -qx 'pilot-4-writer: ready' .plan/work/M03-T11/result.md`
+- files: `runs/data-round/pilot-4/**` (no targets or judgements yet), `checks/**` (dataround kind only), `models/**` on the system, `runbook/README.md` (data-round section only) in the AIRR kit folder; `.plan/work/M03-T11/result.md`
+
+### M03-T12 Validation pilot 4 on the system (changed writer)
+- Preconditions: M03-T11 done and `REV-M03-T11` approves; G's system sign-in valid.
+- One attempt exactly as M03-T10, with the pilot-4 writer config; same pass rule and judge; no revision. Every job inventoried under `runs/usage/M03-T12/` (stage `dataround`); no GPU cap (DEC-100). On `pilot: fail` the same-job line is closed (DEC-102); on `pilot: pass` M03-T07 and the three-family M03-T02/M03-T03 follow (DEC-098, amendment 8).
+- Writes the M03-T10 finding lines for attempt 4.
+- verify: `grep -qE '^pilot: (pass|fail)$' .plan/work/M03-T12/result.md && grep -qx 'heldout-reads: 0' .plan/work/M03-T12/result.md && "$AIRR_KIT/bin/kit-check" dataround --result .plan/work/M03-T12/result.md`
+- files: `runs/data-round/pilot-4/**`, `runs/usage/M03-T12/**`, `runbook/README.md` (data-round section only) in the AIRR kit folder; `.plan/work/M03-T12/result.md`
+
+### M03-T13 One-page proposal: a different job for the model (DEC-102)
+- The lead writes a one-page plain proposal for G: the recommended job first, what he would see in the product, how it would be judged, what it needs (data, GPU, time), with two alternatives; saved in the records folder and sent to the manager. G picks before any training on it; that pick is a later amendment.
+- verify: `grep -qx 'proposal: sent' .plan/work/M03-T13/result.md`
+- files: `.plan/work/M03-T13/result.md`
 

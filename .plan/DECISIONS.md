@@ -836,3 +836,9 @@
 - decision: M03-T10 ran the one option 2 attempt (prompt v3 with nine lab-run exemplars) and missed: 11 of 190 headroom rows won in both orders, filtered preference 0.5206 band 0.5094-0.5337 against 0.729, 2.77 GPU-hours. Under DEC-098 rule 4 Track B stops; M03-T07, M03-T02, M03-T03 and M03-T04 do not run; no further pilot without G. The release keeps the fixed-text explainer.
 - why: the exemplars cut misread values (frozen-check passes 213 to 238 of 267, unfiltered losses 73 to 43) but most rewritten explanations still tie with the plain template (213 ties); the bar is far out of reach.
 - approver: auto (the manager's rule 4 under G's delegation)
+
+## DEC-102 Track B after pilot 3: one pilot with a changed writer, and a new-job proposal for G
+- date: 2026-11-15
+- decision: G, through the manager (11:05 GMT), on stop / another pilot with a different writer / a different job: "ok do all im back". The manager, on G's delegation: the release ships with the fixed-text explainer; one more pilot of the same job with a changed example writer, one attempt, same bar (a fail closes that line); in parallel a one-page proposal for a different job for the model, recommended job first, which G picks before any training on it; the pipeline stays base-agnostic (Qwen, Mistral, Gemma); GPU uncapped (DEC-100), usage reported.
+- lead's writer change for pilot 4: the strongest open-weight instruct model that runs on one node of the system, from a family other than the judge's (gpt-oss) and other than the pilot 1-3 writer if a stronger one fits (EU-first inside the noise band), with its reasoning on; four candidates per row, the first that passes every frozen check kept (the judge never selects); prompt v3 and its exemplars unchanged.
+- approver: G (delegated to the manager, who decided)
