@@ -800,3 +800,8 @@
 - decision: the phase D DoD line checks the kit actually run, round 7t (frozen c3285015a186, DEC-085: the 7s handover plus the 05 fix), and accepts out-of-kit writes when each is listed with its OUT-OF-KIT-WRITES row and rollback line (rows 12 and 13), instead of 7s and zero.
 - why: both were decided during phase D (DEC-084, DEC-085); the DoD text predates them.
 - approver: auto
+
+## DEC-096 M08-T14: privileged role assignments from the schedule instances
+- decision: MS.AAD.7.5 read met on the lab tenant because the product reads roleAssignmentSchedules, where Graph fills an outside-PIM assignment's start with the read time; ScubaGear reads roleAssignmentScheduleInstances, where it is null (checked live). M08-T14 switches the Assignments source; a sol worker implements, Codex reviews, an executing check runs; then one rule reassessment of m08e3 is not possible (raw evidence differs), so the next collection shows it.
+- why: a verdict that disagrees with ScubaGear on a live tenant is a product correctness defect; the code already named it as an inference to confirm.
+- approver: auto (lead; the manager was told it would proceed unless it said no)
