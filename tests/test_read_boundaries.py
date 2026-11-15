@@ -1412,6 +1412,16 @@ def test_no_collector_or_adapter_endpoint_reads_content() -> None:
     assert violations == []
 
 
+def test_the_role_assignment_schedule_instance_read_is_scanned_and_reads_no_content() -> None:
+    """The privileged roles' Assignments source (DEC-096) is seen by the scan and judged a metadata read."""
+    instances = "/roleManagement/directory/roleAssignmentScheduleInstances"
+    endpoints, _ = _engine_endpoint_scan()
+    reads = [(file, params) for file, _, url, params in endpoints if api_inventory.endpoint_template(url)[0] == instances]
+    # The literal in the collector, and every request site the scan traces it to.
+    assert "src/azure_tenant_audit/collectors/identity_governance.py" in {file for file, _ in reads}
+    assert all(_content_reason(instances, params) is None for _, params in reads)
+
+
 def test_unresolved_requests_are_exactly_the_reviewed_ones() -> None:
     _, unresolved = _engine_endpoint_scan()
     assert {(file, qualname) for file, qualname, _, _ in unresolved} == set(_UNRESOLVED_REQUESTS)

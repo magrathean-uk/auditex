@@ -506,6 +506,9 @@ def test_coverage_failures_override_usable_payload(complete_bundle, path, rows):
 
 SCHEDULE = {'id': TENANT, 'principalId': TENANT, 'roleDefinitionId': 'Role1', 'status': 'Provisioned',
             'scheduleInfo': {'startDateTime': '2026-10-01T00:00:00Z'}}
+# The active schedule instance of the same assignment: privileged_roles reads these (DEC-096), privileged_users the schedules.
+INSTANCE = {'id': TENANT, 'principalId': TENANT, 'roleDefinitionId': 'Role1', 'startDateTime': '2026-10-01T00:00:00Z',
+            'endDateTime': None}
 
 
 @pytest.mark.parametrize('section', ['privileged_users', 'privileged_roles'])
@@ -522,7 +525,7 @@ def test_graph_record_status_is_data_not_collection_health(complete_bundle, sect
 
 @pytest.mark.parametrize('section,collector,name,metadata', [
     ('privileged_users', 'identity_governance', 'roleAssignmentSchedules', {'status': 'failed'}),
-    ('privileged_roles', 'identity_governance', 'roleAssignmentSchedules', {'status': 'partial_success'}),
+    ('privileged_roles', 'identity_governance', 'roleAssignmentScheduleInstances', {'status': 'partial_success'}),
     ('privileged_users', 'identity', 'users', {'status': 'failed'}),
     ('service_plans', 'licensing', 'subscribedSkus', {'status': 'failed'}),
 ])
@@ -544,11 +547,22 @@ def test_normalised_envelope_failure_status_still_withholds(complete_bundle):
 
 def test_record_status_does_not_hide_an_envelope_error(complete_bundle):
     operation(complete_bundle, 'identity_governance', 'roleAssignmentSchedules', [SCHEDULE], error='Forbidden')
+    operation(complete_bundle, 'identity_governance', 'roleAssignmentScheduleInstances', [INSTANCE], error='Forbidden')
     p = project_run(complete_bundle)
     assert p['privileged_users'] == NOT_COLLECTED and p['privileged_roles'] == NOT_COLLECTED
     assert p.report['sections']['privileged_users']['reason'] == 'collector_error'
     assert p.report['sections']['privileged_users']['detail'] == {
         'error_class': 'unclassified', 'operation': 'identity_governance.roleAssignmentSchedules'}
+    assert p.report['sections']['privileged_roles']['detail'] == {
+        'error_class': 'unclassified', 'operation': 'identity_governance.roleAssignmentScheduleInstances'}
+
+
+def test_a_failed_schedule_read_does_not_withhold_privileged_roles(complete_bundle):
+    # privileged_roles is built from the instances; the schedules feed the effective admin set (privileged_users).
+    operation(complete_bundle, 'identity_governance', 'roleAssignmentSchedules', [SCHEDULE], error='Forbidden')
+    p = project_run(complete_bundle, redact=False)
+    assert p['privileged_users'] == NOT_COLLECTED and p['privileged_roles'] == EXPECTED['privileged_roles']
+    assert 'identity_governance.roleAssignmentSchedules' in p.report['sections']['privileged_roles']['ignored_failures']
 
 
 POLICY_A, POLICY_B = '0a1b2c3d-1111-4222-8333-444455556666', '0a1b2c3d-1111-4222-8333-777788889999'
@@ -2361,16 +2375,16 @@ def test_collector_error_class_outside_the_vocabulary_is_not_echoed(complete_bun
 
 def pim_refused(root, error_class='license_required'):
     refuse_signin(root)
-    for name in ('roleAssignmentSchedules', 'roleEligibilitySchedules'):
+    refused = ('roleAssignmentSchedules', 'roleAssignmentScheduleInstances', 'roleEligibilitySchedules')
+    for name in refused:
         operation(root, 'identity_governance', name, [], error='refused', error_class=error_class, item_count=0)
     write(root, 'coverage.json', [SIGNIN_COVERAGE] + [
         {'collector': 'identity_governance', 'type': 'graph', 'name': name, 'status': 'failed',
-         'error_class': error_class, 'error': 'refused'} for name in ('roleAssignmentSchedules', 'roleEligibilitySchedules')])
+         'error_class': error_class, 'error': 'refused'} for name in refused])
     write(root, 'normalized/coverage_ledger.json', {'records': [
         ledger_row(diagnostics=[diagnostic('userSignInActivity')]),
         ledger_row('identity_governance', 'blocked_permission', 'permission_or_auth_blocker', diagnostics=[
-            diagnostic('roleAssignmentSchedules', 'identity_governance', error_class),
-            diagnostic('roleEligibilitySchedules', 'identity_governance', error_class)])]})
+            diagnostic(name, 'identity_governance', error_class) for name in refused])]})
     (root / 'normalized/privileged_roles.json').unlink()
 
 
@@ -2383,12 +2397,13 @@ def test_no_p2_privileged_users_project_from_directory_roles(complete_bundle):
     users = p.report['sections']['privileged_users']
     assert p['privileged_users'] == EXPECTED['privileged_users'] and users['status'] == 'projected'
     assert users['ignored_failures'] == [
-        'identity.userSignInActivity', 'identity_governance.roleAssignmentSchedules', 'identity_governance.roleEligibilitySchedules']
+        'identity.userSignInActivity', 'identity_governance.roleAssignmentScheduleInstances',
+        'identity_governance.roleAssignmentSchedules', 'identity_governance.roleEligibilitySchedules']
     # Every frozen privileged_roles shape carries PIM rules: there is no no-P2 shape to project, so it is withheld and
     # the report says why.
     roles = p.report['sections']['privileged_roles']
     assert p['privileged_roles'] == NOT_COLLECTED and roles['reason'] == 'collector_error'
-    assert roles['detail'] == {'error_class': 'license_required', 'operation': 'identity_governance.roleAssignmentSchedules'}
+    assert roles['detail'] == {'error_class': 'license_required', 'operation': 'identity_governance.roleAssignmentScheduleInstances'}
     validate_assessment(result)
     jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
 

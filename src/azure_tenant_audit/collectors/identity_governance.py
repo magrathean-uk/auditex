@@ -11,7 +11,15 @@ from ..collection_gaps import (
     TRUNCATION_ERROR_CLASS,
 )
 from ..graph import GraphClient
-from ._endpoint_reads import STATUS_OK, ObjectRead, input_rows, read_endpoints
+from ._endpoint_reads import (
+    STATUS_OK,
+    ObjectRead,
+    collector_partial,
+    input_rows,
+    mark_section_scoped,
+    read_endpoints,
+    scoped_gap_message,
+)
 from .base import Collector, CollectorResult, run_graph_endpoints
 
 # PIM role management policies of the directory roles. ``roleManagementPolicyAssignments`` lists which policy governs which
@@ -27,6 +35,12 @@ POLICY_RULES_ENDPOINT = "/policies/roleManagementPolicies/{id}/rules"
 POLICY_RULES_FANOUT = f"{POLICY_RULES}Fanout"
 # A licence refusal (Microsoft Entra ID P2 or Governance) is not a failed read of the tenant's data: see ``_policy_rules``.
 LICENCE_ERROR_CLASS = "license_required"
+# The active schedule instances feed only the ``privileged_roles`` artefact (the effective admin set, the findings and the
+# baselines read the schedules), so their read is section-scoped: a failure withholds that artefact and is named as a
+# section gap, and never makes the collector, and every rule that needs it, partial. A licence refusal of the read (Microsoft
+# Entra ID P2 or Governance, like the schedules) is a skipped section: still a named section gap (reason
+# ``license_required``), but no failure diagnostic, so a collector partial only for licence-gated reads stays licence-limited.
+ASSIGNMENT_INSTANCES = "roleAssignmentScheduleInstances"
 # Every directory role (built in and custom) has one policy; a tenant with more roles than this gets a fan-out gap.
 POLICY_RULES_FANOUT_LIMIT = 250
 # The rule reads are paced: at most this many go in one $batch call, so a tenant with 149 policies is read in 30 small
@@ -82,6 +96,12 @@ class IdentityGovernanceCollector(Collector):
                     "endpoint": "/roleManagement/directory/roleAssignmentSchedules",
                     "params": {},
                 },
+                # The active instances are what ScubaGear's exporter reads for the privileged roles' Assignments: an
+                # assignment made outside PIM has a null startDateTime here, while its schedule above carries the read time.
+                ASSIGNMENT_INSTANCES: {
+                    "endpoint": "/roleManagement/directory/roleAssignmentScheduleInstances",
+                    "params": {},
+                },
                 "roleEligibilitySchedules": {
                     "endpoint": "/roleManagement/directory/roleEligibilitySchedules",
                     "params": {},
@@ -108,14 +128,23 @@ class IdentityGovernanceCollector(Collector):
         if rules_section is not None:
             payload[POLICY_RULES] = rules_section
         coverage.extend(rules_coverage)
+        instance_rows = [row for row in coverage if row.get("name") == ASSIGNMENT_INSTANCES]
+        mark_section_scoped(instance_rows)
+        for row in instance_rows:
+            if row.get("status") == "failed" and row.get("error_class") == LICENCE_ERROR_CLASS:
+                row.update(status="skipped", reason=LICENCE_ERROR_CLASS)
         total = sum(item.get("item_count", 0) for item in coverage)
-        partial = any(item.get("status") != "ok" for item in coverage)
+        partial = collector_partial(coverage)
         return CollectorResult(
             name=self.name,
             status="partial" if partial else "ok",
             payload=payload,
             item_count=total,
-            message="Identity governance collector partially completed" if partial else "",
+            message=(
+                "Identity governance collector partially completed"
+                if partial
+                else scoped_gap_message("Identity governance collector", coverage)
+            ),
             coverage=coverage,
         )
 

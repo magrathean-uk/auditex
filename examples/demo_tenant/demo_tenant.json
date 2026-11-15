@@ -389,6 +389,20 @@
         {"id": "ras-010", "principalId": "0d3e1a7f-0000-4000-8000-00010000000e", "roleDefinitionId": "5d6b6bb7-de71-4623-b4af-96380a352509", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}}
       ]
     },
+    "roleAssignmentScheduleInstances": {
+      "value": [
+        {"id": "rasi-001", "principalId": "0d3e1a7f-0000-4000-8000-000100000001", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-001", "endDateTime": null},
+        {"id": "rasi-002", "principalId": "0d3e1a7f-0000-4000-8000-000100000002", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-002", "endDateTime": null},
+        {"id": "rasi-003", "principalId": "0d3e1a7f-0000-4000-8000-000100000003", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-003", "endDateTime": null},
+        {"id": "rasi-004", "principalId": "0d3e1a7f-0000-4000-8000-000100000004", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-004", "endDateTime": null},
+        {"id": "rasi-005", "principalId": "0d3e1a7f-0000-4000-8000-000100000005", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-005", "endDateTime": null},
+        {"id": "rasi-006", "principalId": "0d3e1a7f-0000-4000-8000-000100000022", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-006", "endDateTime": null},
+        {"id": "rasi-007", "principalId": "0d3e1a7f-0000-4000-8000-000100000006", "roleDefinitionId": "29232cdf-9323-42fd-ade2-1d097af3e4de", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-007", "endDateTime": null},
+        {"id": "rasi-008", "principalId": "0d3e1a7f-0000-4000-8000-000100000006", "roleDefinitionId": "729827e3-9c14-49f7-bb1b-9608f156bbb8", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-008", "endDateTime": null},
+        {"id": "rasi-009", "principalId": "0d3e1a7f-0000-4000-8000-000100000002", "roleDefinitionId": "e8611ab8-c189-46e8-94e1-60213ab1f814", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-009", "endDateTime": null},
+        {"id": "rasi-010", "principalId": "0d3e1a7f-0000-4000-8000-00010000000e", "roleDefinitionId": "5d6b6bb7-de71-4623-b4af-96380a352509", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "roleAssignmentScheduleId": "ras-010", "endDateTime": null}
+      ]
+    },
     "roleEligibilitySchedules": {"value": []},
     "administrativeUnits": {"value": []},
     "roleManagementPolicyAssignments": {

@@ -13,6 +13,17 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ### Collection
 
+- **Privileged role assignments from the schedule instances (MS.AAD.7.5).** `identity_governance` also reads
+  `GET /roleManagement/directory/roleAssignmentScheduleInstances` (v1.0, paged, the existing `RoleManagement.Read.Directory`;
+  no new scope), and the `Assignments` of `normalized/privileged_roles.json` come from it, as ScubaGear's exporter reads
+  them. On a live tenant the schedule of an assignment made outside PIM carries the read time as its start, so MS.AAD.7.5
+  read met; its instance has no start, so the policy now reads not met, as ScubaGear does. Both instance dates keep Graph's
+  null or omitted values. `roleAssignmentSchedules` is still read for the effective admin set and the findings, and a
+  failed schedule read no longer withholds the projected `privileged_roles` section (a failed instance read does). The
+  instance read is section-scoped: its failure is a section gap that withholds only `privileged_roles`, never a partial
+  collector, and a licence refusal of it keeps the PIM licence exemption. The remediated demo drops the disabled
+  administrator's instance with its schedule.
+
 - **Live response shapes (first certificate re-collection).** Teams admin policy reads accept the bare JSON array the
   `Skype.Policy` service answers (an empty answer is still withheld), so the 14 Teams rows are read in app-only runs; the
   DLP policy locations a single-value or empty property unrolls to a string or null are kept as lists, as ScubaGear

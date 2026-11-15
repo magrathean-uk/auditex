@@ -59,14 +59,13 @@ read or reconstruct records that the collector did not save. Preserving the
 log does not itself implement the successful-empty-answer rule (spec Q12).
 
 Both paths already preserve `GrantControls.Operator` and distinguish a null
-role-assignment date from an absent key. The M6 collector correction now also
-preserves Graph's explicit null `scheduleInfo.startDateTime` upstream of the
-run projection. Source semantics: the output contract's privileged-role
-section identifies `roleAssignmentSchedules`, including its known scope and
-instance limitations; v3.9 spec section 3.5 and Q26 treat null start/end as
-non-PIM/permanent signals and absent keys as unusable evidence. The change
-preserves source values; it does not establish live Graph behaviour or change
-which schedules are read.
+role-assignment date from an absent key. Assignments come from
+`roleAssignmentScheduleInstances`, the source ScubaGear's exporter reads
+(M08-T14): live on 15 Nov 2026, `roleAssignmentSchedules` gave an assignment
+made outside PIM the read time as `scheduleInfo.startDateTime`, while the
+instance carries `startDateTime` null. The instance's top-level null is kept
+upstream of the run projection; v3.9 spec section 3.5 and Q26 treat null
+start/end as non-PIM/permanent signals and absent keys as unusable evidence.
 
 `scuba_config.M365Environment` reaches AAD 9.1 and the three environment-bound
 Teams private rule views on both paths. Private export rule views accept the exact

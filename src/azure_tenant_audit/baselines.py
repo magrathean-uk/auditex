@@ -216,6 +216,9 @@ _LICENCE_GATED_SECTIONS = {
         }
     ),
 }
+# Section-scoped reads that feed only a projection section, never a baseline rule: their failure is a named section gap and
+# does not decide whether a collector is otherwise licence-limited (M08-T14: the schedule instances feed privileged_roles).
+_PROJECTION_ONLY_SECTIONS = {"identity_governance": frozenset({"roleAssignmentScheduleInstances"})}
 _MTA_STS_POLICY_RULES = frozenset({"dns_posture.mta_sts_policy_invalid", "dns_posture.mta_sts_testing_mode"})
 # Rules judged on the rows they read, not on whether their whole collector completed. ``exchange_policy`` runs a dozen
 # commands and is partial whenever one of them is not available (``Get-ProtectionAlert`` needs a Security & Compliance
@@ -616,7 +619,9 @@ def _licence_limited_collectors(coverage_ledger: list[dict[str, Any]] | None) ->
             continue
         collector = str(row.get("collector") or "")
         gated = _LICENCE_GATED_SECTIONS.get(collector)
-        diagnostics = [item for item in row.get("diagnostics") or [] if isinstance(item, Mapping)]
+        projection_only = _PROJECTION_ONLY_SECTIONS.get(collector, frozenset())
+        listed = [item for item in row.get("diagnostics") or [] if isinstance(item, Mapping)]
+        diagnostics = [item for item in listed if item.get("item") not in projection_only]
         if gated and diagnostics and all(
             item.get("error_class") == "license_required" and item.get("item") in gated for item in diagnostics
         ):

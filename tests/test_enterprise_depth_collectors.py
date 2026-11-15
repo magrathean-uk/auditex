@@ -208,6 +208,7 @@ class _IdentityGovernanceClient:
             "/identityGovernance/entitlementManagement/catalogs": [{"id": "catalog-1", "displayName": "Main catalog"}],
             "/identityGovernance/entitlementManagement/accessPackages": [{"id": "package-1", "displayName": "App access"}],
             "/roleManagement/directory/roleAssignmentSchedules": [{"id": "assignment-schedule-1"}],
+            "/roleManagement/directory/roleAssignmentScheduleInstances": [{"id": "assignment-instance-1"}],
             "/roleManagement/directory/roleEligibilitySchedules": [{"id": "eligibility-schedule-1"}],
             "/directory/administrativeUnits": [{"id": "au-1", "displayName": "EMEA"}],
             "/policies/roleManagementPolicyAssignments": [
@@ -494,6 +495,7 @@ def test_identity_governance_collector_collects_reviews_packages_and_role_schedu
     assert result.status == "ok"
     assert result.payload["accessReviews"]["value"][0]["id"] == "review-1"
     assert result.payload["entitlementCatalogs"]["value"][0]["id"] == "catalog-1"
+    assert result.payload["roleAssignmentScheduleInstances"]["value"][0]["id"] == "assignment-instance-1"
     assert result.payload["roleEligibilitySchedules"]["value"][0]["id"] == "eligibility-schedule-1"
     assert result.payload["administrativeUnits"]["value"][0]["id"] == "au-1"
     assert result.payload["roleManagementPolicyAssignments"]["value"][0]["policyId"] == "policy-1"

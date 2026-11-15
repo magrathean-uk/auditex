@@ -290,11 +290,12 @@ ADMIN_SET_READS = {
                            "roleAssignableGroupMembers", "privilegedGroupFanout", "groupMembers"}),
     "identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"}),
 }
-# Role policy rules come only from the artefact; the schedules are the assignments it describes. The normaliser writes the
-# artefact only when the collector's policy reads (``roleManagementPolicyAssignments``, ``roleManagementPolicyRules``) and
-# the schedules all succeeded in full, so a failure of a policy read leaves no artefact (``missing_artifact``) and is
-# listed in ``ignored_failures`` like any other operation this section does not read.
-PRIVILEGED_ROLES_READS = {"identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"})}
+# Role policy rules come only from the artefact; the active schedule instances (``roleAssignmentScheduleInstances``, the
+# source ScubaGear reads) are the assignments it describes. The normaliser writes the artefact only when the collector's
+# policy reads (``roleManagementPolicyAssignments``, ``roleManagementPolicyRules``) and the instances all succeeded in full,
+# so a failure of a policy read leaves no artefact (``missing_artifact``) and is listed in ``ignored_failures`` like any
+# other operation this section does not read. ``roleAssignmentSchedules`` feeds the effective admin set, not this section.
+PRIVILEGED_ROLES_READS = {"identity_governance": frozenset({"roleAssignmentScheduleInstances", "roleEligibilitySchedules"})}
 # Names a gap or coverage row may carry for a collector although the collector's payload has no operation of that name: the
 # normaliser records an artefact it withheld after every read succeeded (``collection_gaps``: ``identity_governance.
 # privileged_roles``, reason ``artefact_withheld``). Like a policy read, it is listed in ``ignored_failures`` and never

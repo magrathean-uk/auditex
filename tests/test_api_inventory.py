@@ -297,3 +297,18 @@ def test_a_ledger_written_before_the_sharepoint_section_still_applies() -> None:
     del ledger["sharepoint_admin_rest"]
     applied = _apply_ledger({"safety": {"read_only": True}, "counts": {}}, ledger)
     assert applied["counts"]["observed_sharepoint_admin_rest_requests"] == 0
+
+
+def test_the_role_assignment_schedule_instance_read_is_a_declared_v1_get_without_content() -> None:
+    """``identity_governance`` reads the active schedule instances for the privileged roles (DEC-096): GET, v1.0, no content."""
+    from pim_support import collect
+
+    result = collect()
+    inventory = build_api_call_inventory(platform="m365", selected_collectors=["identity_governance"], capability_rows=[],
+                                         coverage_rows=result.coverage, data_handling={"platform": "m365", "read_only": True})
+    call = next(item for item in inventory["observed_calls"] if item["name"] == "roleAssignmentScheduleInstances")
+
+    assert call["endpoint"] == "/roleManagement/directory/roleAssignmentScheduleInstances"
+    assert (call["method"], call["api_version"], call["access_mode"]) == ("GET", "v1.0", "read")
+    assert call["content_reads"] is False and call["write_actions"] is False
+    assert inventory["safety"]["read_only"] is True and inventory["safety"]["no_content_reads"] is True

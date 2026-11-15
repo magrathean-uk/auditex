@@ -20,9 +20,6 @@ from pim_support import (
     PRINCIPALS,
     READER,
     RECIPIENT,
-    SCHEDULES,
-    PolicyClient,
-    collect,
     forbidden,
     graph_rules,
     license_required,
@@ -31,6 +28,8 @@ from pim_support import (
     snapshot,
     transient,
 )
+from pim_support import PolicyClient as _SupportClient
+from pim_support import collect as _support_collect
 
 from azure_tenant_audit import privileged_roles as artefact
 from azure_tenant_audit.baselines import _licence_limited_collectors
@@ -90,6 +89,33 @@ EXPECTED = [
 
 # The artefact rows also carry the ``key`` every normalized record has (the bundle contract and run comparison need it).
 ARTEFACT = [{"key": f"privileged_role:{row['RoleTemplateId']}", **row} for row in EXPECTED]
+
+INSTANCES_PATH = "/roleManagement/directory/roleAssignmentScheduleInstances"
+# The active schedule instances of the three schedules: the dates sit at the top level, and an end that never comes is null.
+INSTANCES = [
+    {"id": "i1", "principalId": PRINCIPALS["a"], "roleDefinitionId": GA, "directoryScopeId": "/", "assignmentType": "Assigned",
+     "memberType": "Direct", "startDateTime": "2026-10-01T09:30:00Z", "endDateTime": None},
+    {"id": "i2", "principalId": PRINCIPALS["b"], "roleDefinitionId": GA, "directoryScopeId": "/", "assignmentType": "Assigned",
+     "memberType": "Direct", "startDateTime": "2026-01-15T00:00:00Z", "endDateTime": "2026-10-01T09:30:00.1234567Z"},
+    {"id": "i3", "principalId": PRINCIPALS["c"], "roleDefinitionId": EXO, "directoryScopeId": "/", "assignmentType": "Assigned",
+     "memberType": "Direct", "startDateTime": "2026-10-01T09:30:00Z", "endDateTime": None},
+]
+
+
+class PolicyClient(_SupportClient):
+    """The support client, also answering the active schedule instances (``instances``; ``fail`` applies to their path)."""
+
+    def __init__(self, *, instances: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.instances = INSTANCES if instances is None else instances
+
+    def _answer(self, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = super()._answer(path, params)
+        return self.instances if path == INSTANCES_PATH else rows
+
+
+def collect(client: PolicyClient | None = None, **context: Any) -> Any:
+    return _support_collect(client or PolicyClient(), **context)
 
 
 # ---- collection ---------------------------------------------------------------------------------------------------
@@ -350,19 +376,128 @@ def test_privileged_roles_is_written_in_the_export_shape_with_the_pack_date_conv
     assert not any(rule["Id"].startswith(("Enablement_", "AuthenticationContext_")) for role in section["records"] for rule in role["Rules"])
 
 
-# The properties Graph returns for each rule type (the fields the collector keeps), and so all a rule row may carry.
-@pytest.mark.parametrize("start,present", [(None, True), (None, False), ("2026-10-01T09:30:00Z", True)])
-def test_schedule_start_preserves_null_absent_and_dated_values_through_normalisation(start, present) -> None:
-    schedule = {**SCHEDULES[0], "scheduleInfo": {"expiration": {"type": "noExpiration"}}}
+@pytest.mark.parametrize("key,target", [("startDateTime", "StartDateTime"), ("endDateTime", "EndDateTime")])
+@pytest.mark.parametrize("value,present", [(None, True), (None, False), ("2026-10-01T09:30:00Z", True)])
+def test_instance_dates_preserve_null_absent_and_dated_values_through_normalisation(key, target, value, present) -> None:
+    instance = {name: field for name, field in INSTANCES[0].items() if name != key}
     if present:
-        schedule["scheduleInfo"]["startDateTime"] = start
-    normalized = snapshot(collect(PolicyClient(schedules=[schedule])))
+        instance[key] = value
+    normalized = snapshot(collect(PolicyClient(instances=[instance])))
     role = next(row for row in normalized["privileged_roles"]["records"] if row["RoleTemplateId"] == GA)
     assignment = role["Assignments"][0]
-    assert ("StartDateTime" in assignment) is present
+    assert ("StartDateTime" in assignment) is (present or key != "startDateTime")
+    assert ("EndDateTime" in assignment) is (present or key != "endDateTime")
     if present:
-        assert assignment["StartDateTime"] == (None if start is None else "/Date(1790847000000)/")
-    assert assignment["EndDateTime"] is None
+        assert assignment[target] == (None if value is None else "/Date(1790847000000)/")
+
+
+def test_assignments_come_from_the_instances_not_the_schedules() -> None:
+    """The schedule of an assignment made outside PIM carries the read time; its instance has no start (live, DEC-096)."""
+    outside_pim = {**INSTANCES[0], "startDateTime": None}
+    client = PolicyClient(instances=[outside_pim])
+    normalized = snapshot(collect(client))
+    role = next(row for row in normalized["privileged_roles"]["records"] if row["RoleTemplateId"] == GA)
+
+    assert role["Assignments"] == [{"PrincipalId": PRINCIPALS["a"], "StartDateTime": None, "EndDateTime": None}]
+    assert [path for path, _ in client.requests if path == INSTANCES_PATH] == [INSTANCES_PATH]
+    # The schedules are still read: the effective admin set and the governance records use them.
+    assert any(path == "/roleManagement/directory/roleAssignmentSchedules" for path, _ in client.requests)
+
+
+def _aad75(tmp_path: Path, instances: list[dict[str, Any]]) -> dict[str, Any]:
+    """MS.AAD.7.5 over the projection of the artefact built from these instances, on a tenant with Entra ID P2."""
+    from auditex.scuba_projection import (
+        DEFAULT_SCAN_MAX_BYTES,
+        DEFAULT_SCAN_MAX_CHUNKS,
+        DEFAULT_SCAN_MAX_ROWS,
+        Bundle,
+        _roles,
+    )
+    from azure_tenant_audit.value_rules import assess
+
+    normalized = snapshot(collect(PolicyClient(instances=instances)))
+    (tmp_path / "normalized").mkdir()
+    (tmp_path / "normalized" / "privileged_roles.json").write_text(json.dumps(normalized["privileged_roles"]))
+    bundle = Bundle(tmp_path, DEFAULT_SCAN_MAX_ROWS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS)
+    bundle.manifest = {}
+    bundle.collector_health = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    plans = [{"ServicePlanName": "AAD_PREMIUM_P2", "ServicePlanId": "eec0eb4f-6444-4f95-aba0-50c24d67f998"}]
+    return assess("MS.AAD.7.5v1", {"privileged_roles": _roles(bundle), "service_plans": plans})
+
+
+def test_a_direct_assignment_without_an_instance_start_answers_aad_7_5_not_met(tmp_path: Path) -> None:
+    direct = [{**INSTANCES[0], "startDateTime": None}, *INSTANCES[1:]]
+    record = _aad75(tmp_path, direct)
+
+    assert record["verdict"] == "not_met", record
+
+
+def test_pim_assignments_with_an_instance_start_keep_aad_7_5_met(tmp_path: Path) -> None:
+    record = _aad75(tmp_path, INSTANCES)
+
+    assert record["verdict"] == "met", record
+
+
+# ---- the instance read is section-scoped (REV-M08-T14) --------------------------------------------------------------
+
+SCHEDULES_PATH = "/roleManagement/directory/roleAssignmentSchedules"
+ELIGIBILITY_PATH = "/roleManagement/directory/roleEligibilitySchedules"
+PRIVILEGED_MFA = "identity.privileged_mfa_not_registered"
+
+
+def _privileged_mfa_reason(result: Any) -> str | None:
+    """Why the privileged MFA rule cannot be judged on this governance result (identity and auth methods complete)."""
+    from azure_tenant_audit.baselines import _complete_collectors, _rule_evaluation
+
+    ledger = _ledger(result)
+    return _rule_evaluation(
+        PRIVILEGED_MFA, {}, {}, complete_collectors={"identity", "auth_methods"} | _complete_collectors(ledger),
+        snapshot=None, licence_limited_collectors=_licence_limited_collectors(ledger),
+    ).get("reason")
+
+
+def test_a_failed_instance_read_is_a_section_gap_and_keeps_the_collector_complete() -> None:
+    result = collect(PolicyClient(fail={INSTANCES_PATH: transient(INSTANCES_PATH)}))
+
+    assert result.status == "ok", "only privileged_roles reads the instances"
+    assert "roleAssignmentScheduleInstances" in result.message
+    normalized = snapshot(result)
+    assert "privileged_roles" not in normalized, "a failed instance read withholds the artefact"
+    assert normalized["effective_admin_set"] == snapshot(collect())["effective_admin_set"], "the schedules still feed it"
+    gaps = [row for row in normalized["collection_gaps"]["records"] if row["list"] == "roleAssignmentScheduleInstances"]
+    assert [(row["section_scoped"], row["status"], row["error_classes"]) for row in gaps] == [(True, "failed", ["graph_transient"])]
+    assert _ledger(result)[0]["coverage_status"].startswith("complete")
+    assert not str(_privileged_mfa_reason(result)).startswith("collector_not_complete")
+    # Control: a failed schedule read still makes the collector partial and the rule not assessed.
+    assert _privileged_mfa_reason(collect(PolicyClient(fail={SCHEDULES_PATH: transient()})))  == (
+        "collector_not_complete:identity_governance"
+    )
+
+
+def test_a_licence_refusal_of_the_instances_keeps_the_pim_licence_exemption() -> None:
+    refused = license_required()
+    result = collect(PolicyClient(fail={SCHEDULES_PATH: refused, ELIGIBILITY_PATH: refused, ASSIGNMENTS_PATH: refused,
+                                        INSTANCES_PATH: refused, "rules": refused}))
+
+    instances = next(row for row in result.coverage if row["name"] == "roleAssignmentScheduleInstances")
+    assert (instances["status"], instances["reason"], instances["section_scoped"]) == ("skipped", "license_required", True)
+    assert _licence_limited_collectors(_ledger(result)) == {"identity_governance"}
+    assert not str(_privileged_mfa_reason(result)).startswith("collector_not_complete")
+    gaps = [row for row in snapshot(result)["collection_gaps"]["records"] if row["list"] == "roleAssignmentScheduleInstances"]
+    assert [(row["status"], row["reason"]) for row in gaps] == [("skipped", "license_required")], "the gap is still named"
+    # A transient instance failure beside licence-refused PIM reads stays a failed section gap, and (REV-M08-T14 round 2)
+    # does not cancel the PIM licence exemption: no baseline rule reads the instances.
+    other = collect(PolicyClient(fail={SCHEDULES_PATH: refused, ELIGIBILITY_PATH: refused, ASSIGNMENTS_PATH: refused,
+                                       INSTANCES_PATH: transient(INSTANCES_PATH), "rules": refused}))
+    assert next(row for row in other.coverage if row["name"] == "roleAssignmentScheduleInstances")["status"] == "failed"
+    assert _licence_limited_collectors(_ledger(other)) == {"identity_governance"}
+    assert not str(_privileged_mfa_reason(other)).startswith("collector_not_complete")
+    # Control: a transient failure of a read a baseline rule uses still cancels the exemption.
+    schedule_failed = collect(PolicyClient(fail={SCHEDULES_PATH: transient(), ELIGIBILITY_PATH: refused}))
+    assert _licence_limited_collectors(_ledger(schedule_failed)) == set()
+
+
+# The properties Graph returns for each rule type (the fields the collector keeps), and so all a rule row may carry.
 
 
 FAMILY_KEYS = {
@@ -425,7 +560,7 @@ def test_no_frozen_pack_rule_shape_holds_an_expiration_or_approval_rule_as_graph
 
 def test_the_artefact_is_deterministic_and_does_not_depend_on_collection_order() -> None:
     first = snapshot(collect(PolicyClient(roles=(GA, EXO, READER))))["privileged_roles"]
-    reversed_ = snapshot(collect(PolicyClient(roles=(READER, EXO, GA), schedules=list(reversed(SCHEDULES)))))["privileged_roles"]
+    reversed_ = snapshot(collect(PolicyClient(roles=(READER, EXO, GA), instances=list(reversed(INSTANCES)))))["privileged_roles"]
 
     assert first == reversed_
 
@@ -443,13 +578,9 @@ def _without_policy(role: str) -> PolicyClient:
 
 @pytest.mark.parametrize("name,client", [
     pytest.param("a privileged role without a policy", _without_policy(GA), id="no-policy"),
-    pytest.param("an expiration without an end date", PolicyClient(schedules=[
-        {**SCHEDULES[0], "scheduleInfo": {"startDateTime": "2026-10-01T09:30:00Z", "expiration": {"type": "afterDuration", "duration": "P30D"}}}]),
-        id="after-duration-without-end"),
-    pytest.param("a schedule without scheduleInfo", PolicyClient(schedules=[{**SCHEDULES[0], "scheduleInfo": None}]), id="no-schedule-info"),
-    pytest.param("an unparseable date", PolicyClient(schedules=[
-        {**SCHEDULES[0], "scheduleInfo": {"startDateTime": "yesterday", "expiration": {"type": "noExpiration"}}}]), id="bad-date"),
-    pytest.param("a schedule without a principal", PolicyClient(schedules=[{**SCHEDULES[0], "principalId": None}]), id="no-principal"),
+    pytest.param("an end that is not a date", PolicyClient(instances=[{**INSTANCES[0], "endDateTime": 30}]), id="end-not-a-date"),
+    pytest.param("an unparseable date", PolicyClient(instances=[{**INSTANCES[0], "startDateTime": "yesterday"}]), id="bad-date"),
+    pytest.param("an instance without a principal", PolicyClient(instances=[{**INSTANCES[0], "principalId": None}]), id="no-principal"),
 ])
 def test_an_input_that_cannot_be_read_without_guessing_leaves_no_artefact(name: str, client: PolicyClient) -> None:
     assert "privileged_roles" not in snapshot(collect(client)), name
@@ -655,7 +786,7 @@ class _UnreadableExpiration(PolicyClient):
 _TWO_POLICIES_FOR_GA = [*PolicyClient().assignments, {"id": "a2", "policyId": f"{policy_id(GA)}_other", "roleDefinitionId": GA,
                                                      "scopeId": "/", "scopeType": "DirectoryRole"}]
 _EXO_AND_READER = [row for row in PolicyClient().assignments if row["roleDefinitionId"] != GA]
-_EXO_SCHEDULE_WITHOUT_PRINCIPAL = {**SCHEDULES[2], "principalId": None}
+_EXO_INSTANCE_WITHOUT_PRINCIPAL = {**INSTANCES[2], "principalId": None}
 
 WITHHELD = [
     pytest.param(PolicyClient(assignments=[]), [artefact.REASON_EMPTY_POLICY_LIST], id="empty-policy-assignment-list"),
@@ -665,13 +796,11 @@ WITHHELD = [
     pytest.param(_GaRules([row for row in graph_rules(GA) if row["id"].startswith(("Enablement_", "AuthenticationContext_"))]),
                  [f"policy_without_exportable_rules:{GA}"], id="policy-without-exportable-rules"),
     pytest.param(_UnreadableExpiration(), [f"unreadable_rule:{EXO}"], id="unreadable-rule"),
-    pytest.param(PolicyClient(schedules=[{**SCHEDULES[0], "principalId": None}]), [f"unreadable_schedule:{GA}"], id="schedule-without-principal"),
-    pytest.param(PolicyClient(schedules=[{**SCHEDULES[0], "scheduleInfo": {"startDateTime": "2026-10-01T09:30:00Z", "expiration": {
-        "type": "afterDuration", "duration": "P30D"}}}]), [f"unreadable_schedule:{GA}"], id="schedule-without-end-date"),
-    pytest.param(PolicyClient(schedules=[{**SCHEDULES[0], "scheduleInfo": {"startDateTime": "yesterday", "expiration": {
-        "type": "noExpiration"}}}]), [f"unreadable_schedule:{GA}"], id="schedule-with-unparseable-date"),
+    pytest.param(PolicyClient(instances=[{**INSTANCES[0], "principalId": None}]), [f"unreadable_schedule:{GA}"], id="instance-without-principal"),
+    pytest.param(PolicyClient(instances=[{**INSTANCES[0], "endDateTime": "never"}]), [f"unreadable_schedule:{GA}"], id="instance-with-unparseable-end"),
+    pytest.param(PolicyClient(instances=[{**INSTANCES[0], "startDateTime": "yesterday"}]), [f"unreadable_schedule:{GA}"], id="instance-with-unparseable-date"),
     # Every failing role is named, in a stable order, not only the first one found.
-    pytest.param(PolicyClient(assignments=_EXO_AND_READER, schedules=[SCHEDULES[0], _EXO_SCHEDULE_WITHOUT_PRINCIPAL]),
+    pytest.param(PolicyClient(assignments=_EXO_AND_READER, instances=[INSTANCES[0], _EXO_INSTANCE_WITHOUT_PRINCIPAL]),
                  [f"role_without_policy:{GA}", f"unreadable_schedule:{EXO}"], id="several-roles"),
 ]
 
@@ -710,11 +839,11 @@ def test_the_builder_returns_the_rows_or_every_reason() -> None:
         role_definitions=[{"id": GA, "display_name": "Global Administrator"}, {"id": EXO, "display_name": "Exchange Administrator"}],
         policy_assignments=[PolicyClient().assignments[1]],
         policy_rules=[],
-        assignment_schedules=[])
+        assignment_instances=[])
 
     assert built.rows is None
     assert built.reasons == sorted([f"role_without_policy:{GA}", f"policy_without_rules:{EXO}"])
-    complete = artefact.build_privileged_roles(role_definitions=[], policy_assignments=[], policy_rules=[], assignment_schedules=[])
+    complete = artefact.build_privileged_roles(role_definitions=[], policy_assignments=[], policy_rules=[], assignment_instances=[])
     assert (complete.rows, complete.reasons) == ([], []), "no privileged role: a known empty artefact, not a reason"
 
 
@@ -826,3 +955,21 @@ def test_a_policy_still_throttled_after_the_bound_is_a_named_gap_never_a_pass() 
     assert [details["urls"] for name, details in events if name == "graph.batch.retry_exhausted"] == [
         ["/policies/roleManagementPolicies/pol-042/rules"]
     ]
+
+
+# ---- the demo tenants keep their instances and schedules together --------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["demo_tenant.json", "demo_tenant_remediated.json"])
+def test_demo_instances_match_the_assignment_schedules_and_no_disabled_account_keeps_global_admin(name: str) -> None:
+    data = json.loads((Path(__file__).resolve().parents[1] / "examples" / "demo_tenant" / name).read_text(encoding="utf-8"))
+    governance_payload = data["identity_governance"]
+    pairs = {
+        section: {(row["principalId"], row["roleDefinitionId"]) for row in governance_payload[section]["value"]}
+        for section in ("roleAssignmentSchedules", "roleAssignmentScheduleInstances")
+    }
+    assert pairs["roleAssignmentScheduleInstances"] == pairs["roleAssignmentSchedules"], "an instance without its schedule"
+    if name == "demo_tenant_remediated.json":
+        disabled = {user["id"] for user in data["identity"]["users"]["value"] if user.get("accountEnabled") is False}
+        global_admins = {principal for principal, role in pairs["roleAssignmentScheduleInstances"] if role == GA}
+        assert disabled and not global_admins & disabled, "the remediated demo removed Global Administrator from the disabled account"

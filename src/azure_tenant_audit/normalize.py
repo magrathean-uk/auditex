@@ -2200,13 +2200,16 @@ def build_normalized_snapshot(
             )
         )
     # The export-shaped artefact exists only when every read behind it succeeded in full: a missing file means "not
-    # collected", never an empty list. The schedules are read again for their dates (the governance records keep none).
+    # collected", never an empty list. The assignments come from the active schedule instances, the source ScubaGear reads
+    # (an assignment made outside PIM has no start there); the governance records keep the schedules and no dates.
     # When those reads all succeeded and the artefact is withheld all the same, the reasons are recorded as a gap below.
     privileged_role_rows: list[dict[str, Any]] | None = None
     privileged_role_reasons: list[str] = []
+    # Read before the reports are checked: reading the section is what records its read status.
+    assignment_instances = _values(governance_payload, "roleAssignmentScheduleInstances")
     policy_reports = [
         sources.reports.get(f"identity_governance.{name}")
-        for name in ("roleManagementPolicyAssignments", "roleManagementPolicyRules", "roleAssignmentSchedules")
+        for name in ("roleManagementPolicyAssignments", "roleManagementPolicyRules", "roleAssignmentScheduleInstances")
     ]
     rules_section = governance_payload.get("roleManagementPolicyRules") if isinstance(governance_payload, dict) else None
     rules_fanout = rules_section.get("fanout") if isinstance(rules_section, dict) else None
@@ -2219,7 +2222,7 @@ def build_normalized_snapshot(
             role_definitions=role_definitions,
             policy_assignments=policy_assignment_rows,
             policy_rules=policy_rule_rows,
-            assignment_schedules=_values(governance_payload, "roleAssignmentSchedules"),
+            assignment_instances=assignment_instances,
         )
     intune_assignment_objects: list[dict[str, Any]] = []
     # One row per policy the assignment read returned, with how many assignments it has. A policy with

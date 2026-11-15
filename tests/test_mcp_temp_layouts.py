@@ -79,8 +79,8 @@ def test_demo_index_in_common_tmp_layouts(
 
     monkeypatch.setattr(evidence_db, "open_index_read_only", inspect_copy)
     summary = mcp_server.summarize_run(str(run))
-    assert summary["metadata"]["item_count"] == 1080
-    assert sum(row["item_count"] for row in summary["metadata"]["section_stats"]) == 1080
+    assert summary["metadata"]["item_count"] == 1081
+    assert sum(row["item_count"] for row in summary["metadata"]["section_stats"]) == 1081
     validation = build_validation_report(run_dir=run, read_only=True)
     assert validation["valid"], validation["issues"]
     assert not {"invalid_evidence_sqlite", "tenant_identity_conflict"} & {issue["code"] for issue in validation["issues"]}

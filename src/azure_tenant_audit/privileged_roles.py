@@ -5,7 +5,7 @@
 ``Assignments`` and ``Rules`` (plus the ``key`` every normalized record carries, which the projection ignores: the
 bundle contract, the evidence index and run comparison identify a record by it). It is built only from what the
 ``identity_governance`` collector read
-(``roleManagementPolicyAssignments``, ``roleManagementPolicyRules`` and ``roleAssignmentSchedules``) and the role
+(``roleManagementPolicyAssignments``, ``roleManagementPolicyRules`` and ``roleAssignmentScheduleInstances``) and the role
 definitions of the ``identity`` collector, and only when every one of those reads succeeded in full. Nothing is
 defaulted: a value Graph did not return is never filled in, and any gap withholds the whole artefact (a bundle without
 it is "not collected", never an empty list).
@@ -21,11 +21,13 @@ the fields of its kind. Dates are ``/Date(ms)/`` strings, as in the packs. PIM f
 When every read succeeded in full and the artefact is still withheld, the builder says why (``Built.reasons``) and the
 normaliser records it as a ``collection_gaps`` record, so "withheld for this reason" is never read as "not collected".
 
-Inference to confirm on a live tenant before the shape gate opens (that is, before a pack that holds this shape is frozen
-and ``PACK_SHAPE_DIGESTS`` changes): ``Assignments`` come from ``roleAssignmentSchedules``, which also lists the schedules
-scoped to an administrative unit (``directoryScopeId``), and they are copied without their scope; ScubaGear may read the
-schedule instances (``roleAssignmentScheduleInstances``) instead. Neither point is established offline, and nothing here
-filters or reshapes on either.
+``Assignments`` come from the active schedule instances (``roleAssignmentScheduleInstances``), the source ScubaGear's
+pinned exporter reads (``Get-MgBetaRoleManagementDirectoryRoleAssignmentScheduleInstance``, ExportAADProvider.psm1 at
+2446ad723b7f). Checked live: for an assignment made outside PIM the instance has a null ``startDateTime``, while its
+schedule (``roleAssignmentSchedules``) carries the read time, so the schedules would read MS.AAD.7.5 as met where ScubaGear
+does not. ``startDateTime`` and ``endDateTime`` are read at the top level of each instance; a returned null stays null and
+an omitted key stays omitted. The instances also list assignments scoped to an administrative unit (``directoryScopeId``);
+they are copied without their scope, and nothing here filters or reshapes on it.
 """
 from __future__ import annotations
 
@@ -90,21 +92,17 @@ def _date(value: Any) -> str:
 
 
 def _assignment(row: Mapping[str, Any]) -> dict[str, Any]:
+    """One ``Assignments`` item from one active schedule instance (dates at the top level of the instance)."""
     principal = _text(row.get("principalId"))
-    info = row.get("scheduleInfo")
-    expiration = info.get("expiration") if isinstance(info, Mapping) else None
-    if not principal or not isinstance(expiration, Mapping):
+    if not principal:
         raise Unreadable("assignment")
     item: dict[str, Any] = {"PrincipalId": principal}
-    # Preserve Graph's presence semantics: a returned null is evidence, an omitted key is not.
-    # An end is null only when the schedule explicitly says it does not expire.
-    if "startDateTime" in info:
-        start = info["startDateTime"]
-        item["StartDateTime"] = None if start is None else _date(start)
-    if expiration.get("type") == "noExpiration":
-        item["EndDateTime"] = None
-    else:
-        item["EndDateTime"] = _date(expiration.get("endDateTime"))
+    # Preserve Graph's presence semantics: a returned null is evidence (no start: assigned outside PIM; no end: does not
+    # expire), an omitted key is not, so it stays omitted.
+    for source, target in (("startDateTime", "StartDateTime"), ("endDateTime", "EndDateTime")):
+        if source in row:
+            value = row[source]
+            item[target] = None if value is None else _date(value)
     return item
 
 
@@ -167,12 +165,13 @@ def build_privileged_roles(
     role_definitions: Sequence[Mapping[str, Any]],
     policy_assignments: Sequence[Mapping[str, Any]],
     policy_rules: Sequence[Mapping[str, Any]],
-    assignment_schedules: Sequence[Mapping[str, Any]],
+    assignment_instances: Sequence[Mapping[str, Any]],
 ) -> Built:
     """The rows of ``privileged_roles``, or ``None`` rows and the reasons when any input cannot be read without guessing.
 
     The caller passes the inputs only when each was read in full. ``role_definitions`` are the normalized role
-    definitions (``id`` and ``display_name``); the other three are the raw rows of the collector's operations. Empty
+    definitions (``id`` and ``display_name``); the other three are the raw rows of the collector's operations
+    (``assignment_instances`` are the rows of ``roleAssignmentScheduleInstances``). Empty
     rows mean the tenant has no privileged role definition. Every privileged role is checked, so the reasons name each
     role that cannot be read, not only the first.
     """
@@ -192,9 +191,9 @@ def build_privileged_roles(
     for row in policy_rules:
         if _text(row.get("policyId")) and _text(row.get("id")):
             rules_by_policy.setdefault(str(row["policyId"]), []).append(row)
-    schedules_by_role: dict[str, list[Mapping[str, Any]]] = {}
-    for row in assignment_schedules:
-        schedules_by_role.setdefault(_text(row.get("roleDefinitionId")).lower(), []).append(row)
+    instances_by_role: dict[str, list[Mapping[str, Any]]] = {}
+    for row in assignment_instances:
+        instances_by_role.setdefault(_text(row.get("roleDefinitionId")).lower(), []).append(row)
 
     records: list[dict[str, Any]] = []
     reasons: list[str] = []
@@ -227,7 +226,7 @@ def build_privileged_roles(
                 continue
             try:
                 assignments = sorted(
-                    (_assignment(row) for row in schedules_by_role.get(role_id, ())),
+                    (_assignment(row) for row in instances_by_role.get(role_id, ())),
                     key=lambda item: (item["PrincipalId"], item.get("StartDateTime") or "", item.get("EndDateTime") or ""),
                 )
             except Unreadable:

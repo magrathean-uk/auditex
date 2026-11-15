@@ -444,6 +444,7 @@
         "entitlementCatalogs",
         "accessPackages",
         "roleAssignmentSchedules",
+        "roleAssignmentScheduleInstances",
         "roleEligibilitySchedules",
         "administrativeUnits",
         "roleManagementPolicyAssignments",

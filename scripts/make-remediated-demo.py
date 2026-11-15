@@ -125,9 +125,10 @@ def remediate(source: dict) -> tuple[dict, list[str]]:
     ]
     if disabled_admins:
         assignments[:] = [assignment for assignment in assignments if assignment not in disabled_admins]
-        # The PIM schedules list the same assignment; leaving it there would keep the role on the account.
+        # The PIM schedules and their active instances list the same assignment; leaving it there would keep the role on the
+        # account (privileged_roles reads the instances).
         removed = {(assignment.get("principalId"), assignment.get("roleDefinitionId")) for assignment in disabled_admins}
-        for schedule_list in ("roleAssignmentSchedules", "roleEligibilitySchedules"):
+        for schedule_list in ("roleAssignmentSchedules", "roleAssignmentScheduleInstances", "roleEligibilitySchedules"):
             schedules = _values(data, "identity_governance", schedule_list)
             schedules[:] = [row for row in schedules if (row.get("principalId"), row.get("roleDefinitionId")) not in removed]
         changes.append("Removed Global Administrator from the disabled account.")
