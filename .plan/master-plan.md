@@ -79,7 +79,8 @@ The dataround tasks write `round-gpu-hours: dataround <used>`, recomputed by `ki
 | large | M03-T02 | 6,500 | DEC-098 |
 | build | M03-T03 | 192 | DEC-098 |
 | dataround | M03-T06, M03-T07, M03-T10 | 180 | DEC-098 |
-| reserve | - | 16,224 | DEC-037 |
+| auditex | M11-T01, M11-T02, M11-T03, M11-T04 | 5,000 | DEC-115 |
+| reserve | - | 11,224 | DEC-115 |
 | total | - | 20,000 | DEC-002 |
 
 ## Architecture
@@ -100,6 +101,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M08 | collection-completeness | 14 | 100 | done |
 | M09 | certificate-only | 10 | 0 | active |
 | M10 | local-answer | 10 | 0 | active |
+| M11 | auditex-model | 12 | 0 | planned |
 <!-- milestones:end -->
 Weights after amendment 5 (applied): M00 7 to 6, M01 13 to 11, M02 14 to 11, M04 16 to 13, M05 10 to 8, M06 13 to 10,
 M08 0 to 14, from the done milestones in proportion. Amendment 7 keeps every weight: M08 grows by small fixes and one L.
