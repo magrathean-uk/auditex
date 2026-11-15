@@ -237,10 +237,14 @@ def minimise_dlp(name: str, response: dict[str, Any]) -> None:
         if name == "dlpCompliancePolicies":
             for key in DLP_LOCATIONS:
                 value = row.get(key)
+                # Live (15 Nov 2026) the calculated property unrolls: one location arrives as a bare string and an
+                # empty one as null. ScubaGear's JSON export writes both as lists, so they are lists here too.
+                if key in row and value is None:
+                    value = []
+                elif isinstance(value, str) and value:
+                    value = [value]
                 if isinstance(value, list):
                     row[key] = [item if item == "All" else "location" for item in value]
-                elif isinstance(value, str) and value and value != "All":
-                    row[key] = "location"
             continue
         notify = row.get("NotifyUser")
         if isinstance(notify, list):

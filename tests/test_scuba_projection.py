@@ -1228,6 +1228,22 @@ def test_manifest_collection_gap_overrides_successful_endpoint(complete_bundle):
     assert project_run(complete_bundle)['service_plans'] == NOT_COLLECTED
 
 
+def test_manifest_section_gap_of_another_operation_does_not_withhold_a_single_read(complete_bundle):
+    # Live 15 Nov 2026: an app-mode run skips sharepoint_access sitePermissions by design (M08-T08); the manifest's
+    # section gap names that operation, which the payload does not carry, and must not withhold SPO_tenant.
+    path = 'run-manifest.json'
+    manifest = json.loads((complete_bundle / path).read_text())
+    expected = project_run(complete_bundle)['SPO_tenant']
+    manifest['coverage_gaps'] = [{'surface': 'data_exposure', 'status': 'partial',
+                                  'section_gaps': [{'collector': 'sharepoint_access', 'section': 'sitePermissions',
+                                                    'status': 'skipped', 'reason': 'site_permissions_app_only_not_read'}]}]
+    write(complete_bundle, path, manifest)
+    assert project_run(complete_bundle)['SPO_tenant'] == expected != NOT_COLLECTED
+    manifest['coverage_gaps'][0]['section_gaps'][0]['section'] = 'sharePointSettings'
+    write(complete_bundle, path, manifest)
+    assert project_run(complete_bundle)['SPO_tenant'] == NOT_COLLECTED
+
+
 def test_ca_union_of_individually_seen_fields_is_not_a_seen_whole_shape(complete_bundle):
     unseen = {
         'displayName': 'Require MFA', 'state': 'enabled',

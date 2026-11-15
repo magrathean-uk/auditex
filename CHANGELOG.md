@@ -13,6 +13,12 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ### Collection
 
+- **Live response shapes (first certificate re-collection).** Teams admin policy reads accept the bare JSON array the
+  `Skype.Policy` service answers (an empty answer is still withheld), so the 14 Teams rows are read in app-only runs; the
+  DLP policy locations a single-value or empty property unrolls to a string or null are kept as lists, as ScubaGear
+  exports them (SS 3.2); and a manifest coverage gap that names only another operation (the app-mode site-permission
+  skip) no longer withholds a single-read section such as `SPO_tenant`.
+
 - **Opt-in SharePoint admin settings (MS.SHAREPOINT 1.2, 2.1, 2.2, 3.1-3.3).** A new collector, `sharepoint_admin`, off by
   default and in no profile or preset (select it with `--collectors sharepoint_admin`), reads the eight SharePoint tenant
   settings Graph does not carry with one `GET https://<prefix>-admin.sharepoint.com/_api/SPO.Tenant`; the prefix is the

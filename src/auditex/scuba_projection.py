@@ -517,7 +517,7 @@ class Bundle:
         complete = surveyed = False
         gaps = self.manifest.get("coverage_gaps", [])
         _require(isinstance(gaps, (list, dict)), "coverage_gaps", "invalid_type")
-        summary_only = self._manifest_gaps(gaps, collector, reads, known)
+        summary_only = self._manifest_gaps(gaps, collector, reads, known, health)
         for path in ("coverage.json", "normalized/coverage_ledger.json", "normalized/collection_gaps.json"):
             try:
                 data = self.read(path)
@@ -585,12 +585,14 @@ class Bundle:
         status = row.get("coverage_status", row.get("status"))
         _require(status in _COVERAGE_OK, "coverage_status" if "coverage_status" in row else "status")
 
-    def _manifest_gaps(self, gaps: Any, collector: str, reads: frozenset[str], known: frozenset[str]) -> bool:
+    def _manifest_gaps(self, gaps: Any, collector: str, reads: frozenset[str], known: frozenset[str],
+                       health: bool = False) -> bool:
         """Check the manifest's coverage gaps; True when they only list the collector in a surface summary.
 
         A gap that names this collector and an operation is judged like a coverage row. A surface summary that
         merely lists the collector repeats the per-operation rows, so it stands only when no coverage row exists
-        to say which operation failed.
+        to say which operation failed. As for coverage rows, a single read (``health`` False) is not withheld by a
+        gap that names only some other operation, even one the payload does not carry (an app-mode skip).
         """
         summary_only = False
         def operation_gap(names: frozenset[str] | None) -> None:
@@ -598,6 +600,8 @@ class Bundle:
                 unrelated = self._unrelated([names], reads, known)
                 if unrelated is not None:
                     self.ignored.update(f"{collector}.{name}" for name in unrelated)
+                    return
+                if not health:
                     return
             raise Unavailable(field="coverage_gaps")
         def walk(value: Any) -> None:

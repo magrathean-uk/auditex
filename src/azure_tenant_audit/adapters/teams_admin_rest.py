@@ -102,7 +102,9 @@ def unified_settings_token(token):
 
 
 def _rows(parsed, operation):
-    if operation in _LIST_OPERATIONS and isinstance(parsed, list):
+    # Live (15 Nov 2026) every Skype.Policy configuration GET answered a bare JSON array of rows, not a
+    # {"value": [...]} envelope; both are accepted. An empty array still withholds the five admin reads below.
+    if isinstance(parsed, list):
         rows = parsed
     elif not isinstance(parsed, dict) or "error" in parsed:
         raise ValueError("unexpected_shape")

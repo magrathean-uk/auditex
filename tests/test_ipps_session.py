@@ -257,6 +257,17 @@ def test_certificate_run_reads_compliance_in_its_own_session_and_minimises(monke
     assert rule["ContentContainsSensitiveInformation"] == [{"name": "Credit Card Number"}]
 
 
+def test_unrolled_dlp_locations_become_lists(monkeypatch) -> None:
+    # Live 15 Nov 2026: one location arrived as a bare string, an empty one as null.
+    policy = {**POLICY, "ExchangeLocation": "All", "SharePointLocation": None, "OneDriveLocation": PLANTED,
+              "TeamsLocation": ["All"], "EndpointDlpLocation": None}
+    result = _collect(monkeypatch, _Adapter({"dlpCompliancePolicies": {"value": [policy]}}))
+    (row,) = result.payload["dlpCompliancePolicies"]["value"]
+    assert row["ExchangeLocation"] == ["All"] and row["SharePointLocation"] == [] and row["OneDriveLocation"] == ["location"]
+    assert row["TeamsLocation"] == ["All"] and row["EndpointDlpLocation"] == []
+    assert PLANTED not in json.dumps(result.payload)
+
+
 def test_no_dlp_cmdlet_skips_the_dlp_reads_as_licence_not_detected(monkeypatch) -> None:
     adapter = _Adapter({"dlpLicense": {"value": [{"Count": 0}]}})
     result = _collect(monkeypatch, adapter)

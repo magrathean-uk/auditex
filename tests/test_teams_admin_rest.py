@@ -155,7 +155,7 @@ def test_bad_operation_before_any_call(monkeypatch):
     assert session.calls == []
 
 
-@pytest.mark.parametrize("parsed", [{"value": [policy_row()]}, policy_row()])
+@pytest.mark.parametrize("parsed", [{"value": [policy_row()]}, policy_row(), [policy_row()]])
 def test_accepted_shapes(monkeypatch, parsed):
     connect(monkeypatch, [Response(parsed=parsed)])
     result = rest.TeamsAdminRestAdapter().get("meetingPolicies", TOKEN, "commercial")
@@ -163,9 +163,10 @@ def test_accepted_shapes(monkeypatch, parsed):
     assert result["value"] == [policy_row()]
 
 
+@pytest.mark.parametrize("empty", [{"value": []}, []])
 @pytest.mark.parametrize("operation", DESTINATIONS)
-def test_empty_configuration_or_global_policy_is_withheld(monkeypatch, operation):
-    response = Response(parsed={"value": []})
+def test_empty_configuration_or_global_policy_is_withheld(monkeypatch, operation, empty):
+    response = Response(parsed=empty)
     connect(monkeypatch, [response])
     result = rest.TeamsAdminRestAdapter().get(operation, TOKEN, "commercial")
     assert result["error_class"] == "unexpected_shape"
@@ -174,7 +175,7 @@ def test_empty_configuration_or_global_policy_is_withheld(monkeypatch, operation
 
 @pytest.mark.parametrize("parsed", [None, "bad", 1, True, [1], {"value": {}},
     {"value": [None]}, ValueError("private invalid JSON"), {}, {"error": {"message": TOKEN}},
-    [], [policy_row()], {"value": [{}]}, {"Identity": "Global"},
+    [], [{}], {"value": [{}]}, {"Identity": "Global"},
     {"value": [policy_row()], "error": {"message": TOKEN}}])
 def test_unexpected_shapes(monkeypatch, parsed):
     response = Response()
