@@ -40,7 +40,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T13 | One-page proposal: a different job for the model | lead | S | - | done |
 | M03-T14 | Question-answering job: question set, deterministic baseline, hard checks and bar | sol | M | hard | done |
 | M03-T15 | Question-answering validation pilot on the system | terra | M | hard | todo |
-| M03-T16 | Scored pilot-4 verifier in the dataround check | codex | S | hard | todo |
+| M03-T16 | Scored pilot-4 verifier in the dataround check | codex | S | hard | done |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job

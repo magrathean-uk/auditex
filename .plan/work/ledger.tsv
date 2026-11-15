@@ -720,3 +720,6 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-15T17:38:20Z	REV-M09-T02	codex	codex2	gpt-6.1-sol	medium	readonly	0	16		done	task/M09-T02-engine-cert-only	v4
 2026-11-15T17:43:47Z	M03-T11	codex	codex	gpt-6.1-sol	xhigh	inplace	1	360		partial	main	v4
 2026-11-15T17:54:00Z	REV-M03-T11	sol	claude-3	claude-opus-5-5	high	readonly	0	573	2.1073	done	main	v4
+2026-11-15T18:06:25Z	M03-T16	codex	codex	gpt-6.1-sol	xhigh	inplace	1	688		partial	main	v4
+2026-11-15T18:29:06Z	M03-T16	codex	codex	gpt-6.1-sol	xhigh	inplace	0	678		done	main	v4
+2026-11-15T18:40:16Z	REV-M03-T16	sol	claude-4	claude-opus-5-5	high	readonly	0	645	1.8411	done	main	v4
