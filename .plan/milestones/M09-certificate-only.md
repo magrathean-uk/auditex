@@ -24,7 +24,7 @@ A customer's tenant admin can set up the reader app from one exact guide; every 
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M09-T01 | Reader-app permissions guide for the tenant admin, exact | sol | M | hard | todo |
+| M09-T01 | Reader-app permissions guide for the tenant admin, exact | sol | M | hard | done |
 | M09-T02 | Engine certificate-only: modes, flags, probe certificate flags, tests | sol | L | risk:high | todo |
 | M09-T03 | Product layer certificate-only: guided, setup guide, MCP, auth surfaces, scripts, configs | sol | L | risk:high | todo |
 | M09-T04 | Docs, skills, agent files and shipped content for the one way | terra | M | - | todo |
