@@ -824,3 +824,9 @@
 - decision: the files line adds the remediated-demo generator, output_redaction.py (the D5 field-name list) and three tests whose fixtures or counts the new read changes, and the adapter doc the lead fixed.
 - why: REV-M08-T14 and CHK-M08-T14 at 1310ec1 named them.
 - approver: auto
+
+## DEC-100 No GPU-hour caps on Track B
+- date: 2026-11-15
+- decision: G, in the lead chat (15 Nov, about 09:04 GMT): "also no GPU cap, use whatever u want". The Track B stage caps (DEC-001, DEC-098) no longer stop a run; the only limit is the allocation itself (20,000 GPU-hours, ends 31 Jan 2027). Usage is still inventoried per task and reported.
+- why: G's instruction.
+- approver: G

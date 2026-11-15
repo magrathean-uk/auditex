@@ -122,7 +122,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 
 ### M03-T10 Validation pilot 3 on the system (option 2)
 - Added by DEC-098. Preconditions: M03-T09 done and `REV-M03-T09` approves; G has signed in to the system (the only step that needs him).
-- One attempt with prompt v3 on the 190 headroom rows of the 267 validation rows, exactly as M03-T06 ran attempt 2 (same teacher, judge, both orders, pass rule unchanged: after the judge filter the preference band lies wholly above 0.729). No revision: this attempt decides. At most 20 GPU-hours, every job counted, inventoried under `runs/usage/M03-T10/` (stage `dataround`); the run stops at the cap.
+- One attempt with prompt v3 on the 190 headroom rows of the 267 validation rows, exactly as M03-T06 ran attempt 2 (same teacher, judge, both orders, pass rule unchanged: after the judge filter the preference band lies wholly above 0.729). No revision: this attempt decides. Every job counted and inventoried under `runs/usage/M03-T10/` (stage `dataround`); no GPU-hour cap (DEC-100).
 - On `pilot: pass` M03-T07, then the widened M03-T02 and M03-T03, follow without a new ask (DEC-098); on `pilot: fail` Track B stops and the lead writes the manager three plain lines.
 - Writes the M03-T06 finding lines for attempt 3 (`pilot: pass|fail`, `pilot-wins`, `pilot-preference`, `pilot-unfiltered`, `heldout-reads: 0`, `round-gpu-hours: dataround <used>`).
 - verify: `grep -qE '^pilot: (pass|fail)$' .plan/work/M03-T10/result.md && grep -qx 'heldout-reads: 0' .plan/work/M03-T10/result.md && "$AIRR_KIT/bin/kit-check" dataround --result .plan/work/M03-T10/result.md`

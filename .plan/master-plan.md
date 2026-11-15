@@ -58,6 +58,7 @@ Track A: the 1.5.0 release from G's gate answers - the wider Ruff set, the contr
 - Edits to G-owned legal files except text G approves verbatim.
 
 ## Track B GPU-hour budget (caps, for G's approval)
+DEC-100 (G, 15 Nov 2026): no caps; the stage figures below are planning estimates only, the allocation is the limit.
 1 node-hour on Isambard-AI is 4 GPU-hours. A stage that reaches its cap stops and reports. G made the whole
 allocation available to this project (DEC-002), so the total below is the allocation itself (20,000 GPU-hours, read on the awards portal; it ends 31 Jan 2027) and the
 unassigned hours sit in the reserve: the orchestrator resizes stage caps within it, writing an amendment line under
