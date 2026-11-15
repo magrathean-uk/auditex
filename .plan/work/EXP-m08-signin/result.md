@@ -21,3 +21,9 @@ questions_for_g: Guided delegated with Exchange (az login plus m365 login) break
 - Q4 (1): app-only certificate is the one no-prompt path for all six services; delegated stays Graph-only with named skips.
 - Q4 (2): add acceptance tests. They check 0 interactive calls in app and certificate modes, 1 in delegated with a shared cache, and compliance via `-AccessToken` only.
 - Q4 (3): add to B and D that the docs state setup sign-in counts and D's extra Exchange Online Protection consent. Also add a check that nothing in the run path calls `Connect-*` interactively or `az login`.
+
+## Closing statement (lead, 15 Nov 2026, after the M08 merges)
+- App-only (certificate): no interactive sign-in. The M08-T06 run m08e3 (product 880c418) minted Graph, Exchange, compliance, Teams, Power BI, Power Platform and SharePoint admin tokens from the certificate alone; its debug log holds no interactive token call.
+- Delegated: at most one interactive sign-in per run; every further resource (Exchange included, `exchange-one-sign-in: met` in M08-T07; SharePoint admin per M08-T12) is minted silently from the one shared in-memory cache. Where Microsoft would need a second prompt the collector records a named skip.
+- Setup: the guides state the sign-in count for each run mode and each one-time step (M08-T01, M08-T07).
+- Other-vendor reviews that checked this: REV-M08-T01, REV-M08-T05, REV-M08-T07, REV-M08-T12 (Codex, approve); REV-M08-T03 (both providers, ship); REV-M08-T04 (approve). The question for G above was answered by DEC-068 (4): Exchange stays in the guided path at one sign-in.

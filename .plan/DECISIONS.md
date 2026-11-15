@@ -750,6 +750,48 @@
 ## DEC-086 Every M08 product task owns its own guard-inventory entries
 - date: 2026-11-14
 - status: decided
-- decision: From M08-T05 on, a product task may add its own new product field names to `_D5_FIELD_NAMES` in `src/azure_tenant_audit/output_redaction.py` and classify its own new sinks and flags in `tests/sink_expansions.py`, `src/auditex/output_writers.py` and `tests/test_key_guard_cli_values.py` (entries for its change only), and runs `tests/test_redaction_person_names.py tests/test_writer_sinks_d3.py tests/test_key_guard_cli_values.py` with its verify. The reviewer judges those entries.
+- decision: From M08-T05 on, a product task may add its own new product field names to `_D5_FIELD_NAMES` in `src/azure_tenant_audit/output_redaction.py` and classify its own new sinks and flags in `tests/sink_expansions.py`, `src/auditex/output_writers.py` and `tests/test_key_guard_cli_values.py` (entries for its change only), and runs `tests/test_redaction_person_names.py tests/test_writer_sinks_d3.py tests/test_key_guard_cli_values.py tests/test_http_verb_allowlist.py` with its verify (the verb allow-list added after M08-FIX2). The reviewer judges those entries.
 - why: M08-T01, T07, T08, T09 and T04 each broke those inventories after merge (M08-FIX1, DEC-082).
+- approver: auto
+
+## DEC-087 M08-T05 files line widened by its consequential edits
+- date: 2026-11-14
+- status: decided
+- decision: M08-T05 also owns: count and wrapper allow-list updates in tests/test_exchange_session.py, tests/test_review_v3_run_level.py and tests/test_read_boundaries.py (its nonowned-tests.patch); the statements that Auditex opens no Security and Compliance session in docs/guides/setup-guide.md and src/azure_tenant_audit/data_handling.py; and the new skipped reads in src/azure_tenant_audit/offline_replay.py. No open task writes them.
+- why: M08-T05 stopped blocked on ownership only; the edits follow from its accepted change.
+- approver: auto
+
+## DEC-088 M08-T12 files widened
+- decision: M08-T12 also owns `src/azure_tenant_audit/collectors/__init__.py` (registration), `src/azure_tenant_audit/output_redaction.py`, `tests/sink_expansions.py`, `tests/test_certificate_auth.py` and the `sharepoint_admin` entry in `tests/test_normalize_coverage.py` (or a normalize section).
+- why: the worker ran out of turns with every criterion committed; these follow from the accepted read, and the full suite flags the normalize gap.
+- approver: auto
+
+## DEC-089 M08-T12 selection flag is --collectors
+- decision: the M08-T12 criterion names `--collectors sharepoint_admin`, the CLI's existing selection flag; `--include` never existed and is not added.
+- why: Codex's only remaining T12 point was the plan text, not the code.
+- approver: auto
+
+## DEC-090 Phase D sign-ins relayed to the lead's lab browser tab
+- decision: the kit's PKCE sign-ins run with a PATH shim that writes the authorize URL to a file; MSAL-based connects (Teams) launch /usr/bin/open by absolute path, so a local process watcher copies those URLs too. The lead opens each URL in its lab tab and picks the lab operator account; consent screens are cancelled, never accepted. No kit change.
+- why: G's hands are not needed for account pickers on the lab tenant (DEC-083); the sign-in tabs otherwise land outside the agent's browser group.
+- approver: auto
+
+## DEC-091 Phase D kit findings carried to a later kit round, not blocking
+- decision: MS.AAD.3.3 transient PATCH 400 (diagnostic resend, OUT-OF-KIT row 13); MS.AAD.5.3 directory setting created by Entra itself (intent resolved to it); MS.SECURITYSUITE.4.1 Set-ProtectionAlert by name fails (skipped; not a required-decided row); MS.TEAMS.5.1-5.3 org-wide app settings stay manual (portal only); sitting-tokens has no SPO route (kit per-script sign-in used). Each row is decided or carries its reason in M08-T06.
+- why: none blocks the 62 of 64 target; each needs a kit round, not phase D.
+- approver: auto
+
+## DEC-092 B member reads join the plain list with the servicePrincipal cast
+- decision: live, v1.0 /groups/{id}/members leaves the reader service principal out while the cast, beta and $expand show it; Get-M8GroupMembers joins the plain list with the cast. Re-frozen 0796c6d0b8d0, harness 96/96, both providers re-review the diff before the B redo continues.
+- why: the 15-minute poll could never confirm the member; it was a Graph view quirk, not replication lag.
+- approver: auto
+
+## DEC-093 M08-T13: live response shapes fixed before the re-collection is final
+- decision: the first certificate re-collection (m08e) left 14 Teams, 8 SharePoint rows and SS 3.2 not assessed through three product shape gaps (bare Teams arrays, a manifest section gap of another operation, unrolled DLP locations). M08-T13 fixes them (tier A: Codex review and executing check), then M08-T06 collects again; m08e stays as evidence.
+- why: they are product gaps, the milestone target needs those rows, and each fix is small and verified against the live run.
+- approver: auto
+
+## DEC-094 M08-T06 rows: PP 3.1 decided, AAD 3.4 a named tenant reason, target 63
+- decision: PP 3.1 is now decided by the product (M08-T04's tenant isolation read), so only PP 2.3 stays not assessed by product design; MS.AAD.3.4 reads null because Microsoft retired the authentication methods policy migration (the kit marks it manual for the same reason), so it carries the tenant reason `migration-state-retired` instead of met or not met. The DoD line counts decided plus named tenant reason as 63 and product design as 1.
+- why: the run decides one more row than plan v4 assumed, and 3.4 cannot be decided on any tenant now; neither is a product gap.
 - approver: auto

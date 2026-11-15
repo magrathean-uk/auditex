@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 73% (was 69%)
+overall: 85% (was 73%)
 milestone: M03-explainer-training 20%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: a0920b3 2026-11-14T19:00:58Z
+last_checkpoint: 880c418 2026-11-15T07:53:03Z
 
 ## Next tasks
 - M03-T02 Train three seeds of the chosen base on data v2 (terra)
@@ -29,12 +29,12 @@ last_checkpoint: a0920b3 2026-11-14T19:00:58Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 67% orchestrator
-claude-1 77% ok
-claude-2 51% shared
-claude-3 73% ok
-claude-4 54% ok
+claude 72% orchestrator
+claude-1 78% ok
+claude-2 52% shared
+claude-3 74% ok
+claude-4 60% ok
 claude-5 79% ok
-codex 2% ok
-codex2 91% hot
+codex 4% ok
+codex2 0% ok
 <!-- quota:end -->

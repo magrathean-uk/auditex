@@ -12,7 +12,9 @@ questions_for_g: none
 fix: remove-m08b-pbi-access.ps1:193 (5-min watch of groups and deleted items, purge on sight), :206 (not seen in 5 min journalled), :69 (re-check over removed, journalled id only)
 harness: pass 94/94
 changed-files: RECORD.md 56a3bba1, remove-m08b-pbi-access.ps1 a35bec5e, tests/mock.ps1 c96c1e76, tests/run-tests.ps1 3af052df
-frozen: 521703f2826d
+frozen: 947405dfecfc
+applied-from: 947405dfecfc
+applied: complete
 pbpp-check: EXP-m08-pbpp
 pbi-readonly-admin-setting: AllowServicePrincipalsUseReadAdminAPIs
 pp-tenant-settings-method: POST

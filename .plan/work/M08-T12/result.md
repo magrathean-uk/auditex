@@ -1,0 +1,15 @@
+## RESULT M08-T12
+status: done
+summary: Repair round 1, item 1 fixed. The admin host now comes from GET /sites/root?$select=siteCollection (Graph, read-only Sites.Read.All, already in the default set). siteCollection.hostname must be a plain <prefix>.sharepoint.com and not a -admin or -my host; the code builds <prefix>-admin.sharepoint.com from it and SharePoint redirects stay disabled.
+Inconclusive answers record the named skip sharepoint_admin_host_unresolved and request no token. A failed Graph read is sharepoint_admin_host_unknown, carrying the read's own error class. The initial domain is never used. Only commercial and GCC reach discovery, and both use sharepoint.com.
+Sites.Read.All is now the collector's required permission, so a delegated sign-in asks for it. The query plan entry is now rootSite. Renamed-tenant regressions assert the token scope and request destination for app-only and delegated runs, and end to end through the CLI (test_single_sign_in, renamed-admin host).
+Guard and inventory: the Graph read guard admits any body-free GET and the API inventory builds from coverage rows, so neither needed a new entry. DEC-086: the rootsite and sitecollection field names were added to _D5_FIELD_NAMES.
+Host-discovery text updated in admin-permission-guide.md, security-privacy.md, api-call-catalog.md, output-contract.md, CHANGELOG.md and collector-permissions.json notes.
+changes: src/azure_tenant_audit/collectors/sharepoint_admin.py, configs/collector-definitions.json, configs/collector-permissions.json, tests/test_sharepoint_admin_collector.py, tests/test_single_sign_in.py, docs/guides/admin-permission-guide.md, docs/reference/security-privacy.md, docs/reference/api-call-catalog.md, docs/reference/output-contract.md, CHANGELOG.md, src/azure_tenant_audit/output_redaction.py (commits 1fc8050, 974fae9, 04ad35e)
+verification: Ran through hostload --wait 5400 with PYTHONPATH=src on 04ad35e: the verify line (all ten test files, then make lint, then make contract-smoke) plus the DEC-086 tests test_redaction_person_names, test_writer_sinks_d3, test_key_guard_cli_values and test_normalize_coverage. Pass: pytest green, ruff "All checks passed!", contract-smoke inner_exit=0. Log: .plan/work/M08-T12/verify-round1.log.
+An earlier run on 974fae9 failed test_every_product_field_name_is_exempt_from_whole_key_masking ("missing: rootsite sitecollection"); 04ad35e fixed it.
+Negative cases (.plan/work/M08-T12/negative-cases.txt): "contoso.onmicrosoft.com -> skipped sharepoint_admin_host_unresolved scopes [] requests 0"; "contoso-admin.sharepoint.com -> skipped sharepoint_admin_host_unresolved scopes [] requests 0".
+Removed-term grep: the remaining "onmicrosoft" mentions in owned docs and code only say the initial domain is not used; no reference to /organization remains for this collector.
+risks: Not checked against a live tenant: that GET /sites/root?$select=siteCollection returns siteCollection.hostname, and that a renamed tenant's root site reports the new host.
+A delegated run now needs Sites.Read.All consented on the sign-in app (before, only User.Read was needed for discovery).
+questions_for_g: none

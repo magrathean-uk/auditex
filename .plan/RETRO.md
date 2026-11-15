@@ -295,3 +295,5 @@ Failure count: 5 (2 non-zero ledger exits; 3 recorded only in result.md). Ledger
 - Honest partial: M06-T01 (v4) says partial and names the deferred checks instead of passing them.
 - Cheap verification: M06-T05 by luna (claude-1) cost $0.0299 across two runs.
 - Other-provider review: REV-M06-T01 (codex2) and M06-T03 (astra, codex2).
+
+- 14 Nov (fresh lead): the terra-check template waits only 120 s for a heavy slot (CHK-M08-T05 failed as infra); executing checks need --wait 5400 (WASTE-REVIEW rule 6). Fix the template in bolyki-dev/skills/plan/briefs at the next retro. Product tasks broke guard inventories after merge five times (DEC-086).
