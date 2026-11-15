@@ -854,3 +854,9 @@
 - decision: G, through the manager (asked "Which new job should the Auditex model learn?", buttons "Fix plan" and "Answer questions"): "Answer questions". The model answers questions about an assessed run, mainly through the MCP tools, every claim citing the run; the rules keep every verdict. First a curated question set with gold references, a deterministic baseline and hard checks (cites the run, no invented value, no contradicted verdict, unanswerable questions refused), with the pass rule written before any GPU job (M03-T14); then one validation pilot (M03-T15); on a pass, training on Qwen, Mistral and Gemma without a GPU cap (DEC-100). The release that ships now is unchanged; the pilot-4 line (DEC-102) carries on. M03 amendment 10.
 - why: G's pick between the proposal's fix plan and its question-answering alternative.
 - approver: G
+
+## DEC-105 Question set outside data/, and its own GPU-hour line
+- date: 2026-11-15
+- decision: question set v1 moves from `data/qa-v1/` to `qa-data/v1/` in the AIRR kit, so `data/splits.json` (pinned by M02-T03 and the M03 Definition of Done) stays untouched and `kit-check twins` keeps passing; M03-T15 reports `round-gpu-hours: qa <used>`, recomputed by the qa kind from the job inventory as the dataround kind does, instead of a `gpu-hours:` stage line the frozen usage check would refuse. M03-T14 repair round 2 makes both changes.
+- why: M03-T14's result named both risks.
+- approver: auto
