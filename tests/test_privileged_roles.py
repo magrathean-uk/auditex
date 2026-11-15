@@ -654,7 +654,7 @@ def test_the_policy_reads_add_no_required_scope_to_the_existing_set() -> None:
     assert POLICY_SCOPE in guide and "needs no change" in guide and "needs nothing more" not in guide
 
 
-def test_a_tenant_that_granted_the_existing_scopes_is_not_blocked_by_scope_nor_asked_to_consent_again(tmp_path: Path) -> None:
+def test_a_tenant_that_granted_the_existing_scopes_is_not_blocked_by_scope(tmp_path: Path) -> None:
     config, hints = _scope_inputs()
     (row,) = build_capability_matrix_rows(
         auth_context={"token_claims": {"app_roles": EXISTING_SCOPES}},
@@ -668,10 +668,9 @@ def test_a_tenant_that_granted_the_existing_scopes_is_not_blocked_by_scope_nor_a
     args = SimpleNamespace(
         tenant_name="acme", collectors="identity_governance", exclude=None, include_exchange=False, offline=False, sample="sample.json",
         run_name=None, top=None, page_size=None, auditor_profile="global-reader", plane="full", since=None, until=None,
-        collector_preset=None, interactive=True, scopes=None)
+        collector_preset=None)
     plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config, permission_hints=hints, profile=get_profile("global-reader"))
     assert plan.selected_collectors == ["identity_governance"]
-    assert plan.auth_scopes == EXISTING_SCOPES, "the interactive consent set is the existing one"
 
 
 # ---- a policy id is one path segment ------------------------------------------------------------------------------
@@ -902,7 +901,7 @@ class _ThrottlingTenant:
 
 
 def _throttled_collect(tenant: _ThrottlingTenant) -> tuple[Any, list[float], list[tuple[str, dict]]]:
-    from support import graph_auth
+    from support import GRAPH_TEST_TOKEN, graph_auth
 
     from azure_tenant_audit.graph import GraphClient
 
@@ -914,7 +913,7 @@ def _throttled_collect(tenant: _ThrottlingTenant) -> tuple[Any, list[float], lis
         waits.append(seconds)
         now[0] += seconds
 
-    client = GraphClient(graph_auth(throttle_mode="safe"), session=tenant, clock=lambda: now[0], sleep=sleep,  # type: ignore[arg-type]
+    client = GraphClient(graph_auth(throttle_mode="safe"), session=tenant, _token=GRAPH_TEST_TOKEN, clock=lambda: now[0], sleep=sleep,  # type: ignore[arg-type]
                          audit_event=lambda name, _message, details: events.append((name, details or {})))
     return governance.IdentityGovernanceCollector().run({"client": client, "top": None}), waits, events
 

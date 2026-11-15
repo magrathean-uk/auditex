@@ -12,7 +12,8 @@ ADAPTER_CAPABILITY_REGISTRY: dict[str, dict[str, Any]] = {
         "expected_commands": ["GET /Skype.Policy/configurations/*"],
     },
     "m365_cli": {
-        "supported_auth_modes": ["delegated", "saved_context"],
+        # It signs in as a user, which Auditex no longer does (DEC-107); its parsers stay for replaying old bundles.
+        "supported_auth_modes": [],
         "required_tools": ["m365"],
         "supported_profiles": ["exchange-reader", "global-reader", "security-reader", "auto"],
         "supported_actions": ["probe", "exchange_inventory", "response_readiness"],
@@ -20,7 +21,7 @@ ADAPTER_CAPABILITY_REGISTRY: dict[str, dict[str, Any]] = {
         "expected_commands": ["m365 status --output json", "m365 connection list --output json"],
     },
     "m365dsc": {
-        "supported_auth_modes": ["delegated", "app"],
+        "supported_auth_modes": ["app"],
         "required_tools": ["pwsh", "Microsoft365DSC"],
         "supported_profiles": ["app-readonly-full", "global-reader", "auto"],
         "supported_actions": ["configuration_export"],
@@ -28,7 +29,7 @@ ADAPTER_CAPABILITY_REGISTRY: dict[str, dict[str, Any]] = {
         "expected_commands": ["Export-M365DSCConfiguration"],
     },
     "powershell_graph": {
-        "supported_auth_modes": ["delegated", "app", "saved_context"],
+        "supported_auth_modes": ["app"],
         "required_tools": ["pwsh", "Microsoft.Graph"],
         "supported_profiles": ["security-reader", "global-reader", "app-readonly-full", "auto"],
         "supported_actions": ["graph_command", "exchange_probe"],

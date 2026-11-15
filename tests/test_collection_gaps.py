@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from support import FAKE_CERTIFICATE_ARGS, GRAPH_TEST_TOKEN, use_fake_certificate
 
 from azure_tenant_audit import cli
 from azure_tenant_audit.baselines import build_baseline_alignment, rule_inputs_gap
@@ -338,7 +339,7 @@ def test_a_failed_first_page_is_a_blocked_read_not_a_truncation(tmp_path: Path) 
 
 
 def _graph_client(pages: dict[str, dict[str, Any]]) -> tuple[GraphClient, list[str]]:
-    client = GraphClient(AuthConfig(tenant_id="t", client_id="c", auth_mode="access_token", access_token="token"))
+    client = GraphClient(AuthConfig(tenant_id="t", client_id="c"), _token=GRAPH_TEST_TOKEN)
     requested: list[str] = []
 
     def fake_get_json(path, params=None, full_url=False):  # noqa: ANN001, ARG001
@@ -541,9 +542,10 @@ def _live_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str, rows
         def token_claims(self) -> dict[str, Any]:
             return {}
 
+    use_fake_certificate(monkeypatch)
     args = cli.build_parser().parse_args(
         [
-            "--tenant-name", "acme", "--tenant-id", "t-1", "--access-token", "x.y.z",
+            "--tenant-name", "acme", "--tenant-id", "t-1", "--client-id", "c-1", *FAKE_CERTIFICATE_ARGS,
             "--collectors", "identity,auth_methods,conditional_access",
             "--out", str(tmp_path), "--run-name", "r", *extra,
         ]

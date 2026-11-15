@@ -204,22 +204,12 @@ def test_command_runner_masks_both_streams_without_clipping_structured_output(mo
 def test_probe_raw_and_error_snippets_are_masked(tmp_path, monkeypatch, returncode, stdout_kind, stderr) -> None:
     from azure_tenant_audit import probe
 
-    class FakeAdapter:
-        def dependency_check(self):
-            return True
-
-        def run(self, command, log_event):
-            if returncode:
-                return {"error": DIAGNOSTIC}
-            return {"value": [{"connectedAs": EMAIL, "id": GUID, "nested": [UPN]}]}
-
     stdout = {
         "text": DIAGNOSTIC,
         "list": json.dumps([DIAGNOSTIC]),
         "dict": json.dumps({"tenant": GUID, "nested": {"user": UPN}, "address": EMAIL}),
     }[stdout_kind]
     monkeypatch.setattr(probe.shutil, "which", lambda name: f"/mock/{name}")
-    monkeypatch.setattr(probe, "get_adapter", lambda _: FakeAdapter())
     monkeypatch.setattr(probe, "_subprocess_probe", lambda cmd: (returncode, stdout, stderr))
     writer = AuditWriter(tmp_path, tenant_name="mocktenant", run_name="probe-privacy")
     rows = probe._probe_toolchain_statuses(include_response=True, log_event=writer.log_event)
@@ -243,22 +233,6 @@ def test_successful_adapter_evidence_retains_identifiers(tmp_path, monkeypatch, 
     writer.write_raw("evidence", response)
     assert json.loads((writer.raw_dir / "evidence.json").read_text())["value"] == [payload]
     _assert_private((writer.run_dir / "audit-log.jsonl").read_text())
-
-
-@pytest.mark.parametrize("stream", ["stdout", "stderr"])
-def test_azure_cli_token_failure_sample_is_private(tmp_path, monkeypatch, caplog, stream) -> None:
-    from azure_tenant_audit.auth_runtime import acquire_azure_cli_access_token
-
-    streams = {"stdout": "", "stderr": "", stream: DIAGNOSTIC + " detail" * 200}
-    monkeypatch.setattr("subprocess.run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, **streams))
-    writer = AuditWriter(tmp_path, tenant_name="mocktenant", run_name="token-failure")
-    with pytest.raises(RuntimeError) as error:
-        acquire_azure_cli_access_token("mocktenant", log_event=writer.log_event)
-    _assert_private(str(error.value))
-    _assert_private(caplog.text)
-    for path in writer.run_dir.iterdir():
-        if path.is_file():
-            _assert_private(path.read_text())
 
 
 @pytest.mark.parametrize("default", [False, True])

@@ -99,15 +99,17 @@ def run_scripted(
     run_name: str = "probe",
 ) -> int:
     """Run ``cli.run_live`` with ``registry`` as the collector registry; the run lands in ``tmp_path/acme-<run_name>``."""
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    use_fake_certificate(monkeypatch)
     args = cli.build_parser().parse_args(
         [
-            "--tenant-name", "acme", "--tenant-id", "t-123", "--use-azure-cli-token", "--collectors", collectors,
-            "--out", str(tmp_path), "--run-name", run_name, *extra,
+            "--tenant-name", "acme", "--tenant-id", "t-123", "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
+            "--collectors", collectors, "--out", str(tmp_path), "--run-name", run_name, *extra,
         ]
     )
     monkeypatch.setattr(cli, "GraphClient", FakeClient)
     monkeypatch.setattr(cli, "REGISTRY", registry)
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *_, **__: "cached-token")
     return cli.run_live(args)
 
 

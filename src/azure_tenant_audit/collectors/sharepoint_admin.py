@@ -8,11 +8,9 @@ SharePoint host, ``siteCollection.hostname`` of its root site in the tenant's ow
 never guessed. The initial ``onmicrosoft.com`` domain is never used: it does not change when SharePoint is renamed.
 
 Tokens (Microsoft Learn, "SharePoint admin APIs authentication and authorization"): app-only needs the SharePoint
-application permission Sites.FullControl.All and a certificate (SharePoint refuses secret app-only tokens), so a
-secret-only run records a named skip and requests nothing. A delegated run mints the token silently from the run's
-one sign-in for the SharePoint delegated permission AllSites.FullControl; when Microsoft would need a second prompt
-(no consent, conditional access), the read is a named skip and no second sign-in is opened. Both permissions are
-write-capable; this collector makes only the one pinned GET, checked by the read guard before it is sent.
+application permission Sites.FullControl.All and a certificate; the reader app's certificate mints the token
+(DEC-107), and a client without one records a named skip and requests nothing. The permission is write-capable;
+this collector makes only the one pinned GET, checked by the read guard before it is sent.
 
 The collector is in no profile or preset: only an explicit ``--collectors sharepoint_admin`` selects it.
 """
@@ -59,10 +57,8 @@ SHAREPOINT_HOST_SUFFIX = ".sharepoint.com"
 # Hosts that are SharePoint but never a tenant's root site collection.
 _NON_ROOT_PREFIX_SUFFIXES = ("-admin", "-my")
 SHAREPOINT_RESOURCE_APP_ID = "00000003-0000-0ff1-ce00-000000000000"
-# App-only (client credentials) asks for the resource's .default; the delegated scope is the one Microsoft names for
-# admin APIs on behalf of a user (resourceAccess id 56680e0d-d2a3-4ae1-80d8-3c4f2100e3d0, type Scope).
+# App-only (client credentials) asks for the resource's .default.
 APP_SCOPE_SUFFIX = "/.default"
-DELEGATED_PERMISSION = "AllSites.FullControl"
 SHAREPOINT_ADMIN_FIELDS = (
     "ODBSharingCapability",
     "DefaultSharingLinkType",
@@ -81,7 +77,8 @@ READ_TIMEOUT_SECONDS = 30.0
 MAX_RETRY_AFTER_SECONDS = 30.0
 _RETRY_STATUSES = frozenset({429, 503})
 
-# Named skips: nothing is requested from SharePoint.
+# Named skips: nothing is requested from SharePoint. The second-sign-in and token-unavailable reasons are written
+# only by older bundles from the removed sign-in ways; they stay so those bundles still render.
 REASON_CERTIFICATE_REQUIRED = "sharepoint_admin_certificate_required"
 REASON_SECOND_SIGN_IN_REQUIRED = "sharepoint_admin_second_sign_in_required"
 REASON_TOKEN_UNAVAILABLE = "sharepoint_admin_token_unavailable"
@@ -89,8 +86,8 @@ REASON_HOST_UNRESOLVED = "sharepoint_admin_host_unresolved"
 REASON_UNSUPPORTED_ENVIRONMENT = "sharepoint_admin_unsupported_environment"
 SKIP_TEXT = {
     REASON_CERTIFICATE_REQUIRED: (
-        "not collected: the SharePoint admin settings need a certificate app token (SharePoint refuses app-only "
-        "tokens minted from a client secret); no SharePoint token was requested"
+        "not collected: the SharePoint admin settings need an app token from the reader app's certificate; "
+        "no SharePoint token was requested"
     ),
     REASON_SECOND_SIGN_IN_REQUIRED: (
         "not collected: the run's one sign-in cannot give a SharePoint admin token without a second prompt "
@@ -176,18 +173,15 @@ def _claims(token: Any) -> dict[str, Any]:
     return claims if isinstance(claims, dict) else {}
 
 
-def token_fits(token: Any, origin: str, *, delegated: bool) -> bool:
+def token_fits(token: Any, origin: str) -> bool:
     """Audience and credential gate before a token goes to the admin host; the service validates the signature.
 
-    The audience must be the admin origin or the SharePoint resource, so a Graph token is never sent there. An app
-    token must come from a certificate (v1 ``appidacr`` or v2 ``azpacr`` ``"2"``) with no ``scp``; a delegated token
-    must carry ``scp``.
+    The audience must be the admin origin or the SharePoint resource, so a Graph token is never sent there. The token
+    must come from a certificate (v1 ``appidacr`` or v2 ``azpacr`` ``"2"``) with no ``scp``.
     """
     claims = _claims(token)
     if claims.get("aud") not in {origin, origin + "/", SHAREPOINT_RESOURCE_APP_ID}:
         return False
-    if delegated:
-        return isinstance(claims.get("scp"), str) and bool(claims["scp"].strip())
     return claims.get("azpacr", claims.get("appidacr")) == "2" and not claims.get("scp")
 
 
@@ -343,23 +337,16 @@ class SharePointAdminCollector(Collector):
         "anonymous link expiry and types, email attestation."
     )
     # The Graph scope is the read-only root site read that names the SharePoint host. The SharePoint permission
-    # (Sites.FullControl.All app-only, AllSites.FullControl delegated) is on the SharePoint resource and is never added
-    # to the Graph sign-in.
+    # (Sites.FullControl.All, app-only) is on the SharePoint resource, not Microsoft Graph.
     required_permissions: list[str] = [ROOT_SITE_SCOPE]
     session_factory: Callable[[], Any] = requests.Session
 
     def _token_plan(self, client: Any) -> tuple[str | None, str | None]:
-        """("app" | "delegated", None) when a token path exists, else (None, skip reason); decided before any call."""
+        """("app", None) when the client has the certificate, else (None, skip reason); decided before any call."""
         auth = getattr(client, "auth", None)
         if getattr(auth, "certificate", None) is not None:
             return "app", None
-        if getattr(auth, "access_token", None):
-            return None, REASON_TOKEN_UNAVAILABLE
-        if getattr(auth, "auth_mode", "app") == "interactive":
-            return "delegated", None
-        if getattr(auth, "client_secret", None):
-            return None, REASON_CERTIFICATE_REQUIRED
-        return None, REASON_TOKEN_UNAVAILABLE
+        return None, REASON_CERTIFICATE_REQUIRED
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")
@@ -431,21 +418,13 @@ class SharePointAdminCollector(Collector):
             return skipped(REASON_HOST_UNRESOLVED)
         origin = f"https://{sharepoint_admin_host(prefix)}"
 
-        if mode == "app":
-            try:
-                token = client.app_token_for(origin + APP_SCOPE_SUFFIX)
-            except Exception:  # noqa: BLE001 - token errors can carry credential material
-                token = None
-            if not token:
-                return failed("sharepoint_admin_token_failed")
-        else:
-            try:
-                token = client.delegated_token_for(f"{origin}/{DELEGATED_PERMISSION}")
-            except Exception:  # noqa: BLE001 - token errors can carry credential material
-                token = None
-            if not token:
-                return skipped(REASON_SECOND_SIGN_IN_REQUIRED)
-        if not token_fits(token, origin, delegated=mode == "delegated"):
+        try:
+            token = client.app_token_for(origin + APP_SCOPE_SUFFIX)
+        except Exception:  # noqa: BLE001 - token errors can carry credential material
+            token = None
+        if not token:
+            return failed("sharepoint_admin_token_failed")
+        if not token_fits(token, origin):
             return failed("sharepoint_admin_token_refused")
 
         session = self.session_factory()

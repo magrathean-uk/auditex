@@ -6,24 +6,21 @@ import os
 import shutil
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import auth_context
 from . import run as run_core
-from .adapters import get_adapter
-from .auth_runtime import (
-    acquire_azure_cli_access_token as _acquire_azure_cli_access_token,
-)
 from .auth_runtime import (
     build_auth_context_payload as _build_auth_context_payload,
 )
 from .auth_runtime import (
-    capture_signed_in_context as _capture_signed_in_context,
-)
-from .auth_runtime import (
     scrub_command_line as _scrub_command_line,
+)
+from .certificate_auth import (
+    CertificateAuthError,
+    load_certificate_credential,
+    refuse_sources_in_output,
 )
 from .collection_gaps import sample_only
 from .collector_runner import (
@@ -34,7 +31,7 @@ from .collector_runner import (
 )
 from .collectors import REGISTRY
 from .collectors.base import run_graph_endpoints
-from .config import AuthConfig
+from .config import AUTH_MODE, CERTIFICATE_WAY, AuthConfig
 from .data_handling import collector_activity_notices
 from .diagnostics import build_diagnostics as _build_diagnostics
 from .diagnostics import load_permission_hints as _load_permission_hints
@@ -42,9 +39,17 @@ from .findings import build_findings
 from .graph import GraphClient
 from .output import AuditWriter
 from .profiles import get_profile
-from .secret_hygiene import redact_output, sanitize_token_claims
+from .secret_hygiene import redact_output
 
-SUPPORTED_PROBE_MODES = ("delegated", "app", "response")
+# "app" reads the tenant with the reader app's certificate (DEC-107); "response" checks lab response readiness.
+SUPPORTED_PROBE_MODES = ("app", "response")
+# ProbeConfig fields of the removed sign-in ways, refused when set, with what each was.
+_REMOVED_PROBE_CREDENTIALS = (
+    ("access_token", "an access token"),
+    ("use_azure_cli_token", "an Azure CLI token"),
+    ("auth_context", "a saved auth context"),
+    ("client_secret", "a client secret"),
+)
 DEFAULT_COLLECTOR_SURFACES = ("identity", "security", "auth_methods", "intune", "sharepoint", "teams", "exchange")
 LAB_TENANT_ENV = "AUDITEX_LAB_TENANT_IDS"
 DEFAULT_LAB_TENANT_IDS: tuple[str, ...] = ()
@@ -56,22 +61,28 @@ class ProbeConfig:
     output_dir: Path
     tenant_id: str | None = None
     auditor_profile: str = "global-reader"
-    mode: str = "delegated"
+    mode: str = "app"
     surface: str = "all"
     run_name: str | None = None
     since: str | None = None
     until: str | None = None
     top: int = 5
     page_size: int = 5
-    access_token: str | None = None
-    use_azure_cli_token: bool = True
-    auth_context: str | None = None
     client_id: str | None = None
-    client_secret: str | None = None
+    # The audit CLI's certificate options: the key file, its SHA-1 thumbprint and one password source.
+    certificate_path: str | None = None
+    certificate_thumbprint: str | None = None
+    certificate_password_env: str | None = None
+    certificate_password_file: str | None = None
     authority: str = "https://login.microsoftonline.com/"
     graph_scope: str = "https://graph.microsoft.com/.default"
     allow_lab_response: bool = False
     permission_hints_path: Path = Path("configs/collector-permissions.json")
+    # Deprecated and refused when set (DEC-107): the product layer still passes them until M09-T03.
+    access_token: str | None = field(default=None, repr=False)
+    use_azure_cli_token: bool = False
+    auth_context: str | None = None
+    client_secret: str | None = field(default=None, repr=False)
 
 
 def probe_mode_choices() -> tuple[str, ...]:
@@ -180,64 +191,8 @@ def _probe_toolchain_statuses(
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
-    az_exe = shutil.which("az")
-    if az_exe is None:
-        results.append(
-            _toolchain_row(
-                name="az_cli_graph",
-                toolchain="az",
-                status="blocked",
-                message="Azure CLI is not installed.",
-                error_class="command_not_found",
-            )
-        )
-    else:
-        command = [
-            az_exe,
-            "account",
-            "get-access-token",
-            "--resource-type",
-            "ms-graph",
-            "--query",
-            "{tenant:tenant,expiresOn:expiresOn}",
-            "--output",
-            "json",
-        ]
-        code, stdout, stderr = _subprocess_probe(command)
-        if code == 0:
-            try:
-                payload = json.loads(stdout)
-            except json.JSONDecodeError:
-                payload = {"raw": stdout.strip()}
-            results.append(
-                _toolchain_row(
-                    name="az_cli_graph",
-                    toolchain="az",
-                    status="supported",
-                    message="Azure CLI Graph token is available.",
-                    command=" ".join(command),
-                    details=payload if isinstance(payload, dict) else {"raw": stdout.strip()},
-                )
-            )
-        else:
-            results.append(
-                _toolchain_row(
-                    name="az_cli_graph",
-                    toolchain="az",
-                    status="blocked",
-                    message="Azure CLI Graph token could not be acquired.",
-                    command=" ".join(command),
-                    error_class="command_error",
-                    error=(stderr or stdout).strip() or f"return_code:{code}",
-                )
-            )
-        if log_event:
-            log_event(
-                "probe.toolchain.checked",
-                "Azure CLI readiness checked",
-                {"status": results[-1]["status"]},
-            )
-
+    # Sign-in tools (Azure CLI, CLI for Microsoft 365) are not checked: the reader app's certificate is the one
+    # credential (DEC-107), so no probe or collection path signs a user in.
     pwsh_exe = shutil.which("pwsh")
     results.append(
         _toolchain_row(
@@ -292,43 +247,6 @@ def _probe_toolchain_statuses(
             )
         )
 
-    adapter = get_adapter("m365_cli")
-    if not adapter.dependency_check():
-        results.append(
-            _toolchain_row(
-                name="m365_cli_auth",
-                toolchain="m365_cli",
-                status="blocked",
-                message="CLI for Microsoft 365 is not installed.",
-                error_class="command_not_found",
-            )
-        )
-    else:
-        response = adapter.run("m365 status --output json", log_event=log_event)
-        if response.get("error"):
-            results.append(
-                _toolchain_row(
-                    name="m365_cli_auth",
-                    toolchain="m365_cli",
-                    status="blocked",
-                    message="CLI for Microsoft 365 is not authenticated.",
-                    command=str(response.get("command") or "m365 status --output json"),
-                    error_class=str(response.get("error_class") or "command_error"),
-                    error=str(response.get("error")),
-                )
-            )
-        else:
-            results.append(
-                _toolchain_row(
-                    name="m365_cli_auth",
-                    toolchain="m365_cli",
-                    status="supported",
-                    message="CLI for Microsoft 365 is authenticated.",
-                    command=str(response.get("command") or "m365 status --output json"),
-                    details={"value": response.get("value")},
-                )
-            )
-
     if include_response:
         if pwsh_exe:
             response_command = [
@@ -373,11 +291,7 @@ def _toolchain_blockers(rows: list[dict[str, Any]], *, response: bool = False) -
         if row.get("status") == "supported":
             continue
         recommendations: dict[str, Any] = {"required_tools": [row.get("toolchain")]}
-        if row.get("name") == "m365_cli_auth":
-            recommendations["notes"] = "Run `m365 login` before retrying Microsoft 365 CLI-backed probes."
-        elif row.get("name") == "az_cli_graph":
-            recommendations["notes"] = "Run `az login` and ensure Microsoft Graph token acquisition succeeds."
-        elif row.get("name") == "exchange_online_module":
+        if row.get("name") == "exchange_online_module":
             recommendations["notes"] = "Install ExchangeOnlineManagement for Exchange and response probes."
         blockers.append(
             {
@@ -508,14 +422,54 @@ def _build_probe_snapshot(
     }
 
 
+def _probe_certificate(cfg: ProbeConfig) -> tuple[Any, dict[str, Any] | None]:
+    """Load the app probe's certificate before the probe folder exists: (credential, None) or (None, blocker).
+
+    The blocker text is fixed: never the key path, the password or a library diagnostic.
+    """
+    if not (cfg.client_id and cfg.tenant_id and cfg.certificate_path and cfg.certificate_thumbprint):
+        return None, {
+            "collector": "probe_auth",
+            "item": "graph_auth",
+            "status": "failed",
+            "error_class": "missing_app_credentials",
+            "error": f"client-id, tenant-id and the certificate are required for app probe mode. {CERTIFICATE_WAY}.",
+            "recommendations": {
+                "notes": "Provide the customer-local reader app and its certificate before rerunning app probe mode."
+            },
+        }
+    try:
+        refuse_sources_in_output((cfg.certificate_path, cfg.certificate_password_file), (cfg.output_dir,))
+        credential = load_certificate_credential(
+            cfg.certificate_path,
+            cfg.certificate_thumbprint,
+            password_env=cfg.certificate_password_env,
+            password_file=cfg.certificate_password_file,
+        )
+    except CertificateAuthError as exc:
+        return None, {
+            "collector": "probe_auth",
+            "item": "graph_auth",
+            "status": "failed",
+            "error_class": exc.error_code,
+            "error": str(exc),
+            "recommendations": {"notes": "Fix the reader app's certificate before rerunning app probe mode."},
+        }
+    return credential, None
+
+
 def run_live_probe(cfg: ProbeConfig) -> int:
-    writer = AuditWriter(cfg.output_dir.expanduser().resolve(), tenant_name=cfg.tenant_name, run_name=cfg.run_name)
-    permission_hints = _load_permission_hints(cfg.permission_hints_path)
-    profile = get_profile(cfg.auditor_profile)
+    for name, label in _REMOVED_PROBE_CREDENTIALS:
+        if getattr(cfg, name):
+            raise ValueError(f"The probe no longer accepts {label}. {CERTIFICATE_WAY}.")
     if cfg.mode not in SUPPORTED_PROBE_MODES:
-        raise ValueError(f"Unsupported probe mode '{cfg.mode}'.")
+        raise ValueError(f"Unsupported probe mode '{cfg.mode}'. {CERTIFICATE_WAY}.")
+    profile = get_profile(cfg.auditor_profile)
     if cfg.mode != "response" and cfg.mode not in profile.supported_probe_modes:
         raise ValueError(f"Audit profile '{cfg.auditor_profile}' does not support probe mode '{cfg.mode}'.")
+    certificate, certificate_blocker = _probe_certificate(cfg) if cfg.mode == "app" else (None, None)
+    writer = AuditWriter(cfg.output_dir.expanduser().resolve(), tenant_name=cfg.tenant_name, run_name=cfg.run_name)
+    permission_hints = _load_permission_hints(cfg.permission_hints_path)
 
     requested_surfaces = _resolve_requested_surfaces(cfg.surface, cfg.mode)
     # The final shared notice describes run selection flags, not probe --surface.
@@ -534,6 +488,7 @@ def run_live_probe(cfg: ProbeConfig) -> int:
     writer_adapter = AuditWriterCollectorAdapter(writer)
     collector_runner = CollectorRunner(writer_adapter)
     auth_mode = "none"
+    # An app-only probe has no signed-in user, so its session context is empty.
     session_context: dict[str, Any] = {}
     client: GraphClient | None = None
     auth_path = "none"
@@ -607,107 +562,26 @@ def run_live_probe(cfg: ProbeConfig) -> int:
                 capability_matrix.extend(selected_toolchain_rows)
                 blockers.extend(_toolchain_blockers(selected_toolchain_rows, response=True))
     else:
-        tenant_id = cfg.tenant_id
-        access_token = cfg.access_token
-        if cfg.auth_context:
-            saved_context = auth_context.resolve_auth_context(cfg.auth_context)
-            saved_claims = sanitize_token_claims(saved_context.get("token_claims") or {})
-            tenant_id = tenant_id or saved_context.get("tenant_id")
-            access_token = access_token or saved_context.get("token")
-            auth_context_payload = {
-                "name": saved_context.get("name") or cfg.auth_context,
-                "auth_type": saved_context.get("auth_type"),
-                "tenant_id": tenant_id,
-                "token_claims": saved_claims,
-            }
-            session_context = {
-                "user_principal_name": saved_claims.get("user_principal_name"),
-                "roles": list(saved_claims.get("app_roles") or []),
-            }
-
-        tenant_id = tenant_id or "organizations"
-        if cfg.mode == "delegated":
-            auth_mode = "access_token" if access_token else "azure_cli"
-            auth_path = "saved_context" if cfg.auth_context and access_token else auth_mode
-            if not access_token and not cfg.use_azure_cli_token:
-                blockers.append(
-                    {
-                        "collector": "probe_auth",
-                        "item": "graph_auth",
-                        "status": "failed",
-                        "error_class": "unauthenticated",
-                        "error": "Delegated probe requires either --access-token or --use-azure-cli-token.",
-                        "recommendations": {
-                            "notes": "Provide a delegated Graph token or enable Azure CLI token reuse before rerunning delegated probe mode."
-                        },
-                    }
-                )
-            elif not access_token and cfg.use_azure_cli_token:
-                try:
-                    access_token = _acquire_azure_cli_access_token(tenant_id, log_event=writer.log_event)
-                except Exception as exc:  # noqa: BLE001
-                    blockers.append(
-                        {
-                            "collector": "probe_auth",
-                            "item": "graph_auth",
-                            "status": "failed",
-                            "error_class": "unauthenticated",
-                            "error": str(exc),
-                            "recommendations": {"notes": "Azure CLI delegated sign-in is required for delegated probes."},
-                        }
-                    )
-            if access_token:
-                auth = AuthConfig(
-                    tenant_id=tenant_id,
-                    client_id=cfg.client_id,
+        # App mode only (DEC-107): the reader app's certificate, loaded before the probe folder existed.
+        auth_mode = AUTH_MODE
+        auth_path = "app"
+        if certificate_blocker is not None:
+            blockers.append(certificate_blocker)
+        else:
+            auth = AuthConfig(
+                tenant_id=cfg.tenant_id,
+                client_id=cfg.client_id,
+                authority=cfg.authority,
+                graph_scope=cfg.graph_scope,
+                certificate=certificate,
+            )
+            client = GraphClient(auth, audit_event=writer.log_event)
+            if hasattr(client, "token_claims"):
+                auth_context_payload = _build_auth_context_payload(
                     auth_mode=auth_mode,
-                    access_token=access_token,
-                    authority=cfg.authority,
-                    graph_scope=cfg.graph_scope,
-                )
-                client = GraphClient(auth, audit_event=writer.log_event)
-                if auth_path != "saved_context":
-                    session_context = _capture_signed_in_context(client, log_event=writer.log_event)
-                if auth_context_payload is None and hasattr(client, "token_claims"):
-                    auth_context_payload = _build_auth_context_payload(
-                        auth_mode=auth_mode,
-                        tenant_id=tenant_id,
-                        token_claims=client.token_claims(),
-                        session_context=session_context,
-                    )
-        elif cfg.mode == "app":
-            auth_mode = "app"
-            auth_path = "app"
-            if not cfg.client_id or not cfg.client_secret or not cfg.tenant_id:
-                blockers.append(
-                    {
-                        "collector": "probe_auth",
-                        "item": "graph_auth",
-                        "status": "failed",
-                        "error_class": "missing_app_credentials",
-                        "error": "client-id, client-secret, and tenant-id are required for app probe mode.",
-                        "recommendations": {
-                            "notes": "Provide a customer-local read-only app registration before rerunning app probe mode."
-                        },
-                    }
-                )
-            else:
-                auth = AuthConfig(
                     tenant_id=cfg.tenant_id,
-                    client_id=cfg.client_id,
-                    client_secret=cfg.client_secret,
-                    auth_mode="app",
-                    authority=cfg.authority,
-                    graph_scope=cfg.graph_scope,
+                    token_claims=client.token_claims(),
                 )
-                client = GraphClient(auth, audit_event=writer.log_event)
-                if hasattr(client, "token_claims"):
-                    auth_context_payload = _build_auth_context_payload(
-                        auth_mode=auth_mode,
-                        tenant_id=cfg.tenant_id,
-                        token_claims=client.token_claims(),
-                        session_context=session_context,
-                    )
 
         if client is not None:
             for surface in run_core.collector_execution_order(requested_surfaces):

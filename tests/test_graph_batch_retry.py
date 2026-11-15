@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from support import graph_auth, graph_response
+from support import GRAPH_TEST_TOKEN, graph_auth, graph_response
 
 from azure_tenant_audit.graph import (
     GRAPH_BATCH_CHUNK_SIZE,
@@ -64,6 +64,7 @@ def client_for(answer: Answer, *, mode: str = "fast") -> tuple[GraphClient, Batc
     session = BatchSession(answer)
     client = GraphClient(
         graph_auth(throttle_mode=mode),
+        _token=GRAPH_TEST_TOKEN,
         session=session,  # type: ignore[arg-type]
         audit_event=lambda name, _message, details: events.append((name, details or {})),
         clock=lambda: clock.now,

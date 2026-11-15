@@ -6,14 +6,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import auth_context
 from .adapters import ADAPTERS, get_adapter
 from .ai_context import build_privacy_block
 from .finalize import finalize_bundle_contract, seal_run_findings
 from .findings import build_report_pack
 from .output import AuditWriter
 from .profiles import get_profile
-from .secret_hygiene import redact_argv, sanitize_token_claims
+from .secret_hygiene import redact_argv
 
 LAB_TENANT_ENV = "AUDITEX_LAB_TENANT_IDS"
 DEFAULT_LAB_TENANT_IDS: tuple[str, ...] = ()
@@ -62,6 +61,8 @@ class ResponseConfig:
     out_dir: Path
     action: str
     tenant_id: str | None = None
+    # Deprecated and refused when set: saved auth contexts were removed (DEC-107); the product layer still passes
+    # the field until M09-T03.
     auth_context: str | None = None
     target: str | None = None
     intent: str = ""
@@ -148,11 +149,9 @@ def _planned_commands(action: ResponseAction, config: ResponseConfig) -> list[st
     return [template.format(**context) for template in action.commands]
 
 
-def _resolve_saved_auth_context(name: str) -> dict[str, Any]:
-    return auth_context.resolve_auth_context(name)
-
-
 def run_response(config: ResponseConfig, command_line: list[str] | None = None) -> int:
+    if config.auth_context:
+        raise ValueError("Saved auth contexts were removed: Auditex no longer reads one (DEC-107).")
     writer = AuditWriter(config.out_dir.expanduser().resolve(), tenant_name=config.tenant_name, run_name=config.run_name)
     command_line = _scrub_command_line(list(command_line or []))
 
@@ -161,18 +160,7 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
     coverage: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
     data_handling_events: list[dict[str, Any]] = []
-    saved_auth_context: dict[str, Any] | None = None
-    auth_context_payload: dict[str, Any] | None = None
-
-    if config.auth_context:
-        saved_auth_context = _resolve_saved_auth_context(config.auth_context)
-        auth_context_payload = {
-            "name": saved_auth_context.get("name") or config.auth_context,
-            "auth_type": saved_auth_context.get("auth_type"),
-            "tenant_id": saved_auth_context.get("tenant_id"),
-            "token_claims": sanitize_token_claims(saved_auth_context.get("token_claims") or {}),
-        }
-    tenant_id = config.tenant_id or (saved_auth_context or {}).get("tenant_id") or "organizations"
+    tenant_id = config.tenant_id or "organizations"
 
     writer.log_event(
         "response.run.started",
@@ -653,11 +641,8 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
             },
         )
     )
-    if auth_context_payload is not None:
-        auth_context_path = writer.write_json_artifact("auth-context.json", auth_context_payload)
-        auth_context_path_value = str(auth_context_path.relative_to(writer.run_dir))
-    else:
-        auth_context_path_value = None
+    # A response run reads no saved auth context, so it writes no auth-context.json (older runs may have one).
+    auth_context_path_value = None
     finalize_bundle_contract(
         writer=writer,
         bundle_metadata={

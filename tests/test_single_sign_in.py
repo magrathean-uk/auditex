@@ -1,9 +1,9 @@
-"""One sign-in per audit run (DEC-065), Exchange kept in the guided delegated path (DEC-068 (4)).
+"""No interactive sign-in on the audit run path (DEC-065, DEC-107: the reader app's certificate is the one way).
 
-The run path is driven for real (``cli.run_live`` and ``guided.run_guided`` over a real ``GraphClient``); only
-the network edge is faked: msal (counting every interactive call), the HTTP session and the certificate
-client. Two static checks over ``src/`` close what a run cannot show: no ``az login`` on the run path and no
-``Connect-*`` without an access token.
+The run path is driven for real (``cli.run_live`` over a real ``GraphClient``); only the network edge is faked:
+msal (counting every interactive call and public client), the HTTP session and the certificate client. Static
+checks over ``src/`` close what a run cannot show: no interactive token call anywhere, no ``az login`` on the run
+path and no ``Connect-*`` without an access token.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 import requests
 
-from auditex import guided
 from azure_tenant_audit import certificate_auth
 from azure_tenant_audit import cli as tenant_cli
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
@@ -28,8 +27,8 @@ from azure_tenant_audit.collectors.exchange_policy import (
     EXCHANGE_ONLINE_SCOPE,
     _exchange_session,
 )
-from azure_tenant_audit.config import AuthConfig, CollectorConfig
-from azure_tenant_audit.graph import GraphClient, GraphError
+from azure_tenant_audit.config import CollectorConfig
+from azure_tenant_audit.graph import GraphClient
 from azure_tenant_audit.power_bi import POWERBI_SCOPE
 from azure_tenant_audit.power_platform import BAP_SCOPE
 
@@ -94,7 +93,7 @@ def _response(payload: dict, status: int = 200) -> requests.Response:
 
 
 class FakeSession:
-    """Graph reads answer an empty page; token POSTs (client secret) answer an app token."""
+    """Graph reads answer an empty page; a token POST (there should be none) is recorded."""
 
     def __init__(self) -> None:
         self.token_posts: list[str] = []
@@ -180,15 +179,6 @@ def _run(tmp_path, *mode_args: str) -> int:  # noqa: ANN001
 
 # Run path: interactive sign-ins per mode ------------------------------------------------------------
 
-def test_app_only_secret_run_never_signs_in_interactively(edge, tmp_path) -> None:  # noqa: ANN001
-    assert _run(tmp_path, "--client-id", "constructed-app", "--client-secret", "constructed-secret") == 0
-    assert edge.msal.interactive_count == 0
-    assert edge.msal.public_clients == []
-    assert edge.seen["app"][EXCHANGE_ONLINE_SCOPE] == f"app:{EXCHANGE_ONLINE_SCOPE}"
-    assert edge.seen["app"][TEAMS_SCOPE] is None  # Teams only from a certificate: skipped, never prompted
-    assert edge.seen["exchange_session"]["organization"] == "constructed.onmicrosoft.com"
-
-
 def test_app_only_certificate_run_never_signs_in_interactively(edge, tmp_path, certificate_material) -> None:  # noqa: ANN001
     assert _run(
         tmp_path, "--client-id", "constructed-app",
@@ -201,86 +191,22 @@ def test_app_only_certificate_run_never_signs_in_interactively(edge, tmp_path, c
     assert edge.seen["exchange_session"]["access_token"] == f"certificate:{EXCHANGE_ONLINE_SCOPE}"
 
 
-def test_delegated_run_signs_in_once_and_mints_exchange_silently(edge, tmp_path) -> None:  # noqa: ANN001
-    assert _run(tmp_path, "--interactive", "--client-id", "constructed-public-app") == 0
-    assert edge.msal.interactive_count == 1
-    assert len(edge.msal.public_clients) == 1 and len(edge.msal.caches) == 1
-    assert [EXCHANGE_ONLINE_SCOPE] in edge.msal.silent_calls
-    assert edge.seen["exchange_session"] == {
-        "kind": "exchange_online", "access_token": f"delegated:{EXCHANGE_ONLINE_SCOPE}", "user_principal_name": UPN,
-    }
-    assert all(token is None for token in edge.seen["app"].values())  # no app token in a delegated run
+# The Exchange connect carries only the app token and the organisation ----------------------------------------
 
-
-@pytest.mark.parametrize("selection", [[], ["--collectors", "identity"], ["--collectors", "identity,exchange"]])
-def test_guided_delegated_exchange_run_signs_in_once(edge, monkeypatch, tmp_path, selection) -> None:  # noqa: ANN001
-    monkeypatch.setattr(guided, "build_doctor_report", lambda **kwargs: {
-        "system": {"os": "Darwin", "machine": "arm64"}, "auth": {},
-        "readiness": {"core_ready": True, "exchange_ready": True},
-    })
-    monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **kwargs: 0)
-    monkeypatch.setattr(guided, "_persist_local_defaults", lambda **kwargs: None)
-    monkeypatch.setattr(guided, "_run_azure_login", lambda *a, **k: pytest.fail("az login on the run path"))
-    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *a, **k: pytest.fail("m365 login on the run path"))
-    seen_argv: list[list[str]] = []
-    real_main = tenant_cli.main
-    monkeypatch.setattr(guided.tenant_cli, "main", lambda argv, **kwargs: seen_argv.append(list(argv)) or real_main(argv, **kwargs))
-    args = guided.build_guided_parser().parse_args([
-        "--flow", "gr-audit", "--include-exchange", "--client-id", "constructed-public-app",
-        "--tenant-id", "constructed.onmicrosoft.com", "--tenant-name", "acme", "--out", str(tmp_path),
-        "--no-probe-first", "--non-interactive", "--browser-command", "true", *selection,
-    ])
-    assert guided.run_guided(args) == 0
-    assert edge.msal.interactive_count == 1
-    collectors = seen_argv[0][seen_argv[0].index("--collectors") + 1].split(",")
-    # An explicit list keeps Exchange over the one sign-in: exchange_policy added, the m365 CLI collector swapped out.
-    assert "exchange_policy" in collectors and "exchange" not in collectors
-    if selection:
-        assert collectors == ["identity", "exchange_policy"]
-    assert edge.seen["exchange_session"]["access_token"] == f"delegated:{EXCHANGE_ONLINE_SCOPE}"
-
-
-# The guard: no second prompt, no prompt for another resource ----------------------------------------
-
-def _delegated_client(monkeypatch, msal: FakeMsal) -> GraphClient:  # noqa: ANN001
-    monkeypatch.setitem(sys.modules, "msal", msal.module)
-    auth = AuthConfig(tenant_id="constructed.onmicrosoft.com", client_id="constructed-public-app", auth_mode="interactive",
-                      interactive_scopes=["Directory.Read.All"])
-    return GraphClient(auth, session=FakeSession())
-
-
-def test_second_interactive_sign_in_is_refused(monkeypatch) -> None:  # noqa: ANN001
-    msal = FakeMsal(silent_refuses=("Directory.Read.All",))
-    client = _delegated_client(monkeypatch, msal)
-    assert client.ensure_token() == "delegated-graph-token"
-    client._token = None  # the Graph token is gone and the cache cannot refresh it
-    with pytest.raises(GraphError, match="second sign-in is not opened"):
-        client.ensure_token()
-    assert msal.interactive_count == 1
-
-
-def test_resource_without_consent_is_a_gap_not_a_prompt(monkeypatch) -> None:  # noqa: ANN001
-    msal = FakeMsal(silent_refuses=(EXCHANGE_ONLINE_SCOPE,))
-    client = _delegated_client(monkeypatch, msal)
-    assert client.delegated_token_for(EXCHANGE_ONLINE_SCOPE) is None  # before the sign-in: never starts one
-    assert msal.interactive_count == 0
-    client.ensure_token()
-    assert _exchange_session(client, None) == {"kind": "none"}
-    assert msal.interactive_count == 1
-
-
-@pytest.mark.parametrize("upn,connects", [(UPN, True), ("auditor'; Remove-Mailbox x", False), ("", False)])
-def test_delegated_exchange_connect_carries_the_token_and_user(upn, connects) -> None:  # noqa: ANN001
+@pytest.mark.parametrize("session", [
+    {"kind": "exchange_online", "access_token": "constructed-token", "user_principal_name": UPN},
+    {"kind": "exchange_online", "access_token": "constructed-token", "organization": "constructed.onmicrosoft.com",
+     "user_principal_name": UPN},
+])
+def test_exchange_connect_never_carries_a_signed_in_user(session) -> None:  # noqa: ANN001
     env: dict[str, str] = {}
-    session = {"kind": "exchange_online", "access_token": "delegated-token", "user_principal_name": upn}
     prelude = PowerShellGraphAdapter._session_prelude(session, env)
-    if not connects:
-        assert prelude == "" and "AUDITEX_EXO_ACCESS_TOKEN" not in env
-        return
-    assert "Connect-ExchangeOnline -AccessToken $env:AUDITEX_EXO_ACCESS_TOKEN" in prelude
-    assert "-UserPrincipalName $env:AUDITEX_EXO_USER_PRINCIPAL_NAME" in prelude
-    assert upn not in prelude and "delegated-token" not in prelude
-    assert env == {"AUDITEX_EXO_ACCESS_TOKEN": "delegated-token", "AUDITEX_EXO_USER_PRINCIPAL_NAME": upn}
+    assert "-UserPrincipalName" not in prelude and "AUDITEX_EXO_USER_PRINCIPAL_NAME" not in env
+    if "organization" not in session:
+        assert prelude == "" and env == {}
+    else:
+        assert "-Organization 'constructed.onmicrosoft.com'" in prelude
+        assert env == {"AUDITEX_EXO_ACCESS_TOKEN": "constructed-token"}
 
 
 # Static checks over src/ ----------------------------------------------------------------------------
@@ -349,6 +275,38 @@ def test_no_az_login_on_the_run_path_in_src() -> None:
     assert callers == {"_run_ga_setup_flow"}
 
 
+# Interactive or delegated token calls: msal's public client and its interactive, silent and device flows, the Azure
+# CLI token command and the removed GraphClient delegated helpers.
+_INTERACTIVE_CALL = re.compile(
+    r"acquire_token_(interactive|silent|by_device_flow|by_username_password)|PublicClientApplication|initiate_device_flow"
+    r"|get-access-token|delegated_token_for|signed_in_username|_interactive_token"
+)
+
+
+def interactive_call_sites(source: str) -> list[int]:
+    """Lines outside docstrings and comments that name an interactive or delegated token call."""
+    tree = ast.parse(source)
+    docstrings = _docstring_nodes(tree)
+    lines = set()
+    for node in ast.walk(tree):
+        if id(node) in docstrings:
+            continue
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and _INTERACTIVE_CALL.search(node.value):
+            lines.add(node.lineno)
+        elif isinstance(node, ast.Attribute) and _INTERACTIVE_CALL.fullmatch(node.attr):
+            lines.add(node.lineno)
+        elif isinstance(node, ast.Name) and _INTERACTIVE_CALL.fullmatch(node.id):
+            lines.add(node.lineno)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _INTERACTIVE_CALL.fullmatch(node.name):
+            lines.add(node.lineno)
+    return sorted(lines)
+
+
+def test_no_interactive_token_call_anywhere_in_src() -> None:
+    offenders = {path: lines for path, text in _sources().items() if (lines := interactive_call_sites(text))}
+    assert offenders == {}
+
+
 def test_static_checks_catch_a_planted_sign_in() -> None:
     planted = (
         "import subprocess\n"
@@ -360,6 +318,15 @@ def test_static_checks_catch_a_planted_sign_in() -> None:
     )
     assert az_login_sites(planted) == ["<module>", "login", "shell"]
     assert connect_without_token(planted) == [6]
+    interactive = (
+        '"""Docstrings may say acquire_token_interactive."""\n'
+        "import msal\n"
+        "app = msal.PublicClientApplication('x')\n"
+        "token = app.acquire_token_interactive(scopes=['User.Read'])\n"
+        "ARGV = ['az', 'account', 'get-access-token']\n"
+        "def delegated_token_for(scope):\n    return None\n"
+    )
+    assert interactive_call_sites(interactive) == [3, 4, 5, 6]
 
 
 # The opt-in SharePoint admin read (M08-T12) -----------------------------------------------------------------
@@ -409,8 +376,7 @@ def sharepoint_admin(edge, monkeypatch):  # noqa: ANN001
     collector.session_factory = admin.session
     monkeypatch.setitem(tenant_cli.REGISTRY, "sharepoint_admin", collector)
     # The constructed tokens are opaque; the gate is proved in tests/test_sharepoint_admin_collector.py.
-    monkeypatch.setattr(spa, "token_fits", lambda token, origin, *, delegated: token in {
-        f"delegated:{origin}/AllSites.FullControl", f"certificate:{origin}/.default"})
+    monkeypatch.setattr(spa, "token_fits", lambda token, origin: token == f"certificate:{origin}/.default")
     return admin
 
 
@@ -422,23 +388,6 @@ def _run_sharepoint_admin(tmp_path, *mode_args: str) -> int:  # noqa: ANN001
     return tenant_cli.run_live(args)
 
 
-def test_delegated_sharepoint_admin_read_rides_the_one_sign_in(edge, sharepoint_admin, tmp_path) -> None:  # noqa: ANN001
-    assert _run_sharepoint_admin(tmp_path, "--interactive", "--client-id", "constructed-public-app") == 0
-    assert edge.msal.interactive_count == 1
-    assert [SHAREPOINT_ORIGIN + "/AllSites.FullControl"] in edge.msal.silent_calls
-    assert sharepoint_admin.gets == [(SHAREPOINT_ORIGIN + "/_api/SPO.Tenant",
-                                      f"Bearer delegated:{SHAREPOINT_ORIGIN}/AllSites.FullControl")]
-    # The SharePoint permission never joins the Graph sign-in.
-    assert not any("sharepoint" in scope.lower() or "FullControl" in scope for scope in edge.msal.interactive_calls[0])
-
-
-def test_delegated_sharepoint_admin_read_without_consent_is_a_skip_not_a_prompt(edge, sharepoint_admin, tmp_path) -> None:  # noqa: ANN001
-    edge.msal.silent_refuses = (SHAREPOINT_ORIGIN + "/AllSites.FullControl",)
-    assert _run_sharepoint_admin(tmp_path, "--interactive", "--client-id", "constructed-public-app") == 0
-    assert edge.msal.interactive_count == 1
-    assert sharepoint_admin.gets == []
-
-
 def test_certificate_sharepoint_admin_read_never_prompts(edge, sharepoint_admin, tmp_path, certificate_material) -> None:  # noqa: ANN001
     assert _run_sharepoint_admin(
         tmp_path, "--client-id", "constructed-app",
@@ -447,10 +396,3 @@ def test_certificate_sharepoint_admin_read_never_prompts(edge, sharepoint_admin,
     assert edge.msal.interactive_count == 0 and edge.msal.public_clients == []
     assert SHAREPOINT_ORIGIN + "/.default" in edge.confidential.scopes and edge.session.token_posts == []
     assert sharepoint_admin.gets == [(SHAREPOINT_ORIGIN + "/_api/SPO.Tenant", f"Bearer certificate:{SHAREPOINT_ORIGIN}/.default")]
-
-
-def test_secret_run_requests_no_sharepoint_token_and_sends_nothing(edge, sharepoint_admin, tmp_path) -> None:  # noqa: ANN001
-    assert _run_sharepoint_admin(tmp_path, "--client-id", "constructed-app", "--client-secret", "constructed-secret") == 0
-    assert edge.msal.interactive_count == 0
-    assert not any("sharepoint" in scope for scope in edge.session.token_posts)
-    assert sharepoint_admin.gets == []

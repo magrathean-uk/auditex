@@ -24,6 +24,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
 
 from azure_tenant_audit import cli
 from azure_tenant_audit.adapters import powershell_graph as pg
@@ -115,13 +116,13 @@ def harness(tmp_path, monkeypatch):
     monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.get_adapter", lambda _name: _Adapter())
     monkeypatch.setattr(cli, "GraphClient", _FakeClient)
     monkeypatch.setattr(cli, "REGISTRY", {"exchange_policy": ExchangePolicyCollector(), "identity": _Identity()})
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *_, **__: "cached-token")
+    use_fake_certificate(monkeypatch)
     monkeypatch.delenv("AUDITEX_SENSITIVE_USERS_FILE", raising=False)
     out = tmp_path / "out"
     sources: list[tuple[Path, str]] = []
 
     def live(collectors: str, users: str | None, *extra: str) -> int:
-        argv = ["--tenant-name", "acme", "--tenant-id", "t-123", "--use-azure-cli-token", "--collectors", collectors,
+        argv = ["--tenant-name", "acme", "--tenant-id", "t-123", "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS, "--collectors", collectors,
                 "--out", str(out), "--run-name", "resume", *extra]
         if users is not None:
             source = tmp_path / f"users-{len(sources)}.txt"

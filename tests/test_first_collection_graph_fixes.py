@@ -192,7 +192,8 @@ def test_site_permissions_fanout_ignored_by_settings_read_but_not_by_its_own(run
 
 class _Auth:
     def __init__(self, mode):
-        self.auth_mode = mode
+        # app-only means the reader app's certificate is the credential
+        self.certificate = object() if mode == "app" else None
 
 
 class _SiteClient:
@@ -221,9 +222,8 @@ def test_app_only_makes_no_site_permissions_read_and_records_a_skip():
     assert result.payload["sitePermissionsBySite"] == {"value": []}
 
 
-@pytest.mark.parametrize("mode", ["interactive", "azure_cli", "access_token"])
-def test_delegated_modes_keep_the_site_permissions_read(mode):
-    client = _SiteClient(mode)
+def test_a_client_without_a_certificate_keeps_the_site_permissions_read():
+    client = _SiteClient("token")
     result = SharePointAccessCollector().run({"client": client, "top": None, "audit_logger": None})
     assert client.permission_reads == ["/sites/site-1/permissions"]
     assert all(row.get("status") != "skipped" for row in result.coverage)
@@ -266,7 +266,7 @@ def test_app_only_skip_keeps_site_permission_rules_not_assessed():
     assert set(skipped) == set(_SITE_PERMISSION_RULES)
     assert {row["status"] for row in skipped.values()} == {"not_assessed"}
     assert {row["reason"] for row in skipped.values()} == {"site_permissions_not_read"}
-    # negative control: a delegated read of the same sites can pass all four
-    delegated = evaluate("interactive")
+    # negative control: a read of the same sites without the certificate can pass all four
+    delegated = evaluate("token")
     assert set(delegated) == set(_SITE_PERMISSION_RULES)
     assert {row["status"] for row in delegated.values()} == {"pass"}

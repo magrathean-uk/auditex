@@ -219,17 +219,10 @@ def test_default_workload_selection_and_unchanged_presets(tmp_path):
     for name in ("exchange_policy", "dns_posture"):
         assert config.collectors[name].enabled is True
     for profile in ("auto", "global-reader", "app-readonly-full"):
-        for mode_args in ([], ["--interactive"], ["--use-azure-cli-token"]):
-            args = cli.build_parser().parse_args(["--auditor-profile", profile, *mode_args])
-            plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config, permission_hints={}, collector_presets=presets)
-            if not mode_args:
-                assert {"exchange_policy", "dns_posture"} <= set(plan.selected_collectors)
-                assert ("teams_policy" in plan.selected_collectors) is (profile != "auto")
-                assert plan.selection_notices == ()
-            else:
-                assert {"exchange_policy", "dns_posture", "teams_policy"}.isdisjoint(plan.selected_collectors)
-                assert len(plan.selection_notices) == 1
-                assert "app-mode only" in plan.selection_notices[0]
+        args = cli.build_parser().parse_args(["--auditor-profile", profile])
+        plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config, permission_hints={}, collector_presets=presets)
+        assert {"exchange_policy", "dns_posture"} <= set(plan.selected_collectors)
+        assert ("teams_policy" in plan.selected_collectors) is (profile != "auto")
 
 
 def test_deselect_default_workloads_in_both_clis(tmp_path, monkeypatch):
@@ -261,41 +254,16 @@ def test_deselect_default_workloads_in_both_clis(tmp_path, monkeypatch):
                 assert "exchange_policy" in plan.selected_collectors
 
 
-def test_non_app_only_explicit_collectors_override_app_default_boundary(tmp_path):
-    from azure_tenant_audit.config import CollectorConfig
-    from azure_tenant_audit.presets import load_collector_presets
-    from azure_tenant_audit.run import build_live_run_plan
-
-    config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
-    for mode in (["--interactive"], ["--use-azure-cli-token"], ["--access-token", "constructed"]):
-        for selection in (["--collectors", "exchange_policy,dns_posture"], ["--collector-preset", "full"], ["--include-exchange"]):
-            args = cli.build_parser().parse_args([*mode, *selection])
-            plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config,
-                                       permission_hints={}, collector_presets=load_collector_presets())
-            if selection[0] == "--collectors":
-                assert {"exchange_policy", "dns_posture"} <= set(plan.selected_collectors)
-                assert not plan.selection_notices
-            else:
-                assert {"exchange_policy", "dns_posture"}.isdisjoint(plan.selected_collectors)
-                assert len(plan.selection_notices) == 1
-                if selection == ["--include-exchange"]:
-                    assert "exchange" in plan.selected_collectors
-
-
 @pytest.mark.parametrize("selection", [["--auditor-profile", "global-reader"], ["--collector-preset", "full"],
                                        ["--auditor-profile", "global-reader", "--collector-preset", "full"]])
 def test_app_mode_reader_and_full_selection_includes_teams_policy(tmp_path, selection):
     from azure_tenant_audit.config import CollectorConfig
     from azure_tenant_audit.presets import load_collector_presets
-    from azure_tenant_audit.profiles import APP_MODE_ONLY_COLLECTORS
     from azure_tenant_audit.run import build_live_run_plan
 
     config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
-    for credential in (["--client-secret", "constructed"],
-                       ["--certificate-path", "constructed.pem", "--certificate-thumbprint", "A" * 40]):
-        args = cli.build_parser().parse_args(["--tenant-name", "constructed", *credential, *selection])
-        plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config, permission_hints={},
-                                   collector_presets=load_collector_presets())
-        # A secret-only run still selects it and records teams_token_unavailable as a named skip.
-        assert {"teams_policy", "exchange_policy", "dns_posture"} <= set(plan.selected_collectors)
-    assert APP_MODE_ONLY_COLLECTORS == ("exchange_policy", "dns_posture", "teams_policy")
+    certificate = ["--certificate-path", "constructed.pem", "--certificate-thumbprint", "A" * 40]
+    args = cli.build_parser().parse_args(["--tenant-name", "constructed", *certificate, *selection])
+    plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config, permission_hints={},
+                               collector_presets=load_collector_presets())
+    assert {"teams_policy", "exchange_policy", "dns_posture"} <= set(plan.selected_collectors)

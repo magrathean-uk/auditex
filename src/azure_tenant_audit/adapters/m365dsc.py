@@ -28,7 +28,7 @@ COMPATIBILITY_SCRIPT = (
 class M365DSCAdapter(Adapter):
     metadata = AdapterMetadata(
         name="m365dsc",
-        auth_requirements=("app_or_delegated",),
+        auth_requirements=("app",),
         tool_dependencies=("pwsh",),
     )
 

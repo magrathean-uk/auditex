@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
 
 from azure_tenant_audit import cli
 from azure_tenant_audit.collectors.base import CollectorResult
@@ -66,7 +67,9 @@ def _args(tmp_path: Path, collectors: str, *extra: str):
             "acme",
             "--tenant-id",
             "t-123",
-            "--use-azure-cli-token",
+            "--client-id",
+            "constructed-app",
+            *FAKE_CERTIFICATE_ARGS,
             "--collectors",
             collectors,
             "--out",
@@ -81,7 +84,7 @@ def _args(tmp_path: Path, collectors: str, *extra: str):
 def _live(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, registry: dict[str, _Collector], collectors: str, *extra: str) -> int:
     monkeypatch.setattr(cli, "GraphClient", _FakeClient)
     monkeypatch.setattr(cli, "REGISTRY", registry)
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *_, **__: "cached-token")
+    use_fake_certificate(monkeypatch)
     return cli.run_live(_args(tmp_path, collectors, *extra))
 
 

@@ -12,21 +12,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from . import auth_context
 from . import run as run_core
 from .ai_context import build_privacy_block
 from .auth_runtime import (
-    acquire_azure_cli_access_token as _acquire_azure_cli_access_token,
-)
-from .auth_runtime import (
     build_auth_context_payload as _build_auth_context_payload,
 )
-from .auth_runtime import (
-    capture_signed_in_context as _capture_signed_in_context,
-)
-from .auth_runtime import (
-    inspect_access_token as _inspect_access_token,
-)
+from .auth_runtime import removed_auth_flag
 from .auth_runtime import (
     scrub_command_line as _scrub_command_line,
 )
@@ -48,7 +39,13 @@ from .collector_runner import (
 )
 from .collectors import REGISTRY
 from .collectors.base import normalize_collection_limit
-from .config import MIXED_CREDENTIALS_MESSAGE, AuthConfig, CollectorConfig
+from .config import (
+    AUTH_MODE,
+    CERTIFICATE_WAY,
+    MIXED_CREDENTIALS_MESSAGE,
+    AuthConfig,
+    CollectorConfig,
+)
 from .data_handling import collector_activity_notices
 from .data_minimisation import minimise_user_text
 from .diagnostics import build_diagnostics as _build_diagnostics
@@ -168,24 +165,16 @@ def _certificate_selected(args: argparse.Namespace) -> bool:
     return any(getattr(args, name, None) for name in _CERTIFICATE_OPTIONS)
 
 
-def _other_credential_selected(args: argparse.Namespace) -> bool:
-    """Another credential source named for the run; a certificate never runs beside one."""
-    return any(getattr(args, name, None) for name in (
-        "client_secret", "access_token", "interactive", "use_azure_cli_token", "auth_context",
-    ))
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
     parser.add_argument("--version", action="version", version=package_version_line("azure-tenant-audit"))
     parser.add_argument("--tenant-name", default="tenant", help="Label for the output folder.")
     parser.add_argument("--tenant-id", default=None, help="Entra tenant ID.")
-    parser.add_argument("--client-id", default=None, help="App registration ID.")
-    parser.add_argument("--client-secret", default=None, help="App secret.")
+    parser.add_argument("--client-id", default=None, help="The reader app's application (client) ID.")
     parser.add_argument(
         "--certificate-path", default=None, metavar="FILE",
-        help=("App mode: the certificate credential's private key file (PEM or PFX, readable only by its owner). "
-              "Every app token, including the Teams admin token, is minted from it; never with --client-secret. "
+        help=("The reader app's certificate private key file (PEM or PFX, readable only by its owner). "
+              "Every token, including the Teams admin token, is minted from it. "
               "The key is never copied into the run folder."),
     )
     parser.add_argument(
@@ -201,18 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--certificate-password-file", default=None, metavar="FILE",
         help="File holding the key password, readable only by its owner. No option takes the password itself.",
     )
-    parser.add_argument("--access-token", default=None, help="Optional preissued Graph access token.")
-    parser.add_argument("--auth-context", default=None, help="Optional saved Auditex auth context name.")
-    parser.add_argument(
-        "--use-azure-cli-token",
-        action="store_true",
-        help="Use an existing Azure CLI Graph token if available (no app credentials required).",
-    )
     parser.add_argument("--authority", default="https://login.microsoftonline.com/", help="Identity authority URL.")
     parser.add_argument("--graph-scope", default="https://graph.microsoft.com/.default", help="Graph scope.")
-    parser.add_argument("--interactive", action="store_true", help="Use delegated browser login.")
-    parser.add_argument("--scopes", default=None, help="Comma-separated delegated Graph scopes for interactive login.")
-    parser.add_argument("--browser-command", default="firefox", help="Browser command used by interactive auth.")
     parser.add_argument("--out", default="audit-output", help="Base output directory.")
     parser.add_argument("--config", default="configs/collector-definitions.json", help="Collector configuration file.")
     parser.add_argument(
@@ -676,40 +655,35 @@ def run_live(
     except (OSError, UnicodeError) as exc:
         LOG.error("Unable to read the break-glass accounts file: %s", exc)
         return 2
-    # Load and check the certificate credential before the run folder exists or any request is made.
-    # Its errors are fixed text: never the path, the password or a library diagnostic.
-    certificate = None
-    if _certificate_selected(args):
-        if _other_credential_selected(args):
-            LOG.error("%s", MIXED_CREDENTIALS_MESSAGE)
-            return 2
-        if not (getattr(args, "certificate_path", None) and getattr(args, "certificate_thumbprint", None)):
-            LOG.error("Certificate authentication needs both --certificate-path and --certificate-thumbprint.")
-            return 2
-        try:
-            # Before the key is read or the run folder exists: a source inside the output or resume folder,
-            # or linked from one, would be swept into the bundle or overwritten by an output file.
-            refuse_sources_in_output(
-                (args.certificate_path, getattr(args, "certificate_password_file", None)),
-                (args.out, getattr(args, "resume_from", None)),
-            )
-            certificate = load_certificate_credential(
-                args.certificate_path,
-                args.certificate_thumbprint,
-                password_env=getattr(args, "certificate_password_env", None),
-                password_file=getattr(args, "certificate_password_file", None),
-            )
-        except CertificateAuthError as exc:
-            LOG.error("%s", exc)
-            return 2
+    # The reader app's certificate is the one credential (DEC-107). It is loaded and checked before the run folder
+    # exists or any request is made; its errors are fixed text: never the path, the password or a library diagnostic.
+    if not args.client_id:
+        LOG.error("client-id is required. %s.", CERTIFICATE_WAY)
+        return 2
+    if not args.tenant_id:
+        LOG.error("tenant-id is required. %s.", CERTIFICATE_WAY)
+        return 2
+    if not (getattr(args, "certificate_path", None) and getattr(args, "certificate_thumbprint", None)):
+        LOG.error("Certificate authentication needs both --certificate-path and --certificate-thumbprint. %s.", CERTIFICATE_WAY)
+        return 2
+    try:
+        # Before the key is read or the run folder exists: a source inside the output or resume folder,
+        # or linked from one, would be swept into the bundle or overwritten by an output file.
+        refuse_sources_in_output(
+            (args.certificate_path, getattr(args, "certificate_password_file", None)),
+            (args.out, getattr(args, "resume_from", None)),
+        )
+        certificate = load_certificate_credential(
+            args.certificate_path,
+            args.certificate_thumbprint,
+            password_env=getattr(args, "certificate_password_env", None),
+            password_file=getattr(args, "certificate_password_file", None),
+        )
+    except CertificateAuthError as exc:
+        LOG.error("%s", exc)
+        return 2
     out = Path(args.out).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
-
-    saved_auth_context: dict[str, Any] | None = None
-    if args.auth_context:
-        saved_auth_context = auth_context.resolve_auth_context(args.auth_context)
-        args.access_token = args.access_token or saved_auth_context.get("token")
-        args.tenant_id = args.tenant_id or saved_auth_context.get("tenant_id")
 
     try:
         config = CollectorConfig.from_path(Path(args.config))
@@ -727,13 +701,12 @@ def run_live(
         return 2
     run_cfg = plan.run_config
     selected = plan.selected_collectors
-    for notice in [*plan.selection_notices, *collector_activity_notices(selected, "live")]:
+    for notice in collector_activity_notices(selected, "live"):
         LOG.info("%s", notice)
     if NON_FATAL_COLLECTORS.intersection(selected):
         LOG.info("Exchange/DNS failures leave overall status partial, process exit 0 when these are the only failures; "
                  "coverage gates reject partial runs unless --allow-partial is supplied.")
     execution_plane = plan.execution_plane
-    auth_scopes = plan.auth_scopes
 
     resume_from = Path(args.resume_from).expanduser().resolve() if args.resume_from else None
     writer = AuditWriter(
@@ -793,64 +766,14 @@ def run_live(
             },
         )
 
-    if args.use_azure_cli_token:
-        if not args.access_token:
-            try:
-                args.access_token = _acquire_azure_cli_access_token(args.tenant_id, log_event=writer.log_event)
-                writer.log_event(
-                    "auth.cli.token.selected",
-                    "Using Azure CLI cached token for Graph authentication.",
-                    {"tenant_id": args.tenant_id or "organizations"},
-                )
-                LOG.info("Using Azure CLI cached Graph token.")
-            except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
-                writer.log_event(
-                    "auth.cli.token.rejected",
-                    "Azure CLI token could not be used.",
-                    {"tenant_id": args.tenant_id or "organizations", "error": str(exc)},
-                )
-                LOG.error("Unable to use Azure CLI token: %s", exc)
-                return 2
-
-    has_token_source = bool(args.access_token or args.use_azure_cli_token)
-    if args.interactive and not args.client_id and not has_token_source:
-        LOG.warning(
-            "Interactive mode requested without --client-id. Falling back to Azure CLI token mode. "
-            "Run `az login` first; this avoids creating an app registration."
-        )
-        args.interactive = False
-        args.use_azure_cli_token = True
-        has_token_source = True
-    if not args.interactive and not has_token_source:
-        if not args.client_id:
-            LOG.error("client-id is required for app authentication.")
-            return 2
-        if not args.client_secret and certificate is None:
-            LOG.error(
-                "client-id and a client secret or a certificate (--certificate-path with --certificate-thumbprint) "
-                "are required for app auth. Use --interactive or --use-azure-cli-token."
-            )
-            return 2
-        if not args.tenant_id:
-            LOG.error("tenant-id is required for app authentication.")
-            return 2
-    if args.interactive and not args.tenant_id:
-        args.tenant_id = "organizations"
-
-    tenant_id = args.tenant_id or "organizations"
-
-    auth_mode = "interactive" if args.interactive else "azure_cli" if args.use_azure_cli_token else "access_token" if args.access_token else "app"
-
+    tenant_id = args.tenant_id
+    auth_mode = AUTH_MODE
     try:
         auth = AuthConfig(
             tenant_id=tenant_id,
             client_id=args.client_id,
-            auth_mode=auth_mode,
-            client_secret=args.client_secret,
-            access_token=args.access_token,
             authority=args.authority,
             graph_scope=args.graph_scope,
-            interactive_scopes=auth_scopes,
             throttle_mode=args.throttle_mode,
             certificate=certificate,
         )
@@ -858,28 +781,13 @@ def run_live(
         LOG.error("%s", MIXED_CREDENTIALS_MESSAGE)
         return 2
     client = GraphClient(auth, audit_event=writer.log_event)
+    # An app-only run has no signed-in user: the session context is empty (older bundles may carry one).
     session_context: dict[str, Any] = {}
-    if auth_mode in {"azure_cli", "interactive"}:
-        session_context = _capture_signed_in_context(client, log_event=writer.log_event)
-    token_claims: dict[str, Any] = {}
-    if args.access_token:
-        try:
-            token_claims = _inspect_access_token(args.access_token)
-        except Exception as exc:  # noqa: BLE001
-            writer.log_event(
-                "auth.token.inspect_failed",
-                "Access token could not be decoded locally.",
-                {"error": str(exc)},
-            )
-            token_claims = {}
-    elif hasattr(client, "token_claims"):
-        token_claims = client.token_claims()
+    token_claims: dict[str, Any] = client.token_claims() if hasattr(client, "token_claims") else {}
     auth_context_payload = _build_auth_context_payload(
         auth_mode=auth_mode,
         tenant_id=tenant_id,
         token_claims=token_claims,
-        session_context=session_context,
-        saved_context=saved_auth_context,
     )
     capability_rows = run_core.build_capability_matrix_rows(
         auth_context=auth_context_payload,
@@ -1245,16 +1153,17 @@ def main(
 ) -> int:
     parser = build_parser()
     parsed_argv = list(argv if argv is not None else sys.argv[1:])
+    # A removed sign-in flag is refused by name with the one way, before argparse could echo its value.
+    removed = removed_auth_flag(parsed_argv)
+    if removed is not None:
+        parser.error_prevalidated(f"{removed} was removed. {CERTIFICATE_WAY}.")
     args = parse_guarded(parser, parsed_argv)
     args._command_line = ["azure-tenant-audit", *parsed_argv]
     if args.as_of is not None and not args.offline:
         parser.error_prevalidated("--as-of applies only to offline runs (--offline)")
-    certificate_selected = _certificate_selected(args)
-    if certificate_selected:
+    if _certificate_selected(args):
         if args.offline:
-            parser.error_prevalidated("certificate options apply only to live app-mode runs")
-        if _other_credential_selected(args):
-            parser.error_prevalidated(MIXED_CREDENTIALS_MESSAGE)
+            parser.error_prevalidated("certificate options apply only to live runs")
         if not (args.certificate_path and args.certificate_thumbprint):
             parser.error_prevalidated("--certificate-path and --certificate-thumbprint are used together")
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s")
@@ -1273,30 +1182,18 @@ def main(
 
     args.tenant_id = args.tenant_id or None
     args.client_id = args.client_id or None
-    args.client_secret = args.client_secret or None
-    args.access_token = args.access_token or None
 
     if args.tenant_id is None:
-        args.tenant_id = __import__("os").environ.get("AZURE_TENANT_ID")
+        args.tenant_id = os.environ.get("AZURE_TENANT_ID")
     if args.client_id is None:
-        args.client_id = __import__("os").environ.get("AZURE_CLIENT_ID")
-    if args.client_secret is None and not certificate_selected:
-        args.client_secret = __import__("os").environ.get("AZURE_CLIENT_SECRET")
-    elif certificate_selected and __import__("os").environ.get("AZURE_CLIENT_SECRET"):
-        LOG.warning("Ignoring AZURE_CLIENT_SECRET: this run authenticates with the certificate credential only.")
-    if args.access_token is None and __import__("os").environ.get("AZURE_ACCESS_TOKEN") is not None:
-        LOG.warning(
-            "Ignoring AZURE_ACCESS_TOKEN environment variable. "
-            "Pass --access-token explicitly or use a saved auth context."
-        )
+        args.client_id = os.environ.get("AZURE_CLIENT_ID")
+    for ignored in ("AZURE_CLIENT_SECRET", "AZURE_ACCESS_TOKEN"):
+        if os.environ.get(ignored) is not None:
+            LOG.warning("Ignoring %s: Microsoft 365 audits authenticate only with the reader app's certificate.", ignored)
     if args.authority is None:
-        args.authority = __import__("os").environ.get("AZURE_AUTHORITY", args.authority)
+        args.authority = os.environ.get("AZURE_AUTHORITY", args.authority)
     if args.graph_scope is None:
-        args.graph_scope = __import__("os").environ.get("AZURE_GRAPH_SCOPE", args.graph_scope)
-    if args.interactive and args.browser_command:
-        os.environ["BROWSER"] = args.browser_command
-    if args.scopes:
-        args.scopes = args.scopes.strip()
+        args.graph_scope = os.environ.get("AZURE_GRAPH_SCOPE", args.graph_scope)
     if args.offline:
         try:
             offline_break_glass = load_break_glass_accounts(args.break_glass_accounts)

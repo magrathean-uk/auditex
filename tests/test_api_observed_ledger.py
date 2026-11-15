@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from support import graph_auth, graph_response
+from support import GRAPH_TEST_TOKEN, graph_auth, graph_response
 from test_finalize_idempotent import _prepare_bundle_for_finalize
 
 from azure_tenant_audit.api_inventory import (
@@ -295,7 +295,7 @@ def test_writer_derives_the_ledger_from_its_own_audit_log(tmp_path: Path) -> Non
     # A real client wired to the writer, with a fake session: the ledger sees what the transport did.
     session = type("S", (), {})()
     session.request = lambda method, url, headers=None, timeout=None, **kw: graph_response(200, {"value": [{"id": "1"}]})
-    client = GraphClient(graph_auth(), session=session, audit_event=writer.log_event)  # type: ignore[arg-type]
+    client = GraphClient(graph_auth(), session=session, audit_event=writer.log_event, _token=GRAPH_TEST_TOKEN)  # type: ignore[arg-type]
     client.get_all("/users")
     try:
         client._request("DELETE", f"{GRAPH_ROOT}/users/{GUID}")

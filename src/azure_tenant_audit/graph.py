@@ -15,33 +15,12 @@ from requests.exceptions import RequestException
 
 from . import auth_context, certificate_auth
 from .certificate_auth import CERTIFICATE_ERRORS, CertificateAuthError
-from .config import AuthConfig, check_single_credential
+from .config import CERTIFICATE_WAY, AuthConfig, check_single_credential
 from .versioning import package_user_agent
 
 LOG = logging.getLogger(__name__)
-# Teams admin API audience; its token is minted only from a certificate credential, never a secret.
-_TEAMS_ADMIN_AUDIENCE = "48ac35b8-9aa8-4d74-927d-1f4a14a0b239"
-_TEAMS_ADMIN_RESOURCES = frozenset({_TEAMS_ADMIN_AUDIENCE, "https://api.interfaces.records.teams.microsoft.com"})
 # A certificate token is refreshed this many seconds before msal says it expires.
 _CERTIFICATE_REFRESH_MARGIN_SECONDS = 300.0
-
-
-def _is_teams_admin_scope(scope: str) -> bool:
-    return str(scope).casefold().removesuffix("/.default").rstrip("/") in _TEAMS_ADMIN_RESOURCES
-
-
-# Office 365 SharePoint Online. SharePoint refuses app-only tokens minted from a client secret ("In Entra ID when doing
-# app-only you must use a certificate to request access to SharePoint CSOM/REST API's", Microsoft Learn, Granting access
-# via Entra ID App-Only), so app_token_for mints a SharePoint token only from a certificate credential.
-_SHAREPOINT_RESOURCE_APP_ID = "00000003-0000-0ff1-ce00-000000000000"
-
-
-def _is_sharepoint_scope(scope: str) -> bool:
-    text = str(scope).strip().casefold()
-    if text.startswith(_SHAREPOINT_RESOURCE_APP_ID):
-        return True
-    host = (urlparse(text).hostname or "") if "://" in text else ""
-    return host == "sharepoint.com" or host.endswith(".sharepoint.com")
 
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
@@ -76,9 +55,8 @@ _DOWNLOAD_HOST_SUFFIXES = (
 #   to the allowed download hosts (_follow_redirects);
 #   POST only to /v1.0/$batch or /beta/$batch, every sub-request a body-free, relative GET
 #   (class 3 Graph $batch).
-# The only other non-GET calls in this module are token POSTs to the Entra authority (class 2:
-# app_token_for, _app_token, msal in _interactive_token (Graph and delegated_token_for) and msal in _certificate_exchange for a
-# certificate credential), which never pass through _request.
+# The only other non-GET calls in this module are token POSTs to the Entra authority (class 2: msal in
+# _certificate_exchange for the reader app's certificate credential), which never pass through _request.
 # tests/test_http_verb_allowlist.py holds the frozen allow-list; a new non-GET site fails it.
 READ_ONLY_METHODS = frozenset({"GET"})
 _BATCH_ENVELOPE_KEYS = frozenset({"requests"})
@@ -296,11 +274,6 @@ class GraphClient:
     _certificate_app: Any = field(default=None, init=False, repr=False, compare=False)
     _certificate_tokens: dict[str, tuple[str, float]] = field(default_factory=dict, init=False, repr=False, compare=False)
     _certificate_lock: Any = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
-    # Delegated sign-in runtime (DEC-065), process memory only: one msal public client over one in-memory token
-    # cache serves every resource of the run; acquire_token_interactive runs at most once per client.
-    _public_app: Any = field(default=None, init=False, repr=False, compare=False)
-    _interactive_lock: Any = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
-    interactive_prompts: int = field(default=0, init=False, compare=False)
     # Injected clock for tests: a monotonic reading and a wait; None uses time.monotonic and time.sleep.
     clock: Callable[[], float] | None = field(default=None, repr=False, compare=False)
     sleep: Callable[[float], None] | None = field(default=None, repr=False, compare=False)
@@ -318,13 +291,6 @@ class GraphClient:
             self.audit_event(event, message, details)
         except Exception:  # noqa: BLE001
             LOG.exception("Failed to emit audit event.")
-
-    @staticmethod
-    def _safe_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        copy = dict(payload)
-        if "client_secret" in copy:
-            copy["client_secret"] = "***redacted***"
-        return copy
 
     @staticmethod
     def _params_overview(params: dict[str, Any] | None) -> dict[str, Any]:
@@ -390,71 +356,30 @@ class GraphClient:
                 return max(seconds, policy.base_backoff_seconds)
         return round(policy.base_backoff_seconds * (2 ** max(0, attempt - 1)), 2)
 
-    def _authority(self) -> str:
-        tenant_id = self.auth.tenant_id or "organizations"
-        return f"{self.auth.authority.rstrip('/')}/{tenant_id}"
-
     def ensure_token(self) -> str:
+        """The Graph token, minted from the reader app's certificate (DEC-107); there is no other credential."""
         if self.auth.certificate is not None:
             # Certificate tokens carry a refresh deadline, so the cached _token is not trusted alone.
             return self._certificate_token(self.auth.graph_scope)
         if self._token:
+            # Offline tests inject a constructed token here; no product path sets it.
             return self._token
-        if self.auth.access_token:
-            self._token = self.auth.access_token
-            return self._token
-        if self.auth.auth_mode == "interactive":
-            return self._interactive_token()
-        return self._app_token()
+        raise GraphError(f"No certificate credential. {CERTIFICATE_WAY}.", error_code="certificate_required")
 
     def app_token_for(self, scope: str) -> str | None:
-        """Client-credentials token for another resource (e.g. Exchange Online), or None outside app mode.
+        """App token for another resource (e.g. Exchange Online), minted from the certificate, or None.
 
-        A certificate credential mints every app token through msal; a non-Graph token that cannot be
-        acquired is None (the collector records a named gap). The Teams admin and SharePoint tokens come only
-        from a certificate: a secret-only, delegated or token run gets None and never a secret-minted token.
+        A token that cannot be acquired is None (the collector records a named gap); without a certificate
+        there is no token for any other resource.
         """
-        if self.auth.certificate is not None:
-            try:
-                return self._certificate_token(scope)
-            except GraphError:
-                if scope == self.auth.graph_scope:
-                    raise
-                return None
-        if _is_teams_admin_scope(scope) or _is_sharepoint_scope(scope):
+        if self.auth.certificate is None:
             return None
-        if self.auth.access_token or self.auth.auth_mode == "interactive" or not self.auth.client_secret or not self.auth.client_id:
-            return None
-        cache = self.__dict__.setdefault("_resource_tokens", {})
-        if scope in cache:
-            return cache[scope]
-        # Counted like the Graph token request, so token_requests matches token_succeeded and the ledger names the resource.
-        self._emit(
-            "graph.token.requested",
-            "Requesting resource token",
-            {"mode": "client_credentials", "token_url": self._token_url(), "scope": scope},
-        )
         try:
-            response = self.session.post(
-                self._token_url(),
-                data={
-                    "client_id": self.auth.client_id,
-                    "client_secret": self.auth.client_secret,
-                    "scope": scope,
-                    "grant_type": "client_credentials",
-                },
-                timeout=self.auth.timeout_seconds,
-            )
-        except RequestException as exc:  # noqa: BLE001
-            self._emit("graph.token.failed", "Resource token request raised transport exception", {"scope": scope, "error": str(exc)})
+            return self._certificate_token(scope)
+        except GraphError:
+            if scope == self.auth.graph_scope:
+                raise
             return None
-        if response.status_code >= 400:
-            self._emit("graph.token.failed", "Resource token request returned an error response", {"scope": scope, "status": response.status_code})
-            return None
-        token = response.json().get("access_token")
-        cache[scope] = token
-        self._emit("graph.token.succeeded", "Resource token acquired", {"scope": scope, "status": response.status_code})
-        return token
 
     def _certificate_token(self, scope: str) -> str:
         """An app token from the certificate credential, cached in memory until its refresh deadline."""
@@ -517,160 +442,6 @@ class GraphClient:
         if isinstance(lifetime, bool) or not isinstance(lifetime, (int, float)) or not math.isfinite(lifetime) or lifetime <= 0:
             return None, 0.0, "certificate_token_failed"
         return token, float(lifetime), None
-
-    def _app_token(self) -> str:
-        if self.auth.certificate is not None:
-            return self._certificate_token(self.auth.graph_scope)
-        if not self.auth.client_secret:
-            raise GraphError("No client secret or access token provided.")
-
-        payload = {
-            "client_id": self.auth.client_id,
-            "client_secret": self.auth.client_secret,
-            "scope": self.auth.graph_scope,
-            "grant_type": "client_credentials",
-        }
-        start = time.time()
-        self._emit(
-            "graph.token.requested",
-            "Requesting app token",
-            {
-                "mode": "client_credentials",
-                "token_url": self._token_url(),
-                "payload": self._safe_payload(payload),
-            },
-        )
-        try:
-            response = self.session.post(
-                self._token_url(),
-                data=payload,
-                timeout=self.auth.timeout_seconds,
-            )
-        except RequestException as exc:  # noqa: BLE001
-            self._emit("graph.token.failed", "Token request raised transport exception", {"error": str(exc)})
-            raise GraphError(f"Token request failed: {exc}") from exc
-        duration_ms = round((time.time() - start) * 1000, 2)
-        if response.status_code >= 400:
-            self._emit(
-                "graph.token.failed",
-                "Token request returned an error response",
-                {"status": response.status_code, "duration_ms": duration_ms},
-            )
-            raise GraphError(f"Token request failed ({response.status_code}): {response.text}")
-        self._token = response.json()["access_token"]
-        self._emit(
-            "graph.token.succeeded",
-            "App token acquired",
-            {"status": response.status_code, "duration_ms": duration_ms},
-        )
-        return self._token
-
-    def _interactive_scopes(self) -> list[str]:
-        requested_scopes = self.auth.interactive_scopes or [self.auth.graph_scope]
-        scopes = list(dict.fromkeys(requested_scopes)) or ["User.Read"]
-        if self.auth.graph_scope.endswith("/.default") and self.auth.graph_scope in scopes:
-            scopes = [scope for scope in scopes if scope != self.auth.graph_scope]
-            if not scopes:
-                scopes = ["User.Read"]
-        return scopes
-
-    def _public_client(self) -> Any:
-        """The run's one msal public client and its one in-memory token cache (never written to disk)."""
-        if self._public_app is None:
-            try:
-                import msal
-            except Exception as exc:  # noqa: BLE001
-                raise GraphError(f"Interactive auth requires msal dependency: {exc}")  # noqa: B904 - keeps the existing implicit exception context; explicit chaining would change __cause__
-            self._public_app = msal.PublicClientApplication(
-                client_id=self.auth.client_id,
-                authority=self._authority(),
-                token_cache=msal.TokenCache(),
-            )
-        return self._public_app
-
-    def _signed_in_account(self, app: Any) -> Any:
-        accounts = app.get_accounts()
-        return accounts[0] if accounts else None
-
-    def _interactive_token(self, resource_scope: str | None = None) -> str | None:
-        """The run's one sign-in and every token minted from it.
-
-        Without ``resource_scope`` this is the Graph token: silent from the shared cache when it can be, else the
-        one acquire_token_interactive of the run. With ``resource_scope`` (another resource, e.g. Exchange Online)
-        it is acquire_token_silent only and gives None when the cache cannot serve it; it never prompts.
-        """
-        with self._interactive_lock:
-            if resource_scope is None and self._token:
-                return self._token
-            scopes = [resource_scope] if resource_scope else self._interactive_scopes()
-            app = self._public_client()
-            account = self._signed_in_account(app)
-            result: Any = None
-            if account is not None:
-                try:
-                    result = app.acquire_token_silent(scopes=scopes, account=account)
-                except Exception as exc:  # noqa: BLE001 - msal and transport messages can carry request material
-                    if resource_scope is None:
-                        raise GraphError("Silent token refresh failed.") from None
-                    self._emit("graph.token.failed", "Delegated resource token request raised", {"scope": resource_scope, "error_type": type(exc).__name__})
-                    return None
-            token = result.get("access_token") if isinstance(result, dict) else None
-            if resource_scope is not None:
-                if not isinstance(token, str) or not token:
-                    code = result.get("error") if isinstance(result, dict) else "no_signed_in_account"
-                    self._emit("graph.token.failed", "Delegated resource token not available silently", {"scope": resource_scope, "error_code": code})
-                    return None
-                self._emit("graph.token.succeeded", "Delegated resource token acquired silently", {"scope": resource_scope, "source": "cache"})
-                return token
-            if isinstance(token, str) and token:
-                self._token = token
-                self._emit("graph.token.succeeded", "Interactive token loaded from cache", {"source": "cache"})
-                return self._token
-            if self.interactive_prompts:
-                # DEC-065: one sign-in per run. A second prompt is refused, never opened.
-                self._emit("graph.token.failed", "A second sign-in was refused", {"scopes": scopes, "reason": "one_sign_in"})
-                raise GraphError("The run's one sign-in no longer yields a token; a second sign-in is not opened. Run again.")
-
-            self._emit(
-                "graph.token.interactive",
-                "Starting interactive token acquisition",
-                {"scopes": scopes, "authority": self._authority()},
-            )
-            self.interactive_prompts += 1
-            result = app.acquire_token_interactive(scopes=scopes)
-            if not result:
-                self._emit("graph.token.failed", "Interactive auth returned no token", {"scopes": scopes})
-                raise GraphError("Interactive auth was canceled or did not return a token.")
-            if "access_token" not in result:
-                error = result.get("error_description") or result.get("error") or "interactive login failed"
-                self._emit("graph.token.failed", "Interactive auth returned error response", {"error": error})
-                raise GraphError(error)
-            self._token = result["access_token"]
-            self._emit("graph.token.succeeded", "Interactive token acquired", {"source": "interactive"})
-            return self._token
-
-    def delegated_token_for(self, scope: str) -> str | None:
-        """A delegated token for another resource (e.g. Exchange Online), minted silently from the run's one sign-in.
-
-        Only an interactive run that has already signed in has one (the run signs in for Graph before any
-        collector); this reads the shared in-memory cache and never opens a prompt: before the sign-in, or for a
-        resource the sign-in cannot serve silently (no consent, conditional access), it gives None and the
-        collector records a named gap.
-        """
-        if self.auth.auth_mode != "interactive" or self.auth.certificate is not None or self.auth.access_token:
-            return None
-        if self._public_app is None or not self._token:
-            return None
-        self._emit("graph.token.requested", "Requesting delegated resource token silently", {"mode": "delegated_silent", "scope": scope})
-        return self._interactive_token(scope)
-
-    def signed_in_username(self) -> str | None:
-        """The one sign-in's account name (UPN), or None outside an interactive run."""
-        if self._public_app is None:
-            return None
-        account = self._signed_in_account(self._public_app)
-        username = account.get("username") if isinstance(account, dict) else None
-        return str(username) if username else None
 
     def token_claims(self) -> dict[str, Any]:
         if self._token_claims is not None:

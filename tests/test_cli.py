@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
+from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
 
 from azure_tenant_audit import cli
 from azure_tenant_audit.collectors.base import CollectorResult
+
+# The reader app and its certificate for live runs; use_fake_certificate makes the certificate load.
+CERTIFICATE = ("--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS)
 
 
 class _IdentityCollector:
@@ -113,40 +116,8 @@ def test_offline_missing_sample_fails(tmp_path: Path) -> None:
     assert rc == 2
 
 
-def test_interactive_defaults_tenant_id_to_organizations(tmp_path: Path, monkeypatch) -> None:
-    class _FakeClient:
-        def __init__(self, auth):
-            self.tenant_id = auth.tenant_id
-
-    captured = {}
-    class _FakeClientFactory:
-        def __new__(cls, auth, **kwargs):  # noqa: ANN001
-            captured["tenant_id"] = auth.tenant_id
-            return _FakeClient(auth)
-
-    args = cli.build_parser().parse_args(
-        [
-            "--tenant-name",
-            "acme",
-            "--interactive",
-            "--client-id",
-            "app-id",
-            "--collectors",
-            "identity",
-            "--out",
-            str(tmp_path),
-        ]
-    )
-    monkeypatch.setattr(cli, "GraphClient", _FakeClientFactory)
-    monkeypatch.setattr(cli, "REGISTRY", {"identity": _IdentityCollector()})
-    monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
-    rc = cli.run_live(args)
-
-    assert rc == 0
-    assert captured["tenant_id"] == "organizations"
-
-
 def test_run_live_logs_run_events(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _FakeCollector:
         name = "identity"
 
@@ -175,8 +146,7 @@ def test_run_live_logs_run_events(tmp_path: Path, monkeypatch) -> None:
             "t-123",
             "--client-id",
             "app-id",
-            "--client-secret",
-            "secret",
+            *FAKE_CERTIFICATE_ARGS,
             "--collectors",
             "identity",
             "--plane",
@@ -216,6 +186,7 @@ def test_run_live_logs_run_events(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _FakeCollector:
         name = "identity"
 
@@ -235,23 +206,13 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
 
     monkeypatch.setattr(cli, "GraphClient", lambda auth, **kwargs: _FakeClient(auth))
     monkeypatch.setattr(cli, "REGISTRY", {"identity": _FakeCollector()})
-    monkeypatch.setattr(
-        cli,
-        "_inspect_access_token",
-        lambda token: {
-            "tenant_id": "tenant-ctx",
-            "audience": "https://graph.microsoft.com",
-            "delegated_scopes": [
-                "Directory.Read.All",
-                "User.Read.All",
-                "Group.Read.All",
-                "Application.Read.All",
-                "AuditLog.Read.All",
-            ],
-            "app_roles": [],
-            "expires_at_utc": "2030-01-01T00:00:00Z",
-        },
-    )
+    _FakeClient.token_claims = lambda self: {
+        "tenant_id": "tenant-ctx",
+        "audience": "https://graph.microsoft.com",
+        "delegated_scopes": ["Directory.Read.All", "User.Read.All", "Group.Read.All", "Application.Read.All", "AuditLog.Read.All"],
+        "app_roles": [],
+        "expires_at_utc": "2030-01-01T00:00:00Z",
+    }
     monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
 
     args = cli.build_parser().parse_args(
@@ -260,8 +221,7 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
             "acme",
             "--tenant-id",
             "tenant-ctx",
-            "--access-token",
-            "token-value",
+            *CERTIFICATE,
             "--collectors",
             "identity",
             "--out",
@@ -281,7 +241,7 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
     manifest = json.loads((output_dir / "run-manifest.json").read_text(encoding="utf-8"))
     report_pack = json.loads((output_dir / "reports" / "report-pack.json").read_text(encoding="utf-8"))
 
-    assert auth_context["auth_mode"] == "access_token"
+    assert auth_context["auth_mode"] == "app"
     assert auth_context["token_claims"]["tenant_id"] == "tenant-ctx"
     assert capability_matrix["records"][0]["collector"] == "identity"
     assert capability_matrix["records"][0]["status"] == "supported_exact_scope"
@@ -308,6 +268,7 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
 
 
 def test_live_run_does_not_trust_teams_when_every_read_is_skipped(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     from auditex.gate import gate_findings
     from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
 
@@ -329,7 +290,7 @@ def test_live_run_does_not_trust_teams_when_every_read_is_skipped(tmp_path: Path
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
     monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", no_adapter)
     args = cli.build_parser().parse_args([
-        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--tenant-name", "fixture", "--tenant-id", "constructed", *CERTIFICATE,
         "--collectors", "identity,teams_policy", "--out", str(tmp_path), "--run-name", "skipped",
     ])
 
@@ -374,6 +335,7 @@ def test_live_run_does_not_trust_teams_when_every_read_is_skipped(tmp_path: Path
 
 
 def test_explorer_marks_unscoped_all_skipped_reads_unverified(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     from auditex.explorer import _collector_rows
 
     class Skipped:
@@ -390,7 +352,7 @@ def test_explorer_marks_unscoped_all_skipped_reads_unverified(tmp_path: Path, mo
     monkeypatch.setattr(cli, "REGISTRY", {"identity": Skipped()})
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
     args = cli.build_parser().parse_args([
-        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--tenant-name", "fixture", "--tenant-id", "constructed", *CERTIFICATE,
         "--collectors", "identity", "--out", str(tmp_path), "--run-name", "unscoped",
     ])
     assert cli.run_live(args) == 0
@@ -408,6 +370,7 @@ def test_explorer_marks_unscoped_all_skipped_reads_unverified(tmp_path: Path, mo
 
 
 def test_explorer_recognises_successful_empty_read_with_a_skipped_section(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     from auditex.explorer import _collector_rows
     from azure_tenant_audit.collection_gaps import IPPS_SKIP_TEXT
 
@@ -425,7 +388,7 @@ def test_explorer_recognises_successful_empty_read_with_a_skipped_section(tmp_pa
     monkeypatch.setattr(cli, "REGISTRY", {"identity": EmptyRead()})
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
     args = cli.build_parser().parse_args([
-        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--tenant-name", "fixture", "--tenant-id", "constructed", *CERTIFICATE,
         "--collectors", "identity", "--out", str(tmp_path), "--run-name", "empty-mixed",
     ])
     assert cli.run_live(args) == 0
@@ -439,6 +402,7 @@ def test_explorer_recognises_successful_empty_read_with_a_skipped_section(tmp_pa
 
 
 def test_resume_does_not_trust_stale_success_after_all_reads_are_skipped(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class Rerun:
         name = "identity"
         calls = 0
@@ -457,7 +421,7 @@ def test_resume_does_not_trust_stale_success_after_all_reads_are_skipped(tmp_pat
     monkeypatch.setattr(cli, "GraphClient", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(cli, "REGISTRY", {"identity": Rerun()})
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
-    argv = ["--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+    argv = ["--tenant-name", "fixture", "--tenant-id", "constructed", *CERTIFICATE,
             "--collectors", "identity", "--out", str(tmp_path), "--run-name", "resume-trust"]
     run_dir = tmp_path / "fixture-resume-trust"
 
@@ -471,6 +435,7 @@ def test_resume_does_not_trust_stale_success_after_all_reads_are_skipped(tmp_pat
 
 
 def test_run_live_app_mode_uses_client_token_claims(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _FakeCollector:
         name = "identity"
 
@@ -508,8 +473,7 @@ def test_run_live_app_mode_uses_client_token_claims(tmp_path: Path, monkeypatch)
             "tenant-app",
             "--client-id",
             "app-id",
-            "--client-secret",
-            "app-secret",
+            *FAKE_CERTIFICATE_ARGS,
             "--collectors",
             "identity",
             "--out",
@@ -529,6 +493,7 @@ def test_run_live_app_mode_uses_client_token_claims(tmp_path: Path, monkeypatch)
 
 
 def test_run_live_applies_waiver_file_to_findings_and_report_pack(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _FailingCollector:
         name = "security"
 
@@ -576,24 +541,21 @@ def test_run_live_applies_waiver_file_to_findings_and_report_pack(tmp_path: Path
 
     monkeypatch.setattr(cli, "GraphClient", lambda auth, **kwargs: _FakeClient(auth, **kwargs))
     monkeypatch.setattr(cli, "REGISTRY", {"security": _FailingCollector()})
-    monkeypatch.setattr(
-        cli,
-        "_inspect_access_token",
-        lambda token: {
-            "tenant_id": "tenant-ctx",
-            "audience": "https://graph.microsoft.com",
-            "delegated_scopes": ["SecurityEvents.Read.All"],
-            "app_roles": [],
-            "expires_at_utc": "2030-01-01T00:00:00Z",
-        },
-    )
+    _FakeClient.token_claims = lambda self: {
+        "tenant_id": "tenant-ctx",
+        "audience": "https://graph.microsoft.com",
+        "delegated_scopes": ["SecurityEvents.Read.All"],
+        "app_roles": [],
+        "expires_at_utc": "2030-01-01T00:00:00Z",
+    }
 
     args = cli.build_parser().parse_args(
         [
             "--tenant-name",
             "acme",
-            "--access-token",
-            "token-value",
+            "--tenant-id",
+            "tenant-ctx",
+            *CERTIFICATE,
             "--collectors",
             "security",
             "--waiver-file",
@@ -618,6 +580,7 @@ def test_run_live_applies_waiver_file_to_findings_and_report_pack(tmp_path: Path
 
 
 def test_run_live_applies_collector_preset_and_limits_selected_collectors(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _IdentityCollector:
         name = "identity"
         run_calls = 0
@@ -664,24 +627,21 @@ def test_run_live_applies_collector_preset_and_limits_selected_collectors(tmp_pa
         },
     )
     monkeypatch.setattr(cli, "REGISTRY", {"identity": _IdentityCollector(), "security": _SecurityCollector()})
-    monkeypatch.setattr(
-        cli,
-        "_inspect_access_token",
-        lambda token: {
-            "tenant_id": "tenant-ctx",
-            "audience": "https://graph.microsoft.com",
-            "delegated_scopes": ["User.Read"],
-            "app_roles": [],
-            "expires_at_utc": "2030-01-01T00:00:00Z",
-        },
-    )
+    _FakeClient.token_claims = lambda self: {
+        "tenant_id": "tenant-ctx",
+        "audience": "https://graph.microsoft.com",
+        "delegated_scopes": ["User.Read"],
+        "app_roles": [],
+        "expires_at_utc": "2030-01-01T00:00:00Z",
+    }
 
     args = cli.build_parser().parse_args(
         [
             "--tenant-name",
             "acme",
-            "--access-token",
-            "token-value",
+            "--tenant-id",
+            "tenant-ctx",
+            *CERTIFICATE,
             "--collector-preset",
             "identity-only",
             "--out",
@@ -705,6 +665,7 @@ def test_run_live_applies_collector_preset_and_limits_selected_collectors(tmp_pa
 
 
 def test_run_live_writes_diagnostics(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _FailingCollector:
         name = "security"
 
@@ -745,8 +706,7 @@ def test_run_live_writes_diagnostics(tmp_path: Path, monkeypatch) -> None:
             "t-123",
             "--client-id",
             "app-id",
-            "--client-secret",
-            "secret",
+            *FAKE_CERTIFICATE_ARGS,
             "--collectors",
             "security",
             "--out",
@@ -768,6 +728,7 @@ def test_run_live_writes_diagnostics(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_run_live_probe_first_skips_known_blocked_collectors(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _BlockedCollector:
         name = "security"
         run_calls = 0
@@ -836,8 +797,7 @@ def test_run_live_probe_first_skips_known_blocked_collectors(tmp_path: Path, mon
             "t-123",
             "--client-id",
             "app-id",
-            "--client-secret",
-            "secret",
+            *FAKE_CERTIFICATE_ARGS,
             "--collectors",
             "security,identity",
             "--probe-first",
@@ -865,74 +825,8 @@ def test_run_live_probe_first_skips_known_blocked_collectors(tmp_path: Path, mon
     assert any('"event": "collector.skipped"' in line for line in log_lines)
 
 
-def test_interactive_without_client_id_falls_back_to_azure_cli_token(tmp_path: Path, monkeypatch) -> None:
-    class _FakeClient:
-        def __init__(self, auth, audit_event=None):
-            self.audit_event = audit_event
-
-        def get_json(self, path):
-            assert path == "/me"
-            return {
-                "displayName": "Fallback User",
-                "userPrincipalName": "fallback@tenant.local",
-                "id": "fallback-user",
-            }
-
-        def get_all(self, path, params=None):
-            assert path == "/me/memberOf/microsoft.graph.directoryRole"
-            return []
-
-    args = cli.build_parser().parse_args(
-        [
-            "--tenant-name",
-            "acme",
-            "--interactive",
-            "--collectors",
-            "identity",
-            "--out",
-            str(tmp_path),
-        ]
-    )
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *_, **__: "fallback-token")
-    monkeypatch.setattr(cli, "GraphClient", lambda auth, **kwargs: _FakeClient(auth, audit_event=kwargs.get("audit_event")))
-    monkeypatch.setattr(cli, "REGISTRY", {"identity": _IdentityCollector()})
-    rc = cli.run_live(args)
-    assert rc == 0
-
-    output_dirs = list(tmp_path.glob("acme-*"))
-    assert output_dirs
-    manifest = json.loads((output_dirs[0] / "run-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["mode"] == "azure_cli"
-
-
-def test_run_live_with_azure_cli_token_uses_azure_cli_mode(tmp_path: Path, monkeypatch) -> None:
-    class _FakeClient:
-        def __init__(self, auth, audit_event=None):
-            self.auth = auth
-
-    def _fake_client_factory(auth, **kwargs):
-        return _FakeClient(auth)
-
-    class _FakeCollector:
-        name = "identity"
-
-        def run(self, context):
-            return CollectorResult(
-                name=self.name,
-                status="ok",
-                item_count=1,
-                message="ok",
-                payload={"value": [{"id": "1"}]},
-            )
-
-    monkeypatch.setattr(cli, "GraphClient", _fake_client_factory)
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *_, **__: "cached-token")
-    monkeypatch.setattr(cli, "REGISTRY", {"identity": _FakeCollector()})
-
-    monkeypatch.setattr(sys, "argv", ["audit", "--tenant-name", "acme", "--tenant-id", "t-123", "--use-azure-cli-token", "--collectors", "identity", "--out", str(tmp_path)])
-
-
 def test_run_live_resume_skips_completed_collectors(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _IdentityCollector:
         name = "identity"
         run_calls = 0
@@ -1020,7 +914,7 @@ def test_run_live_resume_skips_completed_collectors(tmp_path: Path, monkeypatch)
             "acme",
             "--tenant-id",
             "t-123",
-            "--use-azure-cli-token",
+            *CERTIFICATE,
             "--collectors",
             "identity,security",
             "--out",
@@ -1032,7 +926,6 @@ def test_run_live_resume_skips_completed_collectors(tmp_path: Path, monkeypatch)
 
     monkeypatch.setattr(cli, "GraphClient", _FakeClient)
     monkeypatch.setattr(cli, "REGISTRY", {"identity": identity_collector, "security": security_collector})
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *_, **__: "cached-token")
 
     rc = cli.run_live(args)
 
@@ -1061,7 +954,7 @@ def test_run_live_resume_skips_completed_collectors(tmp_path: Path, monkeypatch)
             "acme",
             "--tenant-id",
             "t-123",
-            "--use-azure-cli-token",
+            *CERTIFICATE,
             "--collectors",
             "identity",
             "--out",
@@ -1076,6 +969,7 @@ def test_run_live_resume_skips_completed_collectors(tmp_path: Path, monkeypatch)
 
 
 def test_run_live_exchange_can_be_explicitly_selected_without_include_flag(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     class _FakeCollector:
         name = "exchange"
 
@@ -1109,8 +1003,7 @@ def test_run_live_exchange_can_be_explicitly_selected_without_include_flag(tmp_p
             "t-123",
             "--client-id",
             "app-id",
-            "--client-secret",
-            "secret",
+            *FAKE_CERTIFICATE_ARGS,
             "--collectors",
             "exchange",
             "--out",
@@ -1130,9 +1023,10 @@ def test_run_live_exchange_can_be_explicitly_selected_without_include_flag(tmp_p
     assert manifest["mode"] == "app"
 
 
-@pytest.mark.parametrize("flag", ["--access-token", "--client-secret"])
+@pytest.mark.parametrize("flag", ["--certificate-path", "--certificate-thumbprint"])
 @pytest.mark.parametrize("inline", [False, True])
 def test_command_line_redaction_in_manifest_and_logs(tmp_path: Path, monkeypatch, flag: str, inline: bool) -> None:
+    use_fake_certificate(monkeypatch)
     class _FakeClient:
         def __init__(self, auth, **kwargs):
             self.auth = auth
@@ -1149,8 +1043,8 @@ def test_command_line_redaction_in_manifest_and_logs(tmp_path: Path, monkeypatch
                 payload={"value": [{"id": "constructed-identity"}]},
             )
 
-    # Exercise main -> run_live -> real bundle finalisation, with auth and all
-    # tenant reads replaced by constructed adapters. No sign-in or API calls.
+    # Exercise main -> run_live -> real bundle finalisation, with the certificate and all
+    # tenant reads replaced by constructed adapters. No token or API calls.
     for name in ("AZURE_CLIENT_SECRET", "AZURE_ACCESS_TOKEN", "AZURE_TENANT_ID", "AZURE_CLIENT_ID"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(cli, "GraphClient", _FakeClient)
@@ -1159,7 +1053,7 @@ def test_command_line_redaction_in_manifest_and_logs(tmp_path: Path, monkeypatch
     credentials = [f"{flag}={canary}"] if inline else [flag, canary]
     argv = [
         "--tenant-name", "constructed", "--tenant-id", "constructed-tenant",
-        "--client-id", "constructed-app", *credentials, "--collectors", "identity",
+        *CERTIFICATE, *credentials, "--collectors", "identity",
         "--out", str(tmp_path), "--run-name", "canary",
     ]
     assert cli.main(argv) == 0
@@ -1178,64 +1072,30 @@ def test_command_line_redaction_in_manifest_and_logs(tmp_path: Path, monkeypatch
             assert canary.encode() not in path.read_bytes(), str(path.relative_to(output_dir))
 
 
-def test_azure_cli_run_captures_session_context(tmp_path: Path, monkeypatch) -> None:
+def test_certificate_run_records_no_signed_in_session(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
+
     class _FakeClient:
         def __init__(self, auth, audit_event=None):
             self.auth = auth
-            self.audit_event = audit_event
 
         def get_json(self, path):
-            assert path == "/me"
-            return {
-                "displayName": "Example Operator",
-                "userPrincipalName": "operator@contoso.test",
-                "id": "user-123",
-            }
-
-        def get_all(self, path, params=None):
-            assert path == "/me/memberOf/microsoft.graph.directoryRole"
-            return [
-                {"displayName": "Global Administrator"},
-                {"displayName": "Global Reader"},
-            ]
-
-    class _FakeCollector:
-        name = "identity"
-
-        def run(self, context):
-            return CollectorResult(
-                name=self.name,
-                status="ok",
-                item_count=1,
-                message="ok",
-                payload={"value": [{"id": "1"}]},
-            )
+            raise AssertionError(f"an app-only run never reads the signed-in user ({path})")
 
     monkeypatch.setattr(cli, "GraphClient", lambda auth, **kwargs: _FakeClient(auth, **kwargs))
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *_, **__: "cached-token")
-    monkeypatch.setattr(cli, "REGISTRY", {"identity": _FakeCollector()})
-
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": _IdentityCollector()})
     args = cli.build_parser().parse_args(
-        [
-            "--tenant-name",
-            "acme",
-            "--tenant-id",
-            "t-123",
-            "--use-azure-cli-token",
-            "--collectors",
-            "identity",
-            "--out",
-            str(tmp_path),
-        ]
+        ["--tenant-name", "acme", "--tenant-id", "t-123", *CERTIFICATE, "--collectors", "identity", "--out", str(tmp_path)]
     )
-    rc = cli.run_live(args)
-    assert rc == 0
+    assert cli.run_live(args) == 0
 
-    output_dirs = list(tmp_path.glob("acme-*"))
-    assert output_dirs
-    manifest = json.loads((output_dirs[0] / "run-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["session_context"]["user_principal_name"] == "operator@contoso.test"
-    assert manifest["session_context"]["roles"] == ["Global Administrator", "Global Reader"]
+    output_dir = next(tmp_path.glob("acme-*"))
+    manifest = json.loads((output_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    auth_context = json.loads((output_dir / "normalized" / "auth_context.json").read_text(encoding="utf-8"))
+    assert manifest["mode"] == "app" and not manifest.get("session_context")
+    assert not (output_dir / "session-context.json").exists()
+    assert auth_context["auth_mode"] == "app"
+    assert auth_context["session_context"] == {} and auth_context["delegated_roles"] == []
 
 
 def test_scrub_command_line_redacts_tokens() -> None:
@@ -1264,6 +1124,7 @@ def test_scrub_command_line_redacts_tokens() -> None:
 @pytest.mark.parametrize("resume", [False, True], ids=["fresh", "resume"])
 @pytest.mark.parametrize("include_other", [False, True], ids=["pair", "context-isolation"])
 def test_run_live_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch, resume, include_other) -> None:
+    use_fake_certificate(monkeypatch)
     envelope = {"value": [{"DomainName": "Contoso.com", "IsCoexistenceDomain": False}]}
     calls = []
     contexts = {}
@@ -1293,7 +1154,7 @@ def test_run_live_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch, resum
         name: _Collector(name) for name in ("dns_posture", "exchange_policy", "identity")
     })
     # An explicit token and fake client keep this orchestration test entirely offline.
-    argv = ["--tenant-name", "fixture", "--tenant-id", "tenant-id", "--access-token", "constructed-token",
+    argv = ["--tenant-name", "fixture", "--tenant-id", "tenant-id", *CERTIFICATE,
             "--collectors", "dns_posture,exchange_policy" + (",identity" if include_other else ""),
             "--out", str(tmp_path), "--run-name", "handoff"]
     if resume:
@@ -1334,37 +1195,6 @@ def test_offline_failure_preserves_partial_status_and_workload_exit_rule(tmp_pat
     assert cli.run_offline(sample, tmp_path, "constructed", "failure") == expected_rc
     manifest = json.loads((tmp_path / "constructed-failure" / "run-manifest.json").read_text())
     assert manifest["overall_status"] == "partial"
-
-
-@pytest.mark.parametrize("mode_args", [["--interactive"], ["--use-azure-cli-token"], ["--access-token", "constructed"]])
-def test_non_app_default_run_omits_workloads_and_prints_one_selection_notice(tmp_path, monkeypatch, caplog, mode_args):
-    from azure_tenant_audit.config import CollectorConfig
-
-    class Healthy:
-        def __init__(self, name):
-            self.name = name
-
-        def run(self, context):
-            return CollectorResult(name=self.name, status="ok", payload={}, item_count=0)
-
-    config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
-    monkeypatch.setattr(cli, "REGISTRY", {name: Healthy(name) for name in config.default_order})
-    monkeypatch.setattr(cli, "GraphClient", lambda *args, **kwargs: object())
-    monkeypatch.setattr(cli, "_capture_signed_in_context", lambda *args, **kwargs: {})
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *args, **kwargs: "constructed")
-    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
-    caplog.set_level("INFO", logger="azure_tenant_audit")
-    args = cli.build_parser().parse_args([
-        "--tenant-name", "acme", "--tenant-id", "constructed", "--client-id", "constructed",
-        "--out", str(tmp_path), "--run-name", "default", *mode_args,
-    ])
-    assert cli.run_live(args) == 0
-    manifest = json.loads((tmp_path / "acme-default/run-manifest.json").read_text())
-    assert {"exchange_policy", "dns_posture"}.isdisjoint(manifest["selected_collectors"])
-    assert manifest["overall_status"] == "ok"
-    notices = [row.message for row in caplog.records if "Defaults/preset did not select" in row.message]
-    assert len(notices) == 1
-    assert "exchange_policy, dns_posture" in notices[0] and "app-mode only" in notices[0]
 
 
 def test_required_preflight_skipped_licensing_keeps_existing_selected_contract(tmp_path, monkeypatch):
@@ -1518,23 +1348,109 @@ def test_live_certificate_run_builds_an_app_auth_config_without_any_secret(
             "--certificate-thumbprint", certificate_material.thumbprint.lower(), "--out", str(tmp_path / "runs"),
         ])
     (auth,) = seen
-    assert auth.auth_mode == "app" and auth.client_secret is None and auth.access_token is None
+    assert not any(hasattr(auth, name) for name in ("auth_mode", "client_secret", "access_token", "interactive_scopes"))
     assert isinstance(auth.certificate, CertificateCredential)
     assert auth.certificate.thumbprint == certificate_material.thumbprint
 
 
-def test_secret_only_app_run_is_unchanged(tmp_path: Path, monkeypatch) -> None:
+# ---- the one way: removed sign-in flags are refused by name (DEC-107, DEC-108) ----------------------------------
+
+REMOVED_FLAGS = (
+    ("--client-secret", True), ("--access-token", True), ("--auth-context", True), ("--use-azure-cli-token", False),
+    ("--interactive", False), ("--scopes", True), ("--browser-command", True),
+)
+
+
+@pytest.mark.parametrize("flag,takes_value", REMOVED_FLAGS, ids=[flag for flag, _ in REMOVED_FLAGS])
+@pytest.mark.parametrize("form", ["separate", "equals", "offline"])
+def test_each_removed_flag_is_refused_naming_the_certificate_way(flag, takes_value, form, tmp_path, monkeypatch, capsys):
+    canary = "constructed-canary-removed-flag-q7"
+    monkeypatch.setattr(cli, "run_live", lambda *_args, **_kwargs: pytest.fail("a removed flag must not reach a run"))
+    monkeypatch.setattr(cli, "run_offline", lambda *_args, **_kwargs: pytest.fail("a removed flag must not reach a run"))
+    if form == "equals":
+        option = [f"{flag}={canary}"]
+    else:
+        option = [flag, canary] if takes_value else [flag]
+    extra = ["--offline"] if form == "offline" else [*CERTIFICATE]
+    argv = ["--tenant-name", "constructed", "--tenant-id", "constructed.example", *extra, *option, "--out", str(tmp_path)]
+    with pytest.raises(SystemExit) as raised:
+        cli.main(argv)
+    assert raised.value.code == 2
+    error = capsys.readouterr().err
+    assert f"{flag} was removed" in error
+    assert "reader app with a certificate" in error and "--certificate-path" in error
+    assert canary not in error
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_removed_flag_in_one_malformed_token_is_refused_without_its_value(capsys):
+    canary = "constructed-canary-malformed-q7"
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["--tenant-name", "constructed", f"--client-secret {canary}"])
+    assert raised.value.code == 2
+    error = capsys.readouterr().err
+    assert "--client-secret was removed" in error and canary not in error
+
+
+def test_removed_flags_are_not_parser_options_and_stay_redacted():
+    from azure_tenant_audit.auth_runtime import REMOVED_AUTH_FLAGS, SENSITIVE_CLI_ARGS
+
+    options = {option for action in cli.build_parser()._actions for option in action.option_strings}
+    assert set(REMOVED_AUTH_FLAGS) == {flag for flag, _ in REMOVED_FLAGS}
+    assert options.isdisjoint(REMOVED_AUTH_FLAGS)
+    assert {"--client-secret", "--access-token"} <= SENSITIVE_CLI_ARGS
+    assert cli._scrub_command_line(["x", "--client-secret", "v", "--access-token=v"]) == [
+        "x", "--client-secret", "***redacted***", "--access-token=***redacted***"]
+
+
+@pytest.mark.parametrize("missing", ["client_id", "tenant_id", "certificate"])
+def test_a_live_run_without_the_reader_app_or_certificate_is_refused_before_any_folder(missing, tmp_path, monkeypatch, caplog):
+    use_fake_certificate(monkeypatch)
+    for name in ("AZURE_TENANT_ID", "AZURE_CLIENT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(cli, "GraphClient", lambda *_args, **_kwargs: pytest.fail("no client without the certificate"))
+    argv = {"client_id": ["--client-id", "constructed-app"], "tenant_id": ["--tenant-id", "constructed.example"],
+            "certificate": list(FAKE_CERTIFICATE_ARGS)}
+    args = [arg for name, values in argv.items() if name != missing for arg in values]
+    out = tmp_path / "runs"
+    assert cli.main(["--tenant-name", "constructed", *args, "--out", str(out)]) == 2
+    assert "reader app with a certificate" in caplog.text
+    assert not out.exists()
+
+
+def test_a_saved_client_secret_or_token_in_the_environment_is_ignored(tmp_path, monkeypatch, caplog):
+    use_fake_certificate(monkeypatch)
     seen = []
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "constructed-saved-secret")
+    monkeypatch.setenv("AZURE_ACCESS_TOKEN", "constructed-saved-token")
+    monkeypatch.setattr(cli, "GraphClient", lambda auth, **kwargs: seen.append(auth) or object())
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": _IdentityCollector()})
+    argv = ["--tenant-name", "constructed", "--tenant-id", "constructed.example", *CERTIFICATE,
+            "--collectors", "identity", "--out", str(tmp_path), "--run-name", "env"]
+    assert cli.main(argv) == 0
+    assert "Ignoring AZURE_CLIENT_SECRET" in caplog.text and "Ignoring AZURE_ACCESS_TOKEN" in caplog.text
+    assert "constructed-saved" not in caplog.text
+    for path in (tmp_path / "constructed-env").rglob("*"):
+        if path.is_file():
+            assert b"constructed-saved" not in path.read_bytes()
 
-    class Stop(Exception):
-        pass
 
-    def client(auth, **kwargs):
-        seen.append(auth)
-        raise Stop
+@pytest.mark.parametrize("old_mode", ["interactive", "azure_cli", "access_token", "delegated"])
+def test_validation_still_accepts_a_bundle_recorded_with_a_removed_auth_mode(old_mode, tmp_path, monkeypatch):
+    from azure_tenant_audit.contracts import build_validation_report
 
-    monkeypatch.setattr(cli, "GraphClient", client)
-    with pytest.raises(Stop):
-        cli.main(["--tenant-name", "constructed", "--tenant-id", "constructed.example", "--client-id", "constructed-app",
-                  "--client-secret", "constructed-secret", "--out", str(tmp_path / "runs")])
-    assert seen[0].client_secret == "constructed-secret" and seen[0].certificate is None
+    # Older bundles carry the removed ways in run-manifest mode and auth_context auth_mode; the contract keeps no
+    # enum on either, so a bundle sealed with an old value still validates (DEC-108).
+    use_fake_certificate(monkeypatch)
+    monkeypatch.setattr(cli, "AUTH_MODE", old_mode)
+    monkeypatch.setattr(cli, "GraphClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": _IdentityCollector()})
+    argv = ["--tenant-name", "constructed", "--tenant-id", "constructed.example", *CERTIFICATE,
+            "--collectors", "identity", "--out", str(tmp_path), "--run-name", "old"]
+    assert cli.main(argv) == 0
+    run_dir = tmp_path / "constructed-old"
+    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    auth_context = json.loads((run_dir / "normalized" / "auth_context.json").read_text(encoding="utf-8"))
+    assert manifest["mode"] == auth_context["auth_mode"] == old_mode
+    assert json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))["valid"] is True
+    assert build_validation_report(run_dir=run_dir, read_only=True)["valid"] is True

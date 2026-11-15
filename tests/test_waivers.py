@@ -292,6 +292,8 @@ def test_a_live_run_reads_the_waiver_file_once_and_applies_those_rows(
 ) -> None:
     # The file is replaced with garbage while the tenant is being read. The run must still apply the
     # rows it validated at the start instead of re-reading the file and failing after collection.
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
     from azure_tenant_audit import cli
     from azure_tenant_audit.collectors.base import CollectorResult
     from azure_tenant_audit.findings import _finalize_finding
@@ -322,13 +324,14 @@ def test_a_live_run_reads_the_waiver_file_once_and_applies_those_rows(
         )]
 
     args = cli.build_parser().parse_args(
-        ["--tenant-name", "acme", "--tenant-id", "t-123", "--client-id", "app-id", "--client-secret", "secret",
+        ["--tenant-name", "acme", "--tenant-id", "t-123", "--client-id", "app-id", *FAKE_CERTIFICATE_ARGS,
          "--collectors", "identity", "--waiver-file", str(waivers), "--out", str(tmp_path / "out")]
     )
     monkeypatch.setattr(cli, "GraphClient", lambda auth, **kwargs: _Client(auth, audit_event=kwargs.get("audit_event")))
     monkeypatch.setattr(cli, "REGISTRY", {"identity": _Collector()})
     monkeypatch.setattr(cli, "build_findings", fake_build_findings)
     monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
+    use_fake_certificate(monkeypatch)
 
     rc = cli.run_live(args)
 

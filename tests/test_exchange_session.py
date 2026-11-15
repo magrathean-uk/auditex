@@ -98,15 +98,13 @@ def test_missing_session_is_labelled_not_command_not_found(monkeypatch) -> None:
     assert plain["error_class"] == "command_not_found"
 
 
-def test_delegated_and_token_clients_cannot_construct_an_exchange_session(monkeypatch):
+def test_a_client_without_a_certificate_cannot_construct_an_exchange_session(monkeypatch):
     from azure_tenant_audit.config import AuthConfig
     from azure_tenant_audit.graph import GraphClient
 
-    for mode, token in (("interactive", None), ("azure_cli", "constructed"), ("access_token", "constructed")):
-        client = GraphClient(AuthConfig(tenant_id="constructed", client_id="constructed", auth_mode=mode,
-                                        access_token=token, client_secret=None))
-        monkeypatch.setattr(client, "get_all", lambda *args, **kwargs: pytest.fail("No domain request without an app token"))
-        assert _exchange_session(client, None) == {"kind": "none"}
+    client = GraphClient(AuthConfig(tenant_id="constructed", client_id="constructed"), _token="constructed")
+    monkeypatch.setattr(client, "get_all", lambda *args, **kwargs: pytest.fail("No domain request without an app token"))
+    assert _exchange_session(client, None) == {"kind": "none"}
 
 
 _LIST_COMMANDS = [(name, command) for name, command in ExchangePolicyCollector.command_collectors

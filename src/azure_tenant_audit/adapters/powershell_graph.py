@@ -17,7 +17,6 @@ from .base import Adapter, AdapterMetadata
 from .read_guard import CommandRefused, VettedCommand, check_command, refusal_response
 
 # A signed-in user name (UPN): plain address characters only; it travels in the environment, never in script text.
-_USER_PRINCIPAL_PATTERN = re.compile(r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _ORGANIZATION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.onmicrosoft\.(?:com|us|de|cn)")
 # Security & Compliance PowerShell (Connect-IPPSSession): the Microsoft Exchange Online Protection resource, by its
 # identifier URI or its application id. Only an app-only token minted from a certificate for it opens the session.
@@ -144,7 +143,7 @@ def _run_bounded(
 class PowerShellGraphAdapter(Adapter):
     metadata = AdapterMetadata(
         name="powershell_graph",
-        auth_requirements=("app_or_delegated",),
+        auth_requirements=("app",),
         tool_dependencies=("pwsh",),
     )
 
@@ -210,8 +209,8 @@ class PowerShellGraphAdapter(Adapter):
     def _session_prelude(session: dict[str, Any] | None, env: dict[str, str]) -> str:
         """Connect step for a fresh pwsh process. Tokens travel in the environment, never on the command line.
 
-        Every connect passes an access token (DEC-065): an app-only token with -Organization, a delegated token
-        from the run's one sign-in with -UserPrincipalName. Without a usable token there is no connect at all.
+        Every connect passes an app-only access token minted from the reader app's certificate with -Organization
+        (DEC-107). Without a usable token there is no connect at all.
 
         The ``security_compliance`` kind connects Security & Compliance PowerShell (``Connect-IPPSSession``, module
         3.8.0 or later for its access-token parameter) with an app-only certificate token for the compliance audience
@@ -235,19 +234,7 @@ class PowerShellGraphAdapter(Adapter):
         token = session.get("access_token")
         if not token:
             return ""
-        user = str(session.get("user_principal_name") or "")
         organization = str(session.get("organization") or "")
-        if user:
-            if not _USER_PRINCIPAL_PATTERN.fullmatch(user):
-                return ""
-            env["AUDITEX_EXO_ACCESS_TOKEN"] = str(token)
-            env["AUDITEX_EXO_USER_PRINCIPAL_NAME"] = user
-            return (
-                "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "
-                "Connect-ExchangeOnline -AccessToken $env:AUDITEX_EXO_ACCESS_TOKEN "
-                "-UserPrincipalName $env:AUDITEX_EXO_USER_PRINCIPAL_NAME "
-                "-ShowBanner:$false -SkipLoadingFormatData -ErrorAction Stop | Out-Null; "
-            )
         if not _ORGANIZATION_PATTERN.fullmatch(organization):
             return ""
         env["AUDITEX_EXO_ACCESS_TOKEN"] = str(token)

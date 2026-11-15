@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Profile and preset defaults that only an app-mode run can collect: Exchange policy (an app-only
-# Exchange session), DNS posture (paired with it) and Teams admin policies (a certificate-minted
-# Teams admin token). Generated delegated set-up commands omit them.
+# Deprecated: every run is app-only (DEC-107), so the engine no longer filters collectors by auth mode. Kept only
+# for the product layer's setup guide and guided run, which M09-T03 rewrites; nothing in this package reads it.
 APP_MODE_ONLY_COLLECTORS: tuple[str, ...] = ("exchange_policy", "dns_posture", "teams_policy")
 
 
@@ -13,6 +12,8 @@ class AuditProfile:
     name: str
     description: str
     default_collectors: tuple[str, ...]
+    # Directory roles that widen what the reader app sees (assigned to its service principal); the name is kept for
+    # the product layer and diagnostics.
     delegated_role_hints: tuple[str, ...]
     app_escalation_permissions: tuple[str, ...]
     supported_planes: tuple[str, ...]
@@ -50,14 +51,14 @@ PROFILES: dict[str, AuditProfile] = {
         delegated_role_hints=("Global Reader",),
         app_escalation_permissions=("Exchange.ManageAsApp",),
         supported_planes=("inventory", "full"),
-        supported_probe_modes=("delegated", "app"),
+        supported_probe_modes=("app",),
         adapter_requirements=("pwsh", "ExchangeOnlineManagement"),
         response_allowed=False,
-        notes="Use for unknown delegated tokens and let diagnostics describe missing visibility.",
+        notes="Use for an unknown permission set and let diagnostics describe missing visibility.",
     ),
     "global-reader": AuditProfile(
         name="global-reader",
-        description="Read-only delegated audit path for Entra, M365, and basic workload posture.",
+        description="Read-only audit path for Entra, M365, and basic workload posture.",
         default_collectors=(
             "identity",
             "app_consent",
@@ -77,8 +78,8 @@ PROFILES: dict[str, AuditProfile] = {
             "sharepoint_access",
             "onedrive_posture",
             "teams",
-            # App mode with a certificate credential reads the Teams admin policies; without one the
-            # collector records teams_token_unavailable as a named skip.
+            # The certificate credential mints the Teams admin token; a refused token is recorded as
+            # teams_token_unavailable, a named skip.
             "teams_policy",
             "exchange_policy",
             "dns_posture",
@@ -107,14 +108,14 @@ PROFILES: dict[str, AuditProfile] = {
             "ServiceMessage.Read.All",
         ),
         supported_planes=("inventory", "full", "export"),
-        supported_probe_modes=("delegated", "app"),
+        supported_probe_modes=("app",),
         adapter_requirements=("pwsh", "ExchangeOnlineManagement"),
         response_allowed=False,
-        notes="Preferred first-pass profile for customer-led browser login without app consent.",
+        notes="Preferred first-pass profile for the reader app with a certificate.",
     ),
     "security-reader": AuditProfile(
         name="security-reader",
-        description="Focused delegated audit for security posture, risk, and alerts.",
+        description="Focused audit for security posture, risk, and alerts.",
         default_collectors=("identity", "app_consent", "security", "conditional_access", "defender", "auth_methods", "identity_governance"),
         delegated_role_hints=("Security Reader", "Global Reader"),
         app_escalation_permissions=(
@@ -131,14 +132,14 @@ PROFILES: dict[str, AuditProfile] = {
             "ServiceMessage.Read.All",
         ),
         supported_planes=("inventory", "full", "export"),
-        supported_probe_modes=("delegated", "app"),
+        supported_probe_modes=("app",),
         adapter_requirements=(),
         response_allowed=False,
         notes="Use when the customer grants Security Reader but not broader workload access.",
     ),
     "reports-reader": AuditProfile(
         name="reports-reader",
-        description="Focused delegated audit for Microsoft 365 usage and service health reporting surfaces.",
+        description="Focused audit for Microsoft 365 usage and service health reporting surfaces.",
         default_collectors=("identity", "security", "service_health", "reports_usage"),
         delegated_role_hints=("Reports Reader", "Global Reader"),
         app_escalation_permissions=(
@@ -149,26 +150,26 @@ PROFILES: dict[str, AuditProfile] = {
             "AuditLog.Read.All",
         ),
         supported_planes=("inventory", "full"),
-        supported_probe_modes=("delegated", "app"),
+        supported_probe_modes=("app",),
         adapter_requirements=(),
         response_allowed=False,
-        notes="Use when the customer grants a reporting-focused delegated role for usage and health evidence.",
+        notes="Use when the reader app is granted only the reporting permissions for usage and health evidence.",
     ),
     "exchange-reader": AuditProfile(
         name="exchange-reader",
-        description="Focused delegated audit for Exchange Online configuration and mail flow evidence.",
+        description="Focused audit for Exchange Online configuration and mail flow evidence.",
         default_collectors=("exchange", "exchange_policy", "security", "identity"),
         delegated_role_hints=("Exchange Reader", "Global Reader"),
         app_escalation_permissions=("Exchange.ManageAsApp",),
         supported_planes=("inventory", "full", "export"),
-        supported_probe_modes=("delegated", "app", "response"),
+        supported_probe_modes=("app", "response"),
         adapter_requirements=("m365_cli", "powershell_graph"),
         response_allowed=True,
         notes="Uses command-based Exchange collection where Graph coverage is limited.",
     ),
     "intune-reader": AuditProfile(
         name="intune-reader",
-        description="Focused delegated audit for Intune devices, compliance, and configuration.",
+        description="Focused audit for Intune devices, compliance, and configuration.",
         default_collectors=("intune", "intune_depth"),
         delegated_role_hints=("Intune Reader", "Global Reader"),
         app_escalation_permissions=(
@@ -178,7 +179,7 @@ PROFILES: dict[str, AuditProfile] = {
             "DeviceManagementScripts.Read.All",
         ),
         supported_planes=("inventory", "full"),
-        supported_probe_modes=("delegated", "app"),
+        supported_probe_modes=("app",),
         adapter_requirements=(),
         response_allowed=False,
         notes="Useful when Global Reader does not expose the device-management surfaces needed.",
@@ -241,7 +242,7 @@ PROFILES: dict[str, AuditProfile] = {
             "Exchange.ManageAsApp",
         ),
         supported_planes=("inventory", "full", "export"),
-        supported_probe_modes=("delegated", "app"),
+        supported_probe_modes=("app",),
         adapter_requirements=("m365_cli", "powershell_graph"),
         response_allowed=False,
         notes="Secondary pass only. Use a customer-local app registration and keep permissions read-only.",

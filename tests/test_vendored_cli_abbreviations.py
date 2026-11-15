@@ -58,8 +58,14 @@ def test_main_rejects_all_sensitive_abbreviations(engine_cli, flag, inline, caps
 @pytest.mark.parametrize("inline", [False, True])
 def test_full_flags_parse_and_scrub_with_prefix_parity(engine_cli, flag, inline):
     argv = [f"{flag}={CANARY}"] if inline else [flag, CANARY]
-    args = engine_cli.build_parser().parse_args(argv)
-    assert getattr(args, flag[2:].replace("-", "_")) == CANARY
+    if flag in auth_runtime.REMOVED_AUTH_FLAGS:
+        # A removed sign-in flag is refused by name (DEC-107) and still redacted below (DEC-108 D5).
+        with pytest.raises(SystemExit) as exc:
+            engine_cli.main(argv)
+        assert exc.value.code == 2
+    else:
+        args = engine_cli.build_parser().parse_args(argv)
+        assert getattr(args, flag[2:].replace("-", "_")) == CANARY
     for length in range(3, len(flag) + 1):
         option = flag[:length]
         value_args = [f"{option}={CANARY}"] if inline else [option, CANARY]

@@ -34,7 +34,6 @@ def jwt(**claims: object) -> str:
 
 
 APP_TOKEN = jwt(aud=ORIGIN, appidacr="2", roles=["Sites.FullControl.All"])
-DELEGATED_TOKEN = jwt(aud="00000003-0000-0ff1-ce00-000000000000", scp="AllSites.FullControl")
 
 
 class FakeResponse:
@@ -76,16 +75,11 @@ class FakeClient:
     def __init__(self, *, mode: str = "certificate", root_site: object = ROOT_SITE, token: object = None) -> None:
         self.auth = types.SimpleNamespace(
             certificate=object() if mode == "certificate" else None,
-            client_secret="constructed-secret" if mode == "secret" else None,
-            access_token="constructed-access-token" if mode == "access_token" else None,
-            auth_mode="interactive" if mode == "delegated" else "app",
         )
         self.root_site = root_site
-        self.token = token if token is not None else (DELEGATED_TOKEN if mode == "delegated" else APP_TOKEN)
+        self.token = token if token is not None else APP_TOKEN
         self.graph_reads: list[tuple[str, dict | None]] = []
         self.app_scopes: list[str] = []
-        self.delegated_scopes: list[str] = []
-        self.interactive_prompts = 0
 
     def get_json(self, path, params=None):  # noqa: ANN001, ANN201
         self.graph_reads.append((path, params))
@@ -95,10 +89,6 @@ class FakeClient:
 
     def app_token_for(self, scope):  # noqa: ANN001, ANN201
         self.app_scopes.append(scope)
-        return self.token
-
-    def delegated_token_for(self, scope):  # noqa: ANN001, ANN201
-        self.delegated_scopes.append(scope)
         return self.token
 
 
@@ -160,7 +150,7 @@ def test_certificate_run_reads_the_eight_settings_with_one_guarded_get() -> None
     assert result.status == "ok" and result.item_count == 1
     assert section(result) == {"value": [SETTINGS], "status": "ok", "item_count": 1}
     assert client.graph_reads == [("/sites/root", {"$select": "siteCollection"})]
-    assert client.app_scopes == [ORIGIN + "/.default"] and client.delegated_scopes == []
+    assert client.app_scopes == [ORIGIN + "/.default"]
     [(url, headers, kwargs)] = session.calls
     assert url == URL
     assert headers["Authorization"] == f"Bearer {APP_TOKEN}"
@@ -181,25 +171,22 @@ def test_certificate_run_reads_the_eight_settings_with_one_guarded_get() -> None
     assert APP_TOKEN not in blob and "contoso" not in blob.lower()
 
 
-@pytest.mark.parametrize(("mode", "reason"), [
-    ("secret", spa.REASON_CERTIFICATE_REQUIRED),
-    ("access_token", spa.REASON_TOKEN_UNAVAILABLE),
-])
-def test_runs_without_a_certificate_or_sign_in_record_a_named_skip_and_send_nothing(mode, reason) -> None:  # noqa: ANN001
-    client = FakeClient(mode=mode)
+def test_a_run_without_a_certificate_records_a_named_skip_and_sends_nothing() -> None:
+    reason = spa.REASON_CERTIFICATE_REQUIRED
+    client = FakeClient(mode="none")
     result, session, events = collect(client)
     assert result.status == "ok"  # a named section gap, not a failed collector
     assert section(result)["status"] == "skipped" and section(result)["reason"] == reason
     assert section(result)[SECTION_SCOPED] is True and section(result)["error"] == spa.SKIP_TEXT[reason]
     assert rest_row(result)["reason"] == reason and rest_row(result)[SECTION_SCOPED] is True
     assert result.message == spa.SKIP_TEXT[reason]
-    assert client.graph_reads == client.app_scopes == client.delegated_scopes == []
+    assert client.graph_reads == client.app_scopes == []
     assert session.calls == [] and events == []
 
 
-def test_the_secret_skip_text_names_the_certificate_limit() -> None:
-    assert "certificate" in spa.SKIP_TEXT[spa.REASON_CERTIFICATE_REQUIRED]
-    assert "client secret" in spa.SKIP_TEXT[spa.REASON_CERTIFICATE_REQUIRED]
+def test_the_certificate_skip_text_names_the_certificate_limit() -> None:
+    text = spa.SKIP_TEXT[spa.REASON_CERTIFICATE_REQUIRED]
+    assert "certificate" in text and "no SharePoint token was requested" in text
 
 
 def test_a_certificate_token_that_cannot_be_acquired_fails_without_a_request() -> None:
@@ -223,32 +210,6 @@ def test_a_token_of_the_wrong_kind_is_never_sent(token) -> None:  # noqa: ANN001
     result, session, _ = collect(FakeClient(token=token))
     assert section(result)["reason"] == "sharepoint_admin_token_refused"
     assert session.calls == []
-
-
-# Delegated mode: the run's one sign-in ---------------------------------------------------------------
-
-def test_delegated_run_mints_the_token_silently_from_the_one_sign_in() -> None:
-    client = FakeClient(mode="delegated")
-    result, session, _ = collect(client)
-    assert section(result)["status"] == "ok" and section(result)["value"] == [SETTINGS]
-    assert client.delegated_scopes == [ORIGIN + "/AllSites.FullControl"] and client.app_scopes == []
-    assert client.interactive_prompts == 0
-    assert session.calls[0][0] == URL
-
-
-def test_delegated_run_without_a_silent_token_records_the_limit_and_opens_no_prompt() -> None:
-    client = FakeClient(mode="delegated", token="")
-    client.token = None
-    result, session, _ = collect(client)
-    reason = spa.REASON_SECOND_SIGN_IN_REQUIRED
-    assert section(result)["status"] == "skipped" and section(result)["reason"] == reason
-    assert "second" in spa.SKIP_TEXT[reason] and "signs in once per run" in spa.SKIP_TEXT[reason]
-    assert result.status == "ok" and session.calls == [] and client.interactive_prompts == 0
-
-
-def test_delegated_token_without_a_user_scope_is_refused() -> None:
-    result, session, _ = collect(FakeClient(mode="delegated", token=jwt(aud=ORIGIN, appidacr="2")))
-    assert section(result)["reason"] == "sharepoint_admin_token_refused" and session.calls == []
 
 
 # The admin host comes from the tenant's own Graph answer ---------------------------------------------
@@ -295,15 +256,6 @@ def test_a_renamed_tenant_reads_its_current_sharepoint_host_not_the_initial_doma
     assert "contoso" not in blob and "onmicrosoft" not in blob
 
 
-def test_a_renamed_delegated_tenant_asks_for_the_current_host_scope() -> None:
-    renamed = "https://fabrikam-admin.sharepoint.com"
-    client = FakeClient(mode="delegated", root_site={"siteCollection": {"hostname": "fabrikam.sharepoint.com"}})
-    result, session, _ = collect(client)
-    assert section(result)["status"] == "ok"
-    assert client.delegated_scopes == [renamed + "/AllSites.FullControl"]
-    assert [call[0] for call in session.calls] == [renamed + "/_api/SPO.Tenant"]
-
-
 def test_a_non_object_root_site_answer_fails_the_section() -> None:
     client = FakeClient(root_site=GraphError("Non-dict response from /sites/root"))
     result, session, _ = collect(client)
@@ -323,7 +275,7 @@ def test_an_inconclusive_host_is_a_named_skip_and_nothing_is_guessed(site) -> No
     assert section(result)["status"] == "skipped" and section(result)["reason"] == spa.REASON_HOST_UNRESOLVED
     assert result.message == spa.SKIP_TEXT[spa.REASON_HOST_UNRESOLVED]
     assert result.coverage[0]["status"] == "ok" and result.coverage[0]["item_count"] == 0
-    assert client.app_scopes == client.delegated_scopes == [] and session.calls == []
+    assert client.app_scopes == [] and session.calls == []
 
 
 def test_a_failed_root_site_read_fails_the_section_without_a_token() -> None:

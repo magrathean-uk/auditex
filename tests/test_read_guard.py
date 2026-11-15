@@ -488,11 +488,11 @@ class _GraphWire:
 
 
 def _graph_client(wire: _GraphWire):
-    from support import graph_auth
+    from support import GRAPH_TEST_TOKEN, graph_auth
 
     from azure_tenant_audit.graph import GraphClient
 
-    return GraphClient(graph_auth(), session=wire)  # type: ignore[arg-type]
+    return GraphClient(graph_auth(), session=wire, _token=GRAPH_TEST_TOKEN)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])

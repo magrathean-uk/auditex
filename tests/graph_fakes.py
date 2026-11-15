@@ -122,9 +122,12 @@ def run_collectors(
     name: str = "r",
 ) -> tuple[int, Path]:
     """Run the live path with ``fake`` as the Graph client; returns the exit code and the run directory."""
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    use_fake_certificate(monkeypatch)
     args = cli.build_parser().parse_args(
         [
-            "--tenant-name", "acme", "--tenant-id", "t-1", "--access-token", "x.y.z",
+            "--tenant-name", "acme", "--tenant-id", "t-1", "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
             "--collectors", collectors, "--out", str(tmp_path), "--run-name", name, *extra,
         ]
     )

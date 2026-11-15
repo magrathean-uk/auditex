@@ -21,6 +21,7 @@ from graph_fakes import (
     rule_statuses,
     run_collectors,
 )
+from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
 
 from auditex.gate import gate_findings
 from auditex.reporting import enterprise_handoff
@@ -506,6 +507,7 @@ def test_ipps_skip_keeps_healthy_app_run_ok_and_real_exchange_failure_partial(mo
 
     fake = FakeGraph(lists={"/domains": [{"id": "constructed.onmicrosoft.com", "isInitial": True}]})
     fake.app_token_for = lambda scope: "constructed-token"
+    use_fake_certificate(monkeypatch)
     calls = []
 
     class Adapter:
@@ -522,7 +524,7 @@ def test_ipps_skip_keeps_healthy_app_run_ok_and_real_exchange_failure_partial(mo
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
     args = cli.build_parser().parse_args([
         "--tenant-name", "acme", "--tenant-id", "constructed", "--client-id", "constructed-app",
-        "--client-secret", "constructed-secret", "--collectors", "licensing,exchange_policy",
+        *FAKE_CERTIFICATE_ARGS, "--collectors", "licensing,exchange_policy",
         "--out", str(tmp_path), "--run-name", "ipps", *(["--probe-first"] if preflight else []),
     ])
     assert cli.run_live(args) == 0
@@ -570,43 +572,3 @@ def test_offline_notice_only_when_selected_and_no_console_exit_text_in_artifacts
     # Pin the named resolver to its shipped endpoint, so a constant change cannot silently mislabel it.
     assert DEFAULT_DOH_ENDPOINT == "https://cloudflare-dns.com/dns-query"
     assert "Cloudflare" in text and DEFAULT_DOH_ENDPOINT in text
-
-
-def test_explicit_delegated_exchange_is_selected_and_reports_auth_mode_reason(monkeypatch, tmp_path):
-    from types import SimpleNamespace
-
-    from azure_tenant_audit import cli
-    from azure_tenant_audit.adapters import powershell_graph
-    from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
-
-    monkeypatch.setattr(cli, 'GraphClient', lambda *args, **kwargs: FakeGraph())
-    monkeypatch.setattr(cli, '_acquire_azure_cli_access_token', lambda *args, **kwargs: 'constructed')
-    monkeypatch.setattr(cli, '_capture_signed_in_context', lambda *args, **kwargs: {})
-    monkeypatch.setattr(cli.run_core, 'collector_pause_seconds', lambda _: 0)
-    monkeypatch.setattr('azure_tenant_audit.collectors.exchange_policy.get_adapter', lambda _: PowerShellGraphAdapter())
-    monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph.shutil.which', lambda _: '/usr/bin/pwsh')
-    monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph.subprocess.run', lambda *args, **kwargs:
-        SimpleNamespace(returncode=1, stdout='', stderr='The term Get-Read is not recognized'))
-    native_calls = []
-
-    def forbidden_native_process(*args, **kwargs):
-        native_calls.append(True)
-        raise AssertionError('This delegated fixture must not start a native process')
-
-    monkeypatch.setattr(powershell_graph, '_run_bounded', lambda *args, **kwargs:
-        SimpleNamespace(returncode=1, stdout=b'', stderr='The term Get-Read is not recognized',
-                        stdout_total=0, stderr_total=35, overflow=False, timed_out=False, duration_ms=0, pid=0))
-    monkeypatch.setattr(powershell_graph.subprocess, 'Popen', forbidden_native_process)
-    args = cli.build_parser().parse_args([
-        '--tenant-name', 'acme', '--tenant-id', 'constructed', '--use-azure-cli-token',
-        '--collectors', 'exchange_policy', '--out', str(tmp_path), '--run-name', 'explicit',
-    ])
-    assert cli.run_live(args) == 0
-    run_dir = tmp_path / 'acme-explicit'
-    manifest = load(run_dir, 'run-manifest.json')
-    assert manifest['selected_collectors'] == ['exchange_policy']
-    assert manifest['overall_status'] == 'partial'
-    ledger = load(run_dir, 'normalized/coverage_ledger.json')['records']
-    assert 'cannot open an Exchange Online policy session' in ledger[0]['message']
-    assert gate_findings(run_dir=str(run_dir), fail_on='critical')['status'] == 'blocked'
-    assert native_calls == []

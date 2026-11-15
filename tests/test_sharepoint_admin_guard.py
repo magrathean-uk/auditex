@@ -161,24 +161,10 @@ def test_no_other_module_talks_to_a_sharepoint_admin_host() -> None:
     "00000003-0000-0ff1-ce00-000000000000/.default",
     "HTTPS://CONTOSO-ADMIN.SHAREPOINT.COM/.default",
 ])
-def test_a_client_secret_never_mints_a_sharepoint_token(scope) -> None:  # noqa: ANN001
+def test_a_client_without_a_certificate_never_mints_a_sharepoint_token(scope) -> None:  # noqa: ANN001
     class NoPost:
         def post(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
-            raise AssertionError("a SharePoint token was requested with the client secret")
+            raise AssertionError("a SharePoint token was requested without a certificate")
 
-    auth = AuthConfig(tenant_id="constructed.onmicrosoft.com", client_id="constructed-app", client_secret="constructed-secret")
-    assert GraphClient(auth, session=NoPost()).app_token_for(scope) is None
-
-
-def test_a_client_secret_still_mints_other_resource_tokens() -> None:
-    posts: list[str] = []
-
-    class Session:
-        def post(self, url, data=None, **kwargs):  # noqa: ANN001, ANN201
-            posts.append(data["scope"])
-            response = type("R", (), {"status_code": 200, "json": lambda self: {"access_token": "t"}})()
-            return response
-
-    auth = AuthConfig(tenant_id="constructed.onmicrosoft.com", client_id="constructed-app", client_secret="constructed-secret")
-    assert GraphClient(auth, session=Session()).app_token_for("https://outlook.office365.com/.default") == "t"
-    assert posts == ["https://outlook.office365.com/.default"]
+    auth = AuthConfig(tenant_id="constructed.onmicrosoft.com", client_id="constructed-app")
+    assert GraphClient(auth, _token="constructed", session=NoPost()).app_token_for(scope) is None

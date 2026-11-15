@@ -14,7 +14,7 @@ from .capability_gate import (
 )
 from .collection_gaps import NON_FATAL_COLLECTORS, collector_gap_reason, sample_only
 from .config import CollectorConfig, RunConfig
-from .profiles import APP_MODE_ONLY_COLLECTORS, AuditProfile, get_profile
+from .profiles import AuditProfile, get_profile
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .scope_catalog import build_m365_scope_catalog
 from .selection import select_collectors
@@ -26,11 +26,9 @@ class LiveRunPlan:
     run_config: RunConfig
     selected_collectors: list[str]
     execution_plane: str
-    auth_scopes: list[str]
     permission_hints: dict[str, dict[str, Any]]
     collector_config: CollectorConfig
     profile: AuditProfile
-    selection_notices: tuple[str, ...] = ()
 
 
 def collector_execution_order(selected: list[str]) -> list[str]:
@@ -53,8 +51,6 @@ def build_live_run_plan(
     collector_presets: dict[str, object] | None = None,
 ) -> LiveRunPlan:
     profile = profile or get_profile(args.auditor_profile)
-    auth_mode = ("interactive" if args.interactive else "azure_cli" if args.use_azure_cli_token
-                 else "access_token" if args.access_token else "app")
     selected_collector_names = parse_csv_list(args.collectors)
     exclude_collector_names = parse_csv_list(args.exclude) or []
     run_cfg = RunConfig(
@@ -83,43 +79,18 @@ def build_live_run_plan(
         explicit_collectors=selected_collector_names,
         excluded_collectors=exclude_collector_names,
         include_exchange=args.include_exchange,
-        auth_mode=auth_mode,
     )
     if run_cfg.plane not in profile.supported_planes:
         raise ValueError(f"Audit profile '{run_cfg.auditor_profile}' does not support plane '{run_cfg.plane}'.")
     execution_plane = "export" if run_cfg.plane in {"full", "export"} else "inventory"
 
-    auth_scopes = parse_csv_list(args.scopes)
-    if args.interactive and not auth_scopes:
-        auth_scopes = sorted({perm for name in selected for perm in collector_config.collectors[name].required_permissions})
-    if args.interactive and not auth_scopes:
-        auth_scopes = ["User.Read"]
-
-    selection_notices: tuple[str, ...] = ()
-    if auth_mode != "app" and not selected_collector_names:
-        app_selected = select_collectors(
-            available=available, profile_default_collectors=profile.default_collectors,
-            preset_name=args.collector_preset, presets=collector_presets or {},
-            excluded_collectors=exclude_collector_names, include_exchange=args.include_exchange,
-            auth_mode="app",
-        )
-        omitted = [name for name in APP_MODE_ONLY_COLLECTORS if name in app_selected and name not in selected]
-        if omitted:
-            selection_notices = (
-                f"Defaults/preset did not select {', '.join(omitted)}: these defaults are app-mode only; "
-                "--include-exchange selects the Microsoft 365 CLI exchange collector in this mode. "
-                "Only --collectors explicitly selects Exchange policy, DNS posture or Teams admin policies outside app mode.",
-            )
-
     return LiveRunPlan(
         run_config=run_cfg,
         selected_collectors=selected,
         execution_plane=execution_plane,
-        auth_scopes=auth_scopes,
         permission_hints=permission_hints,
         collector_config=collector_config,
         profile=profile,
-        selection_notices=selection_notices,
     )
 
 

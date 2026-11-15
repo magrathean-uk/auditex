@@ -1,4 +1,10 @@
-"""Shared local auth-context reading and token inspection, with no product dependency."""
+"""Token inspection for the run's auth context, with no product dependency.
+
+The engine never reads a saved auth context (DEC-107: the reader app's certificate is the only credential).
+``default_auth_contexts_path``, ``default_token_path``, ``auth_context_store`` and ``resolve_stored_auth_context``
+remain only for the product layer's ``auditex auth`` commands, which M09-T03 removes; nothing in this package calls
+them.
+"""
 
 from __future__ import annotations
 
@@ -54,7 +60,7 @@ def _load_json(path: Path, *, default: Any) -> Any:
 
 
 def auth_context_store() -> dict[str, Any]:
-    """Read the shared local context store, normalising absent or invalid data."""
+    """Read the shared local context store, normalising absent or invalid data (product layer only, M09-T03)."""
     store = _load_json(default_auth_contexts_path(), default={"active_context": None, "contexts": {}})
     if not isinstance(store, dict):
         return {"active_context": None, "contexts": {}}
@@ -140,13 +146,3 @@ def resolve_stored_auth_context(
             f"auth context '{selected_name}' is not usable: {', '.join(validation['blockers'])}"
         )
     return context
-
-
-def resolve_auth_context(name: str | None = None) -> dict[str, Any]:
-    """Read a saved context using the same local paths as the product wrapper."""
-    return resolve_stored_auth_context(
-        auth_context_store(),
-        name,
-        resolve_token_path=default_token_path,
-        read_token=lambda path: path.read_text(encoding="utf-8").strip(),
-    )

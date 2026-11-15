@@ -6,7 +6,7 @@ import subprocess
 from typing import Any
 
 import pytest
-from support import graph_auth, graph_response
+from support import GRAPH_TEST_TOKEN, graph_auth, graph_response
 
 from azure_tenant_audit.api_inventory import (
     endpoint_template,
@@ -44,6 +44,7 @@ class _Session:
 def _client(session: _Session, events: list[tuple[str, dict[str, Any]]]) -> GraphClient:
     return GraphClient(
         graph_auth(),
+        _token=GRAPH_TEST_TOKEN,
         session=session,  # type: ignore[arg-type]
         audit_event=lambda event, message, details=None: events.append((event, dict(details or {}))),
     )
@@ -165,22 +166,14 @@ def test_the_observed_ledger_lists_redirect_hops_without_a_query() -> None:
 # ---- token events -----------------------------------------------------------------------------------------
 
 
-def test_a_resource_token_request_is_counted_like_the_graph_token_request() -> None:
-    class _Post:
-        status_code = 200
+def test_a_resource_token_request_is_counted_like_the_graph_token_request(monkeypatch) -> None:
+    from support import FakeCertificate
 
-        @staticmethod
-        def json() -> dict[str, Any]:
-            return {"access_token": "resource-token"}
-
-    class _TokenSession(_Session):
-        def post(self, url: str, **kwargs: Any) -> Any:  # noqa: ARG002
-            return _Post()
-
+    monkeypatch.setattr(GraphClient, "_certificate_exchange", lambda self, scope: ("resource-token", 3600.0, None))
     events: list[tuple[str, dict[str, Any]]] = []
     client = GraphClient(
-        graph_auth(auth_mode="app", access_token=None, client_secret="s"),
-        session=_TokenSession(),  # type: ignore[arg-type]
+        graph_auth(certificate=FakeCertificate()),
+        session=_Session(),  # type: ignore[arg-type]
         audit_event=lambda event, message, details=None: events.append((event, dict(details or {}))),
     )
 

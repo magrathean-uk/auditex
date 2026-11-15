@@ -12,6 +12,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
 
 from azure_tenant_audit import cli
 from azure_tenant_audit.guarded_io import UnsafeRunFileError
@@ -321,7 +322,7 @@ def test_short_sensitive_value_does_not_corrupt_parser_diagnostics(capsys, entry
     with pytest.raises(SystemExit):
         command([*prefix, "--sensitive-users", "r", "--throttle-mode", "invalid"])
     assert "error: invalid arguments" in capsys.readouterr().err
-    options = ("--tenant-id", "--client-secret") + (("--access-token",) if entrypoint == "engine" else ())
+    options = ("--tenant-id", "--client-id", "--certificate-path")
     for option in options:
         with pytest.raises(SystemExit):
             command([*prefix, "--sensitive-users", "r", option])
@@ -355,7 +356,7 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
     def forbidden(*args, **kwargs):
         pytest.fail("collection/auth/guided flow reached with invalid input")
 
-    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", forbidden)
+    monkeypatch.setattr(cli, "load_certificate_credential", forbidden)
     monkeypatch.setattr(guided, "_resolve_flow", forbidden)
     if entrypoint == "guided":
         assert guided.run_guided(guided.build_guided_parser().parse_args([])) == 2
@@ -636,7 +637,7 @@ def test_guided_passes_loaded_input_without_rereading(tmp_path, monkeypatch, cap
     monkeypatch.setattr(guided.tenant_cli, "main", engine)
     args = guided.build_guided_parser().parse_args([
         "--flow", "app-audit", "--tenant-id", "tenant.invalid", "--tenant-name", "test",
-        "--client-id", "constructed-app", "--client-secret", "constructed-secret",
+        "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
         "--non-interactive", "--local-mode", "--out", str(tmp_path / "out"),
         "--sensitive-users", str(path),
     ])
@@ -666,10 +667,11 @@ def test_simulated_live_run_reads_once_before_collection(tmp_path, monkeypatch, 
                                    coverage=[{"collector": "identity", "name": "users", "type": "graph",
                                               "status": "ok", "item_count": 1}])
 
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr(cli, "GraphClient", lambda *args, **kwargs: object())
     monkeypatch.setattr(cli, "REGISTRY", {"identity": Collector()})
     argv = ["--tenant-name", "test", "--run-name", "live", "--tenant-id", "constructed-tenant",
-            "--client-id", "constructed-app", "--client-secret", "constructed-secret",
+            "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
             "--collectors", "identity", "--out", str(tmp_path / "runs")]
     argv.extend([flag + "=" + str(path)] if equals else [flag, str(path)])
     assert cli.main(argv, event_listener=events.append) == 0

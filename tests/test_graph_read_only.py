@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from support import graph_auth, graph_response
+from support import GRAPH_TEST_TOKEN, graph_auth, graph_response
 
 from azure_tenant_audit.graph import (
     GRAPH_BETA_ROOT,
@@ -33,9 +33,10 @@ class _Recorder:
         raise AssertionError("a refused request must not even ask for a token")
 
 
-def _client(session: _Recorder, events: list[tuple[str, dict[str, Any]]], **auth: Any) -> GraphClient:
+def _client(session: _Recorder, events: list[tuple[str, dict[str, Any]]], token: str | None = GRAPH_TEST_TOKEN) -> GraphClient:
     client = GraphClient(
-        graph_auth(**auth),
+        graph_auth(),
+        _token=token,
         session=session,  # type: ignore[arg-type]
         audit_event=lambda event, message, details=None: events.append((event, dict(details or {}))),
     )
@@ -46,8 +47,8 @@ def _client(session: _Recorder, events: list[tuple[str, dict[str, Any]]], **auth
 def test_non_read_methods_are_refused_before_any_network_call(method) -> None:
     session = _Recorder()
     events: list[tuple[str, dict[str, Any]]] = []
-    # No access token and no client secret: ensure_token() would fail or reach the token endpoint if called.
-    client = _client(session, events, auth_mode="app", access_token=None, client_secret="s")
+    # No token and no certificate: ensure_token() would fail if called.
+    client = _client(session, events, token=None)
 
     with pytest.raises(GraphError) as caught:
         client._request(method, f"{GRAPH_ROOT}/users/u1", json={"accountEnabled": False})
@@ -250,7 +251,7 @@ def test_ordinary_headers_are_still_allowed() -> None:
 def test_the_bearer_token_never_goes_to_another_host(url: str) -> None:
     session = _Recorder()
     events: list[tuple[str, dict[str, Any]]] = []
-    client = _client(session, events, auth_mode="app", access_token=None, client_secret="s")
+    client = _client(session, events, token=None)
 
     for call in (
         lambda: client.get_json(url, full_url=True),

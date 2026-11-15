@@ -28,11 +28,10 @@ Detection-coverage commands (all read-only ``Get-*`` cmdlets):
   PowerShell only; see the compliance session below.
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert
 
-Security & Compliance reads (SCuBA MS.SECURITYSUITE 3.1-3.4 and 4.1) run in their own session, opened only in app-only
-certificate mode: a certificate token for the Microsoft Exchange Online Protection resource (``COMPLIANCE_SCOPE``, its
-``Exchange.ManageAsApp`` permission plus a read role such as Global Reader) is passed to ``Connect-IPPSSession`` as an
-access token with the initial domain. A secret, delegated or access-token run, or a connect that fails, records the
-``ipps_session_not_opened`` section gap on every read below and never invokes them after the failure; the gaps are
+Security & Compliance reads (SCuBA MS.SECURITYSUITE 3.1-3.4 and 4.1) run in their own session: a certificate token
+for the Microsoft Exchange Online Protection resource (``COMPLIANCE_SCOPE``, its ``Exchange.ManageAsApp`` permission
+plus a read role such as Global Reader) is passed to ``Connect-IPPSSession`` as an access token with the initial
+domain. A missing or refused token, or a connect that fails, records the ``ipps_session_not_opened`` section gap on every read below and never invokes them after the failure; the gaps are
 section-scoped, so the Exchange reads above keep the collector's status.
 https://learn.microsoft.com/en-us/powershell/exchange/app-only-auth-powershell-v2
 
@@ -144,23 +143,14 @@ MAILBOX_FORWARDING_COMMAND = (
 
 
 def _exchange_session(client: Any, log_event: Any) -> dict[str, Any]:
-    """Exchange Online session (token plus initial domain or signed-in user), or a marker that none is available.
+    """Exchange Online session (app-only token plus initial domain), or a marker that none is available.
 
-    App-only: needs the Exchange.ManageAsApp application permission and an Exchange-capable read role
-    (for example Global Reader) assigned to the service principal:
+    The token is minted from the reader app's certificate (DEC-107) and needs the Exchange.ManageAsApp application
+    permission and an Exchange-capable read role (for example Global Reader) assigned to the service principal:
     https://learn.microsoft.com/powershell/exchange/app-only-auth-powershell-v2
-    Delegated (DEC-068): the token is minted silently from the run's one sign-in (GraphClient.delegated_token_for)
-    and needs the delegated Office 365 Exchange Online permission Exchange.Manage with admin consent on the
-    sign-in app; it is passed with -UserPrincipalName, as the Connect-ExchangeOnline reference requires for a
-    delegated access token. No token means no session; Auditex never opens a second sign-in for Exchange.
+    No token means no session; Auditex never signs in for Exchange.
     """
     token = client.app_token_for(EXCHANGE_ONLINE_SCOPE) if hasattr(client, "app_token_for") else None
-    if not token and hasattr(client, "delegated_token_for"):
-        delegated = client.delegated_token_for(EXCHANGE_ONLINE_SCOPE)
-        user = client.signed_in_username() if delegated and hasattr(client, "signed_in_username") else None
-        if delegated and user:
-            return {"kind": "exchange_online", "access_token": delegated, "user_principal_name": user}
-        return {"kind": "none"}
     organization = _initial_domain(client, log_event) if token else None
     if token and organization:
         return {"kind": "exchange_online", "access_token": token, "organization": organization}
@@ -183,9 +173,9 @@ def _initial_domain(client: Any, log_event: Any) -> str | None:
 def _compliance_session(client: Any, organization: str | None, log_event: Any) -> dict[str, Any]:
     """Security & Compliance session (certificate token plus initial domain), or a marker that none is available.
 
-    App-only certificate mode only: the token is minted silently from the run's certificate credential and must pass
-    ``compliance_certificate_token``. A secret, delegated or access-token run asks for no token at all (no Microsoft
-    source shows a secret-minted token is accepted), so it never prompts and the reads record ``ipps_session_not_opened``.
+    The token is minted silently from the run's certificate credential and must pass ``compliance_certificate_token``.
+    A client without a certificate asks for no token at all, so it never prompts and the reads record
+    ``ipps_session_not_opened``.
     """
     auth = getattr(client, "auth", None)
     if getattr(auth, "certificate", None) is None or not hasattr(client, "app_token_for"):

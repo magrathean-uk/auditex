@@ -382,15 +382,12 @@ def test_environment_from_manifest(monkeypatch):
     assert len(session.calls) == 5 and result.item_count == 5
 
 
-@pytest.mark.parametrize("auth", [SimpleNamespace(client_secret="constructed-secret", auth_mode="app"),
-                                  SimpleNamespace(auth_mode="delegated")])
-def test_collector_does_not_attempt_non_certificate_auth(monkeypatch, auth):
+def test_collector_does_not_attempt_non_certificate_auth(monkeypatch):
     commands = command_reader(monkeypatch)
     session = connect(monkeypatch, [])
-    client = Client()
-    client.auth = auth
+    client = Client(resource_token=None)  # a client without a certificate mints no Teams admin token
     result = TeamsPolicyCollector().run({"client": client})
-    assert client.scopes == [] and session.calls == [] and commands.calls == []
+    assert session.calls == [] and commands.calls == []
     assert result.status == "ok"
     assert all(row["reason"] == "teams_token_unavailable" for row in result.coverage)
 
@@ -884,14 +881,14 @@ def test_certificate_graph_client_token_drives_the_five_rest_reads(monkeypatch, 
     assert token not in json.dumps([result.payload, result.coverage]) + caplog.text
 
 
-def test_secret_graph_client_never_requests_a_teams_admin_token():
+def test_graph_client_without_a_certificate_never_requests_a_teams_admin_token():
     from azure_tenant_audit.config import AuthConfig
     from azure_tenant_audit.graph import GraphClient
 
     class Session:
         def post(self, *args, **kwargs):
-            raise AssertionError("a secret must never mint a Teams admin token")
+            raise AssertionError("a client without a certificate must never mint a Teams admin token")
 
-    client = GraphClient(AuthConfig(tenant_id="constructed.example", client_id="constructed-app",
-                                    client_secret="constructed-secret"), session=Session())
+    client = GraphClient(AuthConfig(tenant_id="constructed.example", client_id="constructed-app"),
+                         _token="constructed", session=Session())
     assert client.app_token_for(rest.TEAMS_ADMIN_SCOPE) is None

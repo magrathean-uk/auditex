@@ -7,6 +7,27 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+### One way to audit Microsoft 365: the reader app with a certificate
+
+- **The engine accepts only the reader app's certificate (DEC-107, DEC-108).** `azure-tenant-audit` live runs need
+  `--client-id`, `--tenant-id`, `--certificate-path` and `--certificate-thumbprint` (with an optional
+  `--certificate-password-env` or `--certificate-password-file`). The client-secret, access-token, saved-auth-context,
+  Azure CLI token and interactive (delegated) sign-in ways are removed from the engine, with their flags: each removed
+  flag is refused by name with the certificate way, before any value is read, and stays in the argv redaction lists.
+  `AZURE_CLIENT_SECRET` and `AZURE_ACCESS_TOKEN` in the environment are ignored with a warning. No engine path signs a
+  user in or asks Azure CLI for a token; the probe toolchain no longer checks Azure CLI or CLI for Microsoft 365 sign-in.
+- **Probe.** The engine probe takes the audit CLI's certificate options in app mode (loaded before the probe folder
+  exists, a failure is a fixed-text blocker); the delegated probe mode goes, and a probe given an access token, Azure CLI
+  token, saved auth context or client secret is refused.
+- **Bundles.** Run manifests keep `mode` and `normalized/auth_context.json` keeps `auth_mode`, both `app`; the session
+  context and delegated roles are empty. Validation and replay still accept older bundles with other values, and the
+  SharePoint admin skip reasons of the removed ways stay readable.
+- **Lab kit.** `tenant-bootstrap/scripts/run-audit-collector.sh` runs with the reader app's certificate options. It
+  passes the repository-level collector configs (it pointed at a missing `src/configs/` folder), and its dry run
+  redacts the certificate path, thumbprint and password source.
+- The product layer (`auditex` guided run, setup guide, MCP tools, `auditex auth`, `auditex probe live` flags) follows in
+  the next change of this release.
+
 - Power Platform: `listTenantSettings` is now sent as the body-free POST Microsoft documents, instead of GET; the client admits POST
   for that one path only. The admin guide states the exact removal and blast radius of the Power BI read-only admin API setting and the
   Power Platform management-app registration.

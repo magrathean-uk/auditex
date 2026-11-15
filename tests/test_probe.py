@@ -5,9 +5,14 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
 
 from azure_tenant_audit.collectors.base import CollectorResult
 from azure_tenant_audit.probe import ProbeConfig, _build_probe_snapshot, run_live_probe
+
+# The reader app and its certificate for the app probe; use_fake_certificate makes the certificate load.
+CERTIFICATE = {"client_id": "constructed-app", "certificate_path": FAKE_CERTIFICATE_ARGS[1],
+               "certificate_thumbprint": FAKE_CERTIFICATE_ARGS[3]}
 
 
 class _FakeCollector:
@@ -40,24 +45,20 @@ class _FakeClient:
 
 
 def test_probe_live_writes_capability_and_toolchain_artifacts(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeClient)
-    monkeypatch.setattr("azure_tenant_audit.probe._acquire_azure_cli_access_token", lambda *_, **__: "token")
-    monkeypatch.setattr(
-        "azure_tenant_audit.probe._capture_signed_in_context",
-        lambda *_, **__: {"user_principal_name": "auditor@contoso.test", "roles": ["Global Reader"]},
-    )
     monkeypatch.setattr(
         "azure_tenant_audit.probe._probe_toolchain_statuses",
         lambda **_: [
             {
                 "collector": "toolchain",
-                "surface": "az_cli_graph",
+                "surface": "pwsh",
                 "type": "toolchain",
-                "name": "az_cli_graph",
-                "toolchain": "az",
+                "name": "pwsh",
+                "toolchain": "pwsh",
                 "status": "supported",
                 "item_count": 1,
-                "message": "Azure CLI Graph token available",
+                "message": "PowerShell is available.",
             }
         ],
     )
@@ -68,9 +69,10 @@ def test_probe_live_writes_capability_and_toolchain_artifacts(tmp_path: Path, mo
             tenant_name="contoso",
             output_dir=tmp_path,
             tenant_id="tenant-id",
-            mode="delegated",
+            mode="app",
             surface="identity",
             run_name="probe-live",
+            **CERTIFICATE,
         )
     )
     assert rc == 0
@@ -85,8 +87,8 @@ def test_probe_live_writes_capability_and_toolchain_artifacts(tmp_path: Path, mo
     assert capability_matrix[0]["toolchain"] == "graph"
     assert live_readiness["trust_level"] == "live_verified"
     assert live_readiness["trusted_collectors"] == ["identity"]
-    assert toolchain["az_cli_graph"]["status"] == "supported"
-    assert manifest["probe_mode"] == "delegated"
+    assert toolchain["pwsh"]["status"] == "supported"
+    assert manifest["probe_mode"] == "app" and manifest["mode"] == "app" and manifest["auth_path"] == "app"
     assert manifest["probe_surface"] == "identity"
     assert manifest["capability_matrix_path"] == "capability-matrix.json"
     assert manifest["toolchain_readiness_path"] == "toolchain-readiness.json"
@@ -97,8 +99,8 @@ def test_probe_live_writes_capability_and_toolchain_artifacts(tmp_path: Path, mo
 
 
 def test_windows365_probe_carries_successful_empty_read_into_trust(tmp_path: Path, monkeypatch) -> None:
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeClient)
-    monkeypatch.setattr("azure_tenant_audit.probe._capture_signed_in_context", lambda *_, **__: {})
     monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
 
     def windows_probe(_cfg, *, client, writer):
@@ -107,8 +109,8 @@ def test_windows365_probe_carries_successful_empty_read_into_trust(tmp_path: Pat
 
     monkeypatch.setattr("azure_tenant_audit.probe._run_windows365_probe", windows_probe)
     rc = run_live_probe(ProbeConfig(
-        tenant_name="contoso", output_dir=tmp_path, tenant_id="constructed", mode="delegated",
-        surface="windows365", run_name="windows", access_token="constructed", use_azure_cli_token=False,
+        tenant_name="contoso", output_dir=tmp_path, tenant_id="constructed", mode="app",
+        surface="windows365", run_name="windows", **CERTIFICATE,
     ))
 
     assert rc == 0
@@ -135,9 +137,8 @@ def test_repeated_probe_labels_and_per_object_endpoints_have_distinct_indexed_ke
                 } for name, endpoint in self.endpoints],
             )
 
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeClient)
-    monkeypatch.setattr("azure_tenant_audit.probe._acquire_azure_cli_access_token", lambda *_, **__: "token")
-    monkeypatch.setattr("azure_tenant_audit.probe._capture_signed_in_context", lambda *_, **__: {})
     monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
     monkeypatch.setattr("azure_tenant_audit.probe.REGISTRY", {
         "identity": _RepeatedCollector("identity", [("servicePrincipals", "/servicePrincipals")]),
@@ -151,7 +152,7 @@ def test_repeated_probe_labels_and_per_object_endpoints_have_distinct_indexed_ke
 
     assert run_live_probe(ProbeConfig(
         tenant_name="fixture", tenant_id="tenant-id", output_dir=tmp_path,
-        surface="identity,app_consent", run_name="overlap",
+        surface="identity,app_consent", run_name="overlap", **CERTIFICATE,
     )) == 0
     run = tmp_path / "fixture-overlap"
     rows = json.loads((run / "normalized/capabilities.json").read_text())["records"]
@@ -213,77 +214,85 @@ def test_response_probe_requires_lab_guard_but_still_writes_blockers(tmp_path: P
     assert manifest["lab_guard_state"] == "blocked"
 
 
-def test_delegated_probe_without_token_source_writes_auth_blocker(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(
-        "azure_tenant_audit.probe._probe_toolchain_statuses",
-        lambda **_: [],
-    )
+@pytest.mark.parametrize("missing", ["client_id", "certificate_path", "certificate_thumbprint"])
+def test_app_probe_without_the_reader_app_or_certificate_writes_auth_blocker(tmp_path: Path, monkeypatch, missing) -> None:
+    use_fake_certificate(monkeypatch)
+    monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
+    monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", lambda *args, **kwargs: pytest.fail("no client without it"))
+    fields = {**CERTIFICATE, missing: None}
 
-    rc = run_live_probe(
-        ProbeConfig(
-            tenant_name="contoso",
-            output_dir=tmp_path,
-            tenant_id="tenant-id",
-            mode="delegated",
-            surface="identity",
-            run_name="probe-missing-auth",
-            use_azure_cli_token=False,
-        )
-    )
+    rc = run_live_probe(ProbeConfig(
+        tenant_name="contoso", output_dir=tmp_path, tenant_id="tenant-id", mode="app", surface="identity",
+        run_name="probe-missing-auth", **fields,
+    ))
     assert rc == 1
 
     run_dir = tmp_path / "contoso-probe-missing-auth"
     blockers = json.loads((run_dir / "blockers" / "blockers.json").read_text(encoding="utf-8"))
     assert blockers[0]["collector"] == "probe_auth"
-    assert blockers[0]["error_class"] == "unauthenticated"
+    assert blockers[0]["error_class"] == "missing_app_credentials"
+    assert "reader app with a certificate" in blockers[0]["error"]
 
 
-def test_probe_live_uses_saved_auth_context_and_writes_auth_artifact(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeClient)
-    monkeypatch.setattr(
-        "azure_tenant_audit.probe._probe_toolchain_statuses",
-        lambda **_: [],
-    )
-    monkeypatch.setattr("azure_tenant_audit.probe.REGISTRY", {"identity": _FakeCollector()})
-    monkeypatch.setattr(
-        "azure_tenant_audit.auth_context.resolve_auth_context",
-        lambda name=None: {
-            "name": name or "customer-token",
-            "auth_type": "imported_token",
-            "tenant_id": "tenant-saved",
-            "token": "saved-token",
-            "token_claims": {
-                "tenant_id": "tenant-saved",
-                "audience": "https://graph.microsoft.com",
-                "delegated_scopes": ["Directory.Read.All"],
-                "app_roles": [],
-                "user_principal_name": "reader@contoso.test",
-                "expires_at_utc": "2030-01-01T00:00:00Z",
-            },
-        },
-    )
+def test_app_probe_with_an_unusable_certificate_writes_a_fixed_text_blocker(tmp_path: Path, monkeypatch) -> None:
+    from azure_tenant_audit import probe
+    from azure_tenant_audit.certificate_auth import CertificateAuthError
 
-    rc = run_live_probe(
-        ProbeConfig(
-            tenant_name="contoso",
-            output_dir=tmp_path,
-            auth_context="customer-token",
-            mode="delegated",
-            surface="identity",
-            run_name="probe-auth-context",
-        )
-    )
-    assert rc == 0
+    def refuse(*_args, **_kwargs):
+        raise CertificateAuthError("certificate_thumbprint_mismatch")
 
-    run_dir = tmp_path / "contoso-probe-auth-context"
-    auth_context = json.loads((run_dir / "auth-context.json").read_text(encoding="utf-8"))
-    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr(probe, "load_certificate_credential", refuse)
+    monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
+    monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", lambda *args, **kwargs: pytest.fail("no client"))
+    rc = run_live_probe(ProbeConfig(
+        tenant_name="contoso", output_dir=tmp_path, tenant_id="tenant-id", mode="app", surface="identity",
+        run_name="probe-bad-certificate", **CERTIFICATE,
+    ))
+    assert rc == 1
+    run_dir = tmp_path / "contoso-probe-bad-certificate"
+    blockers = json.loads((run_dir / "blockers" / "blockers.json").read_text(encoding="utf-8"))
+    assert blockers[0]["error_class"] == "certificate_thumbprint_mismatch"
+    assert FAKE_CERTIFICATE_ARGS[1] not in json.dumps(blockers)
 
-    assert auth_context["name"] == "customer-token"
-    assert auth_context["tenant_id"] == "tenant-saved"
-    assert auth_context["token_claims"]["delegated_scopes"] == ["Directory.Read.All"]
-    assert manifest["auth_path"] == "saved_context"
-    assert manifest["auth_context_path"] == "auth-context.json"
+
+def test_app_probe_refuses_a_certificate_inside_its_output_folder(tmp_path: Path, monkeypatch, certificate_material) -> None:
+    import shutil
+
+    monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
+    monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", lambda *args, **kwargs: pytest.fail("no client"))
+    out = tmp_path / "probes"
+    out.mkdir()
+    key = out / "reader-app.pem"
+    shutil.copy2(certificate_material.pem, key)
+    key.chmod(0o600)
+    rc = run_live_probe(ProbeConfig(
+        tenant_name="contoso", output_dir=out, tenant_id="tenant-id", mode="app", surface="identity",
+        run_name="probe-key-inside", client_id="constructed-app", certificate_path=str(key),
+        certificate_thumbprint=certificate_material.thumbprint,
+    ))
+    assert rc == 1
+    blockers = json.loads((out / "contoso-probe-key-inside" / "blockers" / "blockers.json").read_text(encoding="utf-8"))
+    assert blockers[0]["error_class"] == "certificate_source_in_output"
+
+
+@pytest.mark.parametrize("removed", [
+    {"access_token": "constructed-token"}, {"use_azure_cli_token": True}, {"auth_context": "customer-token"},
+    {"client_secret": "constructed-secret"}, {"mode": "delegated"},
+])
+def test_probe_refuses_the_removed_sign_in_ways_before_writing_anything(tmp_path: Path, monkeypatch, removed) -> None:
+    monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: pytest.fail("no probe"))
+    with pytest.raises(ValueError) as caught:
+        run_live_probe(ProbeConfig(tenant_name="contoso", output_dir=tmp_path, tenant_id="tenant-id",
+                                   **{**CERTIFICATE, **removed}))
+    assert "reader app with a certificate" in str(caught.value)
+    assert "constructed" not in str(caught.value) and "customer-token" not in str(caught.value)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_probe_config_never_renders_a_removed_secret_field() -> None:
+    cfg = ProbeConfig(tenant_name="contoso", output_dir=Path("o"), access_token="constructed-token",
+                      client_secret="constructed-secret")
+    assert "constructed" not in repr(cfg)
 
 
 def test_probe_live_app_mode_writes_token_claims(tmp_path: Path, monkeypatch) -> None:
@@ -297,6 +306,7 @@ def test_probe_live_app_mode_writes_token_claims(tmp_path: Path, monkeypatch) ->
                 "app_id": "app-id",
             }
 
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeAppClient)
     monkeypatch.setattr(
         "azure_tenant_audit.probe._probe_toolchain_statuses",
@@ -310,9 +320,8 @@ def test_probe_live_app_mode_writes_token_claims(tmp_path: Path, monkeypatch) ->
             output_dir=tmp_path,
             tenant_id="tenant-app",
             mode="app",
-            client_id="app-id",
-            client_secret="app-secret",
             surface="identity",
+            **{**CERTIFICATE, "client_id": "app-id"},
             run_name="probe-app-context",
         )
     )
@@ -343,15 +352,15 @@ def test_probe_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch) -> None:
             payload = {"acceptedDomains": envelope} if self.name == "exchange_policy" else {}
             return CollectorResult(name=self.name, status="ok", item_count=1, message="ok", payload=payload)
 
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeClient)
-    monkeypatch.setattr("azure_tenant_audit.probe._capture_signed_in_context", lambda *_, **__: {})
     monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
     monkeypatch.setattr("azure_tenant_audit.probe.REGISTRY", {
         name: _Collector(name) for name in ("dns_posture", "exchange_policy", "identity")
     })
     assert run_live_probe(ProbeConfig(
         tenant_name="fixture", tenant_id="tenant-id", output_dir=tmp_path,
-        surface="dns_posture,exchange_policy,identity", run_name="handoff", access_token="constructed-token",
+        surface="dns_posture,exchange_policy,identity", run_name="handoff", **CERTIFICATE,
     )) == 0
     assert calls == ["exchange_policy", "dns_posture", "identity"]
     assert contexts["dns_posture"]["exchange_accepted_domains"] == envelope
@@ -359,11 +368,11 @@ def test_probe_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch) -> None:
     assert "exchange_accepted_domains" not in contexts["identity"]
 
 
-def test_app_probe_all_includes_default_workloads_but_delegated_does_not():
-    from azure_tenant_audit.probe import _resolve_requested_surfaces
+def test_app_probe_all_includes_default_workloads_and_only_app_and_response_modes_exist():
+    from azure_tenant_audit.probe import _resolve_requested_surfaces, probe_mode_choices
 
     assert {"exchange_policy", "dns_posture"} <= set(_resolve_requested_surfaces("all", "app"))
-    assert {"exchange_policy", "dns_posture"}.isdisjoint(_resolve_requested_surfaces("all", "delegated"))
+    assert probe_mode_choices() == ("app", "response")
 
 
 @pytest.mark.parametrize('surface,expected', [
@@ -385,5 +394,5 @@ def test_probe_prints_selected_activity_before_toolchain_or_tenant_reads(tmp_pat
     monkeypatch.setattr('azure_tenant_audit.probe.GraphClient', lambda *args, **kwargs: pytest.fail('No tenant reads'))
     assert run_live_probe(ProbeConfig(
         tenant_name='constructed', tenant_id='constructed', output_dir=tmp_path,
-        mode='app', surface=surface, use_azure_cli_token=False,
-    )) == 1  # Missing credentials stop the probe after its notices.
+        mode='app', surface=surface,
+    )) == 1  # A missing certificate stops the probe after its notices.

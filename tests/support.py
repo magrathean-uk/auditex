@@ -386,10 +386,15 @@ def graph_response(status_code: int, body: object, *, headers: dict[str, str] | 
     return FakeGraphResponse(status_code, body, headers=headers)
 
 
+# A constructed Graph token for offline GraphClient tests: GraphClient(graph_auth(), _token=GRAPH_TEST_TOKEN, ...).
+# No product path sets _token; a live run mints its token from the reader app's certificate.
+GRAPH_TEST_TOKEN = "x"
+
+
 def graph_auth(**overrides: Any):
     from azure_tenant_audit.config import AuthConfig
 
-    defaults = {"tenant_id": "t-1", "client_id": "c-1", "auth_mode": "access_token", "access_token": "x"}
+    defaults = {"tenant_id": "t-1", "client_id": "c-1"}
     defaults.update(overrides)
     return AuthConfig(**defaults)
 
@@ -397,4 +402,31 @@ def graph_auth(**overrides: Any):
 def fake_graph_client(**auth_overrides: Any):
     from azure_tenant_audit.graph import GraphClient
 
-    return GraphClient(graph_auth(**auth_overrides))
+    return GraphClient(graph_auth(**auth_overrides), _token=GRAPH_TEST_TOKEN)
+
+
+# Engine CLI arguments of the reader app's certificate for live-run tests; use_fake_certificate makes them load.
+FAKE_CERTIFICATE_ARGS = ("--certificate-path", "constructed-reader-app.pem", "--certificate-thumbprint", "0" * 40)
+
+
+class FakeCertificate:
+    """Stands in for a loaded certificate_auth.CertificateCredential in live-run tests."""
+
+
+def use_fake_certificate(monkeypatch: Any, token: str = "constructed-token") -> FakeCertificate:
+    """Make FAKE_CERTIFICATE_ARGS load and mint ``token`` for Microsoft Graph only (no other resource token)."""
+    from azure_tenant_audit import cli, probe
+    from azure_tenant_audit.graph import GraphClient
+
+    credential = FakeCertificate()
+    for module in (cli, probe):
+        monkeypatch.setattr(module, "load_certificate_credential", lambda *_args, **_kwargs: credential)
+        monkeypatch.setattr(module, "refuse_sources_in_output", lambda *_args, **_kwargs: None)
+
+    def exchange(self: Any, scope: str) -> tuple[str | None, float, str | None]:
+        if scope == self.auth.graph_scope:
+            return token, 3600.0, None
+        return None, 0.0, "certificate_token_failed"
+
+    monkeypatch.setattr(GraphClient, "_certificate_exchange", exchange)
+    return credential

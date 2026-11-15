@@ -8,25 +8,26 @@ from typing import Any
 
 from .selection import select_collectors
 
-MIXED_CREDENTIALS_MESSAGE = (
-    "Certificate authentication runs in app mode with a client ID and no other credential: "
-    "remove the client secret, access token, Azure CLI token or interactive sign-in."
+# Auditex audits Microsoft 365 one way only (DEC-107): the app-only reader app with a certificate credential.
+# Bundles still record this constant as run-manifest ``mode`` and auth_context ``auth_mode``; replay and
+# validation accept the other values that older bundles carry.
+AUTH_MODE = "app"
+CERTIFICATE_WAY = (
+    "Microsoft 365 audits use only the reader app with a certificate: "
+    "--client-id with --certificate-path and --certificate-thumbprint"
 )
+MIXED_CREDENTIALS_MESSAGE = "Certificate authentication needs the reader app's client ID (--client-id)."
 
 
 @dataclass
 class AuthConfig:
     tenant_id: str
     client_id: str | None
-    auth_mode: str = "app"
-    client_secret: str | None = field(default=None, repr=False)
-    access_token: str | None = field(default=None, repr=False)
     authority: str = "https://login.microsoftonline.com/"
     graph_scope: str = "https://graph.microsoft.com/.default"
-    interactive_scopes: list[str] | None = None
     timeout_seconds: int = 60
     throttle_mode: str = "safe"
-    # A loaded azure_tenant_audit.certificate_auth.CertificateCredential; app mode only, never with a secret.
+    # A loaded azure_tenant_audit.certificate_auth.CertificateCredential: the one credential a live run has.
     certificate: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -35,16 +36,10 @@ class AuthConfig:
 
 
 def check_single_credential(auth: AuthConfig) -> None:
-    """Refuse a certificate mixed with any other credential, before any request is made."""
+    """Refuse a certificate without the reader app's client ID, before any request is made."""
     if auth.certificate is None:
         return
-    if (
-        auth.auth_mode != "app"
-        or auth.client_secret
-        or auth.access_token
-        or not isinstance(auth.client_id, str)
-        or not auth.client_id.strip()
-    ):
+    if not isinstance(auth.client_id, str) or not auth.client_id.strip():
         raise ValueError(MIXED_CREDENTIALS_MESSAGE)
 
 

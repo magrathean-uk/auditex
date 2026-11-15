@@ -91,19 +91,16 @@ class TeamsPolicyCollector(Collector):
                            and parsed_endpoint.netloc == "graph.microsoft.com" else "unknown")
         if not environment and hasattr(client, "app_token_for"):
             environment = "unknown"
-        auth = getattr(client, "auth", None)
         token = None
-        # Only a certificate credential mints the Teams admin token: GraphClient.app_token_for
-        # returns None for it otherwise, and a run with a client secret never asks, so a
-        # secret-only or delegated run records teams_token_unavailable below. In app mode with a
-        # certificate the five REST reads run; messaging and app setup policies (no REST read path)
-        # and the unified app settings (a user sign-in only) stay named skips.
-        if not getattr(auth, "client_secret", None) and getattr(auth, "auth_mode", "app") == "app":
-            if environment in TEAMS_ADMIN_BASE and hasattr(client, "app_token_for"):
-                try:
-                    token = client.app_token_for(TEAMS_ADMIN_SCOPE)
-                except Exception:  # Token errors may contain credentials; keep diagnostics out of the bundle.
-                    token = None
+        # Only the reader app's certificate mints the Teams admin token: GraphClient.app_token_for returns None
+        # without it, certificate_token refuses any other token, and a refused or missing token records
+        # teams_token_unavailable below. With the token the five REST reads run; messaging and app setup policies
+        # (no REST read path) and the unified app settings (a user sign-in only) stay named skips.
+        if environment in TEAMS_ADMIN_BASE and hasattr(client, "app_token_for"):
+            try:
+                token = client.app_token_for(TEAMS_ADMIN_SCOPE)
+            except Exception:  # Token errors may contain credentials; keep diagnostics out of the bundle.
+                token = None
         if not certificate_token(token):
             token = None
         rest = get_adapter("teams_admin_rest") if token else None

@@ -45,5 +45,5 @@ def test_fake_graph_helpers_make_token_client_without_network() -> None:
     client = fake_graph_client()
     response = graph_response(200, {"value": [{"id": "1"}]})
 
-    assert client.auth.access_token == "x"
+    assert client.ensure_token() == "x" and client.auth.certificate is None
     assert response.json()["value"][0]["id"] == "1"

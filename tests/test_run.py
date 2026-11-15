@@ -26,14 +26,12 @@ def _args(**overrides: Any) -> SimpleNamespace:
         "since": None,
         "until": None,
         "collector_preset": "identity-only",
-        "interactive": True,
-        "scopes": None,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 
 
-def test_run_module_plans_collectors_plane_and_interactive_scopes_without_graph(tmp_path: Path) -> None:
+def test_run_module_plans_collectors_and_plane_without_graph(tmp_path: Path) -> None:
     config = CollectorConfig(
         collectors={
             "identity": CollectorDefinition(
@@ -65,7 +63,7 @@ def test_run_module_plans_collectors_plane_and_interactive_scopes_without_graph(
 
     assert plan.selected_collectors == ["identity"]
     assert plan.execution_plane == "export"
-    assert plan.auth_scopes == ["Directory.Read.All"]
+    assert not hasattr(plan, "auth_scopes")
     assert plan.run_config.output_dir == tmp_path
 
 

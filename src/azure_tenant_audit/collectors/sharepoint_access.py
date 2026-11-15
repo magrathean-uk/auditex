@@ -93,8 +93,8 @@ SITE_PERMISSIONS_APP_ONLY_TEXT = (
 
 
 def _app_only(client: Any) -> bool:
-    """True only when the client says it signs in as an application (client credentials)."""
-    return getattr(getattr(client, "auth", None), "auth_mode", None) == "app"
+    """True when the client signs in as the reader app, that is when it carries the certificate credential (DEC-107)."""
+    return getattr(getattr(client, "auth", None), "certificate", None) is not None
 
 
 class SharePointAccessCollector(Collector):

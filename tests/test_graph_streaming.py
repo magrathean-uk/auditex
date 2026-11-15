@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from support import GRAPH_TEST_TOKEN
 
 from azure_tenant_audit.chunk_reader import iter_endpoint_records
 from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter
@@ -19,14 +20,7 @@ from azure_tenant_audit.output import AuditWriter
 
 
 def _client() -> GraphClient:
-    return GraphClient(
-        AuthConfig(
-            tenant_id="tenant-1",
-            client_id="client-1",
-            auth_mode="access_token",
-            access_token="token",
-        )
-    )
+    return GraphClient(AuthConfig(tenant_id="tenant-1", client_id="client-1"), _token=GRAPH_TEST_TOKEN)
 
 
 def test_iter_pages_follows_next_link(monkeypatch) -> None:

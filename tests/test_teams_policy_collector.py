@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from test_teams_admin_rest import Client
 
 from azure_tenant_audit.collectors.teams_policy import (
@@ -302,12 +301,7 @@ class _NoTokenPosts:
         raise AssertionError("no token request is expected")
 
 
-@pytest.mark.parametrize("auth", [
-    {"client_secret": "constructed-secret"},
-    {"auth_mode": "interactive"},
-    {"auth_mode": "access_token", "access_token": "constructed-token"},
-])
-def test_secret_only_and_delegated_runs_record_teams_token_unavailable(monkeypatch, auth) -> None:
+def test_a_run_without_a_certificate_records_teams_token_unavailable(monkeypatch) -> None:
     from azure_tenant_audit.config import AuthConfig
     from azure_tenant_audit.graph import GraphClient
 
@@ -316,7 +310,8 @@ def test_secret_only_and_delegated_runs_record_teams_token_unavailable(monkeypat
 
     monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", forbidden_adapter)
     session = _NoTokenPosts()
-    client = GraphClient(AuthConfig(tenant_id="constructed.example", client_id="constructed-app", **auth), session=session)
+    client = GraphClient(AuthConfig(tenant_id="constructed.example", client_id="constructed-app"),
+                         _token="constructed-token", session=session)
 
     result = TeamsPolicyCollector().run({"client": client, "audit_logger": None})
 

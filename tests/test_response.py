@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from azure_tenant_audit.response import ResponseConfig, run_response
 
 
@@ -22,16 +24,6 @@ class _FakeAdapter:
             "value": [{"id": "trace-1"}],
             "duration_ms": 1.0,
         }
-
-
-def _jwt(payload: dict[str, object]) -> str:
-    import base64
-
-    def _encode(value: dict[str, object]) -> str:
-        raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-    return f"{_encode({'alg': 'none', 'typ': 'JWT'})}.{_encode(payload)}.sig"
 
 
 def test_response_execute_requires_matching_lab_tenant_even_with_allow_flag(tmp_path: Path, monkeypatch) -> None:
@@ -109,120 +101,11 @@ def test_response_execute_runs_when_lab_guard_is_satisfied(tmp_path: Path, monke
     assert validation["valid"] is True
 
 
-def test_response_execute_uses_jwt_saved_auth_context_and_writes_auth_artifact(tmp_path: Path, monkeypatch) -> None:
-    adapter = _FakeAdapter()
-    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
-    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant-saved"})
-    monkeypatch.setattr(
-        "azure_tenant_audit.auth_context.resolve_auth_context",
-        lambda name=None: {
-            "name": name or "customer-token",
-            "auth_type": "imported_token",
-            "tenant_id": "tenant-saved",
-            "token": _jwt(
-                {
-                    "tid": "tenant-saved",
-                    "aud": "https://graph.microsoft.com",
-                    "scp": "Directory.Read.All",
-                    "upn": "reader@contoso.test",
-                    "exp": 1893456000,
-                }
-            ),
-            "token_claims": {
-                "tenant_id": "tenant-saved",
-                "audience": "https://graph.microsoft.com",
-                "delegated_scopes": ["Directory.Read.All"],
-                "app_roles": [],
-                "user_principal_name": "reader@contoso.test",
-                "expires_at_utc": "2030-01-01T00:00:00Z",
-            },
-        },
-    )
-
-    rc = run_response(
-        ResponseConfig(
-            tenant_name="contoso",
-            out_dir=tmp_path,
-            action="message_trace",
-            target="user@example.com",
-            intent="review smoke",
-            auditor_profile="exchange-reader",
-            tenant_id=None,
-            auth_context="customer-token",
-            execute=True,
-            allow_lab_response=True,
-            run_name="response-auth-context",
-        )
-    )
-
-    assert rc == 0
-    run_dir = tmp_path / "contoso-response-auth-context"
-    auth_context = json.loads((run_dir / "auth-context.json").read_text(encoding="utf-8"))
-    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
-
-    assert auth_context["name"] == "customer-token"
-    assert auth_context["tenant_id"] == "tenant-saved"
-    assert auth_context["token_claims"]["delegated_scopes"] == ["Directory.Read.All"]
-    assert manifest["tenant_id"] is None
-    assert manifest["tenant_id_requested"] == "tenant-saved"
-    assert manifest["tenant_identity"]["status"] == "unknown"
-    validation = json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))
-    assert manifest["auth_context_path"] == "auth-context.json"
-    assert manifest["contract_status"] == "valid"
-    assert validation["valid"] is True
-    assert (run_dir / "index" / "evidence.sqlite").exists()
-
-
-def test_response_execute_uses_saved_auth_context_and_writes_auth_artifact(tmp_path: Path, monkeypatch) -> None:
-    adapter = _FakeAdapter()
-    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
-    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant-saved"})
-    monkeypatch.setattr(
-        "azure_tenant_audit.auth_context.resolve_auth_context",
-        lambda name=None: {
-            "name": name or "customer-token",
-            "auth_type": "imported_token",
-            "tenant_id": "tenant-saved",
-            "token": "saved-token",
-            "token_claims": {
-                "tenant_id": "tenant-saved",
-                "audience": "https://graph.microsoft.com",
-                "delegated_scopes": ["Directory.Read.All"],
-                "app_roles": [],
-                "user_principal_name": "reader@contoso.test",
-                "expires_at_utc": "2030-01-01T00:00:00Z",
-            },
-        },
-    )
-
-    rc = run_response(
-        ResponseConfig(
-            tenant_name="contoso",
-            out_dir=tmp_path,
-            auth_context="customer-token",
-            action="message_trace",
-            target="user@example.com",
-            intent="review smoke",
-            auditor_profile="exchange-reader",
-            allow_lab_response=True,
-            run_name="response-auth-context",
-        )
-    )
-
-    assert rc == 0
-
-    run_dir = tmp_path / "contoso-response-auth-context"
-    auth_context = json.loads((run_dir / "auth-context.json").read_text(encoding="utf-8"))
-    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
-
-    assert auth_context["name"] == "customer-token"
-    assert auth_context["auth_type"] == "imported_token"
-    assert auth_context["tenant_id"] == "tenant-saved"
-    assert auth_context["token_claims"]["delegated_scopes"] == ["Directory.Read.All"]
-    assert manifest["auth_context_path"] == "auth-context.json"
-    assert manifest["session_context_path"] == "session-context.json"
-    assert manifest["session_context"]["tenant_id"] == "tenant-saved"
-    assert (run_dir / "session-context.json").exists()
+def test_response_refuses_a_saved_auth_context_before_writing_anything(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Saved auth contexts were removed"):
+        run_response(ResponseConfig(tenant_name="contoso", out_dir=tmp_path, action="message_trace",
+                                    auth_context="customer-token"))
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_response_execute_blocks_command_override_without_explicit_allow(tmp_path: Path, monkeypatch) -> None:

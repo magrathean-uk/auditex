@@ -113,37 +113,23 @@ def test_command_runner_redacts_secret_values_echoed_by_child(flag: str, inline:
 
 
 @pytest.mark.parametrize("secret_source", ["argument", "environment"])
-def test_guided_app_flow_keeps_secret_out_of_console_and_written_files(
+def test_guided_secret_flow_is_refused_and_keeps_secret_out_of_console_and_written_files(
     secret_source: str, tmp_path: Path, monkeypatch, capsys, caplog,
 ) -> None:
     from auditex import guided
     from azure_tenant_audit import cli as engine_cli
-    from azure_tenant_audit.collectors.base import CollectorResult
 
-    # Exercise the real guided flow, engine parser, event log and bundle writer.
-    # Only the machine doctor and tenant transport/collector are replaced.
+    # The real guided flow and engine parser: a client secret, from the command line or the saved environment,
+    # is refused by the engine (DEC-107) and never appears in the console, the log or any written file.
     monkeypatch.setattr(guided, "build_doctor_report", lambda **kwargs: {
         "system": {"os": "test", "machine": "test"}, "readiness": {"core_ready": True},
     })
-    auth_env = tmp_path / "local-auth.env"
-    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(auth_env))
+    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(tmp_path / "local-auth.env"))
     monkeypatch.setenv("AUDITEX_AUTH_CONTEXTS_PATH", str(tmp_path / "auth-contexts.json"))
     monkeypatch.setenv("AUDITEX_M365_HOME", str(tmp_path / "m365-home"))
     if secret_source == "environment":
         monkeypatch.setenv("AZURE_CLIENT_SECRET", CANARY)
-
-    def client(auth, **kwargs):
-        assert auth.auth_mode == "app" and auth.client_secret == CANARY
-        return object()
-
-    class Collector:
-        name = "identity"
-
-        def run(self, context):
-            return CollectorResult(name=self.name, status="ok", item_count=0, message="ok", payload={"value": []})
-
-    monkeypatch.setattr(engine_cli, "GraphClient", client)
-    monkeypatch.setattr(engine_cli, "REGISTRY", {"identity": Collector()})
+    monkeypatch.setattr(engine_cli, "GraphClient", lambda *args, **kwargs: pytest.fail("a secret run never reaches Graph"))
     argv = [
         "--flow", "app-audit", "--tenant-id", "constructed.example", "--tenant-name", "CONSTRUCTED",
         "--client-id", "constructed-app", "--out", str(tmp_path / "runs"), "--run-name", "redaction",
@@ -152,18 +138,16 @@ def test_guided_app_flow_keeps_secret_out_of_console_and_written_files(
     ]
     if secret_source == "argument":
         argv.extend(["--client-secret", CANARY])
-    assert guided.run_guided(guided.build_guided_parser().parse_args(argv)) == 0
+    with pytest.raises(SystemExit) as raised:
+        guided.run_guided(guided.build_guided_parser().parse_args(argv))
+    assert raised.value.code == 2
     output = capsys.readouterr()
+    assert "--client-secret was removed" in output.err and "reader app with a certificate" in output.err
     assert CANARY not in output.out + output.err + caplog.text
-    run_dir = tmp_path / "runs" / "CONSTRUCTED-redaction"
-    manifest = (run_dir / "run-manifest.json").read_text(encoding="utf-8")
-    assert "--client-secret" in manifest and "***redacted***" in manifest
-    assert (run_dir / "audit-log.jsonl").is_file()
-    assert auth_env.is_file()
+    assert not (tmp_path / "runs" / "CONSTRUCTED-redaction").exists()
     for path in tmp_path.rglob("*"):
         if path.is_file():
             assert CANARY.encode() not in path.read_bytes(), path.relative_to(tmp_path)
-
 
 
 def _certificate_run_fixtures(monkeypatch, certificate_material):

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from .presets import resolve_collector_selection
-from .profiles import APP_MODE_ONLY_COLLECTORS
 
 
 def select_collectors(
@@ -15,8 +14,9 @@ def select_collectors(
     explicit_collectors: list[str] | None = None,
     excluded_collectors: list[str] | None = None,
     include_exchange: bool = False,
-    auth_mode: str = "app",
+    auth_mode: str = "app",  # noqa: ARG001 - deprecated and ignored; the product layer passes "app" until M09-T03
 ) -> list[str]:
+    """The run's collectors. Every run is app-only (DEC-107), so the selection never depends on an auth mode."""
     ordered_available = list(available)
     selected = resolve_collector_selection(
         available=ordered_available,
@@ -26,10 +26,6 @@ def select_collectors(
         explicit_collectors=explicit_collectors,
         excluded_collectors=excluded_collectors,
     )
-    if auth_mode != "app" and not explicit_collectors:
-        selected = [name for name in selected if name not in APP_MODE_ONLY_COLLECTORS]
-        if not selected:
-            raise ValueError("No collectors selected for this authentication mode.")
     excluded = set(excluded_collectors or [])
     if include_exchange and "exchange" in ordered_available and "exchange" not in excluded and "exchange" not in selected:
         selected.append("exchange")

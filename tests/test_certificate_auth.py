@@ -318,19 +318,18 @@ def test_credential_never_renders_or_serialises_the_key(certificate_material):
 
 # Mixed credentials -------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("other", [
-    {"client_secret": "constructed-secret"},
-    {"access_token": "constructed-token"},
-    {"auth_mode": "interactive"},
-    {"auth_mode": "azure_cli"},
-    {"client_id": None},
-    {"client_id": " "},
-])
-def test_certificate_refuses_any_other_credential(certificate_material, other):
-    fields = {"tenant_id": TENANT, "client_id": CLIENT_ID, **other}
+@pytest.mark.parametrize("client_id", [None, " ", ""])
+def test_certificate_needs_the_reader_app_client_id(certificate_material, client_id):
     with pytest.raises(ValueError) as caught:
-        AuthConfig(**fields, certificate=credential(certificate_material))
-    assert "constructed" not in str(caught.value)
+        AuthConfig(tenant_id=TENANT, client_id=client_id, certificate=credential(certificate_material))
+    assert "client ID" in str(caught.value)
+
+
+@pytest.mark.parametrize("removed", ["client_secret", "access_token", "auth_mode", "interactive_scopes"])
+def test_auth_config_has_no_other_credential(certificate_material, removed):
+    with pytest.raises(TypeError):
+        AuthConfig(tenant_id=TENANT, client_id=CLIENT_ID, certificate=credential(certificate_material),
+                   **{removed: "constructed"})
 
 
 # Minting through msal ----------------------------------------------------------------------------
@@ -424,48 +423,27 @@ def test_msal_exception_text_never_escapes(certificate_material, monkeypatch):
     assert caught.value.__context__ is None and caught.value.__cause__ is None
 
 
-# Secret-only and delegated runs are unchanged ----------------------------------------------------
+# Without the certificate there is no token -------------------------------------------------------
 
-class _SecretSession:
+class _NoTokenSession:
     def __init__(self) -> None:
         self.posts: list[dict] = []
 
     def post(self, url, data=None, timeout=None):
-        self.posts.append(dict(data))
-
-        class Response:
-            status_code = 200
-
-            @staticmethod
-            def json():
-                return {"access_token": constructed_token(data["scope"], appidacr="1")}
-
-        return Response()
+        self.posts.append(dict(data or {}))
+        raise AssertionError("no token request without the certificate")
 
 
-@pytest.mark.parametrize("scope", [TEAMS_SCOPE, "https://api.interfaces.records.teams.microsoft.com/.default",
-                                   "48AC35B8-9AA8-4D74-927D-1F4A14A0B239"])
-def test_secret_run_never_mints_a_teams_token(scope):
-    session = _SecretSession()
-    client = GraphClient(AuthConfig(tenant_id=TENANT, client_id=CLIENT_ID, client_secret="constructed-secret"),
-                         session=session)
+@pytest.mark.parametrize("scope", [GRAPH_SCOPE, TEAMS_SCOPE, EXCHANGE_SCOPE,
+                                   "https://contoso-admin.sharepoint.com/.default"])
+def test_a_client_without_the_certificate_mints_no_token(scope):
+    session = _NoTokenSession()
+    client = GraphClient(AuthConfig(tenant_id=TENANT, client_id=CLIENT_ID), session=session)
     assert client.app_token_for(scope) is None
-    assert session.posts == []
-    # The secret path for other resources is unchanged.
-    assert client.app_token_for(EXCHANGE_SCOPE)
-    assert [post["scope"] for post in session.posts] == [EXCHANGE_SCOPE]
-    assert "client_assertion" not in session.posts[0]
-
-
-@pytest.mark.parametrize("auth", [
-    {"auth_mode": "interactive"}, {"auth_mode": "access_token", "access_token": "constructed"},
-    {"auth_mode": "azure_cli", "access_token": "constructed"},
-])
-def test_delegated_and_token_runs_get_no_app_token(auth):
-    session = _SecretSession()
-    client = GraphClient(AuthConfig(tenant_id=TENANT, client_id=CLIENT_ID, **auth), session=session)
-    assert client.app_token_for(TEAMS_SCOPE) is None
-    assert client.app_token_for(EXCHANGE_SCOPE) is None
+    with pytest.raises(GraphError) as caught:
+        client.ensure_token()
+    assert caught.value.error_code == "certificate_required"
+    assert "reader app with a certificate" in str(caught.value)
     assert session.posts == []
 
 
@@ -487,13 +465,4 @@ def test_the_sharepoint_admin_token_is_minted_from_the_certificate(certificate_m
     token = client.app_token_for(SHAREPOINT_ADMIN_ORIGIN + "/.default")
     assert [request["scope"] for request in entra.token_requests] == [SHAREPOINT_ADMIN_ORIGIN + "/.default"]
     assert entra.token_requests[0]["grant_type"] == "client_credentials"
-    assert token_fits(token, SHAREPOINT_ADMIN_ORIGIN, delegated=False)
-
-
-@pytest.mark.parametrize("scope", [SHAREPOINT_ADMIN_ORIGIN + "/.default", "00000003-0000-0ff1-ce00-000000000000/.default"])
-def test_secret_run_never_mints_a_sharepoint_token(scope):
-    session = _SecretSession()
-    client = GraphClient(AuthConfig(tenant_id=TENANT, client_id=CLIENT_ID, client_secret="constructed-secret"),
-                         session=session)
-    assert client.app_token_for(scope) is None
-    assert session.posts == []
+    assert token_fits(token, SHAREPOINT_ADMIN_ORIGIN)

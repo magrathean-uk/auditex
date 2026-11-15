@@ -127,7 +127,6 @@ _UNRESOLVED_RUNNER_INPUTS: dict[tuple[str, str], str] = {
     ("src/azure_tenant_audit/adapters/m365dsc.py", "M365DSCAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "PowerShellGraphAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "_run_bounded"): _ADAPTER_ENTRY,
-    ("src/azure_tenant_audit/auth_runtime.py", "acquire_azure_cli_access_token"): _RUNTIME_ARGV,
     ("src/azure_tenant_audit/collectors/exchange_policy.py", "ExchangePolicyCollector.run"): _LITERAL_FSTRINGS,
     ("src/azure_tenant_audit/collectors/exchange_policy.py", "_run_anti_phish"): _LITERAL_FSTRINGS,
     ("src/azure_tenant_audit/collectors/purview.py", "PurviewCollector._run_command"): (

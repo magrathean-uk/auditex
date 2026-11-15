@@ -159,7 +159,7 @@ def test_audit_graph_client_get_all_accepts_full_urls():
     sys.path.insert(0, str(ROOT))
     from azure_tenant_audit import config, graph  # type: ignore
 
-    client = graph.GraphClient(config.AuthConfig(tenant_id="tenant", client_id=None, access_token="token"))
+    client = graph.GraphClient(config.AuthConfig(tenant_id="tenant", client_id=None), _token="token")
     calls = []
 
     def fake_get_json(path, params=None, full_url=False):

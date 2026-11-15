@@ -161,15 +161,10 @@ _POWER_PLATFORM_CLIENT = "src/azure_tenant_audit/power_platform.py"
 
 # Frozen non-GET allow-list: transport-inventory section E (M01-T02, v2 DEC-006). Do not widen it
 # without a new inventory row and decision; a site outside the eight transport classes needs sol.
+# DEC-108 (D6) removed the entries only the removed sign-in ways used: the client-secret token POSTs
+# (GraphClient.app_token_for and GraphClient._app_token) and the msal interactive and silent exchanges
+# (GraphClient._interactive_token). Every token now comes from the certificate exchange below.
 ALLOW_LIST: tuple[Allowed, ...] = (
-    Allowed(_GRAPH, "GraphClient.app_token_for", "self.session.post", "POST", 1, 2, "A1",
-            "Entra client-credentials token for the Power BI, Power Platform, Exchange Online and Teams admin scopes"),
-    Allowed(_GRAPH, "GraphClient._app_token", "self.session.post", "POST", 1, 2, "A2",
-            "Entra client-credentials token for Graph"),
-    Allowed(_GRAPH, "GraphClient._interactive_token", "app.acquire_token_silent", TOKEN_POST, 1, 2, "A3",
-            "msal silent refresh of the interactive Graph token"),
-    Allowed(_GRAPH, "GraphClient._interactive_token", "app.acquire_token_interactive", TOKEN_POST, 1, 2, "A3",
-            "msal interactive sign-in token exchange"),
     Allowed(_GRAPH, "GraphClient._certificate_exchange", "app.acquire_token_for_client", TOKEN_POST, 1, 2, "A1, A2",
             "msal client-credentials token from the certificate credential for Graph and the resource scopes "
             "(Exchange Online, Teams admin, Power BI, Power Platform, SharePoint admin); assertion only to a pinned "

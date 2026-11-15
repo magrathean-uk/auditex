@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
 
 from auditex.gate import gate_findings
 from azure_tenant_audit import cli
@@ -96,11 +97,12 @@ def test_live_exit_and_partial_workload_notice(tmp_path: Path, monkeypatch, caps
             return CollectorResult(name=self.name, status="partial" if failed else "ok", item_count=0,
                                    message="partial" if failed else "ok", payload={}, coverage=[row])
 
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr(cli, "GraphClient", lambda *args, **kwargs: object())
     monkeypatch.setattr(cli, "REGISTRY", {name: Collector(name) for name in OPERATIONS})
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
     args = cli.build_parser().parse_args([
-        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--tenant-name", "fixture", "--tenant-id", "constructed", "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
         "--collectors", ",".join(OPERATIONS), "--out", str(tmp_path), "--run-name", "live",
     ])
 
@@ -126,11 +128,12 @@ def test_resume_notice_names_an_unselected_incomplete_workload(tmp_path: Path, m
     checkpoint.write_text(json.dumps({"run_id": "resume", "collectors": {
         "dns_posture": {"status": "partial", "message": CANARY, "item_count": 0},
     }}))
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr(cli, "GraphClient", lambda *args, **kwargs: object())
     monkeypatch.setattr(cli, "REGISTRY", {"identity": Healthy()})
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
     args = cli.build_parser().parse_args([
-        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--tenant-name", "fixture", "--tenant-id", "constructed", "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
         "--collectors", "identity", "--out", str(tmp_path), "--resume-from", str(run_dir),
     ])
 
@@ -147,6 +150,7 @@ def test_live_notice_includes_incomplete_normalized_workload_evidence(tmp_path: 
         def run(self, context):
             return CollectorResult(name=self.name, status="ok", item_count=0, message="ok", payload={})
 
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr(cli, "GraphClient", lambda *args, **kwargs: object())
     monkeypatch.setattr(cli, "REGISTRY", {"dns_posture": Healthy()})
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
@@ -154,7 +158,7 @@ def test_live_notice_includes_incomplete_normalized_workload_evidence(tmp_path: 
         "collector": "dns_posture", "status": "partial", "error_class": "incomplete_evidence", "error": CANARY,
     }])
     args = cli.build_parser().parse_args([
-        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--tenant-name", "fixture", "--tenant-id", "constructed", "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
         "--collectors", "dns_posture", "--out", str(tmp_path), "--run-name", "normalized",
     ])
 
@@ -176,10 +180,11 @@ def test_resume_after_workload_recovers_drops_the_old_notice(tmp_path: Path, mon
             return CollectorResult(name=self.name, status="partial" if failed else "ok", item_count=0,
                                    message="partial" if failed else "ok", payload={})
 
+    use_fake_certificate(monkeypatch)
     monkeypatch.setattr(cli, "GraphClient", lambda *args, **kwargs: object())
     monkeypatch.setattr(cli, "REGISTRY", {"exchange_policy": Recovers()})
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
-    argv = ["--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+    argv = ["--tenant-name", "fixture", "--tenant-id", "constructed", "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
             "--collectors", "exchange_policy", "--out", str(tmp_path), "--run-name", "recovery"]
     run_dir = tmp_path / "fixture-recovery"
 

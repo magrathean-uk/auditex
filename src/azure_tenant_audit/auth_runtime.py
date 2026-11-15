@@ -1,142 +1,42 @@
 from __future__ import annotations
 
-import json
-import subprocess
-import time
-from collections.abc import Callable
 from typing import Any
 
 from . import auth_context
-from .graph import GraphClient
 from .secret_hygiene import (
     CERTIFICATE_ARG_FLAGS,
     redact_argv,
-    redact_output,
     sanitize_token_claims,
 )
 
+# Every entry stays, removed flags included (DEC-108 D5): an old command line or a mistyped flag is still redacted.
 SENSITIVE_CLI_ARGS = {
     "--client-secret", "--access-token", "--sensitive-users", "--partner-domains",
     "--env", "--break-glass-accounts", *CERTIFICATE_ARG_FLAGS,
 }
 
+# Engine flags of the removed Microsoft 365 sign-in ways (DEC-107). They are refused by name with the certificate
+# way, before argparse could echo a value; the two that carried a secret stay in SENSITIVE_CLI_ARGS for redaction.
+REMOVED_AUTH_FLAGS = (
+    "--client-secret", "--access-token", "--auth-context", "--use-azure-cli-token",
+    "--interactive", "--scopes", "--browser-command",
+)
+
+
+def removed_auth_flag(argv: list[str]) -> str | None:
+    """The first removed sign-in flag in ``argv`` (``--flag``, ``--flag=value`` or one malformed token), else None."""
+    for item in argv:
+        if item == "--":
+            break
+        parts = item.split(maxsplit=1)
+        name = parts[0].partition("=")[0] if parts else ""
+        if name in REMOVED_AUTH_FLAGS:
+            return name
+    return None
+
 
 def scrub_command_line(command_line: list[str]) -> list[str]:
     return redact_argv(command_line, sensitive_flags=SENSITIVE_CLI_ARGS)
-
-
-def acquire_azure_cli_access_token(
-    tenant_id: str | None,
-    log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
-) -> str:
-    command = [
-        "az",
-        "account",
-        "get-access-token",
-        "--resource",
-        "https://graph.microsoft.com",
-        "--output",
-        "json",
-    ]
-    if tenant_id:
-        command.extend(["--tenant", tenant_id])
-
-    start = time.time()
-    if log_event:
-        log_event(
-            "auth.cli.token.requested",
-            "Requesting Microsoft Graph token from Azure CLI",
-            {"tenant_id": tenant_id or "organizations", "resource": "https://graph.microsoft.com"},
-        )
-    try:
-        completed = subprocess.run(command, check=False, text=True, capture_output=True, timeout=120)
-    except FileNotFoundError as exc:
-        raise RuntimeError("Azure CLI is not available. Install azure-cli and sign in with 'az login'.") from exc
-
-    duration_ms = round((time.time() - start) * 1000, 2)
-    if completed.returncode != 0:
-        message = (completed.stderr or completed.stdout or "").strip() or "Azure CLI token command failed."
-        if "Please run 'az login'" in message or "Please run: az login" in message:
-            if log_event:
-                log_event(
-                    "auth.cli.token.failed",
-                    "Azure CLI token acquisition failed because login is required.",
-                    {"tenant_id": tenant_id or "organizations", "duration_ms": duration_ms},
-                )
-            raise RuntimeError("Azure CLI is not signed in. Run 'az login' in a browser first, then retry.") from None
-        if log_event:
-            log_event(
-                "auth.cli.token.failed",
-                "Azure CLI token acquisition failed.",
-                {"tenant_id": tenant_id or "organizations", "duration_ms": duration_ms, "error": redact_output(message)},
-            )
-        raise RuntimeError(f"Azure CLI token fetch failed: {redact_output(message)}")
-
-    try:
-        payload = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        if log_event:
-            log_event(
-                "auth.cli.token.failed",
-                "Azure CLI token response was not valid JSON.",
-                {"tenant_id": tenant_id or "organizations", "duration_ms": duration_ms},
-            )
-        raise RuntimeError("Azure CLI returned non-JSON token response.") from exc
-
-    token = payload.get("accessToken") or payload.get("access_token")
-    if not token:
-        if log_event:
-            log_event(
-                "auth.cli.token.failed",
-                "Azure CLI token response missing access token field.",
-                {"tenant_id": tenant_id or "organizations", "duration_ms": duration_ms},
-            )
-        raise RuntimeError("Azure CLI token response was missing accessToken.")
-
-    if log_event:
-        log_event(
-            "auth.cli.token.acquired",
-            "Azure CLI token acquired.",
-            {"tenant_id": tenant_id or "organizations", "duration_ms": duration_ms},
-        )
-    return token
-
-
-def capture_signed_in_context(
-    client: GraphClient,
-    log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
-) -> dict[str, Any]:
-    try:
-        me = client.get_json("/me")
-        roles = client.get_all(
-            "/me/memberOf/microsoft.graph.directoryRole",
-            params={"$select": "id,displayName,roleTemplateId"},
-        )
-    except Exception as exc:  # noqa: BLE001
-        if log_event:
-            log_event(
-                "auth.session.unavailable",
-                "Unable to capture signed-in identity and directory roles.",
-                {"error": str(exc)},
-            )
-        return {}
-
-    role_names = sorted(
-        {
-            role.get("displayName")
-            for role in roles
-            if isinstance(role, dict) and role.get("displayName")
-        }
-    )
-    context = {
-        "display_name": me.get("displayName"),
-        "user_principal_name": me.get("userPrincipalName"),
-        "object_id": me.get("id"),
-        "roles": role_names,
-    }
-    if log_event:
-        log_event("auth.session.context", "Captured signed-in identity and directory roles.", context)
-    return context
 
 
 def inspect_access_token(token: str) -> dict[str, Any]:
@@ -148,24 +48,12 @@ def build_auth_context_payload(
     auth_mode: str,
     tenant_id: str,
     token_claims: dict[str, Any] | None = None,
-    session_context: dict[str, Any] | None = None,
-    saved_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
+    """normalized/auth_context.json for an app-only run: no signed-in user, so no session context or delegated roles."""
+    return {
         "auth_mode": auth_mode,
         "tenant_id": tenant_id,
         "token_claims": sanitize_token_claims(token_claims),
-        "session_context": session_context or {},
+        "session_context": {},
+        "delegated_roles": [],
     }
-    if saved_context:
-        payload["saved_auth_context"] = {
-            "name": saved_context.get("name"),
-            "auth_type": saved_context.get("auth_type"),
-            "tenant_id": saved_context.get("tenant_id"),
-        }
-        delegated_roles = saved_context.get("delegated_roles") or []
-    else:
-        delegated_roles = []
-    session_roles = (session_context or {}).get("roles") or []
-    payload["delegated_roles"] = list(dict.fromkeys([*delegated_roles, *session_roles]))
-    return payload
