@@ -22,7 +22,7 @@ The public audit surface does not write to production tenants. It also does not 
 
 - Microsoft 365 collection through the `auditex` and `azure-tenant-audit` CLIs.
 - Google Workspace collection through the optional `google` dependencies.
-- Guided setup and audit flows, capability probes, local auth-context management, and diagnostics.
+- Guided setup and audit flows, capability probes, and diagnostics. Microsoft 365 is audited one way: as a reader app that signs in with a certificate.
 - Offline fixtures for contract checks and demonstrations.
 - Report rendering, CSV/JSON and other exporters, comparison and drift gates, customer handoff packs, and a local MCP server.
 - Offline imports and control-by-control review of Maester, ScubaGear and Monkey365 JSON assessments, with source hashes and strict tenant identity checks.
@@ -81,15 +81,10 @@ Guided operator flow:
 
 ```bash
 auditex guided-run
-auditex guided-run --flow gr-audit --include-exchange
 auditex guided-run --flow app-audit
 ```
 
-The `ga-setup-app` flow is a separate setup operation. Run it only when you are authorized to create or configure the app registration and its permissions:
-
-```bash
-auditex guided-run --flow ga-setup-app
-```
+The guided flow audits as the reader app and creates nothing in the tenant. The tenant administrator sets the app up once; every permission and setting is in [Reader app permissions](docs/guides/reader-app-permissions.md).
 
 Offline runs are safe for local checking:
 
@@ -99,16 +94,16 @@ auditex google run --offline --sample examples/google_workspace_sample.json \
   --domain example.com --tenant-name demo --out outputs/google
 ```
 
-For an authorized live Microsoft 365 audit with an existing Azure CLI sign-in, authenticate first and use the resulting delegated read-only context:
+For an authorized live Microsoft 365 audit, use the reader app with its certificate. The key file must be readable only by you; an encrypted key takes `--certificate-password-file` or `--certificate-password-env`, never the password itself:
 
 ```bash
-make login TENANT=contoso.onmicrosoft.com
 auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com \
-  --use-azure-cli-token \
+  --client-id <app-id> --certificate-path ~/audit-keys/auditex-reader.pem \
+  --certificate-thumbprint <sha1-thumbprint> \
   --auditor-profile global-reader --out outputs/live
 ```
 
-Use `auditex probe live` after auth or scope changes to identify capability blockers before a full run. For app-based runs, use an already authorized read-only app context and follow the generated setup guide.
+Use `auditex probe live` after permission changes to identify capability blockers before a full run, and follow the generated setup guide.
 
 Google Workspace supports domain-wide delegation and OAuth. The full Google path requires the optional dependencies and provider credentials kept outside the repository:
 
@@ -159,7 +154,7 @@ Run the local MCP server after installing the `mcp` extra:
 auditex-mcp
 ```
 
-The MCP registry exposes inventory and contract inspection, offline validation, Microsoft 365 and Google Workspace audit/probe operations, run summaries and comparisons, reports and proof tables, customer-pack verification, exports, notifications, rules, auth status, and setup guides. Audit operations retain the same read-only and no-content-read boundary as the CLI. No MCP tool takes a bearer token or client secret; app credentials come from the server's environment. Every path argument is confined to `AUDITEX_MCP_ROOT` (default: the server's working directory).
+The MCP registry exposes inventory and contract inspection, offline validation, Microsoft 365 and Google Workspace audit/probe operations, run summaries and comparisons, reports and proof tables, customer-pack verification, exports, notifications, rules, and setup guides. Audit operations retain the same read-only and no-content-read boundary as the CLI. No MCP tool takes a bearer token, client secret or auth context; the Microsoft 365 tools take the reader app's client ID, certificate thumbprint and confined paths to its key and password file. Every path argument is confined to `AUDITEX_MCP_ROOT` (default: the server's working directory).
 
 ## Documentation
 

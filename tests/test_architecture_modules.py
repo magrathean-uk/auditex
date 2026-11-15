@@ -144,24 +144,14 @@ contracts._validate_finding_collectors([
 ], issues)
 assert [issue["code"] for issue in issues] == ["unknown_finding_collector"]
 
-# Use only a synthetic context in pytest's temporary directory.
-store_path = Path(sys.argv[1]) / "contexts.json"
-os.environ["AUDITEX_AUTH_CONTEXTS_PATH"] = str(store_path)
-claims = {"tenant_id": "fixture", "audience": "https://graph.microsoft.com",
-          "delegated_scopes": ["Directory.Read.All"], "expires_at_utc": "2099-01-01T00:00:00Z"}
-context = {"name": "fixture", "tenant_id": "fixture", "token_file": "fixture.token", "token_claims": claims}
-store_path.write_text(json.dumps({"active_context": "fixture", "contexts": {"fixture": context}}))
-token_path = auth_context.default_token_path("fixture", "fixture.token")
+# Token claims are read from a synthetic token only (no saved auth context exists since M09).
 payload = base64.urlsafe_b64encode(json.dumps({"tid": "fixture"}).encode()).decode().rstrip("=")
 token = ".".join(("e30", payload, "sig"))
-token_path.write_text(token + "\\n")
-assert auth_context.resolve_auth_context()["token"] == token
 assert auth_runtime.inspect_access_token(token)["tenant_id"] == "fixture"
 client = GraphClient.__new__(GraphClient)
 client._token_claims = None
 client.ensure_token = lambda: token
 assert client.token_claims()["tenant_id"] == "fixture"
-assert response._resolve_saved_auth_context("fixture")["token"] == token
 try:
     main(["--help"])
 except SystemExit as exc:

@@ -25,22 +25,23 @@ auditex setup-guide google --collector-preset everything --format md
 
 Review the generated plan with the tenant administrator. Scope names may carry broader rights than the read calls Auditex makes; check scope risk before granting access. Keep app credentials, service-account files, and token caches in an ignored local location such as `.secrets/`.
 
-For delegated Microsoft 365 access:
+Microsoft 365 is audited as the reader app with a certificate; its setup is in [Reader app permissions](../guides/reader-app-permissions.md). Probe it first:
 
 ```bash
-az login --allow-no-subscriptions --tenant contoso.onmicrosoft.com
-auditex probe live --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --mode delegated --use-azure-cli-token
+auditex probe live --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --mode app \
+  --client-id <app-id> --certificate-path ~/audit-keys/auditex-reader.pem --certificate-thumbprint <sha1-thumbprint>
 ```
 
-`make login TENANT=contoso.onmicrosoft.com` is an alternative Azure CLI login helper that selects Firefox. Azure CLI keeps its sign-in state in `AZURE_CONFIG_DIR` (default `~/.azure`), which the scripts leave untouched; set it in your shell to keep that state elsewhere. The Microsoft 365 CLI (`m365`) has no such setting, so Auditex runs it, in the shell scripts and in the Python commands alike, with `HOME` pointing at a private folder: `AUDITEX_M365_HOME` when set (an empty value keeps the `m365` default), otherwise `$XDG_DATA_HOME/auditex/m365` when `XDG_DATA_HOME` is set, otherwise no change. Run `m365` by hand with the same `HOME` to see that sign-in. Review the probe's `live-readiness.json` and `audit-plan.json` before collection. Missing scopes, roles, licenses, services, local tools, tenant policy, runtime errors, and unverified surfaces are separate blockers.
+Review the probe's `live-readiness.json` and `audit-plan.json` before collection. Missing scopes, roles, licenses, services, local tools, tenant policy, runtime errors, and unverified surfaces are separate blockers.
 
 ## Run an audit
 
 ```bash
-auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --auditor-profile global-reader --plane full --use-azure-cli-token --out outputs/live
+auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --auditor-profile global-reader --plane full \
+  --client-id <app-id> --certificate-path ~/audit-keys/auditex-reader.pem --certificate-thumbprint <sha1-thumbprint> --out outputs/live
 ```
 
-`auditex guided-run` provides the interactive route. `--flow gr-audit` uses delegated access and `--flow app-audit` uses saved app credentials. `--flow ga-setup-app` performs app setup and requires explicit authority to create or change the customer-local registration; it is not an audit-only step.
+`auditex guided-run` provides the interactive route: `--flow app-audit` (the default for `--flow auto`) audits as the reader app with its certificate. It creates nothing in the tenant; the app is set up by the tenant administrator.
 
 Google Workspace commands and credential choices are in the [product manual](../guides/product-manual.md#google-workspace-audit-flow). Rerun a probe after changing roles or scopes.
 

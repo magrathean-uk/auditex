@@ -65,13 +65,6 @@ SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
         "skills under `skills/`",
     ),
     ShippedContentArea(
-        "skills_delegated_auth",
-        "skills/delegated-auth",
-        "auditex/skills/delegated-auth",
-        ("skills/delegated-auth/SKILL.md",),
-        "skills under `skills/`",
-    ),
-    ShippedContentArea(
         "skills_evidence_pack",
         "skills/evidence-pack",
         "auditex/skills/evidence-pack",

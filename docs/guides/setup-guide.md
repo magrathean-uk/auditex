@@ -4,40 +4,28 @@ Tenant administrators: every permission, role and setting the reader app needs i
 
 ## Default Exchange and public DNS collection
 
-App-mode runs with the `auto` or `global-reader` profile select `exchange_policy`
+Runs with the `auto` or `global-reader` profile select `exchange_policy`
 and `dns_posture` by default, as does the `full` preset. `app-readonly-full` also
-includes both. Profile defaults and presets omit both in interactive, delegated and access-token
-modes; DNS needs no Exchange session but follows this app-mode default boundary.
-Only an explicit `--collectors` list retains these collectors outside app mode.
-In delegated mode `--include-exchange` selects the Microsoft 365 CLI
-`exchange` collector; it does not select `exchange_policy`. The guided `gr-audit`
-flow with Exchange instead passes `exchange_policy` explicitly and reads it over the
-run's one sign-in (see Sign-ins per run below).
-`config-only` and `power-platform` retain their existing scopes. Power Platform
-and Power BI remain opt-in.
+includes both. Only an explicit `--collectors` list or the `config-only` and
+`power-platform` presets change that. Power Platform and Power BI remain opt-in.
 
-A default app-mode run opens an Exchange Online PowerShell session for read-only
-`Get-*` policy reads. A delegated run with one sign-in (`--interactive --client-id`)
-opens it with an Exchange token minted silently from that sign-in, given the delegated
-`Exchange.Manage` permission on the sign-in app; Azure CLI and access-token runs cannot
-open it, and each fresh PowerShell process cannot inherit an operator's session.
-For app access, install `pwsh` and `ExchangeOnlineManagement`, grant tenant admin
-consent to the **Office 365 Exchange Online** application permission
-`Exchange.ManageAsApp`, and assign **Global Reader only** to the service principal.
-This is a write-capable-named permission used read-only. Its blast radius is
+A default run opens an Exchange Online PowerShell session for read-only
+`Get-*` policy reads, with an Exchange token minted silently from the reader app's
+certificate. Each fresh PowerShell process cannot inherit an operator's session.
+Install `pwsh` and `ExchangeOnlineManagement`; the app's `Exchange.ManageAsApp`
+permission and the Global Reader role are in [Reader app permissions](reader-app-permissions.md).
+`Exchange.ManageAsApp` is a write-capable-named permission used read-only. Its blast radius is
 tenant-wide Exchange policy visibility under Global Reader: read-only Get-* cmdlets
 only; no mutating cmdlet is issued. A write-capable scope does not authorise tenant
 writes. No additional Graph permission is introduced by these defaults.
 
-Alert and DLP policies are read in a Security & Compliance (IPPS) session, which
-Auditex opens only in app-only **certificate** runs: a token minted silently from the
-certificate for Microsoft Exchange Online Protection is passed to
+Alert and DLP policies are read in a Security & Compliance (IPPS) session: a token
+minted silently from the certificate for Microsoft Exchange Online Protection is passed to
 `Connect-IPPSSession -AccessToken`. It needs `Exchange.ManageAsApp` on **Microsoft
 Exchange Online Protection** (a second admin consent) with Global Reader, and
 `ExchangeOnlineManagement` 3.8.0 or later; only read-only `Get-*` reads are issued
 (see the [admin permission guide](admin-permission-guide.md#security--compliance-in-app-only-certificate-runs)).
-A client-secret, delegated or access-token run opens no such session, and a connect
-that fails stops the reads that follow: alert and DLP policies are then **not
+A connect that fails stops the reads that follow: alert and DLP policies are then **not
 assessed**, with reason `ipps_session_not_opened`. A session without the DLP cmdlets
 skips the DLP reads as `dlp_licence_not_detected`. These section skips leave the
 collector and run **ok** when other reads succeed; the gate passes with a named
@@ -66,19 +54,10 @@ Add the usual tenant/auth/output arguments. These flags also work on
 `azure-tenant-audit` and `auditex setup-guide m365`. An explicit allowlist such as
 `--collectors identity,conditional_access` replaces defaults;
 `--collector-preset config-only` omits both. Exclusions apply after profile, preset or explicit selection.
-In the guided `gr-audit` flow, answering No to Exchange excludes both Exchange collectors.
-Answering Yes reads `exchange_policy` over the run's one sign-in in delegated mode; it needs
-the sign-in app id (saved by `ga-setup-app` or passed with `--client-id`) and no longer opens
-a Microsoft 365 CLI browser sign-in.
-Guided `app-audit` keeps both default policy collectors and honours an explicitly
-named or profile-selected Microsoft 365 CLI `exchange` collector. Outside a
-`gr-audit` No answer, guided flows add no Exchange exclusion. Generated setup plans derive
-the delegated selection from the app selection; each command has its own permissions, tooling
-and collection notices, including app requirements in the default delegated guide. An empty
-delegated selection is omitted from an app guide with a note.
-If an explicit Exchange policy or DNS posture name is removed from a generated
-delegated command, its setup steps explain the app-mode-only restriction.
-Generated app and delegated probes also retain the probe-only `windows365` surface.
+The guided `app-audit` flow keeps both default policy collectors and honours an explicitly
+named or profile-selected `exchange` collector. Guided flows add no Exchange exclusion of their own.
+Generated setup plans carry the permissions, tooling and collection notices of their command.
+Generated probes retain the probe-only `windows365` surface.
 
 Real Exchange/DNS failures leave dependent policies **not assessed**, with a clear
 reason. DNS lookup failures mean unknown records, never absent records. If these
@@ -88,11 +67,11 @@ failures retain their non-zero exit behaviour. Missing tooling, consent and real
 Exchange session failures retain the tooling or app-consent remediation.
 The CLI writes a collector-only notice to stderr and records it as `partial_workload_notice` in the summary.
 
-App-mode `auditex probe live --surface all` includes Exchange policy and DNS posture.
+`auditex probe live --surface all` includes Exchange policy and DNS posture.
 The standalone probe prints the Exchange session and Cloudflare resolver notices
 before its reads; use `--surface` to limit probe surfaces.
 `--probe-first` defers these two collectors to the collection phase, so it does not
-repeat their PowerShell sessions or public lookups. A standalone app probe performs
+repeat their PowerShell sessions or public lookups. A standalone probe performs
 the reads and a subsequent run repeats them. Added runtime depends on tenant size,
 PowerShell connection time and public DNS/HTTPS latency; it has not been measured
 in this offline validation. Allow time for a session per Exchange command and DNS
@@ -161,30 +140,25 @@ Treat OAuth output as partial if domain-wide admin surfaces are blocked. OAuth c
 
 ## Microsoft 365
 
+Auditex audits Microsoft 365 one way: through the reader app, an app registration in the customer's own tenant that
+signs in with a certificate. It never uses a client secret, a delegated permission or a sign-in window, so a run needs
+no interactive sign-in. Everything the tenant administrator has to grant is in
+[Reader app permissions](reader-app-permissions.md).
+
 Preferred first pass:
 
 ```bash
-auditex setup-guide m365 --mode delegated --auditor-profile global-reader --collector-preset full --tenant-id contoso.onmicrosoft.com
+auditex setup-guide m365 --auditor-profile global-reader --collector-preset full --tenant-id contoso.onmicrosoft.com
 ```
 
 Admin flow:
 
-1. Assign the operator the read-only role shown in the guide.
-2. Sign in with Azure CLI once (`az login`), or use the one-sign-in route below.
+1. The tenant administrator follows [Reader app permissions](reader-app-permissions.md) and hands over the application (client) ID, the tenant ID and the certificate thumbprint.
+2. The operator keeps the certificate's private key (PEM or PFX) in a file only they can read (mode `600`). An encrypted key takes its password from a file or an environment variable, never from the command line.
 3. Run the generated probe command.
 4. Review `live-readiness.json`, `audit-plan.json`, and `diagnostics.json`.
 5. Add only the missing read permission or role justified by the probe.
 6. Rerun probe before full collection.
-
-App-only repeat runs:
-
-```bash
-auditex setup-guide m365 --mode app --auditor-profile app-readonly-full --collector-preset full --tenant-id contoso.onmicrosoft.com
-```
-
-The app registration must be customer-owned. Add only the listed Microsoft Graph application permissions and grant tenant-wide admin consent.
-
-App-only runs authenticate with a client secret or a certificate, never both. The Teams admin policies (`teams_policy`, selected by the `global-reader` profile and the `full` preset) need the certificate: the Teams admin API refuses a secret-minted token, so a secret-only run records `teams_token_unavailable` for them. Upload the certificate's public part to the app registration, keep its private key (PEM or PFX) in a file only you can read (mode `600`) and pass the SHA-1 thumbprint the portal shows. An encrypted key takes its password from a file or an environment variable, never from the command line:
 
 ```bash
 auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --client-id <app-id> \
@@ -192,54 +166,23 @@ auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --client-i
   --certificate-password-file ~/audit-keys/auditex-reader.pass --auditor-profile global-reader --collector-preset full
 ```
 
-### Sign-ins per run (one sign-in rule)
+`auditex guided-run --flow app-audit` takes the same four options. `--mode app` on `auditex setup-guide m365` is accepted
+for old scripts and changes nothing. The Teams admin policies (`teams_policy`, selected by the `global-reader` profile and
+the `full` preset) need the certificate: the Teams admin API refuses any other token. A saved `AZURE_CLIENT_SECRET` is
+ignored with a warning.
 
-Every service token a run uses comes from one credential or one sign-in: an audit run asks for at
-most one interactive sign-in, and none in app-only mode. Auditex never opens a second sign-in window during a
-run: when the one sign-in can no longer be refreshed silently the run stops with an error, and a service the
-sign-in cannot serve silently (no consent for it) is recorded as a named coverage gap.
+### Sign-ins
 
-| Run mode | Interactive sign-ins per run | Service tokens |
-|---|---|---|
-| App-only, certificate (`--certificate-path`, `--certificate-thumbprint`) | 0 | All minted silently from the certificate: Microsoft Graph, Exchange Online, Security & Compliance (`exchange_policy` alert and DLP reads), the Teams admin API, Power BI and Power Platform |
-| App-only, client secret (`--client-secret`) | 0 | Minted silently from the secret: Microsoft Graph, Exchange Online, Power BI and Power Platform; the Teams admin policies (`teams_token_unavailable`) and the Security & Compliance reads (`ipps_session_not_opened`) are skipped, never prompted |
-| Guided `app-audit` with Exchange | 0 | As app-only; the Microsoft 365 CLI signs in with the client secret, without a browser |
-| Delegated, one sign-in (`--interactive --client-id <sign-in app>`, and guided `gr-audit` when the sign-in app id is saved or passed) | 1 | Microsoft Graph from the sign-in; Exchange Online (`exchange_policy`) minted silently from the same sign-in. Teams admin, Power BI, Power Platform and Security & Compliance are not collected in delegated mode and never prompt |
-| Delegated, Azure CLI token (`--use-azure-cli-token`, and guided `gr-audit` without a sign-in app id and without Exchange) | 0 inside Auditex | Microsoft Graph from the operator's existing Azure CLI sign-in (one `az login` made before the run and reused until it expires). Auditex never runs `az login` during a run |
-| Access token (`--access-token`) | 0 | Microsoft Graph only |
+- Set-up (once): one administrator sign-in to the Microsoft Entra admin centre covers the app registration, the permissions and admin consent, the role assignment and the certificate upload. Creating the certificate and its key needs no sign-in. Power BI and Power Platform need one sign-in each to their admin portals (see [Reader app permissions](reader-app-permissions.md)).
+- Audit (every run): no interactive sign-in. Every service token (Microsoft Graph, Exchange Online, Security & Compliance, the Teams admin API and the optional Power BI, Power Platform and SharePoint admin resources) is minted silently from the certificate; a service the app has no consent or setting for is recorded as a named coverage gap, never prompted for.
 
-One-time set-up steps, each counted on its own:
-
-| Set-up step | Sign-ins (once) |
-|---|---|
-| App registration, permissions, admin consent, role assignment and certificate upload in the Microsoft Entra admin centre | 1 administrator sign-in covers all of them; creating the certificate and its key needs none |
-| Delegated Exchange permission on the sign-in app (`Exchange.Manage`, admin consent) | 0 when added in the same Entra admin centre session, otherwise 1 |
-| Guided `ga-setup-app` (saves the Microsoft 365 CLI app as the sign-in app) | At most 3 browser sign-ins: `az login` (skipped when Azure CLI is already signed in to the tenant), the Microsoft 365 CLI setup's own sign-in (it signs in as Azure CLI to create the app) and the `m365 login` check (skipped when the CLI is already signed in) |
-| Power BI read-only admin API setting (Fabric admin portal) | 1 sign-in to the Fabric admin portal |
-| Power Platform management-app registration (`Add-PowerAppsAccount`, `New-PowerAppManagementApp`) | 1 sign-in with the Power Apps administration module |
-| Installing `pwsh` and `ExchangeOnlineManagement` | 0 |
-
-Sign-in app for the one-sign-in delegated route, Exchange included: a public client with the **Mobile and
-desktop applications** redirect URI `http://localhost`, the delegated Graph permissions the selected
-collectors need, and the delegated `Exchange.Manage` permission on **Office 365 Exchange Online**, all with
-admin consent; `ExchangeOnlineManagement` 3.1.0 or later. Details and sources are in the
-[administrator permission guide](admin-permission-guide.md#exchange-online-in-a-delegated-run).
-
-```bash
-auditex guided-run --flow gr-audit --include-exchange --client-id <sign-in-app-id> --tenant-id contoso.onmicrosoft.com
-```
-
-Sign-ins for the certificate route, counted apart:
-
-- Set-up (once): one administrator sign-in to the Microsoft Entra admin centre covers the app registration, the permissions and admin consent, the role assignment and the certificate upload. Creating the certificate and its key needs no sign-in.
-- Audit (every run): no interactive sign-in. An app-only certificate run mints every service token (Microsoft Graph, Exchange Online, the Teams admin API and the optional Power BI and Power Platform resources) silently from the certificate.
-
-Every app token then comes from the certificate; a saved `AZURE_CLIENT_SECRET` is ignored with a warning. `auditex setup-guide m365 --mode app` prints the same run as `app_run_certificate`, and `auditex guided-run --flow app-audit` takes the same four options. Set-up steps and the blast radius of the key credential are in the [administrator permission guide](admin-permission-guide.md#certificate-credential-for-app-only-runs).
+The blast radius of the key credential is in the [administrator permission guide](admin-permission-guide.md#certificate-credential).
 
 Emergency access accounts: tell the Conditional Access check which accounts they are, so that it does not rely on inference. Pass `--break-glass-accounts` to `auditex run` or `azure-tenant-audit` (comma-separated object IDs, user principal names, display names or group names, or `@file` with one per line; an entry is looked up in the full user and group lists, and one that matches nothing, or a display name two accounts share, is reported as unresolved and not judged) or set `AUDITEX_BREAK_GLASS_ACCOUNTS` for any entry point; the option wins over the variable. List the group your policies exclude when the accounts are excluded through it (membership is read only for role-assignable groups). The same list tells the MFA and legacy-authentication checks which exclusions are acceptable: a Conditional Access policy for all users that excludes anything else (an administrator role, a guest type, a staff group) reads "enforced with exclusions" and fails the CIS and ScubaGear controls, so list the accounts even when you do not need the break-glass finding. The finding `ca.break_glass_exclusion_missing` then names each enabled policy that requires MFA or blocks and excludes none of the listed accounts. Without a list the accounts are inferred (names containing break glass or emergency access, and Global Administrator role holders), and the finding is rated medium at most.
 
 ```bash
-auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --use-azure-cli-token \
+auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --client-id <app-id> \
+  --certificate-path ~/audit-keys/auditex-reader.pem --certificate-thumbprint <sha1-thumbprint> \
   --break-glass-accounts "bg1@contoso.onmicrosoft.com,Break Glass Accounts"
 ```
 

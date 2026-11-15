@@ -33,20 +33,20 @@ auditex-mcp --help
 
 ## Microsoft 365
 
-### Azure CLI token unavailable
+### Certificate refused or token not acquired
 
-Run:
+Auditex stops before any request, with a fixed message naming the cause. Check, in order:
 
-```bash
-az login --allow-no-subscriptions --tenant <tenant-id-or-domain>
-auditex probe live --tenant-name CLIENT --tenant-id <tenant-id-or-domain> --mode delegated --use-azure-cli-token
-```
+- the key file is a PEM or PFX owned by the operator, mode `600`, not a symbolic link and under 64 KiB,
+- an encrypted key has its password in `--certificate-password-file` (owner-only) or in the environment variable named by `--certificate-password-env`,
+- `--certificate-thumbprint` is the SHA-1 thumbprint the Microsoft Entra admin centre shows for the public certificate uploaded to the reader app, and the certificate has not expired,
+- `--client-id` and `--tenant-id` are the reader app's Application (client) ID and Directory (tenant) ID.
 
-If the token still fails, verify the account is in the tenant and has the expected reader role.
+Every step the tenant administrator has to take is in [Reader app permissions](reader-app-permissions.md).
 
 ### `Authorization_RequestDenied`
 
-The signed-in account or app lacks the required role or Graph permission. Review:
+The reader app lacks the required role or Graph permission. Review:
 
 - `live-readiness.json`,
 - `audit-plan.json`,

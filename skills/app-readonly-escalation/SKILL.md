@@ -1,16 +1,17 @@
 ---
 name: app-readonly-escalation
-description: Use when a delegated Microsoft 365 audit is blocked and a customer-local app registration may provide a documented second pass.
+description: Use when a Microsoft 365 reader-app audit or probe reports a blocked collector and the tenant administrator may add a documented permission, role or setting.
 ---
 
 # App-Readonly Escalation
 
-Use app consent only after the delegated pass identifies blocked collectors.
+Auditex audits Microsoft 365 only as the reader app, with a certificate. Use this when a probe or run names a blocked collector. The full grant is in `docs/guides/reader-app-permissions.md`; do not restate it, point to it.
 
 ## Requirements
 
-- Use a customer-local app registration.
-- Request only the permissions justified by the blocked collectors.
+- Use the customer's own reader app registration.
+- Request only the permission, role or setting that the blocked collector's
+  probe result justifies, and check it against the reader app guide first.
 - Keep the Auditex operation read-only and do not use the app to mutate a
   production tenant.
 - Record the expected permission blast radius. A provider permission name can
@@ -20,6 +21,6 @@ Use app consent only after the delegated pass identifies blocked collectors.
 
 ## Handoff
 
-State what delegated mode collected, what was blocked, the exact additional
+State what the reader app collected, what was blocked, the exact additional
 permissions that would add coverage, and why the intended collector calls are
 read-only for that tenant. Do not share credentials or raw tenant evidence.

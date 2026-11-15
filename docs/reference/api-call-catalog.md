@@ -56,7 +56,7 @@ Token requests to the OAuth endpoint (for Graph and for another resource such as
 
 ## Removed command variants
 
-The Purview collector no longer tries these `m365` commands. They were guesses at CLI spellings, not reads the CLI documents, and the first three are not read commands at all, so they fail the shared read allowlist:
+Live collection does not start the Microsoft 365 CLI at all (the `exchange` collector records the named skip `m365_cli_not_used`). The Purview collector once tried these `m365` commands, and the ledger still classifies them in logs of earlier runs. They were guesses at CLI spellings, not reads the CLI documents, and the first three are not read commands at all, so they fail the shared read allowlist:
 
 | Removed | Collector operation | Why |
 | --- | --- | --- |
@@ -65,7 +65,7 @@ The Purview collector no longer tries these `m365` commands. They were guesses a
 | `m365 purview auditlog export create` (probed with `--help`) | `auditLogExports` | Creates an export; only ever probed with `--help`. |
 | `m365 purview` | `purviewReadiness` | A bare command-group probe that prints help and reads nothing. |
 
-`auditLogJobs` and `auditLogExports` now run only `m365 purview auditlog list` (the latter with `--top 100`), and `purviewReadiness` runs only `m365 purview auditlog list --output json --help`. The read-only spelling variants (`retentionlabel list` and `retention label list`, and so on) stay.
+Before the CLI was dropped, `auditLogJobs` and `auditLogExports` ran only `m365 purview auditlog list` (the latter with `--top 100`), and `purviewReadiness` ran only `m365 purview auditlog list --output json --help`; the read-only spelling variants (`retentionlabel list` and `retention label list`, and so on) were kept.
 
 Each observed Graph call records `api_version` (`v1.0` or `beta`). Auditex calls Microsoft Graph v1.0 by default. A collector endpoint uses beta only when the surface has no v1.0 equivalent, and the call then shows the full `https://graph.microsoft.com/beta/...` endpoint with `api_version: "beta"`. Current beta reads:
 
@@ -85,7 +85,7 @@ The SharePoint and OneDrive reads are Microsoft Graph v1.0:
 | --- | --- | --- | --- |
 | `sharepoint`, `sharepoint_access`, `onedrive_posture` | `/admin/sharepoint/settings` | `SharePointTenantSettings.Read.All` | SharePoint and OneDrive tenant settings; a single GET. |
 | `sharepoint`, `sharepoint_access`, `onedrive_posture` | `/sites` | `Sites.Read.All` | Fixed `$select` of site metadata; no file or list content. |
-| `sharepoint_access` | `/sites/{id}/permissions` | `Sites.Read.All` | Delegated runs only; an app-only run records a named skip. |
+| `sharepoint_access` | `/sites/{id}/permissions` | `Sites.Read.All` | Not read: in an app-only run the endpoint lists app grants, not user sharing, so the collector records a named skip. |
 
 Other v1.0 reads with gating worth knowing:
 
@@ -227,7 +227,7 @@ not assessed, never as a pass.
 
 ## Teams Policy Reads
 
-In app-only runs a certificate-authenticated Teams admin API token and Global Reader on the service principal enable the five GET paths below, in commercial and GCC only. No new Graph scope is required. The token comes from the run's certificate credential (`--certificate-path` with `--certificate-thumbprint`), minted through `msal.ConfidentialClientApplication` as a client-credentials grant against the tenant's Entra token endpoint; a client secret never mints it. In supported environments, without a usable certificate token (a secret-only or delegated run), all eight operations are recorded as `skipped` with reason `teams_token_unavailable`; no `Get-Cs*` command or Teams admin API read is attempted. The collector completes `ok`, so Teams alone does not make the run partial or return exit code 1. Coverage gaps, the report pack and handoff say "not collected: certificate token for the Teams admin API not available"; the policies remain not assessed. GCC High and DoD retain `unsupported_environment` failures for the five REST operations and make no Teams admin API call; their two command operations skip without a token, and the unified app-settings read records `unsupported_environment`. With a usable token, messaging and app setup are still skipped with reason `teams_powershell_not_supported` because no Teams PowerShell session path exists. The org-wide unified app settings (`tenantAppSettings`, the source of `Get-M365UnifiedTenantSettings`) are served only to a user sign-in, so an app-only run records the same named skip and sends no request and no token for them; the `tenant_app_settings` rule input is then ScubaGear's certificate-authentication marker (`CertificateBasedAuth: true`), and MS.TEAMS 5.1-5.3 are decided from the app permission policies, as ScubaGear decides them with certificate authentication. A tenant that manages apps only through the newer org-wide app settings in the Teams admin center can read differently there. Client-secret acceptance and these REST reads are not verified live. Policy settings only, no messages, chats, channel posts or files.
+A certificate-authenticated Teams admin API token and Global Reader on the service principal enable the five GET paths below, in commercial and GCC only. No new Graph scope is required. The token comes from the run's certificate credential (`--certificate-path` with `--certificate-thumbprint`), minted through `msal.ConfidentialClientApplication` as a client-credentials grant against the tenant's Entra token endpoint; a client secret never mints it. In supported environments, without a usable certificate token, all eight operations are recorded as `skipped` with reason `teams_token_unavailable`; no `Get-Cs*` command or Teams admin API read is attempted. The collector completes `ok`, so Teams alone does not make the run partial or return exit code 1. Coverage gaps, the report pack and handoff say "not collected: certificate token for the Teams admin API not available"; the policies remain not assessed. GCC High and DoD retain `unsupported_environment` failures for the five REST operations and make no Teams admin API call; their two command operations skip without a token, and the unified app-settings read records `unsupported_environment`. With a usable token, messaging and app setup are still skipped with reason `teams_powershell_not_supported` because no Teams PowerShell session path exists. The org-wide unified app settings (`tenantAppSettings`, the source of `Get-M365UnifiedTenantSettings`) are served only to a user sign-in, so an app-only run records the same named skip and sends no request and no token for them; the `tenant_app_settings` rule input is then ScubaGear's certificate-authentication marker (`CertificateBasedAuth: true`), and MS.TEAMS 5.1-5.3 are decided from the app permission policies, as ScubaGear decides them with certificate authentication. A tenant that manages apps only through the newer org-wide app settings in the Teams admin center can read differently there. These REST reads are not verified live. Policy settings only, no messages, chats, channel posts or files.
 
 | Collector | Command | Fields read | Role |
 | --- | --- | --- | --- |
@@ -236,7 +236,7 @@ In app-only runs a certificate-authenticated Teams admin API token and Global Re
 | `teams_policy` | `Get-CsTeamsAppPermissionPolicy` | `Identity`, `DefaultCatalogAppsType`, `GlobalCatalogAppsType`, `PrivateCatalogAppsType` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsAppPermissionPolicy` |
 | `teams_policy` | `Get-CsTeamsMeetingBroadcastPolicy` | `Identity`, `BroadcastRecordingMode` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsMeetingBroadcastPolicy` |
 | `teams_policy` | `Get-CsTeamsClientConfiguration` | `Identity`, `AllowEmailIntoChannel` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsClientConfiguration` |
-| `teams_policy` | `Get-M365UnifiedTenantSettings` (`tenantAppSettings`) | `SettingName`, `SettingValue` (`Users` and `Groups` are dropped) | A user sign-in only; never sent by an app-only run (named skip `teams_powershell_not_supported`). Pinned read: `GET https://substrate.office.com/AdminAppCatalog/ps/v2/admin/unifiedApp/settings` with a token for resource `08ff1ce2-4973-4b08-86a3-ebed13badc7f`, commercial and GCC only (source: ScubaGear `PowerShell/ScubaGear/schemas/ScubaGearApiCatalog.json`, entries `Get-TeamsM365UnifiedTenantSettingsRest` and `Get-TeamsUnifiedApiEndpoint`; Microsoft Learn `Get-M365UnifiedTenantSettings`). The adapter sends only a token for that audience, never the Teams admin or Graph token |
+| `teams_policy` | `Get-M365UnifiedTenantSettings` (`tenantAppSettings`) | `SettingName`, `SettingValue` (`Users` and `Groups` are dropped) | Served only to a user sign-in; never sent (named skip `teams_powershell_not_supported`). Pinned read: `GET https://substrate.office.com/AdminAppCatalog/ps/v2/admin/unifiedApp/settings` with a token for resource `08ff1ce2-4973-4b08-86a3-ebed13badc7f`, commercial and GCC only (source: ScubaGear `PowerShell/ScubaGear/schemas/ScubaGearApiCatalog.json`, entries `Get-TeamsM365UnifiedTenantSettingsRest` and `Get-TeamsUnifiedApiEndpoint`; Microsoft Learn `Get-M365UnifiedTenantSettings`). The adapter sends only a token for that audience, never the Teams admin or Graph token |
 
 ## SharePoint Admin Settings (opt-in)
 
@@ -291,8 +291,7 @@ The permission ledger joins `api-inventory.json` and `audit-plan.json` so review
 Commercial cloud only; deliberately select the `power-platform` preset. These
 collectors add no Graph permission and obtain their own app-mode tokens:
 `https://service.powerapps.com//.default` and
-`https://analysis.windows.net/powerbi/api/.default`. Delegated runs have no token
-path and leave all 15 supported policies not assessed. The
+`https://analysis.windows.net/powerbi/api/.default`. The
 [permission guide](../guides/admin-permission-guide.md#power-platform-and-power-bi-optional)
 describes the customer-side setup and write-capable administrative blast radius.
 

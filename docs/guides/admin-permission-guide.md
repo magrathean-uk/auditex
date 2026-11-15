@@ -107,61 +107,31 @@ describes its constraints.
 
 ### Sign-ins per run and per set-up step
 
-Every service token a run uses comes from one credential or one sign-in: an audit run asks for at
-most one interactive sign-in, and none in app-only mode. Auditex never opens a second sign-in window during a
-run: when the one sign-in can no longer be refreshed silently the run stops with an error, and a service the
-sign-in cannot serve silently (no consent for it) is recorded as a named coverage gap.
-
-| Run mode | Interactive sign-ins per run | Service tokens |
-|---|---|---|
-| App-only, certificate (`--certificate-path`, `--certificate-thumbprint`) | 0 | All minted silently from the certificate: Microsoft Graph, Exchange Online, Security & Compliance (`exchange_policy` alert and DLP reads), the Teams admin API, Power BI, Power Platform and the SharePoint admin API (opt-in `sharepoint_admin`) |
-| App-only, client secret (`--client-secret`) | 0 | Minted silently from the secret: Microsoft Graph, Exchange Online, Power BI and Power Platform; the Teams admin policies (`teams_token_unavailable`), the Security & Compliance reads (`ipps_session_not_opened`) and the SharePoint admin read (`sharepoint_admin_certificate_required`) are skipped, never prompted |
-| Guided `app-audit` with Exchange | 0 | As app-only; the Microsoft 365 CLI signs in with the client secret, without a browser |
-| Delegated, one sign-in (`--interactive --client-id <sign-in app>`, and guided `gr-audit` when the sign-in app id is saved or passed) | 1 | Microsoft Graph from the sign-in; Exchange Online (`exchange_policy`) and, when selected, the SharePoint admin API (`sharepoint_admin`) minted silently from the same sign-in; a SharePoint token the sign-in cannot give silently is the named skip `sharepoint_admin_second_sign_in_required`. Teams admin, Power BI, Power Platform and Security & Compliance are not collected in delegated mode and never prompt |
-| Delegated, Azure CLI token (`--use-azure-cli-token`, and guided `gr-audit` without a sign-in app id and without Exchange) | 0 inside Auditex | Microsoft Graph from the operator's existing Azure CLI sign-in (one `az login` made before the run and reused until it expires). Auditex never runs `az login` during a run |
-| Access token (`--access-token`) | 0 | Microsoft Graph only |
+Every service token a run uses is minted silently from the reader app's certificate: an audit run never opens a
+sign-in window, and Auditex never opens one during a run. The tokens are Microsoft Graph, Exchange Online, Security &
+Compliance (`exchange_policy` alert and DLP reads), the Teams admin API, Power BI, Power Platform and the SharePoint
+admin API (opt-in `sharepoint_admin`). A service the app has no consent or setting for is recorded as a named coverage
+gap, never prompted for.
 
 One-time set-up steps, each counted on its own:
 
 | Set-up step | Sign-ins (once) |
 |---|---|
 | App registration, permissions, admin consent, role assignment and certificate upload in the Microsoft Entra admin centre | 1 administrator sign-in covers all of them; creating the certificate and its key needs none |
-| Delegated Exchange permission on the sign-in app (`Exchange.Manage`, admin consent) | 0 when added in the same Entra admin centre session, otherwise 1 |
-| Security & Compliance permission on the audit app (`Exchange.ManageAsApp` on **Microsoft Exchange Online Protection**, admin consent) | 0 when added in the same Entra admin centre session as the app registration, otherwise 1 |
-| SharePoint admin permission for the opt-in `sharepoint_admin` collector (`Sites.FullControl.All` application or `AllSites.FullControl` delegated on **Office 365 SharePoint Online**, admin consent) | 0 when added in the same Entra admin centre session as the app registration, otherwise 1 |
-| Guided `ga-setup-app` (saves the Microsoft 365 CLI app as the sign-in app) | At most 3 browser sign-ins: `az login` (skipped when Azure CLI is already signed in to the tenant), the Microsoft 365 CLI setup's own sign-in (it signs in as Azure CLI to create the app) and the `m365 login` check (skipped when the CLI is already signed in) |
 | Power BI read-only admin API setting (Fabric admin portal) | 1 sign-in to the Fabric admin portal |
 | Power Platform management-app registration (`Add-PowerAppsAccount`, `New-PowerAppManagementApp`) | 1 sign-in with the Power Apps administration module |
 | Installing `pwsh` and `ExchangeOnlineManagement` | 0 |
 
-### Delegated Read Login
+### Probe before the first run
 
-Use this when an operator signs in with a tenant account.
-
-Recommended role:
-
-- Global Reader for broad audit coverage.
-
-Useful narrower roles:
-
-- Security Reader for security posture.
-- Reports Reader for usage and report surfaces.
-- Exchange admin or Exchange reader tooling only when Exchange command coverage is explicitly in scope.
-
-Command shape, one sign-in inside the run (Exchange included when selected; sign-in app requirements under
-[Exchange Online in a delegated run](#exchange-online-in-a-delegated-run)):
+Probe the reader app before a full collection (the values are those of the reader app; the key and its password stay
+local, see [Certificate credential](#certificate-credential)):
 
 ```bash
-auditex guided-run --flow gr-audit --include-exchange --client-id <sign-in-app-id> --tenant-id <tenant-id-or-domain>
-```
-
-Command shape with an existing Azure CLI sign-in (no Exchange; the operator runs `az login` once, before the run):
-
-```bash
-auditex setup-guide m365 --mode delegated --auditor-profile global-reader --collector-preset full
-az login --allow-no-subscriptions --tenant <tenant-id-or-domain>
-auditex probe live --tenant-name CLIENT --tenant-id <tenant-id-or-domain> --mode delegated --use-azure-cli-token
-auditex run --tenant-name CLIENT --tenant-id <tenant-id-or-domain> --auditor-profile global-reader --plane full --use-azure-cli-token
+auditex probe live --tenant-name CLIENT --tenant-id <tenant-id-or-domain> --mode app \
+  --client-id <app-id> --certificate-path <key file> --certificate-thumbprint <sha1-thumbprint>
+auditex run --tenant-name CLIENT --tenant-id <tenant-id-or-domain> --auditor-profile global-reader --plane full \
+  --client-id <app-id> --certificate-path <key file> --certificate-thumbprint <sha1-thumbprint>
 ```
 
 Expected blockers on basic tenants:
@@ -171,13 +141,13 @@ Expected blockers on basic tenants:
 - Intune may be absent; Intune answers `Forbidden` both for missing scopes and for an unlicensed tenant, so Auditex reports a licence blocker when `subscribedSkus` (licensing collector) shows no Intune-capable SKU and a scope blocker otherwise,
 - user sign-in activity needs `AuditLog.Read.All` and Entra ID P1/P2; without them identity still runs and records a coverage gap instead of stale-account findings,
 - audit/sign-in log history may be limited,
-- some SharePoint or Exchange depth may need extra role or app-only coverage.
+- some SharePoint or Exchange depth may need an extra role or setting from [Reader app permissions](reader-app-permissions.md).
 
 Auditex records these as blockers in `live-readiness.json` and `audit-plan.json`.
 
 ### App-Readonly
 
-Use this when a customer grants an app registration for repeatable read-only audits.
+The reader app is the one way Auditex audits Microsoft 365. The grant itself is in [Reader app permissions](reader-app-permissions.md); this section gives the reason and blast radius of each Microsoft Graph application permission a collector can use, including the opt-in ones.
 
 Typical Microsoft Graph application permissions depend on selected collectors, but commonly include:
 
@@ -198,31 +168,31 @@ Typical Microsoft Graph application permissions depend on selected collectors, b
 - `DeviceManagementScripts.Read.All` where the `intune_depth` collector is in scope. Blast radius: read access to Intune script metadata and, by the permission's nature, script bodies; Auditex requests a fixed `$select` that drops `scriptContent`, so no body is read or stored.
 - `Sites.Read.All` for the SharePoint and OneDrive site inventory (`/sites`). Blast radius: read access to site metadata and content of every site; Auditex reads site names, URLs and dates only, never files or list items.
 - `SharePointTenantSettings.Read.All` for the SharePoint and OneDrive tenant settings (`GET /admin/sharepoint/settings`: sharing capability and link defaults). Blast radius: read access to those tenant settings; no setting is written.
-- Sampled site permissions (`GET /sites/{id}/permissions`) are read only in delegated runs. An app-only run records a named skip and the orphaned-site and weak-ownership rules read not assessed, so no write-capable scope is needed for the default collectors.
+- Sampled site permissions (`GET /sites/{id}/permissions`) are not read: in an app-only run that endpoint lists app grants, not user sharing, so Auditex records a named skip and the orphaned-site and weak-ownership rules read not assessed, so no write-capable scope is needed for the default collectors.
 - `Organization.Read.All` (tenant and licence details), `ServiceHealth.Read.All` and `ServiceMessage.Read.All` (service health and message centre), `Team.ReadBasic.All` and `Channel.ReadBasic.All` (team and channel names), `Policy.Read.PermissionGrant` (permission grant policies) and `MailboxSettings.Read` (inbox rules, not message bodies).
 - `IdentityRiskyUser.Read.All` only when the opt-in `identity_protection` collector is selected (Entra ID P2; stores aggregate counts only).
 - `ConsentRequest.Read.All` only when the opt-in `defender_cloud_apps` collector (app consent requests) is in scope. Defender for Cloud Apps app risk profiles have no Microsoft Graph REST endpoint; review them in the Defender portal.
 
 Use `auditex probe live --mode app` before full collection. Do not grant broad permissions automatically. Auditex never requests `AppRoleAssignment.ReadWrite.All` (an app holding it can grant itself any permission) or `Mail.Read` (message content); app role assignments are read with `Application.Read.All` and inbox rules with `MailboxSettings.Read`. Some shipped profile hints include `Exchange.ManageAsApp`, which needs an Exchange role assignment and does not by itself establish least privilege. Review the generated plan and the blocked surface with the administrator before approving any broader grant. The audit commands themselves must remain read-only.
 
-#### Certificate credential for app-only runs
+#### Certificate credential
 
-An app-only run authenticates with a client secret or with a certificate, never both. A certificate is needed for the Teams admin policies (`teams_policy`): the Teams admin API accepts only a certificate-minted token, so a secret-only run records `teams_token_unavailable` for its seven operations. It is also needed for the Security & Compliance reads of `exchange_policy` (alert and DLP policies), which a secret-only run records as `ipps_session_not_opened`. With a certificate, Auditex mints every app token (Microsoft Graph, Exchange Online, Security & Compliance, the Teams admin API and the optional Power BI and Power Platform resources) from it through `msal.ConfidentialClientApplication`; the client-secret path is unchanged for runs that use a secret.
+The reader app authenticates with a certificate only, never a client secret. With it Auditex mints every app token (Microsoft Graph, Exchange Online, Security & Compliance, the Teams admin API, the SharePoint admin API and the optional Power BI and Power Platform resources) through `msal.ConfidentialClientApplication`. The Teams admin policies (`teams_policy`) need it because the Teams admin API accepts only a certificate-minted token; so do the Security & Compliance reads of `exchange_policy` (alert and DLP policies) and the SharePoint admin read.
 
-Set-up, by the customer's administrator:
+Set-up, by the customer's administrator (the full steps are in [Reader app permissions](reader-app-permissions.md)):
 
 1. Create an RSA certificate of at least 2048 bits under the customer's key-management policy, with an expiry no later than the audit engagement needs. A self-signed certificate is accepted by Entra.
-2. Upload the **public** certificate (`.cer` or `.pem`, no private key) to the audit app registration under Certificates & secrets > Certificates, and note the SHA-1 thumbprint the portal shows. This adds a key credential to the app; it is a tenant change made by the administrator, never by Auditex.
+2. Upload the **public** certificate (`.cer` or `.pem`, no private key) to the reader app registration under Certificates & secrets > Certificates, and note the SHA-1 thumbprint the portal shows. This adds a key credential to the app; it is a tenant change made by the administrator, never by Auditex.
 3. Keep the private key as a PEM or PFX file on the audit workstation, readable only by the operator account (mode `600`; Auditex refuses a key file that its group or others can read, a symbolic link, a non-regular file or one over 64 KiB). If the key is encrypted, keep its password in a separate owner-only file or supply it through an environment variable.
 4. Run with `--client-id <app-id> --certificate-path <key file> --certificate-thumbprint <sha1>` and, for an encrypted key, `--certificate-password-file <file>` or `--certificate-password-env <variable name>`. No option takes the password or key text itself.
 
-Blast radius of the key credential: anyone holding the private key (and its password) can sign in as the audit app from anywhere, with every application permission and directory role the app holds, until the certificate expires or is removed from the app registration. For the reader app that is the read-only Graph application permissions, `Exchange.ManageAsApp` (on Office 365 Exchange Online and, when added for the alert and DLP reads, on Microsoft Exchange Online Protection) with Global Reader and the Teams admin read with Global Reader; it grants nothing the app does not already hold, and no write permission is added. Remove the key credential from the app registration when the engagement ends, and delete the private key file.
+Blast radius of the key credential: anyone holding the private key (and its password) can sign in as the reader app from anywhere, with every application permission and directory role the app holds, until the certificate expires or is removed from the app registration. That is the read-only Graph application permissions, `Exchange.ManageAsApp` (on Office 365 Exchange Online and on Microsoft Exchange Online Protection) with Global Reader, the Teams admin read with Global Reader and, for the opt-in `sharepoint_admin` collector, the write-capable `Sites.FullControl.All` (see [SharePoint admin settings](#sharepoint-admin-settings-opt-in)). The credential grants nothing the app does not already hold, and Auditex adds no write permission. Remove the key credential from the app registration when the engagement ends, and delete the private key file.
 
-What Auditex does with it: the key file and password are read once, before the run folder exists or any request is made, and checked (RSA of at least 2048 bits; when the file carries the certificate, it must match the key and the thumbprint and be within its validity dates). The password environment variable is removed from the process environment as soon as it is read, so PowerShell and other child processes do not inherit it. The key stays in process memory, as do tokens (msal's cache is in memory only); none of the key, its password, the assertion or a token is written to the run folder, the audit log, the API ledger, the console or an error message. The `--certificate-*` options are redacted from the recorded command line, and every failure is a fixed message naming the cause (file refused, password unavailable, key unreadable, thumbprint mismatch, certificate not valid, authority refused, token not acquired), never a path, value or service diagnostic. The client assertion is sent only to an HTTPS Microsoft Entra authority (`login.microsoftonline.com`, `login.microsoftonline.us`, `login.chinacloudapi.cn`, `login.partner.microsoftonline.cn`). A certificate together with `--client-secret`, `--access-token`, `--auth-context`, `--interactive` or `--use-azure-cli-token` is refused before any request; a saved `AZURE_CLIENT_SECRET` is ignored with a warning and never sent. `auditex probe live` does not take a certificate yet; run the probe with a secret or rely on `--probe-first` in the certificate run.
+What Auditex does with it: the key file and password are read once, before the run folder exists or any request is made, and checked (RSA of at least 2048 bits; when the file carries the certificate, it must match the key and the thumbprint and be within its validity dates). The password environment variable is removed from the process environment as soon as it is read, so PowerShell and other child processes do not inherit it. The key stays in process memory, as do tokens (msal's cache is in memory only); none of the key, its password, the assertion or a token is written to the run folder, the audit log, the API ledger, the console or an error message. The `--certificate-*` options are redacted from the recorded command line, and every failure is a fixed message naming the cause (file refused, password unavailable, key unreadable, thumbprint mismatch, certificate not valid, authority refused, token not acquired), never a path, value or service diagnostic. The client assertion is sent only to an HTTPS Microsoft Entra authority (`login.microsoftonline.com`, `login.microsoftonline.us`, `login.chinacloudapi.cn`, `login.partner.microsoftonline.cn`). A saved `AZURE_CLIENT_SECRET` is ignored with a warning and never sent. `auditex probe live --mode app` takes the same certificate options.
 
 ### Exchange-Assisted Coverage
 
-Exchange posture can use Microsoft 365 CLI and PowerShell adapters where Graph has poor coverage. Auditex still records the command surface and keeps audit output read-only. Do not use production write commands.
+Exchange posture is read through Exchange Online PowerShell with the reader app's certificate token, where Graph has poor coverage. Auditex does not start the Microsoft 365 CLI. It records the command surface and keeps audit output read-only. Do not use production write commands.
 
 Detection coverage reads `Get-AdminAuditLogConfig`, `Get-OrganizationConfig`, and `Get-MailboxAuditBypassAssociation` in Exchange Online PowerShell, and `Get-ProtectionAlert` in Security & Compliance PowerShell, which opens only in app-only certificate runs (see [Security & Compliance in app-only certificate runs](#security--compliance-in-app-only-certificate-runs)). These are read-only `Get-*` cmdlets; View-Only Organization Management or Global Reader is sufficient. Without a session the signal is reported as `unknown`, not `off`.
 
@@ -354,37 +324,14 @@ The reads, all read-only `Get-*` cmdlets:
 - `Get-DlpCompliancePolicy`: `Name`, `Enabled`, `Mode`, `Workload` and the five location lists, written as text; every location entry other than `All` is stored as the placeholder `location`.
 - `Get-DlpComplianceRule`: `Name`, `ParentPolicyName`, `Disabled`, `IsAdvancedRule`, `AdvancedRule`, `ContentContainsSensitiveInformation`, `BlockAccess`, `BlockAccessScope`, `NotifyUser` (stored as same-length `recipient` placeholders) and `NotifyUserType`. A failed DLP read keeps only the length of its output (`stdout_bytes`).
 
-A client-secret, delegated or access-token run opens no Security & Compliance session and asks for no token for it (no Microsoft source shows a secret-minted token is accepted): the four reads record the section-scoped gap `ipps_session_not_opened` and the five rows are not assessed. So does a connect that fails (missing consent or role, an older module); the failure is named, never a pass, and the Exchange reads keep the collector's status.
+A connect that fails (missing consent or role, an older module) records the section-scoped gap `ipps_session_not_opened` for the four reads and the five rows are not assessed; the failure is named, never a pass, and the Exchange reads keep the collector's status.
 
 The same Exchange session reads `Get-SharingPolicy` (`Name`, `Domains`), readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet. It uses the existing grants and reads partner-sharing configuration without message content. `Get-OrganizationConfig` includes `Identity`, `Name`, `AuditDisabled`; `Get-TransportConfig` includes `Name`, `SmtpClientAuthenticationDisabled`; `Get-TransportRule` includes `State`, `Mode`, `FromScope`, `PrependSubject` in its explicit configuration field list. The same session reads `Get-AcceptedDomain` with `Name`, `DomainName`, `DomainType`, `Default`, `IsCoexistenceDomain`. Complete same-run accepted-domain evidence supplies the SPF, DKIM and DMARC raw-record universe: domain names de-duplicated case-insensitively with the first-seen spelling retained and coexistence rows excluded. When both collectors are selected, `dns_posture` runs after `exchange_policy` and reuses that evidence without another tenant read or additional grants. Missing, failed, truncated or malformed evidence falls back to verified domains with the Email service; missing or non-list Graph `supportedServices` is kept. Coverage records `domain_universe` as `accepted_domains` or `graph_email_service`. These TXT lookups use public DNS without sign-in, retain the 200-domain record cap and fail-closed behaviour, and leave posture checks over all verified domains unchanged.
-
-### Exchange Online in a delegated run
-
-The one-sign-in delegated route needs a sign-in app registered in the customer tenant (the app
-`ga-setup-app` saves, or any app passed with `--client-id`): a public client with the **Mobile and desktop
-applications** redirect URI `http://localhost` (the sign-in opens the browser and returns to a local port), the
-delegated Microsoft Graph permissions the selected collectors need, with admin consent, and for Exchange the
-delegated permission `Exchange.Manage` on **Office 365 Exchange Online**, with admin consent. The run signs in once
-for Microsoft Graph, then asks the same in-memory token cache, silently, for an Exchange Online token for
-`https://outlook.office365.com/.default` and connects with
-`Connect-ExchangeOnline -AccessToken <token> -UserPrincipalName <signed-in user>`; the token and the user name
-reach PowerShell through environment variables, never the command line, and the cache is never written to disk.
-Sources: the [Connect-ExchangeOnline reference](https://learn.microsoft.com/powershell/module/exchangepowershell/connect-exchangeonline)
-(`-AccessToken`, module 3.1.0-Preview1 or later, used with `-Organization`, `-DelegatedOrganization` or
-`-UserPrincipalName` by token type) and the
-[Exchange Online token guidance](https://learn.microsoft.com/exchange/reference/admin-api-authentication)
-(the `https://outlook.office365.com/.default` scope, and the Exchange role the signed-in user needs);
-`Exchange.Manage` is the delegated permission the Office 365 Exchange Online API publishes, listed under
-API permissions > Office 365 Exchange Online > Delegated permissions in the Entra admin centre, and the
-token's `scp` claim must carry it. The signed-in user needs an Exchange read role such as Global Reader or
-View-Only Organization Management. Without the permission or the role, the Exchange checks are coverage gaps
-(`session_not_connected` or `command_not_authenticated`), never a second sign-in. The Security & Compliance reads
-(`Get-ProtectionAlert` and the DLP reads) stay a named skip (`ipps_session_not_opened`) in delegated runs.
 
 ## Power Platform and Power BI (optional)
 
 This is extended scope, off by default and available only in the commercial cloud.
-With app credentials configured locally, deliberately opt in for a run:
+With the reader app's certificate options added (`--client-id`, `--certificate-path`, `--certificate-thumbprint`), deliberately opt in for a run:
 
 ```bash
 auditex run --tenant-name CLIENT --tenant-id <tenant-id-or-domain> \
@@ -431,12 +378,12 @@ supporting organisation and service-plan reads use the existing `Directory.Read.
      in the Entra admin centre (Groups > the group > Delete). A deleted security group
      is not kept in deleted items. With the Fabric admin API the same change is
      `POST https://api.fabric.microsoft.com/v1/admin/tenantsettings/AllowServicePrincipalsUseReadAdminAPIs/update`
-     with `{"enabled": false, "enabledSecurityGroups": []}` (delegated `Tenant.ReadWrite.All`,
-     Fabric Administrator).
+     with `{"enabled": false, "enabledSecurityGroups": []}` (a Fabric Administrator's
+     `Tenant.ReadWrite.All`).
    The alternative operator role is Fabric Administrator with a Power BI or Fabric licence
    and at least one prior sign-in to the Power BI portal. It is a write-capable admin role
    used read-only, with tenant-wide Power BI/Fabric administrative blast radius. This
-   operator route is a prerequisite reference, not a working delegated token path in Auditex.
+   operator route is a prerequisite reference: Auditex does not sign in as a person.
 2. **Power Platform management-app route first:** an authorised customer administrator
    (Global Administrator or Power Platform Administrator) signs in interactively with the
    Power Apps administration module (`Add-PowerAppsAccount -Endpoint prod -TenantID <tenant id>`)
@@ -459,14 +406,13 @@ supporting organisation and service-plan reads use the existing `Directory.Read.
    The alternative operator role is Power Platform Administrator with a Power Apps for
    Office 365 licence. It is a write-capable admin role used read-only; it can administer
    environments and policy across the tenant. Auditex itself writes nothing. This operator
-   route likewise does not supply a delegated token path in Auditex.
+   route likewise is a prerequisite reference: Auditex does not sign in as a person.
 
 In app mode each collector obtains its own token through `app_token_for`, using
 `https://service.powerapps.com//.default` (the double slash is intentional) and
 `https://analysis.windows.net/powerbi/api/.default`. Do not supply a separate bearer
-token. Configure the app authentication locally using the existing app-mode process.
-See the selected collector notes in
-`auditex setup-guide m365 --collector-preset power-platform --plane inventory --mode app --format json`.
+token. See the selected collector notes in
+`auditex setup-guide m365 --collector-preset power-platform --plane inventory --format json`.
 The JSON guide includes these setup requirements only when the collectors are selected.
 
 Every request is a read: GET, plus one body-free POST for Power Platform
@@ -487,9 +433,7 @@ path only and sends no body; every other Power Platform request is GET.
 
 Without the opt-in, optional Power BI / Power Platform collection was not enabled;
 these policies are not assessed: MS.POWERBI 1.1, 2.1, 3.1, 4.1, 4.2, 5.1, 6.1 and
-7.1; MS.POWERPLATFORM 1.1, 1.2, 2.1, 2.2, 3.1, 5.1 and 6.1. All 15 also stay not
-assessed on delegated runs, even with the roles above, because Auditex has no
-delegated token path for either audience. Missing setup, denied reads and incomplete
+7.1; MS.POWERPLATFORM 1.1, 1.2, 2.1, 2.2, 3.1, 5.1 and 6.1. Missing setup, denied reads and incomplete
 or truncated evidence also withhold the dependent sections rather than passing them.
 MS.POWERPLATFORM.2.3 is a separate constant not-assessed policy and is not enabled by
 this opt-in. Missing optional sections on a run with a known collector selection now carry
@@ -509,9 +453,9 @@ Each REST operation caps decoded response bodies at 4 MiB in total across both a
 
 Commercial and GCC are supported; GCC High, DoD and unknown environments are not collected (`unsupported_environment`) and make no Teams admin API call. In supported environments, without a usable certificate token, all seven operations are `skipped` with reason `teams_token_unavailable`, without attempting any `Get-Cs*` command or Teams admin API read. The collector completes `ok`; Teams alone does not make the run partial or return exit code 1. The coverage gaps, report pack and handoff state "not collected: certificate token for the Teams admin API not available" and the policies remain not assessed, never a pass or not applicable. In unsupported environments the five REST operations retain their `unsupported_environment` failures; the two command operations skip without a token. A service refusal with a usable token or a missing role yields `command_not_authenticated`, never a pass. With a usable token, messaging and app setup policies are still skipped as coverage gaps with reason and collector error class `teams_powershell_not_supported` ("not collected: Teams PowerShell sessions are not supported"); no PowerShell command is attempted. Auditex has no Teams PowerShell connection path in any authentication mode.
 
-Certificate authentication is evidenced by ScubaGear at pinned commit `2446ad72`, `Modules/Connection/Connection.psm1` (`Get-MsalAccessToken -CertificateThumbprint` for the Teams scope); its API catalogue specifies Global Reader. In an app-mode run with a certificate credential (see "Certificate credential for app-only runs" above) Auditex mints the Teams admin token from it through msal and the five REST reads run (meeting policies, broadcast policies, federation configuration, client configuration and app permission policies), covering every Teams section the assessed SCuBA policies cite. The other two Teams operations, messaging policies (`Get-CsTeamsMessagingPolicy`) and app setup policies (`Get-CsTeamsAppSetupPolicy`), stay named skips with reason `teams_powershell_not_supported` in every app-only run, certificate included: they have no Teams admin REST read and would need a Teams PowerShell session, which Auditex does not open, and no assessed SCuBA policy cites them. A secret-only run never asks for a Teams token and records `teams_token_unavailable`, and a delegated run is unchanged. The `global-reader` profile and the `full` preset select `teams_policy` for app-mode runs. The reader requires the Teams audience and certificate credential claim (`appidacr` or `azpacr` equal to `2`); the service validates the token itself.
+Certificate authentication is evidenced by ScubaGear at pinned commit `2446ad72`, `Modules/Connection/Connection.psm1` (`Get-MsalAccessToken -CertificateThumbprint` for the Teams scope); its API catalogue specifies Global Reader. In an app-mode run with a certificate credential (see "Certificate credential" above) Auditex mints the Teams admin token from it through msal and the five REST reads run (meeting policies, broadcast policies, federation configuration, client configuration and app permission policies), covering every Teams section the assessed SCuBA policies cite. The other two Teams operations, messaging policies (`Get-CsTeamsMessagingPolicy`) and app setup policies (`Get-CsTeamsAppSetupPolicy`), stay named skips with reason `teams_powershell_not_supported` in every app-only run, certificate included: they have no Teams admin REST read and would need a Teams PowerShell session, which Auditex does not open, and no assessed SCuBA policy cites them. If no usable certificate token is available the operations record `teams_token_unavailable`. The `global-reader` profile and the `full` preset select `teams_policy` for app-mode runs. The reader requires the Teams audience and certificate credential claim (`appidacr` or `azpacr` equal to `2`); the service validates the token itself.
 
-Client-secret token acceptance was **not verified live** (playground check not run) and that credential path is disabled for Teams policy reads. Certificate-authenticated reads and actual REST response shapes have also not been verified live. Org-wide `tenant_app_settings` remain uncollected on app-only runs, so TEAMS 5.1-5.3 remain not assessed; no certificate marker is synthesised to bypass that gap.
+Certificate-authenticated reads and actual REST response shapes have also not been verified live. Org-wide `tenant_app_settings` remain uncollected on app-only runs, so TEAMS 5.1-5.3 remain not assessed; no certificate marker is synthesised to bypass that gap.
 
 ## SharePoint admin settings (opt-in)
 
@@ -537,31 +481,25 @@ What it sends, and nothing else:
    and `EmailAttestationReAuthDays` are kept. One retry follows a 429 or 503 (Retry-After capped at 30 seconds); a
    redirect is not followed; the answer is capped at 1 MiB.
 
-Permissions (Microsoft Learn, "SharePoint admin APIs authentication and authorization"), both on **Office 365
+Permission (Microsoft Learn, "SharePoint admin APIs authentication and authorization"), on **Office 365
 SharePoint Online** (resource `00000003-0000-0ff1-ce00-000000000000`) with admin consent:
 
-- App-only: the application permission Sites.FullControl.All and a certificate credential (see
-  [Certificate credential for app-only runs](#certificate-credential-for-app-only-runs)). SharePoint refuses app-only
-  tokens minted from a client secret (Microsoft Learn, "Granting access via Entra ID App-Only"), so a secret-only run
-  records the named skip `sharepoint_admin_certificate_required` and requests no SharePoint token. ScubaGear's catalogue
-  lists the same permission for this read.
-- Delegated: the delegated permission AllSites.FullControl on the sign-in app and a signed-in SharePoint Administrator.
-  The token comes silently from the run's one sign-in; when Microsoft would need a second prompt (no consent, or
-  conditional access asking again) the read is the named skip `sharepoint_admin_second_sign_in_required` and no second
-  sign-in is opened. An access-token or Azure CLI run records `sharepoint_admin_token_unavailable`.
+- The application permission Sites.FullControl.All and the reader app's certificate (see
+  [Certificate credential](#certificate-credential)). SharePoint refuses app-only tokens minted from a client secret
+  (Microsoft Learn, "Granting access via Entra ID App-Only"), which is why the reader app uses a certificate only.
+  ScubaGear's catalogue lists the same permission for this read.
 - GCC High, DoD and other clouds are not collected (`sharepoint_admin_unsupported_environment`).
 
-Blast radius: both permissions are write-capable. Sites.FullControl.All lets anyone who holds the app's certificate
+Blast radius: the permission is write-capable. Sites.FullControl.All lets anyone who holds the app's certificate
 key take full control of every site collection in the tenant (read, change and delete content, permissions and
-settings); AllSites.FullControl gives the same over every site the signed-in administrator can reach, for as long as
-the sign-in lasts. Auditex makes no mutating call: the read guard (`check_sharepoint_admin_request`) admits only the
+settings). Auditex makes no mutating call: the read guard (`check_sharepoint_admin_request`) admits only the
 one body-free GET above, refuses any other verb, host, path, query, header or body before a token is attached, and the
 API ledger records every request under `observed_ledger.sharepoint_admin_rest`. Before sending, Auditex also checks that
-the token's audience is the SharePoint admin host (and, app-only, that it is a certificate token), so no Graph token
+the token's audience is the SharePoint admin host and that it is a certificate token, so no Graph token
 reaches SharePoint.
 
 Removal: when the engagement ends, open the Microsoft Entra admin centre > App registrations > the audit app > API
-permissions, remove the SharePoint Sites.FullControl.All (and, on the sign-in app, AllSites.FullControl) entry and
+permissions, remove the SharePoint Sites.FullControl.All entry and
 revoke its admin consent, or delete the app; remove the certificate key credential too.
 
 Without the collector, or when it is skipped or fails, MS.SHAREPOINT 1.1 and 1.3 keep their Graph answers and the six

@@ -673,8 +673,7 @@ The required `projection` envelope is separate from the assessment-case evidence
   (`effective_admin_set`, `sharepoint_tenant_settings`) are read by named field and not
   listed. An extra field that cannot change the meaning of a projected one never
   withholds: the adapter projects only the fields it selects and the projected object
-  passes the same frozen shape gate. Field presence depends on the token (a delegated
-  token returns `servicePlans[].servicePlanType`, an Azure CLI token does not), not on the
+  passes the same frozen shape gate. Field presence depends on the token, not on the
   tenant. Unseen enum values, wrong types and missing fields still withhold. Where an
   extra field can scope or qualify a kept one, only an empty or demonstrably harmless
   value is ignored; a populated one withholds the section as `incomplete_shape` with
@@ -1650,9 +1649,9 @@ https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant`; the evidence, coverage a
 events name the host only by that template (the `graph.token.*` events name the token scope, as for every resource).
 
 A named skip is `status: skipped` with `section_scoped: true`, a `reason` and fixed `error` text, no rows and no error
-class, and leaves the collector `ok`: `sharepoint_admin_certificate_required` (an app-only run without a certificate),
-`sharepoint_admin_second_sign_in_required` (a delegated run whose one sign-in cannot give the SharePoint token
-silently; no second sign-in is opened), `sharepoint_admin_token_unavailable` (an access-token or Azure CLI run),
+class, and leaves the collector `ok`: `sharepoint_admin_certificate_required` (a run without a usable certificate),
+`sharepoint_admin_second_sign_in_required` and `sharepoint_admin_token_unavailable` (written by runs of earlier
+versions that had other sign-in ways; no current run writes them, and replay still reads them),
 `sharepoint_admin_host_unresolved` (the root site names no plain `<prefix>.sharepoint.com` host) and
 `sharepoint_admin_unsupported_environment` (not commercial or GCC). A failure is `status: failed` with a precise
 `reason` and an `error_class` from the collector error vocabulary, and makes the collector `partial`:

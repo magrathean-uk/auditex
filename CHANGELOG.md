@@ -61,6 +61,13 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - Power Platform: `listTenantSettings` is now sent as the body-free POST Microsoft documents, instead of GET; the client admits POST
   for that one path only. The admin guide states the exact removal and blast radius of the Power BI read-only admin API setting and the
   Power Platform management-app registration.
+- **Docs, skills and shipped content describe the one way.** The setup guide, administrator permission guide, product
+  manual, troubleshooting guide, runbook, security and privacy reference, API call catalogue, output contract, README and
+  the profile pages describe the reader app with a certificate only and defer every permission to
+  `docs/guides/reader-app-permissions.md`; the delegated, Azure CLI, access-token, secret and guided-setup sections go. The
+  `delegated-auth` skill is removed from `skills/` and from shipped content (`pyproject.toml` data-files and
+  `shipped_content.py`); the `auditex-operator` and `app-readonly-escalation` skills now start from the reader app. The
+  profile pages list the collectors `profiles.py` selects.
 
 ### Collection
 

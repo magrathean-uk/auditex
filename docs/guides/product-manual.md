@@ -1,12 +1,12 @@
 # Auditex Product Manual
 
-See [default Exchange and public DNS collection](setup-guide.md#default-exchange-and-public-dns-collection) for app-mode selection, external requests, deselection and failure semantics.
+See [default Exchange and public DNS collection](setup-guide.md#default-exchange-and-public-dns-collection) for default collector selection, external requests, deselection and failure semantics.
 
 Auditex is an audit-only evidence collection and reporting toolkit for Microsoft 365 and Google Workspace. It gathers read-only posture evidence, records exactly what was attempted, normalizes the evidence into a stable bundle, and produces a customer review pack with finding-to-evidence references and recorded coverage gaps.
 
 ## What Auditex Does
 
-- Runs Microsoft 365 delegated, app-readonly, and offline sample audits.
+- Runs Microsoft 365 audits as a reader app with a certificate, and offline sample audits.
 - Runs Google Workspace domain-wide delegation, OAuth, and offline sample audits.
 - Flags Google collaboration posture from metadata-only evidence, including public group visibility, public membership visibility, shared-drive external-member allowance, calendar ACL exposure, and Drive sharing exposure.
 - Produces a local evidence bundle with manifest, summary, raw evidence, normalized records, findings, report pack, API inventory, proof table, evidence index, AI-safe context, and validation.
@@ -59,51 +59,45 @@ If `doctor` reports missing optional tools, install only the adapters needed for
 
 ## Microsoft 365 Audit Flow
 
-Start with delegated read access when you only have tenant login access.
+The tenant administrator sets up the reader app once; every permission and setting is in [Reader app permissions](reader-app-permissions.md). The operator then needs the application (client) ID, the tenant ID, the certificate thumbprint and the private key file (mode `600`).
 
-Generate the access plan before asking an admin to grant roles or app permissions.
+Generate the access plan before asking an admin to grant anything.
 
 ```bash
 auditex setup-guide m365 \
-  --mode delegated \
   --auditor-profile global-reader \
   --collector-preset full \
   --tenant-id <tenant-id-or-domain>
 ```
 
+Probe first:
+
 ```bash
-az login --allow-no-subscriptions --tenant <tenant-id-or-domain>
 auditex probe live \
   --tenant-name CLIENT \
   --tenant-id <tenant-id-or-domain> \
-  --mode delegated \
-  --use-azure-cli-token \
+  --mode app \
+  --client-id <app-id> \
+  --certificate-path ~/audit-keys/auditex-reader.pem \
+  --certificate-thumbprint <sha1-thumbprint> \
   --run-name probe
 ```
 
-If the probe is usable or partial with acceptable blockers, run the audit.
+If the probe is usable or partial with acceptable blockers, run the audit. An encrypted key takes `--certificate-password-file` or `--certificate-password-env` (the variable's name, never the password); no option takes the password itself.
 
 ```bash
 auditex run \
   --tenant-name CLIENT \
   --tenant-id <tenant-id-or-domain> \
+  --client-id <app-id> \
+  --certificate-path ~/audit-keys/auditex-reader.pem \
+  --certificate-thumbprint <sha1-thumbprint> \
   --auditor-profile global-reader \
   --plane full \
-  --use-azure-cli-token \
   --out outputs/live
 ```
 
-For app-readonly tenants, use the app profile and an ignored local auth file containing `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET`. Keep the file local; do not put secret values in shell commands or reports.
-
-```bash
-auditex run \
-  --tenant-name CLIENT \
-  --tenant-id <tenant-id> \
-  --auditor-profile app-readonly-full \
-  --plane full \
-  --env .secrets/m365-auth.env \
-  --out outputs/live
-```
+`auditex guided-run --flow app-audit` asks for the same values step by step.
 
 ## Google Workspace Audit Flow
 
@@ -406,7 +400,7 @@ Start the MCP server:
 auditex-mcp
 ```
 
-MCP tools never accept a bearer token or client secret: sign in through `auditex auth ...` and a saved auth context, and export `AZURE_CLIENT_SECRET` in the server's environment for app mode. Every path argument (run directories, output directories, credential files, assessment files) is confined to `AUDITEX_MCP_ROOT`, which defaults to the server's working directory; paths with `..` or outside it are refused.
+MCP tools never accept a bearer token, client secret or auth context: the Microsoft 365 tools take the reader app's client ID (else `AZURE_CLIENT_ID`), its certificate thumbprint and confined paths to the certificate key and its password file. Every path argument (run directories, output directories, credential files, assessment files) is confined to `AUDITEX_MCP_ROOT`, which defaults to the server's working directory; paths with `..` or outside it are refused.
 
 Use MCP tools for bundle-backed answers only. Every answer should cite bundle evidence or say evidence is missing. Key read-only review tools:
 
