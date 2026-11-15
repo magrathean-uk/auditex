@@ -885,3 +885,9 @@
 - why: M09-T02's result.
 - addendum (REV-M09-T02 item 3): `tenant-bootstrap/tests/test_remaining_population_gaps.py` joins M09-T02's files; it asserts the lab collector script's options, which M09-T02 had to change.
 - approver: auto
+
+## DEC-110 Pilot 4: the scored verifier is its own task; generation starts now, sharded
+- date: 2026-11-15
+- decision: REV-M03-T11 approved the pilot-4 writer (Qwen3.8-Flash-Next 812d96e1, medium reasoning, four candidates per row, first passing kept; 13.7612 GPU-hours to qualify) and found the dataround check has no scored pilot-4 verifier yet, so M03-T12's verify cannot pass. M03-T16 (codex, CPU) adds it, reviewed by the other vendor. M03-T12 starts generation and judging at once, because the pass rule, judge and selection rule are frozen; its verify waits for M03-T16. Generation runs all four candidates per row as qualified (no change to the reviewed generate.py), sharded across many nodes (about 84 node-hours for 760 candidates; no GPU cap, DEC-100) so it ends inside G's sign-in window where possible.
+- why: REV-M03-T11 findings 1 to 3.
+- approver: auto

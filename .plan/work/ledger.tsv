@@ -710,3 +710,13 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-15T16:23:57Z	REV-M09-T01	codex	codex2	gpt-6.1-sol	high	readonly	5	10		failed	task/M09-T01-permissions-guide	v4
 2026-11-15T16:28:39Z	REV-M09-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	281		done	task/M09-T01-permissions-guide	v4
 2026-11-15T16:31:32Z	REV-M09-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	125		done	task/M09-T01-permissions-guide	v4
+2026-11-15T17:03:24Z	M09-T02	sol	claude-4	claude-opus-5-5	xhigh	branch	0	3411	18.2338	done	task/M09-T02-engine-cert-only	v4
+2026-11-15T17:11:48Z	CHK-M09-T02	terra	claude-3	claude-sonnet-5-5	xhigh	readonly	0	467	1.7280	done	task/M09-T02-engine-cert-only	v4
+2026-11-15T17:12:19Z	REV-M09-T02	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	498		done	task/M09-T02-engine-cert-only	v4
+2026-11-15T17:19:01Z	M09-T02	sol	claude-4	claude-opus-5-5	high	branch	0	373	1.3137	done	task/M09-T02-engine-cert-only	v4
+2026-11-15T17:21:46Z	REV-M09-T02	codex	codex2	gpt-6.1-sol	high	readonly	0	152		done	task/M09-T02-engine-cert-only	v4
+2026-11-15T17:37:32Z	M03-T11	codex	codex	gpt-6.1-sol	xhigh	inplace	124	14401		timeout	main	v4
+2026-11-15T17:37:36Z	CHK-M09-T02	terra	claude-3	claude-sonnet-5-5	xhigh	readonly	0	940	1.3428	done	task/M09-T02-engine-cert-only	v4
+2026-11-15T17:38:20Z	REV-M09-T02	codex	codex2	gpt-6.1-sol	medium	readonly	0	16		done	task/M09-T02-engine-cert-only	v4
+2026-11-15T17:43:47Z	M03-T11	codex	codex	gpt-6.1-sol	xhigh	inplace	1	360		partial	main	v4
+2026-11-15T17:54:00Z	REV-M03-T11	sol	claude-3	claude-opus-5-5	high	readonly	0	573	2.1073	done	main	v4

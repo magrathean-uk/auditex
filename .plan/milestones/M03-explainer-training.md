@@ -35,11 +35,12 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T08 | Add the data-round checks to the kit verifier | sol | M | hard | done |
 | M03-T09 | Teacher prompt v3 seeded with real lab-run explanations, and the pilot-3 checks | codex | M | hard | done |
 | M03-T10 | Validation pilot 3 on the system (option 2, cap 20 GPU-hours) | terra | M | hard | done |
-| M03-T11 | Pilot 4 writer: choose, fetch and qualify a stronger example writer | codex | M | hard | todo |
+| M03-T11 | Pilot 4 writer: choose, fetch and qualify a stronger example writer | codex | M | hard | done |
 | M03-T12 | Validation pilot 4 on the system (changed writer) | terra | M | hard | todo |
 | M03-T13 | One-page proposal: a different job for the model | lead | S | - | done |
 | M03-T14 | Question-answering job: question set, deterministic baseline, hard checks and bar | sol | M | hard | done |
 | M03-T15 | Question-answering validation pilot on the system | terra | M | hard | todo |
+| M03-T16 | Scored pilot-4 verifier in the dataround check | codex | S | hard | todo |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
@@ -143,7 +144,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 - files: `runs/data-round/pilot-4/**` (no targets or judgements yet), `checks/**` (dataround kind only), `models/**` on the system, `runbook/README.md` (data-round section only) in the AIRR kit folder; `.plan/work/M03-T11/result.md`
 
 ### M03-T12 Validation pilot 4 on the system (changed writer)
-- Preconditions: M03-T11 done and `REV-M03-T11` approves; G's system sign-in valid.
+- Preconditions: M03-T11 done and `REV-M03-T11` approves; G's system sign-in valid. Generation and judging may start before M03-T16 lands (the pass rule and judge are frozen since pilot 2); the verify waits for M03-T16 (DEC-110). Shard generation across nodes (REV-M03-T11 finding 3) and build targets from `kept_target` without a second `parse_output` (finding 2).
 - One attempt exactly as M03-T10, with the pilot-4 writer config; same pass rule and judge; no revision. Every job inventoried under `runs/usage/M03-T12/` (stage `dataround`); no GPU cap (DEC-100). On `pilot: fail` the same-job line is closed (DEC-102); on `pilot: pass` M03-T07 and the three-family M03-T02/M03-T03 follow (DEC-098, amendment 8).
 - Writes the M03-T10 finding lines for attempt 4.
 - verify: `grep -qE '^pilot: (pass|fail)$' .plan/work/M03-T12/result.md && grep -qx 'heldout-reads: 0' .plan/work/M03-T12/result.md && "$AIRR_KIT/bin/kit-check" dataround --result .plan/work/M03-T12/result.md`
@@ -172,3 +173,8 @@ G has looked at the budget against the allocation balance before any M03 run; th
 - Writes `qa-pilot: pass|fail`, `qa-hardcheck-pass-rate: <value>`, `qa-pilot-preference: <value> band <lo>-<hi>`, `heldout-reads: 0` and `round-gpu-hours: qa <used>` under `### Findings`; `kit-check qa --result` recomputes that line from `runs/usage/M03-T15/` the way the dataround kind recomputes its own, because the frozen usage check binds stages to plan v4's first table (DEC-105).
 - verify: `grep -qE '^qa-pilot: (pass|fail)$' .plan/work/M03-T15/result.md && grep -qx 'heldout-reads: 0' .plan/work/M03-T15/result.md && "$AIRR_KIT/bin/kit-check" qa --result .plan/work/M03-T15/result.md`
 - files: `runs/qa/pilot-1/**`, `runs/usage/M03-T15/**`, `runbook/README.md` (question-answering section only) in the AIRR kit folder; `.plan/work/M03-T15/result.md`
+
+### M03-T16 Scored pilot-4 verifier in the dataround check (DEC-110)
+- Extends `kit-check dataround` (checks/**, dataround kind only) so M03-T12 is a known task: the pilot-4 preparation check allows the targets, judgements and measures M03-T12 writes, and a scored pilot-4 verifier recomputes from them exactly what the pilot-3 verifier recomputes for M03-T10 (wins, preference and band, unfiltered counts, `heldout-reads: 0`, `round-gpu-hours: dataround`), with kept targets taken from `kept_target` (no second `parse_output`) and the first-passing selection checked, joined from per-shard raw and selection files. The M03-T09 to M03-T11 checks keep passing once pilot-4 holds targets. Tests; `kit-check selftest` passes. Reviewed by the other vendor (`REV-M03-T16`).
+- verify: `"$AIRR_KIT/bin/kit-check" selftest && for t in M03-T09 M03-T10 M03-T11; do "$AIRR_KIT/bin/kit-check" dataround --result ".plan/work/$t/result.md" || exit 1; done && grep -qx 'pilot-4-verifier: ready' .plan/work/M03-T16/result.md`
+- files: `checks/**` (dataround kind only) in the AIRR kit folder; `.plan/work/M03-T16/result.md`
