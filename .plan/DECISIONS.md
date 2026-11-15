@@ -860,3 +860,9 @@
 - decision: question set v1 moves from `data/qa-v1/` to `qa-data/v1/` in the AIRR kit, so `data/splits.json` (pinned by M02-T03 and the M03 Definition of Done) stays untouched and `kit-check twins` keeps passing; M03-T15 reports `round-gpu-hours: qa <used>`, recomputed by the qa kind from the job inventory as the dataround kind does, instead of a `gpu-hours:` stage line the frozen usage check would refuse. M03-T14 repair round 2 makes both changes.
 - why: M03-T14's result named both risks.
 - approver: auto
+
+## DEC-106 Question-answering hard checks re-scoped to a fail-closed answer form
+- date: 2026-11-15
+- decision: after two review rounds in which blocklist-style checks kept letting nearby invalid answers through (REV-M03-T14 round 2: an uncited refusal, a negated verdict, a number word), the hard checks become fail-closed: an answer is either exactly the fixed refusal sentence, or sentences that each end with at least one citation; every value token in a sentence (digits, quoted spans in any quote style, verdict words, state words such as enabled, disabled, true, false, on, off, yes, no) must appear at a cited reference; number words are refused; a negation word in a sentence with a verdict or value token is refused. Anything outside the form fails. One author round on this design, then the other-vendor re-review; the answer form goes into the writer prompt for M03-T15.
+- why: AGENTS.md "two repair rounds, then re-scope".
+- approver: auto
