@@ -848,3 +848,9 @@
 - decision: the manager role moved to session local_a865e722-53ca-49b6-a31a-c8c65b33d91c ("Manager chat passover", 12:40 GMT); the old manager chat is closed. The lead sends DEC-073 messages (G's hands, G-only decisions, milestone landings, full stops) there from now on.
 - why: the manager's passover message.
 - approver: manager
+
+## DEC-104 New job for the model: answering questions about a tenant's results
+- date: 2026-11-15
+- decision: G, through the manager (asked "Which new job should the Auditex model learn?", buttons "Fix plan" and "Answer questions"): "Answer questions". The model answers questions about an assessed run, mainly through the MCP tools, every claim citing the run; the rules keep every verdict. First a curated question set with gold references, a deterministic baseline and hard checks (cites the run, no invented value, no contradicted verdict, unanswerable questions refused), with the pass rule written before any GPU job (M03-T14); then one validation pilot (M03-T15); on a pass, training on Qwen, Mistral and Gemma without a GPU cap (DEC-100). The release that ships now is unchanged; the pilot-4 line (DEC-102) carries on. M03 amendment 10.
+- why: G's pick between the proposal's fix plan and its question-answering alternative.
+- approver: G

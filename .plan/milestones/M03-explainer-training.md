@@ -38,6 +38,8 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T11 | Pilot 4 writer: choose, fetch and qualify a stronger example writer | codex | M | hard | todo |
 | M03-T12 | Validation pilot 4 on the system (changed writer) | terra | M | hard | todo |
 | M03-T13 | One-page proposal: a different job for the model | lead | S | - | done |
+| M03-T14 | Question-answering job: question set, deterministic baseline, hard checks and bar | sol | M | hard | todo |
+| M03-T15 | Question-answering validation pilot on the system | terra | M | hard | todo |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
@@ -152,3 +154,21 @@ G has looked at the budget against the allocation balance before any M03 run; th
 - verify: `grep -qx 'proposal: sent' .plan/work/M03-T13/result.md`
 - files: `.plan/work/M03-T13/result.md`
 
+### Amendment 10 (DEC-104): the new job is answering questions about a tenant's results
+- G picked "Answer questions" (alternative 1 of the M03-T13 proposal). The model answers a question about one assessed run (or two runs, for "what changed") and every answer cites the run. Verdicts stay the rules'; the model never decides one. The shipped release is unchanged; M03-T11 and M03-T12 carry on as decided (DEC-102). The pipeline stays base-agnostic (Qwen, Mistral, Gemma as in amendment 8); no GPU cap (DEC-100). On `qa-pilot: pass` the lead adds the three-family training and build tasks as a later amendment without a new ask; on `qa-pilot: fail` the lead tells the manager in three plain lines and the job stops.
+
+### M03-T14 Question-answering job: question set, deterministic baseline, hard checks and bar (DEC-104)
+- Builds, in the AIRR kit, question set v1 under `data/qa-v1/`: at least 600 questions over assessed runs (the pseudonymised lab-tenant runs, built the way M03-T09 built its exemplars, plus synthetic runs from the kit's existing explainer inputs and rule vectors), spread over at least these kinds: why a check has its verdict, which setting value a check saw, what changed between two runs, which checks a policy area or object affects, and questions the run cannot answer. Each question carries its gold references (the run artefacts and fields that answer it) and its kind; splits train, validation (at least 150) and held-out (at least 150, sealed the way the M02 held-out set is), fixed by a seeded rule and hashed.
+- Writes a deterministic baseline answerer (gold-reference lookup rendered with the fixed-text explainer's sentences) under `runs/qa/baseline/`.
+- Adds a `qa` kind to `kit-check` (checks/** only) with the hard checks every answer must pass: each claim cites a run reference that exists; every quoted value appears verbatim at the cited reference; no statement contradicts a rule's verdict; an unanswerable question gets a "not in this run" answer and no invented content. Tests; `kit-check selftest` passes.
+- Writes the pilot pass rule into the runbook's question-answering section before any GPU job: the same form as the explainer bar (after the hard-check filter, the judge preference band of model-style answers against the baseline, both orders, judge family other than the writer's, lies wholly above 0.729), plus at least 95% of written answers passing every hard check.
+- Reviewed by the other vendor (`REV-M03-T14`).
+- verify: `"$AIRR_KIT/bin/kit-check" selftest && "$AIRR_KIT/bin/kit-check" qa --set data/qa-v1 && grep -qx 'qa-set: ready' .plan/work/M03-T14/result.md`
+- files: `data/qa-v1/**`, `runs/qa/**` (baseline only), `checks/**` (qa kind only), `runbook/README.md` (question-answering section only) in the AIRR kit folder; `.plan/work/M03-T14/result.md`
+
+### M03-T15 Question-answering validation pilot on the system (DEC-104)
+- Preconditions: M03-T14 done and `REV-M03-T14` approves; G's system sign-in valid.
+- One attempt: the writer (the pilot-4 writer if M03-T11 qualified it, else the pilot-3 writer) answers the validation questions with reasoning on, four candidates per row, the first passing every hard check kept; the judge compares kept answers with the baseline in both orders; the pass rule written in M03-T14 decides. Held-out untouched. Every job inventoried under `runs/usage/M03-T15/`.
+- Writes `qa-pilot: pass|fail`, `qa-hardcheck-pass-rate: <value>`, `qa-pilot-preference: <value> band <lo>-<hi>`, `heldout-reads: 0` and `gpu-hours: qa-pilot <used>` under `### Findings`.
+- verify: `grep -qE '^qa-pilot: (pass|fail)$' .plan/work/M03-T15/result.md && grep -qx 'heldout-reads: 0' .plan/work/M03-T15/result.md && "$AIRR_KIT/bin/kit-check" qa --result .plan/work/M03-T15/result.md`
+- files: `runs/qa/pilot-1/**`, `runs/usage/M03-T15/**`, `runbook/README.md` (question-answering section only) in the AIRR kit folder; `.plan/work/M03-T15/result.md`
