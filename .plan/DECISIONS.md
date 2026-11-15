@@ -897,3 +897,9 @@
 - decision: M03-T15 ran the one validation pilot (pilot-4 writer, four candidates per question, first passing the fail-closed hard checks kept, gpt-oss judge in both orders) and missed both parts of the pass rule: hard-check rate 0.9015 (833 of 924 candidates) against 0.95, preference 0.5281 band 0.5065-0.5519 against 0.729 (21 wins, 202 ties, 8 losses). 275.7845 GPU-hours. Under amendment 10 the job stops; no training on it; the shipped release is unchanged. The lead restored the pinned pass rule text in the kit runbook's section 16, which an older copy had replaced (the pilot's own pass rule matched the pinned sha256 bfcc1a4c).
 - why: as with the explainer, the fixed-text baseline already answers well; most model answers tie with it.
 - approver: auto (amendment 10 rule under G's DEC-104)
+
+## DEC-112 Pilot 4 failed: the same-job line closes (DEC-102)
+- date: 2026-11-15
+- decision: M03-T12 ran the one pilot-4 attempt (Qwen3.8-Flash-Next writer, four candidates per row, first passing kept, prompt v3) and missed: 38 of 190 headroom rows won in both orders, filtered preference 0.5712 band 0.5506-0.5918 against 0.729; check failures fell to 3 of 190 but 226 of 267 pairs tie. 439.9112 GPU-hours, nothing left on the system; the lead reran the verify (kit-check dataround PASS). Under DEC-102 the explainer-rewriting line closes; with DEC-111 both Track B jobs tried so far have failed for the same reason. M03-T07, M03-T02, M03-T03 and M03-T04 do not run. Whether Track B ends or tries the remaining proposal job (the fix plan) is G's call, put to him through the manager.
+- why: DEC-102 rule (one attempt, same bar).
+- approver: auto (DEC-102 rule under G's delegation)

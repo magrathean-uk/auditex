@@ -36,7 +36,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T09 | Teacher prompt v3 seeded with real lab-run explanations, and the pilot-3 checks | codex | M | hard | done |
 | M03-T10 | Validation pilot 3 on the system (option 2, cap 20 GPU-hours) | terra | M | hard | done |
 | M03-T11 | Pilot 4 writer: choose, fetch and qualify a stronger example writer | codex | M | hard | done |
-| M03-T12 | Validation pilot 4 on the system (changed writer) | terra | M | hard | todo |
+| M03-T12 | Validation pilot 4 on the system (changed writer) | terra | M | hard | done |
 | M03-T13 | One-page proposal: a different job for the model | lead | S | - | done |
 | M03-T14 | Question-answering job: question set, deterministic baseline, hard checks and bar | sol | M | hard | done |
 | M03-T15 | Question-answering validation pilot on the system | terra | M | hard | done |
