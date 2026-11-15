@@ -805,3 +805,8 @@
 - decision: MS.AAD.7.5 read met on the lab tenant because the product reads roleAssignmentSchedules, where Graph fills an outside-PIM assignment's start with the read time; ScubaGear reads roleAssignmentScheduleInstances, where it is null (checked live). M08-T14 switches the Assignments source; a sol worker implements, Codex reviews, an executing check runs; then one rule reassessment of m08e3 is not possible (raw evidence differs), so the next collection shows it.
 - why: a verdict that disagrees with ScubaGear on a live tenant is a product correctness defect; the code already named it as an inference to confirm.
 - approver: auto (lead; the manager was told it would proceed unless it said no)
+
+## DEC-097 M08-T14 files widened
+- decision: the M08-T14 files line adds normalize.py (feed the instance rows to build_privileged_roles and check their read status), configs/collector-definitions.json (the identity_governance query plan), scuba_projection.py and its test (PRIVILEGED_ROLES_READS), and the sample bundles under examples/ the contract smoke reads, for privileged roles only. roleAssignmentSchedules stays (effective admins, findings, baselines, governance records use it).
+- why: the worker's blocked report showed the new read cannot reach privileged_roles without them.
+- approver: auto
