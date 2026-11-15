@@ -9,9 +9,11 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.auth_runtime import removed_auth_flag
 from azure_tenant_audit.cli import AS_OF_HELP, parse_as_of
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.cli_guard import RunArgumentRefusal, guarded_cli, parse_guarded
+from azure_tenant_audit.config import CERTIFICATE_WAY
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.guarded_io import guard_session, open_private_output
 from azure_tenant_audit.output_redaction import (
@@ -31,7 +33,6 @@ from azure_tenant_audit.response import ResponseConfig, response_actions, run_re
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 from azure_tenant_audit.versioning import package_version_line
 
-from . import auth as auditex_auth
 from .bootstrap import print_doctor_report, run_setup
 from .features import response_disabled_message, response_enabled
 from .google_workspace.run import (
@@ -48,6 +49,20 @@ from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 
 REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
+# The tenant administrator's guide to every permission, role and setting of the reader app (DEC-107).
+READER_APP_GUIDE = "docs/guides/reader-app-permissions.md"
+AUTH_REMOVED_MESSAGE = (
+    "auditex auth was removed: Microsoft 365 audits sign in only as the reader app with a certificate, so there is "
+    "no sign-in, token or saved connection to manage. Pass --client-id, --certificate-path and "
+    "--certificate-thumbprint to auditex run or auditex probe live; the grant is in " + READER_APP_GUIDE + "."
+)
+
+
+def _refuse_removed_auth_flag(parser: Any, argv: list[str]) -> None:
+    """Refuse a removed sign-in flag by name with the one way, before argparse could echo its value."""
+    removed = removed_auth_flag(argv)
+    if removed is not None:
+        parser.error_prevalidated(f"{removed} was removed. {CERTIFICATE_WAY}; see {READER_APP_GUIDE}.")
 
 
 def _probe_mode_choices() -> tuple[str, ...]:
@@ -66,8 +81,8 @@ def _build_root_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("setup", allow_abbrev=False, help="Bootstrap local runtime dependencies.")
     subparsers.add_parser("setup-guide", allow_abbrev=False, help="Print provider setup scopes, roles, and verification commands.")
-    subparsers.add_parser("doctor", allow_abbrev=False, help="Show local runtime and auth readiness.")
-    subparsers.add_parser("guided-run", allow_abbrev=False, help="Run the guided operator flow.")
+    subparsers.add_parser("doctor", allow_abbrev=False, help="Show local runtime readiness (Python, PowerShell, Exchange module).")
+    subparsers.add_parser("guided-run", allow_abbrev=False, help="Run the guided reader-app audit with a certificate.")
     subparsers.add_parser("demo", allow_abbrev=False, help="Walk through Auditex on a fictional, synthetic tenant (offline).")
     subparsers.add_parser("run", allow_abbrev=False, help="Run a raw tenant audit.")
     subparsers.add_parser("probe", allow_abbrev=False, help="Run or summarize capability probes.")
@@ -80,7 +95,6 @@ def _build_root_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("assess", allow_abbrev=False, help="Write the rule-only SCuBA assessment for a finished run; rows without a rule are not assessed.")
     subparsers.add_parser("notify", allow_abbrev=False, help="Build or send post-run notifications.")
     subparsers.add_parser("rules", allow_abbrev=False, help="Inspect built-in rule packs.")
-    subparsers.add_parser("auth", allow_abbrev=False, help="Inspect and manage local auth state.")
     subparsers.add_parser("google", allow_abbrev=False, help="Run Google Workspace audit flows.")
     subparsers.add_parser("gate", allow_abbrev=False, help="Severity-threshold gate for CI integration.")
     subparsers.add_parser("gate-drift", allow_abbrev=False, help="Drift gate: fail when new findings appear above a severity threshold.")
@@ -217,7 +231,8 @@ def _build_probe_parser() -> argparse.ArgumentParser:
     live.add_argument("--tenant-name", required=True, help="Label for the probe output folder.")
     live.add_argument("--tenant-id", default=None, help="Entra tenant ID.")
     live.add_argument("--auditor-profile", default="global-reader", help="Audit profile for escalation guidance.")
-    live.add_argument("--mode", default="delegated", choices=_probe_mode_choices(), help="Probe auth and execution mode.")
+    live.add_argument("--mode", default="app", choices=_probe_mode_choices(),
+                      help="app probes the tenant as the reader app with its certificate; response is lab only.")
     live.add_argument("--surface", default="all", help="Surface family to probe, or comma-separated list.")
     live.add_argument("--out", default="outputs/probes", help="Base output directory.")
     live.add_argument("--run-name", default=None, help="Optional probe run name.")
@@ -225,11 +240,16 @@ def _build_probe_parser() -> argparse.ArgumentParser:
     live.add_argument("--until", default=None, help="Optional ISO8601 upper bound for time-windowed surfaces.")
     live.add_argument("--top", type=int, default=5, help="Per-surface result limit for probe requests.")
     live.add_argument("--page-size", type=int, default=5, help="Per-request page size for probe requests.")
-    live.add_argument("--access-token", default=None, help="Optional preissued Graph access token.")
-    live.add_argument("--auth-context", default=None, help="Saved local auth context name to use for probe execution.")
-    live.add_argument("--use-azure-cli-token", action="store_true", help="Use Azure CLI Graph token for delegated probes.")
-    live.add_argument("--client-id", default=None, help="App registration ID for app probe mode.")
-    live.add_argument("--client-secret", default=None, help="App secret for app probe mode.")
+    live.add_argument("--client-id", default=None, help="The reader app's application (client) ID (else AZURE_CLIENT_ID).")
+    live.add_argument("--certificate-path", default=None, metavar="FILE",
+                      help="The reader app's certificate private key file (PEM or PFX, readable only by its owner).")
+    live.add_argument("--certificate-thumbprint", default=None, metavar="SHA1",
+                      help="SHA-1 thumbprint (40 hex characters) of the certificate on the app registration.")
+    certificate_password = live.add_mutually_exclusive_group()
+    certificate_password.add_argument("--certificate-password-env", default=None, metavar="NAME",
+                                      help="Name of the environment variable that holds the key password.")
+    certificate_password.add_argument("--certificate-password-file", default=None, metavar="FILE",
+                                      help="File holding the key password, readable only by its owner.")
     live.add_argument("--authority", default="https://login.microsoftonline.com/", help="Identity authority URL.")
     live.add_argument("--graph-scope", default="https://graph.microsoft.com/.default", help="Graph scope.")
     live.add_argument("--allow-lab-response", action="store_true", help="Allow response readiness probes against configured lab tenants only.")
@@ -241,47 +261,6 @@ def _build_probe_parser() -> argparse.ArgumentParser:
 
     summarize = subparsers.add_parser("summarize", allow_abbrev=False, help="Summarize an existing probe run.")
     summarize.add_argument("run_dir", help="Probe run directory.")
-    return parser
-
-
-def _build_auth_parser() -> argparse.ArgumentParser:
-    parser = build_argument_parser(allow_abbrev=False, prog="auditex auth", description="Inspect and manage local Auditex auth state.")
-    subparsers = parser.add_subparsers(dest="auth_command", required=True)
-
-    subparsers.add_parser("status", allow_abbrev=False, help="Show Azure CLI, local auth env, and active m365 connection state.")
-    subparsers.add_parser("list", allow_abbrev=False, help="List saved m365 connections.")
-    use = subparsers.add_parser("use", allow_abbrev=False, help="Switch the active m365 connection.")
-    use.add_argument("connection_name", help="Saved m365 connection name.")
-
-    export_env = subparsers.add_parser("export-env", allow_abbrev=False, help="Show the effective local auth env values.")
-    export_env.add_argument("--format", choices=("json", "shell"), default="json")
-
-    login = subparsers.add_parser("login", allow_abbrev=False, help="Run delegated or app m365 login.")
-    login.add_argument("--mode", choices=("delegated", "app"), default="delegated")
-    login.add_argument("--tenant-id", default=None)
-    login.add_argument("--connection-name", default=None)
-    login.add_argument("--auth-type", default=None)
-    login.add_argument("--app-id", default=None)
-    login.add_argument("--client-secret", default=None)
-
-    import_token = subparsers.add_parser("import-token", allow_abbrev=False, help="Save a customer-provided Graph bearer token as a local auth context.")
-    import_token.add_argument("--name", required=True, help="Saved auth context name.")
-    import_token.add_argument("--token", default=None, help="Bearer token or JWT access token. Prefer --token-stdin, --token-env, or --token-file.")
-    import_token.add_argument("--token-env", default=None, help="Read token from this environment variable.")
-    import_token.add_argument("--token-file", default=None, help="Read token from a local file.")
-    import_token.add_argument("--token-stdin", action="store_true", help="Read token from stdin.")
-    import_token.add_argument("--tenant-id", default=None)
-
-    inspect_token = subparsers.add_parser("inspect-token", allow_abbrev=False, help="Decode a Graph bearer token locally without sending it anywhere.")
-    inspect_token.add_argument("--token", default=None, help="Bearer token or JWT access token. Prefer --token-stdin, --token-env, or --token-file.")
-    inspect_token.add_argument("--token-env", default=None, help="Read token from this environment variable.")
-    inspect_token.add_argument("--token-file", default=None, help="Read token from a local file.")
-    inspect_token.add_argument("--token-stdin", action="store_true", help="Read token from stdin.")
-
-    capability = subparsers.add_parser("capability", allow_abbrev=False, help="Show collector capability for a saved auth context.")
-    capability.add_argument("--name", default=None, help="Saved auth context name. Defaults to active context.")
-    capability.add_argument("--collectors", required=True, help="Comma-separated collector IDs to evaluate.")
-    capability.add_argument("--auditor-profile", default="auto")
     return parser
 
 
@@ -442,7 +421,6 @@ def _build_response_parser() -> argparse.ArgumentParser:
     run.add_argument("--allow-lab-response", action="store_true", help="Allow the response plane for configured lab tenants only.")
     run.add_argument("--allow-adapter-override", action="store_true", help="Allow override of adapter name for response execution.")
     run.add_argument("--allow-command-override", action="store_true", help="Allow override of raw command text for response execution.")
-    run.add_argument("--auth-context", default=None, help="Saved local auth context name to use for response execution.")
     run.add_argument("--adapter-override", default=None, help="Override the adapter used for the response action.")
     run.add_argument("--command-override", default=None, help="Override the command template used for the response action.")
 
@@ -496,8 +474,8 @@ def _build_setup_guide_parser() -> argparse.ArgumentParser:
     m365.add_argument("--tenant-id", default="<tenant-id-or-domain>")
     m365.add_argument("--auditor-profile", default="global-reader")
     m365.add_argument("--plane", choices=("inventory", "full", "export"), default="full")
-    m365.add_argument("--mode", choices=("delegated", "app"), default="delegated")
-    m365.add_argument("--include-exchange", action="store_true")
+    m365.add_argument("--mode", choices=("app",), default="app",
+                      help="Kept for old scripts: the guide is always for the reader app with a certificate.")
     m365.add_argument("--config", default="configs/collector-definitions.json")
     m365.add_argument("--permission-hints", default="configs/collector-permissions.json")
     m365.add_argument("--format", choices=("json", "md"), default="md")
@@ -985,8 +963,6 @@ def main(argv: list[str] | None = None) -> int:
             token_cache=getattr(args, "token_cache", ".secrets/google-token.json"),
             auditor_profile=getattr(args, "auditor_profile", "global-reader"),
             plane=getattr(args, "plane", "full"),
-            mode=getattr(args, "mode", "delegated"),
-            include_exchange=getattr(args, "include_exchange", False),
             config_path=getattr(args, "config", "configs/collector-definitions.json"),
             permission_hints_path=getattr(args, "permission_hints", "configs/collector-permissions.json"),
         )
@@ -1044,6 +1020,7 @@ def main(argv: list[str] | None = None) -> int:
         return demo_main(argv[1:])
     if argv[0] == "guided-run":
         parser = build_guided_parser()
+        _refuse_removed_auth_flag(parser, argv[1:])
         args = parse_guarded(parser, argv[1:])
         return run_guided(args)
     if argv[0] == "rules":
@@ -1219,83 +1196,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(send_notification(run_dir=args.run_dir, sink=args.sink, dry_run=not args.execute), indent=2))
         return 0
     if argv[0] == "auth":
-        parser = _build_auth_parser()
-        args = parse_guarded(parser, argv[1:])
-        if args.auth_command == "status":
-            print(json.dumps(auditex_auth.get_auth_status(), indent=2))
-            return 0
-        if args.auth_command == "list":
-            print(json.dumps(auditex_auth.list_connections(), indent=2))
-            return 0
-        if args.auth_command == "use":
-            print(json.dumps(auditex_auth.use_connection(args.connection_name), indent=2))
-            return 0
-        if args.auth_command == "export-env":
-            payload = auditex_auth.export_env()
-            if args.format == "shell":
-                for key, value in (payload.get("values") or {}).items():
-                    print(f"{key}={value}")
-            else:
-                print(json.dumps(payload, indent=2))
-            return 0
-        if args.auth_command == "login":
-            return auditex_auth.login_connection(
-                mode=args.mode,
-                tenant_id=args.tenant_id,
-                connection_name=args.connection_name,
-                auth_type=args.auth_type,
-                app_id=args.app_id,
-                client_secret=args.client_secret,
-            )
-        if args.auth_command == "import-token":
-            token, source = auditex_auth.resolve_token_input(
-                token=args.token,
-                token_env=args.token_env,
-                token_file=args.token_file,
-                token_stdin=args.token_stdin,
-            )
-            if source == "argv":
-                print(
-                    "warning: --token exposes secrets through shell history/process listings; prefer --token-stdin or --token-env",
-                    file=sys.stderr,
-                )
-            print(
-                json.dumps(
-                    auditex_auth.import_token_context(
-                        name=args.name,
-                        token=token,
-                        tenant_id=args.tenant_id,
-                    ),
-                    indent=2,
-                )
-            )
-            return 0
-        if args.auth_command == "inspect-token":
-            token, source = auditex_auth.resolve_token_input(
-                token=args.token,
-                token_env=args.token_env,
-                token_file=args.token_file,
-                token_stdin=args.token_stdin,
-            )
-            if source == "argv":
-                print(
-                    "warning: --token exposes secrets through shell history/process listings; prefer --token-stdin or --token-env",
-                    file=sys.stderr,
-                )
-            print(json.dumps(auditex_auth.inspect_token_claims(token), indent=2))
-            return 0
-        if args.auth_command == "capability":
-            print(
-                json.dumps(
-                    auditex_auth.capability_for_context(
-                        name=args.name,
-                        collectors=[item.strip() for item in args.collectors.split(",") if item.strip()],
-                        auditor_profile=args.auditor_profile,
-                    ),
-                    indent=2,
-                )
-            )
-            return 0
+        print(AUTH_REMOVED_MESSAGE, file=sys.stderr)
         return 2
     if argv[0] == "google":
         parser = _build_google_parser()
@@ -1404,6 +1305,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] == "probe":
         parser = _build_probe_parser()
+        _refuse_removed_auth_flag(parser, argv[1:])
         args = parse_guarded(parser, argv[1:])
         if args.probe_command == "summarize":
             print(json.dumps(summarize_run(args.run_dir), indent=2))
@@ -1411,12 +1313,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.probe_command != "live":
             return 2
         if args.mode == "app":
-            # Same fallback as `auditex run`: read saved app credentials instead of requiring the secret on the command line.
-            import os
-
+            # Same fallback as `auditex run`: the tenant and the reader app's client ID may come from the environment.
             args.tenant_id = args.tenant_id or os.environ.get("AZURE_TENANT_ID")
             args.client_id = args.client_id or os.environ.get("AZURE_CLIENT_ID")
-            args.client_secret = args.client_secret or os.environ.get("AZURE_CLIENT_SECRET")
         cfg = ProbeConfig(
             tenant_name=args.tenant_name,
             output_dir=Path(args.out),
@@ -1429,11 +1328,11 @@ def main(argv: list[str] | None = None) -> int:
             until=args.until,
             top=args.top,
             page_size=args.page_size,
-            access_token=args.access_token,
-            auth_context=args.auth_context,
-            use_azure_cli_token=args.use_azure_cli_token,
             client_id=args.client_id,
-            client_secret=args.client_secret,
+            certificate_path=args.certificate_path,
+            certificate_thumbprint=args.certificate_thumbprint,
+            certificate_password_env=args.certificate_password_env,
+            certificate_password_file=args.certificate_password_file,
             authority=args.authority,
             graph_scope=args.graph_scope,
             allow_lab_response=args.allow_lab_response,
@@ -1465,7 +1364,6 @@ def main(argv: list[str] | None = None) -> int:
             execute=args.execute,
             allow_write=args.allow_write,
             allow_lab_response=args.allow_lab_response,
-            auth_context=args.auth_context,
             adapter_override=args.adapter_override,
             command_override=args.command_override,
             allow_adapter_override=args.allow_adapter_override,

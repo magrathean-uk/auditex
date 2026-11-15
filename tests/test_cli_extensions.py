@@ -221,25 +221,6 @@ def test_notify_send_cli_dispatches(monkeypatch, capsys, tmp_path) -> None:
     assert payload["dry_run"] is True
 
 
-def test_guided_parser_accepts_local_mode_flags() -> None:
-    args = build_guided_parser().parse_args(
-        [
-            "--tenant-id",
-            "contoso.onmicrosoft.com",
-            "--local-mode",
-            "--skip-login-check",
-            "--skip-tool-check",
-            "--report-format",
-            "sarif",
-        ]
-    )
-
-    assert args.local_mode is True
-    assert args.skip_login_check is True
-    assert args.skip_tool_check is True
-    assert args.report_format == "sarif"
-
-
 def test_report_render_cli_accepts_security_export_formats(monkeypatch, capsys, tmp_path) -> None:
     run_a = _bundle(tmp_path)
     monkeypatch.setattr(
@@ -254,634 +235,184 @@ def test_report_render_cli_accepts_security_export_formats(monkeypatch, capsys, 
     assert payload["format"] == "oscal"
 
 
-def test_guided_parser_accepts_app_mode_flags() -> None:
-    args = build_guided_parser().parse_args(
-        [
-            "--tenant-id",
-            "contoso.onmicrosoft.com",
-            "--auth-mode",
-            "app",
-            "--client-id",
-            "app-id",
-            "--client-secret",
-            "app-secret",
-        ]
-    )
-
-    assert args.auth_mode == "app"
-    assert args.client_id == "app-id"
-    assert args.client_secret == "app-secret"
+_THUMBPRINT = "0123456789ABCDEF0123456789ABCDEF01234567"
+_READY_DOCTOR = {
+    "system": {"os": "Darwin", "machine": "arm64"},
+    "readiness": {"core_ready": True, "exchange_ready": True, "pwsh_ready": True},
+}
 
 
-def test_guided_parser_accepts_flow_flag() -> None:
-    args = build_guided_parser().parse_args(
-        [
-            "--flow",
-            "ga-setup-app",
-            "--tenant-id",
-            "contoso.onmicrosoft.com",
-        ]
-    )
-
-    assert args.flow == "ga-setup-app"
+def _certificate_args(tmp_path, *extra: str) -> list[str]:
+    return [
+        "--tenant-id", "contoso.onmicrosoft.com", "--tenant-name", "CONTOSO", "--out", str(tmp_path),
+        "--client-id", "app-id", "--certificate-path", "reader.key.pem", "--certificate-thumbprint", _THUMBPRINT,
+        *extra,
+    ]
 
 
-def test_guided_run_delegated_exchange_needs_the_sign_in_app(monkeypatch, tmp_path, capsys) -> None:  # noqa: ANN001
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {"azure_cli": {"status": "supported"}},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
-    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no m365")))
-    monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no az")))
-    monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: pytest.fail("no run without a sign-in app"))
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--out",
-                str(tmp_path),
-                "--include-exchange",
-                "--non-interactive",
-            ]
-        )
-    )
-
-    assert rc == 2
-    assert "--flow ga-setup-app" in capsys.readouterr().out
-
-
-def test_guided_run_exchange_setup_adds_pwsh(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+def _capture_engine(monkeypatch) -> dict[str, object]:  # noqa: ANN001
     seen: dict[str, object] = {}
-    monkeypatch.setattr(guided, "_current_m365_state", lambda: {})
-
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {"azure_cli": {"status": "supported"}},
-            "readiness": {"core_ready": True, "exchange_ready": False},
-        },
-    )
-    monkeypatch.setattr(guided, "run_setup", lambda **kwargs: seen.update(kwargs) or 0)
-    monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
-    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no m365")))
-    monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: 0)
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--client-id",
-                "public-app",
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--out",
-                str(tmp_path),
-                "--include-exchange",
-                "--non-interactive",
-            ]
-        )
-    )
-
-    assert rc == 0
-    assert seen == {"with_mcp": False, "with_exchange": True, "with_pwsh": True}
-
-
-def test_guided_run_app_mode_skips_azure_login_and_passes_client_credentials(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    seen: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {"azure_cli": {"status": "blocked"}},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not login")))
+    monkeypatch.setattr(guided, "build_doctor_report", lambda: dict(_READY_DOCTOR))
     monkeypatch.setattr(
         "auditex.guided.tenant_cli.main",
-        lambda argv, event_listener=None: seen.update({"argv": list(argv)}) or 0,
+        lambda argv, event_listener=None, **_: seen.update({"argv": list(argv)}) or 0,
+    )
+    return seen
+
+
+def test_guided_parser_takes_the_certificate_and_tool_options() -> None:
+    args = build_guided_parser().parse_args(
+        ["--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id", "--certificate-path", "reader.key.pem",
+         "--certificate-thumbprint", _THUMBPRINT, "--certificate-password-file", "reader.pw", "--skip-tool-check",
+         "--report-format", "sarif"]
     )
 
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--out",
-                str(tmp_path),
-                "--auth-mode",
-                "app",
-                "--client-id",
-                "app-id",
-                "--client-secret",
-                "app-secret",
-                "--non-interactive",
-            ]
-        )
-    )
+    assert (args.flow, args.client_id, args.certificate_path) == ("auto", "app-id", "reader.key.pem")
+    assert args.certificate_thumbprint == _THUMBPRINT and args.certificate_password_file == "reader.pw"
+    assert args.skip_tool_check is True and args.report_format == "sarif"
+
+
+@pytest.mark.parametrize("removed", [
+    ["--auth-mode", "app"], ["--client-secret", "x"], ["--browser-command", "safari"], ["--local-mode"],
+    ["--skip-login-check"], ["--include-exchange"], ["--flow", "gr-audit"], ["--flow", "ga-setup-app"],
+])
+def test_guided_parser_has_no_removed_sign_in_option(removed: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        build_guided_parser().parse_args(["--tenant-id", "contoso.onmicrosoft.com", *removed])
+
+
+@pytest.mark.parametrize("flag", ["--client-secret", "--access-token", "--auth-context", "--interactive"])
+def test_guided_run_refuses_a_removed_sign_in_flag_by_name_without_its_value(flag, capsys) -> None:  # noqa: ANN001
+    canary = "constructed-guided-canary"
+    argv = ["guided-run", "--tenant-id", "contoso.onmicrosoft.com", f"{flag}={canary}"]
+    with pytest.raises(SystemExit) as exc:
+        auditex_cli.main(argv)
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert f"error: {flag} was removed." in err and "docs/guides/reader-app-permissions.md" in err
+    assert canary not in err
+
+
+def test_guided_run_passes_the_certificate_to_the_engine(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _capture_engine(monkeypatch)
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "constructed-saved-secret")
+
+    rc = guided.run_guided(build_guided_parser().parse_args(
+        [*_certificate_args(tmp_path, "--certificate-password-env", "READER_KEY_PASSWORD"), "--non-interactive"]
+    ))
 
     assert rc == 0
-    assert "--use-azure-cli-token" not in seen["argv"]
-    assert "--client-id" in seen["argv"]
-    assert "--client-secret" in seen["argv"]
+    argv = seen["argv"]
+    assert argv[argv.index("--client-id") + 1] == "app-id"
+    assert argv[argv.index("--certificate-path") + 1] == "reader.key.pem"
+    assert argv[argv.index("--certificate-thumbprint") + 1] == _THUMBPRINT
+    assert argv[argv.index("--certificate-password-env") + 1] == "READER_KEY_PASSWORD"
+    assert argv[argv.index("--tenant-id") + 1] == "contoso.onmicrosoft.com"
+    for removed in ("--client-secret", "--use-azure-cli-token", "--interactive", "--browser-command",
+                    "--include-exchange", "--exclude"):
+        assert removed not in argv
+    assert "constructed-saved-secret" not in argv
+    assert "--probe-first" in argv
 
 
-def test_guided_run_app_mode_requires_real_tenant(monkeypatch, tmp_path, capsys) -> None:  # noqa: ANN001
-    monkeypatch.delenv("AUDITEX_TENANT_ID", raising=False)
-    monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
-    monkeypatch.delenv("AUDITEX_TENANT_NAME", raising=False)
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
+def test_guided_run_reads_the_tenant_and_client_id_from_the_environment(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _capture_engine(monkeypatch)
+    monkeypatch.setenv("AZURE_TENANT_ID", "fabrikam.onmicrosoft.com")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "env-app-id")
 
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--auth-mode",
-                "app",
-                "--client-id",
-                "app-id",
-                "--client-secret",
-                "app-secret",
-                "--out",
-                str(tmp_path),
-                "--non-interactive",
-            ]
-        )
-    )
+    rc = guided.run_guided(build_guided_parser().parse_args(
+        ["--out", str(tmp_path), "--certificate-path", "reader.key.pem", "--certificate-thumbprint", _THUMBPRINT,
+         "--non-interactive"]
+    ))
+
+    assert rc == 0
+    argv = seen["argv"]
+    assert argv[argv.index("--tenant-id") + 1] == "fabrikam.onmicrosoft.com"
+    assert argv[argv.index("--tenant-name") + 1] == "FABRIKAM"
+    assert argv[argv.index("--client-id") + 1] == "env-app-id"
+
+
+def test_guided_run_requires_a_real_tenant(monkeypatch, tmp_path, capsys) -> None:  # noqa: ANN001
+    seen = _capture_engine(monkeypatch)
+
+    rc = guided.run_guided(build_guided_parser().parse_args(
+        ["--client-id", "app-id", "--certificate-path", "k.pem", "--certificate-thumbprint", _THUMBPRINT,
+         "--out", str(tmp_path), "--non-interactive"]
+    ))
 
     assert rc == 2
     assert "Real tenant id or domain needed" in capsys.readouterr().out
+    assert "argv" not in seen
 
 
-def test_guided_run_ga_setup_flow_saves_app_defaults(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    seen: dict[str, object] = {}
+@pytest.mark.parametrize("missing", ["--client-id", "--certificate-path", "--certificate-thumbprint"])
+def test_guided_run_needs_the_reader_app_values(monkeypatch, tmp_path, capsys, missing) -> None:  # noqa: ANN001
+    seen = _capture_engine(monkeypatch)
+    args = _certificate_args(tmp_path)
+    index = args.index(missing)
+    del args[index:index + 2]
 
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {"azure_cli": {"status": "supported", "tenant_id": "contoso.onmicrosoft.com"}},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
-    monkeypatch.setattr(guided, "_run_m365_setup", lambda: 0)
-    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *args, **kwargs: 0)
-    monkeypatch.setattr(
-        "auditex.guided.auditex_auth.save_local_auth_values",
-        lambda payload: seen.setdefault("saved", []).append(dict(payload)),
-    )
-    monkeypatch.setattr(
-        "auditex.guided.auditex_auth.get_auth_status",
-        lambda **kwargs: {"m365": {"active_connection": "tenant-user"}},
-    )
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--flow",
-                "ga-setup-app",
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--client-id",
-                "app-id",
-                "--client-secret",
-                "app-secret",
-                "--out",
-                str(tmp_path),
-                "--non-interactive",
-            ]
-        )
-    )
-
-    assert rc == 0
-    assert len(seen["saved"]) == 2
-    assert seen["saved"][0]["M365_CLI_APP_ID"] == "app-id"
-    assert seen["saved"][1]["AUDITEX_M365_CONNECTION_NAME"] == "tenant-user"
-
-
-def test_guided_run_app_audit_uses_saved_local_defaults(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    seen: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setenv("AUDITEX_TENANT_ID", "contoso.onmicrosoft.com")
-    monkeypatch.setenv("AUDITEX_TENANT_NAME", "CONTOSO")
-    monkeypatch.setenv("AZURE_CLIENT_ID", "saved-app-id")
-    monkeypatch.setenv("AZURE_CLIENT_SECRET", "saved-app-secret")
-    monkeypatch.setattr(
-        "auditex.guided.tenant_cli.main",
-        lambda argv, event_listener=None: seen.update({"argv": list(argv)}) or 0,
-    )
-    monkeypatch.setattr(
-        "auditex.guided.auditex_auth.save_local_auth_values",
-        lambda payload: seen.setdefault("saved", []).append(dict(payload)),
-    )
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--flow",
-                "app-audit",
-                "--out",
-                str(tmp_path),
-                "--non-interactive",
-            ]
-        )
-    )
-
-    assert rc == 0
-    assert "--client-id" in seen["argv"]
-    assert "saved-app-id" in seen["argv"]
-    assert "--client-secret" in seen["argv"]
-    assert "saved-app-secret" in seen["argv"]
-
-
-def test_guided_run_delegated_never_runs_az_login(monkeypatch, tmp_path, capsys) -> None:  # noqa: ANN001
-
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {"azure_cli": {"status": "supported", "tenant_id": "wrong-tenant"}},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no az login")))
-    monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: pytest.fail("no run without a sign-in"))
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--out",
-                str(tmp_path),
-                "--non-interactive",
-            ]
-        )
-    )
+    rc = guided.run_guided(build_guided_parser().parse_args([*args, "--non-interactive"]))
 
     assert rc == 2
-    assert "az login --tenant contoso.onmicrosoft.com --allow-no-subscriptions once" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "--certificate-path" in out and "docs/guides/reader-app-permissions.md" in out
+    assert "argv" not in seen
 
 
-def test_guided_run_app_exchange_uses_secret_m365_login(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    seen: dict[str, object] = {}
-    monkeypatch.setattr(guided, "_current_m365_state", lambda: {})
+def test_guided_run_prompts_for_the_reader_app_values(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _capture_engine(monkeypatch)
+    answers = iter(["contoso.onmicrosoft.com", "", "app-id", "reader.key.pem", _THUMBPRINT])
+    monkeypatch.setattr(guided, "_read_prompt", lambda prompt: next(answers))
 
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
-    monkeypatch.setattr(
-        guided,
-        "_ensure_m365_login",
-        lambda tenant_id, browser_command, **kwargs: seen.update(
-            {"tenant_id": tenant_id, "auth_mode": kwargs.get("auth_mode"), "client_id": kwargs.get("client_id")}
-        )
-        or 0,
-    )
-    monkeypatch.setattr("auditex.guided.tenant_cli.main", lambda *args, **kwargs: 0)
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--out",
-                str(tmp_path),
-                "--auth-mode",
-                "app",
-                "--client-id",
-                "app-id",
-                "--client-secret",
-                "app-secret",
-                "--include-exchange",
-                "--non-interactive",
-            ]
-        )
-    )
+    rc = guided.run_guided(build_guided_parser().parse_args(["--out", str(tmp_path)]))
 
     assert rc == 0
-    assert seen == {"tenant_id": "contoso.onmicrosoft.com", "auth_mode": "app", "client_id": "app-id"}
-
-
-def test_guided_run_delegated_gr_audit_uses_azure_cli_token(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    seen: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {"azure_cli": {"status": "supported", "tenant_id": "contoso.onmicrosoft.com"}},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no login")))
-    monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: (_ for _ in ()).throw(AssertionError("no exchange")))
-    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no m365")))
-    monkeypatch.setattr(
-        "auditex.guided.tenant_cli.main",
-        lambda argv, event_listener=None: seen.update({"argv": list(argv)}) or 0,
-    )
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--auditor-profile",
-                "global-reader",
-                "--out",
-                str(tmp_path),
-                "--non-interactive",
-            ]
-        )
-    )
-
-    assert rc == 0
-    assert "--use-azure-cli-token" in seen["argv"]
-    assert "--client-id" not in seen["argv"]
-    assert "--client-secret" not in seen["argv"]
-    assert seen["argv"][seen["argv"].index("--auditor-profile") + 1] == "global-reader"
-
-
-def test_guided_run_ga_app_setup_writes_local_app_state_and_reuses_it(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    auth_env = tmp_path / "m365-auth.env"
-    seen: dict[str, object] = {}
-    run_calls: list[list[str]] = []
-
-    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(auth_env))
-    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
-    monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
-    monkeypatch.delenv("M365_CLI_APP_ID", raising=False)
-    monkeypatch.delenv("M365_CLI_CLIENT_ID", raising=False)
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {"azure_cli": {"status": "supported", "tenant_id": "contoso.onmicrosoft.com"}},
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no login")))
-    monkeypatch.setattr(guided, "_confirm", lambda label, default=True: True)
-    monkeypatch.setattr(
-        guided,
-        "_prompt",
-        lambda label, default=None: "ga-app-id" if label == "App id to save" else (default or ""),
-    )
-    monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
-    monkeypatch.setattr(
-        guided.auditex_auth,
-        "get_auth_status",
-        lambda **kwargs: {
-            "m365": {
-                "status": "supported",
-                "active_connection": "ga-conn",
-                "authenticated": True,
-                "auth_type": "browser",
-                "tenant_id": "contoso.onmicrosoft.com",
-            }
-        },
-    )
-
-    def _fake_run(command, **kwargs):  # noqa: ANN001
-        run_calls.append(list(command))
-        return type("Result", (), {"returncode": 0})()
-
-    monkeypatch.setattr(guided.subprocess, "run", _fake_run)
-    monkeypatch.setattr(
-        "auditex.guided.tenant_cli.main",
-        lambda argv, event_listener=None: seen.update({"argv": list(argv)}) or 0,
-    )
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--flow",
-                "ga-setup-app",
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--client-id",
-                "ga-app-id",
-                "--include-exchange",
-                "--out",
-                str(tmp_path),
-                "--non-interactive",
-            ]
-        )
-    )
-
-    assert rc == 0
-    rendered = auth_env.read_text(encoding="utf-8")
-    assert "M365_CLI_APP_ID=ga-app-id" in rendered
-    assert "AUDITEX_M365_CONNECTION_NAME=ga-conn" in rendered
-
-
-def test_guided_run_reuses_saved_local_app_state(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    auth_env = tmp_path / "m365-auth.env"
-    auth_env.write_text("M365_CLI_APP_ID=saved-app-id\n", encoding="utf-8")
-    seen: dict[str, object] = {}
-
-    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(auth_env))
-    monkeypatch.setattr(
-        guided,
-        "build_doctor_report",
-        lambda **kwargs: {
-            "system": {"os": "Darwin", "machine": "arm64"},
-            "auth": {
-                "azure_cli": {"status": "supported", "tenant_id": "contoso.onmicrosoft.com"},
-                "m365": {"status": "supported", "active_connection": "saved-conn", "authenticated": True, "auth_type": "browser", "tenant_id": "contoso.onmicrosoft.com"},
-            },
-            "readiness": {"core_ready": True, "exchange_ready": True},
-        },
-    )
-    monkeypatch.setattr(guided, "_run_azure_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no login")))
-    monkeypatch.setattr(guided, "_offer_m365_setup", lambda *_: (_ for _ in ()).throw(AssertionError("no setup")))
-    monkeypatch.setattr(guided, "_ensure_exchange_module", lambda **_: 0)
-    monkeypatch.setattr(guided, "_ensure_m365_login", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no m365")))
-    monkeypatch.setenv("M365_CLI_APP_ID", "saved-app-id")
-    monkeypatch.setattr(
-        guided.auditex_auth,
-        "get_auth_status",
-        lambda: {
-            "m365": {
-                "status": "supported",
-                "active_connection": "saved-conn",
-                "authenticated": True,
-                "auth_type": "browser",
-                "tenant_id": "contoso.onmicrosoft.com",
-            }
-        },
-    )
-    monkeypatch.setattr(
-        "auditex.guided.tenant_cli.main",
-        lambda argv, event_listener=None: seen.update({"argv": list(argv)}) or 0,
-    )
-
-    rc = guided.run_guided(
-        build_guided_parser().parse_args(
-            [
-                "--tenant-id",
-                "contoso.onmicrosoft.com",
-                "--tenant-name",
-                "CONTOSO",
-                "--include-exchange",
-                "--out",
-                str(tmp_path),
-                "--non-interactive",
-            ]
-        )
-    )
-
-    assert rc == 0
-    rendered = auth_env.read_text(encoding="utf-8")
-    assert "M365_CLI_APP_ID=saved-app-id" in rendered
-    assert "AUDITEX_TENANT_ID=contoso.onmicrosoft.com" in rendered
     argv = seen["argv"]
-    # DEC-068: the saved app signs in once inside the run; Exchange comes from that sign-in, not the m365 CLI.
-    assert argv[argv.index("--client-id") + 1] == "saved-app-id"
-    assert "--interactive" in argv and "--use-azure-cli-token" not in argv
-    assert "--include-exchange" not in argv
-    assert "exchange_policy" in argv[argv.index("--collectors") + 1].split(",")
+    assert argv[argv.index("--tenant-name") + 1] == "CONTOSO"
+    assert argv[argv.index("--certificate-path") + 1] == "reader.key.pem"
+    assert argv[argv.index("--certificate-thumbprint") + 1] == _THUMBPRINT
 
 
-def test_guided_no_exchange_excludes_policy_even_from_explicit_list(monkeypatch, tmp_path):
-    from pathlib import Path
-
-    from azure_tenant_audit import cli as tenant_cli
-    from azure_tenant_audit.config import CollectorConfig
-    from azure_tenant_audit.run import build_live_run_plan
-
-    seen = []
-    monkeypatch.setattr(guided, "_saved_value", lambda *args: None)
-    monkeypatch.setattr(guided, "_confirm", lambda *args, **kwargs: False)
-    monkeypatch.setattr(guided, "_persist_local_defaults", lambda **kwargs: None)
-    monkeypatch.setattr(guided, "build_doctor_report", lambda **kwargs: {
+def test_guided_run_installs_exchange_tooling_when_it_is_missing(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _capture_engine(monkeypatch)
+    monkeypatch.setattr(guided, "build_doctor_report", lambda: {
         "system": {"os": "Darwin", "machine": "arm64"},
-        "readiness": {"core_ready": True, "exchange_ready": True}, "auth": {},
+        "readiness": {"core_ready": True, "exchange_ready": False, "pwsh_ready": False},
     })
-    monkeypatch.setattr(guided.tenant_cli, "main", lambda argv, **kwargs: seen.append(argv) or 0)
-    args = build_guided_parser().parse_args([
-        "--flow", "gr-audit", "--tenant-id", "constructed", "--tenant-name", "acme",
-        "--out", str(tmp_path), "--local-mode", "--skip-login-check", "--skip-tool-check",
-        "--collectors", "identity,exchange,exchange_policy",
-    ])
-    assert guided.run_guided(args) == 0
-    run_args = tenant_cli.build_parser().parse_args(seen[0])
-    plan = build_live_run_plan(run_args, output_dir=tmp_path,
-                               collector_config=CollectorConfig.from_path(Path("configs/collector-definitions.json")),
-                               permission_hints={})
-    assert plan.selected_collectors == ["identity"]
-    assert run_args.exclude == "exchange,exchange_policy"
+    setup: dict[str, object] = {}
+    monkeypatch.setattr(guided, "run_setup", lambda **kwargs: setup.update(kwargs) or 0)
+
+    rc = guided.run_guided(build_guided_parser().parse_args([*_certificate_args(tmp_path), "--non-interactive"]))
+
+    assert rc == 0
+    assert setup == {"with_mcp": False, "with_exchange": True, "with_pwsh": True}
+    assert "argv" in seen
 
 
-@pytest.mark.parametrize('flow,include_exchange', [('app-audit', False), ('gr-audit', True), ('gr-audit', False)])
-@pytest.mark.parametrize('non_interactive', [False, True])
-@pytest.mark.parametrize('selection', [[], ['--auditor-profile', 'app-readonly-full'],
-                                      ['--collectors', 'identity,exchange']])
-def test_guided_auth_mode_selection(monkeypatch, tmp_path, flow, include_exchange, non_interactive, selection):
-    from pathlib import Path
-
-    from azure_tenant_audit import cli as tenant_cli
-    from azure_tenant_audit.config import CollectorConfig
-    from azure_tenant_audit.run import build_live_run_plan
-    seen = []
-    monkeypatch.setattr(guided, '_current_m365_state', lambda: {})
-    monkeypatch.setattr(guided, '_saved_value', lambda *args: None)
-    monkeypatch.setattr(guided, '_confirm', lambda *args, **kwargs: True)
-    monkeypatch.setattr(guided, '_persist_local_defaults', lambda **kwargs: None)
-    monkeypatch.setattr(guided, '_ensure_exchange_module', lambda **kwargs: 0)
-    monkeypatch.setattr(guided, '_ensure_m365_login', lambda *args, **kwargs: 0)
-    monkeypatch.setattr(guided, 'build_doctor_report', lambda **kwargs: {
-        'system': {'os': 'Darwin', 'machine': 'arm64'},
-        'readiness': {'core_ready': True, 'exchange_ready': True}, 'auth': {},
+def test_guided_run_stops_when_tool_setup_fails(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _capture_engine(monkeypatch)
+    monkeypatch.setattr(guided, "build_doctor_report", lambda: {
+        "system": {"os": "Darwin", "machine": "arm64"},
+        "readiness": {"core_ready": False, "exchange_ready": True},
     })
-    monkeypatch.setattr(guided.tenant_cli, 'main', lambda argv, **kwargs: seen.append(argv) or 0)
-    argv = ['--flow', flow, '--tenant-id', 'constructed', '--tenant-name', 'acme',
-            '--out', str(tmp_path), '--local-mode', '--skip-login-check', '--skip-tool-check']
-    if flow == 'app-audit':
-        argv += ['--client-id', 'constructed-app', '--client-secret', 'constructed-secret']
-    else:
-        argv += ['--client-id', 'constructed-public-app']
-    if include_exchange:
-        argv += ['--include-exchange']
-    if non_interactive:
-        argv += ['--non-interactive']
-    argv += selection
-    assert guided.run_guided(build_guided_parser().parse_args(argv)) == 0
-    args = tenant_cli.build_parser().parse_args(seen[0])
-    plan = build_live_run_plan(args, output_dir=tmp_path,
-        collector_config=CollectorConfig.from_path(Path('configs/collector-definitions.json')), permission_hints={})
-    if flow == 'app-audit':
-        assert not args.exclude
-        if '--collectors' in selection:
-            assert plan.selected_collectors == ['identity', 'exchange']
-        else:
-            assert {'exchange_policy', 'dns_posture'} <= set(plan.selected_collectors)
-            if '--auditor-profile' in selection:
-                assert 'exchange' in plan.selected_collectors
-    else:
-        exchange = include_exchange or not non_interactive
-        assert args.interactive and args.client_id == 'constructed-public-app' and not args.use_azure_cli_token
-        assert 'dns_posture' not in plan.selected_collectors
-        if '--collectors' in selection:
-            # DEC-068: an explicit list keeps Exchange over the one sign-in, never through the m365 CLI collector.
-            assert plan.selected_collectors == (['identity', 'exchange_policy'] if exchange else ['identity'])
-        else:
-            # DEC-068: Exchange in a delegated run is exchange_policy over the one sign-in, never the m365 CLI collector.
-            assert ('exchange_policy' in plan.selected_collectors) == exchange
-            assert 'exchange' not in plan.selected_collectors
+    monkeypatch.setattr(guided, "run_setup", lambda **kwargs: 7)
+
+    rc = guided.run_guided(build_guided_parser().parse_args([*_certificate_args(tmp_path), "--non-interactive"]))
+
+    assert rc == 7
+    assert "argv" not in seen
+
+
+def test_guided_explicit_collectors_pass_through_unchanged(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _capture_engine(monkeypatch)
+
+    rc = guided.run_guided(build_guided_parser().parse_args(
+        [*_certificate_args(tmp_path, "--collectors", "identity,exchange_policy"), "--non-interactive"]
+    ))
+
+    assert rc == 0
+    argv = seen["argv"]
+    assert argv[argv.index("--collectors") + 1] == "identity,exchange_policy"
+    assert "--exclude" not in argv

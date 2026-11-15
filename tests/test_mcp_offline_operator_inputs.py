@@ -164,11 +164,13 @@ def test_offline_validation_drops_operator_input_flags(
 @pytest.mark.parametrize(
     ("tool_name", "arguments", "expected_arg"),
     [
-        ("auditex_run_delegated_audit", {"tenant_name": "live"}, "--use-azure-cli-token"),
+        ("auditex_run_certificate_audit", {"tenant_name": "live", "certificate_path": "keys/reader.key.pem",
+                                           "certificate_thumbprint": "A" * 40}, "--certificate-path"),
         ("auditex_google_doctor", {}, "doctor"),
         ("auditex_google_probe", {}, "probe"),
         ("auditex_run_google_workspace_audit", {}, "run"),
-        ("auditex_probe_live", {"tenant_name": "live"}, "probe"),
+        ("auditex_probe_live", {"tenant_name": "live", "certificate_path": "keys/reader.key.pem",
+                                "certificate_thumbprint": "A" * 40}, "probe"),
         ("auditex_run_response_action", {"tenant_name": "live", "action": "message_trace"}, "response"),
     ],
 )

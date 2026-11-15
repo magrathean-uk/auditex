@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import ast
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -737,30 +736,19 @@ def test_the_shipped_ediscovery_catalogue_matches_the_commands_the_collector_run
     assert shipped == {entry["name"]: entry["commands"] for entry in EDiscoveryCollector.command_collectors}
 
 
-def test_a_cli_help_dump_that_exits_zero_is_logged_as_an_error_not_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_cli_help_dump_that_exits_zero_is_classified_as_an_error_not_ok() -> None:
+    """The adapter no longer runs ``m365`` (DEC-108 D2); its output classifier stays for replaying old answers."""
     help_text = "CLI for Microsoft 365 v11.11.0\n\nCommands:\n  purview  ...\n"
-    monkeypatch.setattr("shutil.which", lambda name, *a, **k: f"/usr/bin/{name}")
-    monkeypatch.setattr("subprocess.run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout=help_text, stderr=""))
-    events: list[dict[str, Any]] = []
-    response = M365CLIAdapter().run(
-        "m365 purview hold list --output json", log_event=lambda event, message, details=None: events.append({"event": event, **(details or {})})
-    )
+    response = M365CLIAdapter()._classify_output(0, help_text, "", "m365 purview hold list --output json", set())
 
     assert response["error_class"] == "command_parse_error"
-    (completed,) = [item for item in events if item["event"] == "command.completed"]
-    assert completed["status"] == "error" and completed["return_code"] == 0
 
 
-def test_a_json_answer_is_still_logged_as_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shutil.which", lambda name, *a, **k: f"/usr/bin/{name}")
-    monkeypatch.setattr("subprocess.run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout='[{"id": "1"}]', stderr=""))
-    events: list[dict[str, Any]] = []
-    response = M365CLIAdapter().run(
-        "m365 purview hold list --output json", log_event=lambda event, message, details=None: events.append({"event": event, **(details or {})})
-    )
+def test_a_json_answer_is_still_classified_as_rows() -> None:
+    response = M365CLIAdapter()._classify_output(0, '[{"id": "1"}]', "", "m365 purview hold list --output json", set())
 
     assert response["value"] == [{"id": "1"}]
-    assert [item["status"] for item in events if item["event"] == "command.completed"] == ["ok"]
+    assert "error" not in response
 
 
 # ---- #29 fan-out totals and OneDrive sites come from the whole list, not the 20-row sample -------------------------

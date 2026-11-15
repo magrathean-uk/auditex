@@ -450,7 +450,9 @@ def run_demo(options: DemoOptions) -> int:
     console.line()
     console.line(console.style("Run it on your own tenant:", "1"))
     console.line("  auditex setup-guide m365 --collector-preset full --format md")
-    console.line("  auditex probe live --tenant-name CONTOSO --tenant-id <tenant> --mode delegated --use-azure-cli-token")
+    console.line("  auditex probe live --tenant-name CONTOSO --tenant-id <tenant> --client-id <app-id> \\")
+    console.line("    --certificate-path <private-key-file> --certificate-thumbprint <sha1-thumbprint>")
+    console.line("  (the reader app's grant: docs/guides/reader-app-permissions.md)")
     return 0
 
 

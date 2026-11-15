@@ -2,45 +2,28 @@ from __future__ import annotations
 
 import argparse
 import os
-import platform
-import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit import cli as tenant_cli
-from azure_tenant_audit.m365_home import m365_environment, m365_subprocess_kwargs
 from azure_tenant_audit.output_redaction import PROFILE_LOCAL
-from azure_tenant_audit.profiles import (
-    APP_MODE_ONLY_COLLECTORS,
-    PROFILES,
-    profile_choices,
-)
+from azure_tenant_audit.profiles import profile_choices
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 
-from . import auth as auditex_auth
 from .bootstrap import build_doctor_report, run_setup
-from .operator_flow import (
-    flow_choices,
-    flow_plan,
-    guided_choice_options,
-    resolve_auto_flow,
-)
+from .operator_flow import flow_choices, flow_plan
 
 REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
+# Where the tenant administrator finds every permission, role and setting the reader app needs (DEC-107).
+READER_APP_GUIDE = "docs/guides/reader-app-permissions.md"
 
 
 def _read_prompt(prompt: str) -> str:
     from azure_tenant_audit.guarded_io import read_guarded_stdin
     print(prompt, end="", flush=True)
     return read_guarded_stdin(line=True)
-
-
-def _default_browser_command() -> str:
-    if platform.system() == "Darwin":
-        return "safari"
-    return os.environ.get("BROWSER") or "firefox"
 
 
 def _prompt(label: str, default: str | None = None) -> str:
@@ -55,24 +38,6 @@ def _confirm(label: str, default: bool = True) -> bool:
     if not value:
         return default
     return value in {"y", "yes"}
-
-
-def _prompt_choice(label: str, options: list[tuple[str, str]], default: str) -> str:
-    print(label)
-    for index, (_value, text) in enumerate(options, start=1):
-        print(f"  {index}. {text}")
-    default_index = next((index for index, (value, _text) in enumerate(options, start=1) if value == default), 1)
-    raw = _read_prompt(f"Choice [{default_index}]: ").strip()
-    if not raw:
-        return default
-    if raw.isdigit():
-        picked = int(raw)
-        if 1 <= picked <= len(options):
-            return options[picked - 1][0]
-    for value, _text in options:
-        if raw == value:
-            return value
-    return default
 
 
 class ProgressRenderer:
@@ -130,66 +95,6 @@ class ProgressRenderer:
             print("Run complete")
 
 
-def _delegated_exchange_collectors(auditor_profile: str) -> str:
-    """The profile's delegated collectors plus exchange_policy, read over the run's one sign-in (DEC-068).
-
-    The Microsoft 365 CLI ``exchange`` collector is left out: it needs its own CLI sign-in, which this path no
-    longer opens. Explicit selection is the engine's only way to run exchange_policy outside app mode.
-    """
-    defaults = PROFILES[auditor_profile].default_collectors
-    names = [name for name in defaults if name not in APP_MODE_ONLY_COLLECTORS and name != "exchange"]
-    return ",".join([*names, "exchange_policy"])
-
-
-def _delegated_exchange_selection(collectors: str) -> str:
-    """An explicit collector list routed for Exchange over the run's one sign-in (DEC-068).
-
-    The Microsoft 365 CLI ``exchange`` collector is swapped out and exchange_policy added when missing, so an explicit
-    list never drops Exchange or reopens the separate CLI sign-in.
-    """
-    names: list[str] = []
-    for raw in collectors.split(","):
-        name = raw.strip()
-        if name and name != "exchange" and name not in names:
-            names.append(name)
-    if "exchange_policy" not in names:
-        names.append("exchange_policy")
-    return ",".join(names)
-
-
-def _run_azure_login(tenant_id: str, browser_command: str) -> int:
-    """One-time GA app setup only (ga-setup-app): the Microsoft 365 CLI setup signs in as Azure CLI.
-
-    Never called on an audit run's path; tests/test_single_sign_in.py checks that statically (DEC-065).
-    """
-    env = os.environ.copy()
-    env["BROWSER"] = browser_command
-    return subprocess.run(
-        ["az", "login", "--tenant", tenant_id, "--allow-no-subscriptions"],
-        env=env,
-        check=False,
-    ).returncode
-
-
-def _offer_m365_setup(tenant_id: str) -> int:
-    print("Exchange needs m365 app setup")
-    if not _confirm("Run one-time m365 setup now?", default=False):
-        return 0
-    setup_rc = _run_m365_setup()
-    if setup_rc != 0:
-        return setup_rc
-    app_id = _prompt("m365 app id", default=os.environ.get("M365_CLI_APP_ID") or "")
-    if app_id:
-        auth_env = auditex_auth.default_local_auth_env_path()
-        auth_env.parent.mkdir(parents=True, exist_ok=True)
-        existing = auth_env.read_text(encoding="utf-8") if auth_env.exists() else ""
-        lines = [line for line in existing.splitlines() if not line.startswith("M365_CLI_APP_ID=")]
-        lines.append(f"M365_CLI_APP_ID={app_id}")
-        auth_env.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
-        os.environ["M365_CLI_APP_ID"] = app_id
-    return 0
-
-
 def _saved_value(*keys: str) -> str | None:
     for key in keys:
         value = os.environ.get(key)
@@ -203,147 +108,6 @@ def _default_tenant_name(tenant_id: str | None) -> str:
         return "TENANT"
     token = tenant_id.split(".")[0].strip()
     return token.upper() if token else "TENANT"
-
-
-def _resolve_flow(args: argparse.Namespace) -> str:
-    if args.flow != "auto":
-        return args.flow
-    auto_flow = resolve_auto_flow(auth_mode=args.auth_mode, non_interactive=args.non_interactive)
-    if auto_flow:
-        return auto_flow
-    return _prompt_choice(
-        "Flow",
-        list(guided_choice_options()),
-        default="gr-audit",
-    )
-
-
-def _persist_local_defaults(
-    *,
-    tenant_id: str,
-    tenant_name: str,
-    app_id: str | None = None,
-    client_secret: str | None = None,
-    connection_name: str | None = None,
-) -> None:
-    values: dict[str, str | None] = {
-        "AUDITEX_TENANT_ID": tenant_id,
-        "AUDITEX_TENANT_NAME": tenant_name,
-        "AZURE_TENANT_ID": tenant_id,
-    }
-    if app_id:
-        values["M365_CLI_APP_ID"] = app_id
-        values["M365_CLI_CLIENT_ID"] = app_id
-        values["AZURE_CLIENT_ID"] = app_id
-    if client_secret:
-        values["AZURE_CLIENT_SECRET"] = client_secret
-    if connection_name:
-        values["AUDITEX_M365_CONNECTION_NAME"] = connection_name
-    auditex_auth.save_local_auth_values(values)
-
-
-def _run_m365_setup() -> int:
-    command = ["m365", "setup"]
-    return subprocess.run(command, check=False, **m365_subprocess_kwargs(command)).returncode
-
-
-def _current_m365_state() -> dict[str, Any]:
-    try:
-        payload = auditex_auth.get_auth_status(include_azure_cli=False, include_exchange=False)
-    except TypeError:
-        payload = auditex_auth.get_auth_status()
-    return (payload.get("m365") or {}) if isinstance(payload, dict) else {}
-
-
-def _tenant_matches(observed: str | None, expected: str) -> bool:
-    if not observed or expected == "organizations":
-        return True
-    left = observed.strip().lower()
-    right = expected.strip().lower()
-    return left == right or left.endswith(f".{right}") or right.endswith(f".{left}")
-
-
-def _ensure_exchange_module(*, non_interactive: bool) -> int:
-    exchange = auditex_auth.get_auth_status().get("exchange") or {}
-    if exchange.get("status") == "supported":
-        return 0
-    print("Exchange PowerShell module missing")
-    if not non_interactive and not _confirm("Install ExchangeOnlineManagement now?", default=True):
-        return 2
-    return auditex_auth.ensure_exchange_online_module()
-
-
-def _ensure_m365_login(
-    tenant_id: str,
-    browser_command: str,
-    *,
-    auth_mode: str = "delegated",
-    client_id: str | None = None,
-    client_secret: str | None = None,
-) -> int:
-    status = auditex_auth.get_auth_status().get("m365") or {}
-    required_auth_type = "secret" if auth_mode == "app" else "browser"
-    if (
-        status.get("status") == "supported"
-        and status.get("active_connection")
-        and status.get("authenticated")
-        and status.get("auth_type") == required_auth_type
-        and _tenant_matches(str(status.get("tenant_id") or ""), tenant_id)
-    ):
-        return 0
-    if auth_mode == "app":
-        effective_app_id = client_id or os.environ.get("M365_CLI_APP_ID") or os.environ.get("M365_CLI_CLIENT_ID")
-        if not effective_app_id or not client_secret:
-            return 2
-        rc = auditex_auth.login_connection(
-            mode="app",
-            tenant_id=tenant_id,
-            connection_name=f"auditex-app-{effective_app_id[:8]}",
-            app_id=effective_app_id,
-            client_secret=client_secret,
-        )
-        if rc != 0:
-            return rc
-        refreshed = auditex_auth.get_auth_status().get("m365") or {}
-        if (
-            refreshed.get("status") != "supported"
-            or not refreshed.get("active_connection")
-            or not refreshed.get("authenticated")
-            or refreshed.get("auth_type") != "secret"
-            or not _tenant_matches(str(refreshed.get("tenant_id") or ""), tenant_id)
-        ):
-            return 5
-        return 0
-    app_id = os.environ.get("M365_CLI_APP_ID") or os.environ.get("M365_CLI_CLIENT_ID")
-    if not app_id:
-        setup_rc = _offer_m365_setup(tenant_id)
-        if setup_rc != 0:
-            return setup_rc
-        app_id = os.environ.get("M365_CLI_APP_ID") or os.environ.get("M365_CLI_CLIENT_ID")
-    command = [
-        "m365",
-        "login",
-        "--authType",
-        "browser",
-        "--tenant",
-        tenant_id,
-    ]
-    if app_id:
-        command.extend(["--appId", app_id])
-    env = m365_environment(command) or os.environ.copy()
-    env["BROWSER"] = browser_command
-    rc = subprocess.run(command, env=env, check=False).returncode
-    if rc != 0:
-        return rc
-    refreshed = auditex_auth.get_auth_status().get("m365") or {}
-    if (
-        refreshed.get("status") != "supported"
-        or not refreshed.get("active_connection")
-        or not refreshed.get("authenticated")
-        or not _tenant_matches(str(refreshed.get("tenant_id") or ""), tenant_id)
-    ):
-        return 5
-    return 0
 
 
 def _certificate_argv(args: argparse.Namespace) -> list[str]:
@@ -361,11 +125,9 @@ def build_guided_parser() -> argparse.ArgumentParser:
     parser.add_argument("--flow", choices=flow_choices(), default="auto")
     parser.add_argument("--tenant-id", default=None)
     parser.add_argument("--tenant-name", default=None)
-    parser.add_argument("--auth-mode", choices=("delegated", "app"), default="delegated")
-    parser.add_argument("--client-id", default=None)
-    parser.add_argument("--client-secret", default=None)
+    parser.add_argument("--client-id", default=None, help="The reader app's application (client) ID (else AZURE_CLIENT_ID).")
     parser.add_argument("--certificate-path", default=None, metavar="FILE",
-                        help="App mode: private key file (PEM or PFX, owner-only) of the certificate credential.")
+                        help="The reader app's certificate private key file (PEM or PFX, owner-only).")
     parser.add_argument("--certificate-thumbprint", default=None, metavar="SHA1",
                         help="SHA-1 thumbprint of the certificate on the app registration.")
     certificate_password = parser.add_mutually_exclusive_group()
@@ -384,102 +146,16 @@ def build_guided_parser() -> argparse.ArgumentParser:
         "or a larger --top)."
     ))
     parser.add_argument("--page-size", type=int, default=50)
-    parser.add_argument("--browser-command", default=None)
     parser.add_argument("--collectors", default=None)
-    parser.add_argument("--include-exchange", action="store_true")
     parser.add_argument("--throttle-mode", choices=("fast", "safe", "ultra-safe"), default="safe")
     parser.add_argument("--include-blocked", action="store_true")
     parser.add_argument("--with-mcp", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
-    parser.add_argument("--local-mode", action="store_true")
-    parser.add_argument("--skip-login-check", action="store_true")
     parser.add_argument("--skip-tool-check", action="store_true")
     parser.add_argument("--report-format", choices=REPORT_FORMAT_CHOICES, default=None)
     parser.add_argument("--probe-first", dest="probe_first", action="store_true", default=True)
     parser.add_argument("--no-probe-first", dest="probe_first", action="store_false")
     return parser
-
-
-def _run_ga_setup_flow(
-    *,
-    args: argparse.Namespace,
-    tenant_id: str,
-    tenant_name: str,
-    browser_command: str,
-) -> int:
-    doctor = build_doctor_report(
-        auth_mode="delegated",
-        include_exchange=True,
-        include_auth_checks=not args.skip_login_check,
-    )
-    needs_setup = not args.skip_tool_check and (
-        not doctor.get("readiness", {}).get("core_ready") or not doctor.get("readiness", {}).get("exchange_ready")
-    )
-    if needs_setup:
-        print("Local tools missing")
-        if args.non_interactive or _confirm("Run setup now?", default=True):
-            setup_rc = run_setup(with_exchange=True, with_pwsh=True, with_mcp=args.with_mcp)
-            if setup_rc != 0:
-                return setup_rc
-        else:
-            return 2
-
-    azure_state = (doctor.get("auth") or {}).get("azure_cli") or {}
-    azure_supported = azure_state.get("status") == "supported" and _tenant_matches(
-        str(azure_state.get("tenant_id") or ""), tenant_id
-    )
-    if not args.local_mode and not args.skip_login_check and not azure_supported:
-        print("Azure login needed")
-        login_rc = _run_azure_login(tenant_id, browser_command)
-        if login_rc != 0:
-            return login_rc
-
-    module_rc = _ensure_exchange_module(non_interactive=args.non_interactive)
-    if module_rc != 0:
-        return module_rc
-
-    print("Run one-time m365 setup")
-    setup_rc = _run_m365_setup()
-    if setup_rc != 0:
-        return setup_rc
-
-    app_id = args.client_id or _saved_value("M365_CLI_APP_ID", "M365_CLI_CLIENT_ID", "AZURE_CLIENT_ID")
-    client_secret = args.client_secret or _saved_value("AZURE_CLIENT_SECRET")
-    if not args.non_interactive:
-        app_id = _prompt("App id to save", default=app_id or "")
-        if not client_secret and _confirm("Save app secret for later app runs?", default=False):
-            client_secret = _prompt("App secret")
-    if not app_id:
-        print("App id missing")
-        return 2
-
-    _persist_local_defaults(
-        tenant_id=tenant_id,
-        tenant_name=tenant_name,
-        app_id=app_id,
-        client_secret=client_secret,
-    )
-
-    verify_rc = _ensure_m365_login(
-        tenant_id,
-        browser_command,
-        auth_mode="delegated",
-        client_id=app_id,
-    )
-    if verify_rc != 0:
-        print("m365 login failed")
-        return verify_rc
-
-    m365_state = _current_m365_state()
-    _persist_local_defaults(
-        tenant_id=tenant_id,
-        tenant_name=tenant_name,
-        app_id=app_id,
-        client_secret=client_secret,
-        connection_name=str(m365_state.get("active_connection") or "") or None,
-    )
-    print("App saved")
-    return 0
 
 
 def run_guided(args: argparse.Namespace) -> int:
@@ -498,122 +174,50 @@ def run_guided(args: argparse.Namespace) -> int:
     except (SensitiveUsersError, PartnerDomainsError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    flow = _resolve_flow(args)
-    plan = flow_plan(flow)
-    auth_mode = plan.auth_mode
-    print("Auditex guided run")
+    plan = flow_plan(args.flow)
+    print("Auditex guided run: reader app with a certificate")
 
-    tenant_id = args.tenant_id or _saved_value("AUDITEX_TENANT_ID", "AZURE_TENANT_ID")
-    tenant_name = args.tenant_name or _saved_value("AUDITEX_TENANT_NAME")
-    browser_command = args.browser_command or _default_browser_command()
-    include_exchange = args.include_exchange or plan.include_exchange
-    if auth_mode == "delegated":
-        # The sign-in app saved by ga-setup-app (a public client); its one sign-in serves Graph and Exchange.
-        client_id = args.client_id or _saved_value("M365_CLI_APP_ID", "M365_CLI_CLIENT_ID", "AZURE_CLIENT_ID")
-    else:
-        client_id = args.client_id or _saved_value("AZURE_CLIENT_ID", "M365_CLI_APP_ID", "M365_CLI_CLIENT_ID")
-    certificate_argv = _certificate_argv(args)
-    if certificate_argv and (args.client_secret or auth_mode != "app"):
-        print("A certificate runs only in an app flow and never with a client secret")
-        return 2
-    # A saved secret is never read for, or passed beside, a certificate run.
-    client_secret = None if certificate_argv else args.client_secret or _saved_value("AZURE_CLIENT_SECRET")
+    tenant_id = args.tenant_id or _saved_value("AZURE_TENANT_ID")
+    tenant_name = args.tenant_name
+    client_id = args.client_id or _saved_value("AZURE_CLIENT_ID")
+    certificate_path = args.certificate_path
+    certificate_thumbprint = args.certificate_thumbprint
 
     if not args.non_interactive:
-        tenant_default = tenant_id or plan.tenant_default
-        tenant_id = tenant_id or _prompt("Tenant id or domain", default=tenant_default)
+        tenant_id = tenant_id or _prompt("Tenant id or domain")
         tenant_name = tenant_name or _prompt("Tenant label", default=_default_tenant_name(tenant_id))
-        if plan.requires_app_credentials:
-            client_id = client_id or _prompt("Client id")
-            if not certificate_argv:
-                client_secret = client_secret or _prompt("Client secret")
-        if flow == "gr-audit" and not args.include_exchange:
-            include_exchange = _confirm("Include Exchange checks?", default=False)
+        client_id = client_id or _prompt("Reader app client id")
+        certificate_path = certificate_path or _prompt("Certificate private key file")
+        certificate_thumbprint = certificate_thumbprint or _prompt("Certificate thumbprint")
     else:
-        tenant_id = tenant_id or plan.tenant_default
         tenant_name = tenant_name or _default_tenant_name(tenant_id)
     if plan.requires_real_tenant and (not tenant_id or tenant_id == "organizations"):
         print("Real tenant id or domain needed")
         return 2
-    if plan.requires_app_credentials and (not client_id or not (client_secret or certificate_argv)):
-        print("App credentials missing")
-        return 2
-    if certificate_argv and include_exchange:
-        print("The Microsoft 365 CLI Exchange sign-in needs a client secret: run the certificate flow without --include-exchange")
-        return 2
-    if flow == "ga-setup-app":
-        return _run_ga_setup_flow(
-            args=args,
-            tenant_id=tenant_id,
-            tenant_name=tenant_name,
-            browser_command=browser_command,
+    if not client_id or not certificate_path or not certificate_thumbprint:
+        print(
+            "The reader app's client id, certificate key file and thumbprint are needed "
+            f"(--client-id, --certificate-path, --certificate-thumbprint); see {READER_APP_GUIDE}"
         )
+        return 2
+    args.certificate_path = certificate_path
+    args.certificate_thumbprint = certificate_thumbprint
 
-    doctor = build_doctor_report(
-        auth_mode=auth_mode,
-        include_exchange=include_exchange,
-        include_auth_checks=not args.skip_login_check,
-    )
+    doctor = build_doctor_report()
     print(f"Machine: {doctor['system']['os']} {doctor['system']['machine']}")
-
-    needs_setup = not args.skip_tool_check and not doctor.get("readiness", {}).get("core_ready")
-    if include_exchange and not doctor.get("readiness", {}).get("exchange_ready"):
-        needs_setup = not args.skip_tool_check
-    if needs_setup:
+    readiness = doctor.get("readiness") or {}
+    if not args.skip_tool_check and not (readiness.get("core_ready") and readiness.get("exchange_ready")):
         print("Local tools missing")
         if args.non_interactive or _confirm("Run setup now?", default=True):
             setup_kwargs: dict[str, bool] = {"with_mcp": args.with_mcp}
-            if include_exchange:
+            if not readiness.get("exchange_ready"):
                 setup_kwargs["with_exchange"] = True
                 setup_kwargs["with_pwsh"] = True
             setup_rc = run_setup(**setup_kwargs)
             if setup_rc != 0:
                 return setup_rc
-            doctor = build_doctor_report(
-                auth_mode=args.auth_mode,
-                include_exchange=include_exchange,
-                include_auth_checks=not args.skip_login_check,
-            )
         else:
             return 2
-
-    # DEC-065: a delegated run signs in once, inside the engine (one msal sign-in with an in-memory cache) when a
-    # sign-in app id is known, else it reuses an existing Azure CLI sign-in. It never runs az login or m365 login.
-    one_sign_in = auth_mode == "delegated" and bool(client_id)
-    if auth_mode == "delegated" and not one_sign_in:
-        if include_exchange:
-            print(
-                "Exchange in a delegated run needs the sign-in app id: run --flow ga-setup-app once, or pass "
-                "--client-id. The run then signs in once for Microsoft Graph and Exchange."
-            )
-            return 2
-        azure_state = (doctor.get("auth") or {}).get("azure_cli") or {}
-        azure_supported = (
-            azure_state.get("status") == "supported"
-            and _tenant_matches(str(azure_state.get("tenant_id") or ""), tenant_id)
-        )
-        if not args.local_mode and not args.skip_login_check and not azure_supported:
-            print(
-                f"No sign-in available: run az login --tenant {tenant_id} --allow-no-subscriptions once, or run "
-                "--flow ga-setup-app once so the run can sign in itself."
-            )
-            return 2
-
-    if include_exchange and not args.local_mode and not args.skip_login_check:
-        module_rc = _ensure_exchange_module(non_interactive=args.non_interactive)
-        if module_rc != 0:
-            return module_rc
-    if include_exchange and auth_mode == "app" and not args.local_mode and not args.skip_login_check:
-        m365_rc = _ensure_m365_login(
-            tenant_id,
-            browser_command,
-            auth_mode=auth_mode,
-            client_id=client_id,
-            client_secret=client_secret,
-        )
-        if m365_rc != 0:
-            print("Exchange login failed")
-            return m365_rc
 
     argv = [
         "--tenant-name",
@@ -631,31 +235,12 @@ def run_guided(args: argparse.Namespace) -> int:
     ]
     if args.top:
         argv.extend(["--top", str(args.top)])
-    if one_sign_in:
-        argv.extend(["--interactive", "--client-id", client_id, "--browser-command", browser_command])
-    elif auth_mode == "delegated":
-        argv.append("--use-azure-cli-token")
-    elif certificate_argv:
-        argv.extend(["--client-id", client_id, *certificate_argv])
-    else:
-        argv.extend(["--client-id", client_id, "--client-secret", client_secret])
+    argv.extend(["--client-id", client_id, *_certificate_argv(args)])
     if args.run_name:
         argv.extend(["--run-name", args.run_name])
-    if args.collectors and include_exchange and auth_mode == "delegated":
-        argv.extend(["--collectors", _delegated_exchange_selection(args.collectors)])
-    elif args.collectors:
+    if args.collectors:
         argv.extend(["--collectors", args.collectors])
-    elif include_exchange and auth_mode == "delegated":
-        argv.extend(["--collectors", _delegated_exchange_collectors(args.auditor_profile)])
-    if include_exchange:
-        if auth_mode == "app":
-            argv.append("--include-exchange")
-    elif flow == "gr-audit":
-        argv.extend(["--exclude", "exchange,exchange_policy"])
-    if args.probe_first:
-        argv.append("--probe-first")
-    else:
-        argv.append("--no-probe-first")
+    argv.append("--probe-first" if args.probe_first else "--no-probe-first")
     if args.include_blocked:
         argv.append("--include-blocked")
 
@@ -667,19 +252,6 @@ def run_guided(args: argparse.Namespace) -> int:
     rc = tenant_cli.main(argv, event_listener=renderer, **input_kwargs)
     duration = round(time.time() - started, 2)
     print(f"Done in {duration}s")
-    if include_exchange and auth_mode == "app":
-        m365_state = _current_m365_state()
-        _persist_local_defaults(
-            tenant_id=tenant_id,
-            tenant_name=tenant_name,
-            app_id=client_id,
-            client_secret=client_secret,
-            connection_name=str(m365_state.get("active_connection") or "") or None,
-        )
-    elif one_sign_in:
-        _persist_local_defaults(tenant_id=tenant_id, tenant_name=tenant_name, app_id=client_id)
-    else:
-        _persist_local_defaults(tenant_id=tenant_id, tenant_name=tenant_name)
     if args.report_format:
         from .reporting import render_report
 

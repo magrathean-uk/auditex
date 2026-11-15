@@ -262,17 +262,23 @@ def test_no_connect_cmdlet_without_an_access_token_in_src() -> None:
     assert offenders == {}
 
 
-def test_no_az_login_on_the_run_path_in_src() -> None:
+def test_no_az_login_anywhere_in_src() -> None:
+    """DEC-107: the guided GA app setup, the last az login, is gone; no sign-in CLI is started anywhere in src."""
     sites = {path: found for path, text in _sources().items() if (found := az_login_sites(text))}
-    # The one az login left is the one-time GA app setup (the Microsoft 365 CLI setup signs in as Azure CLI).
-    assert sites == {"src/auditex/guided.py": ["_run_azure_login"]}
-    tree = ast.parse((SRC / "auditex" / "guided.py").read_text(encoding="utf-8"))
-    callers = {
-        function.name for function in ast.walk(tree) if isinstance(function, ast.FunctionDef)
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_run_azure_login"
-    }
-    assert callers == {"_run_ga_setup_flow"}
+    assert sites == {}
+    assert {path for path, text in _sources().items() if m365_sign_in_lines(text)} == set()
+
+
+def m365_sign_in_lines(source: str) -> list[int]:
+    """Lines starting a CLI for Microsoft 365 sign-in or setup: a command string, or an argv literal m365, login|setup."""
+    tree = ast.parse(source)
+    lines = {line for line, text in _string_parts(tree) if re.match(r"\s*m365\s+(login|setup)\b", text)}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.List, ast.Tuple)):
+            words = [item.value for item in node.elts[:2] if isinstance(item, ast.Constant)]
+            if words in (["m365", "login"], ["m365", "setup"]):
+                lines.add(node.lineno)
+    return sorted(lines)
 
 
 # Interactive or delegated token calls: msal's public client and its interactive, silent and device flows, the Azure
@@ -327,6 +333,14 @@ def test_static_checks_catch_a_planted_sign_in() -> None:
         "def delegated_token_for(scope):\n    return None\n"
     )
     assert interactive_call_sites(interactive) == [3, 4, 5, 6]
+    m365 = (
+        "import subprocess\n"
+        "subprocess.run(['m365', 'login', '--authType', 'browser'])\n"
+        "SETUP = ('m365', 'setup')\n"
+        "LOGIN = 'm365 login --authType secret'\n"
+        "READ = 'm365 purview hold list --output json'\n"
+    )
+    assert m365_sign_in_lines(m365) == [2, 3, 4]
 
 
 # The opt-in SharePoint admin read (M08-T12) -----------------------------------------------------------------

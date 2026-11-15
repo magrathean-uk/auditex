@@ -116,11 +116,13 @@ def test_command_runner_redacts_secret_values_echoed_by_child(flag: str, inline:
 def test_guided_secret_flow_is_refused_and_keeps_secret_out_of_console_and_written_files(
     secret_source: str, tmp_path: Path, monkeypatch, capsys, caplog,
 ) -> None:
+    from auditex import cli as product_cli
     from auditex import guided
     from azure_tenant_audit import cli as engine_cli
 
-    # The real guided flow and engine parser: a client secret, from the command line or the saved environment,
-    # is refused by the engine (DEC-107) and never appears in the console, the log or any written file.
+    # The real guided flow: a client secret on the command line is refused by name (DEC-107); one in the saved
+    # environment is never read, so the run stops for the missing certificate. Neither appears in the console, the
+    # log or any written file.
     monkeypatch.setattr(guided, "build_doctor_report", lambda **kwargs: {
         "system": {"os": "test", "machine": "test"}, "readiness": {"core_ready": True},
     })
@@ -134,15 +136,18 @@ def test_guided_secret_flow_is_refused_and_keeps_secret_out_of_console_and_writt
         "--flow", "app-audit", "--tenant-id", "constructed.example", "--tenant-name", "CONSTRUCTED",
         "--client-id", "constructed-app", "--out", str(tmp_path / "runs"), "--run-name", "redaction",
         "--collectors", "identity", "--throttle-mode", "fast", "--no-probe-first",
-        "--non-interactive", "--skip-login-check", "--skip-tool-check",
+        "--non-interactive", "--skip-tool-check",
     ]
     if secret_source == "argument":
-        argv.extend(["--client-secret", CANARY])
-    with pytest.raises(SystemExit) as raised:
-        guided.run_guided(guided.build_guided_parser().parse_args(argv))
-    assert raised.value.code == 2
-    output = capsys.readouterr()
-    assert "--client-secret was removed" in output.err and "reader app with a certificate" in output.err
+        with pytest.raises(SystemExit) as raised:
+            product_cli.main(["guided-run", *argv, "--client-secret", CANARY])
+        assert raised.value.code == 2
+        output = capsys.readouterr()
+        assert "--client-secret was removed" in output.err and "reader app with a certificate" in output.err
+    else:
+        assert guided.run_guided(guided.build_guided_parser().parse_args(argv)) == 2
+        output = capsys.readouterr()
+        assert "--certificate-path" in output.out and "reader-app-permissions.md" in output.out
     assert CANARY not in output.out + output.err + caplog.text
     assert not (tmp_path / "runs" / "CONSTRUCTED-redaction").exists()
     for path in tmp_path.rglob("*"):
@@ -248,7 +253,7 @@ def test_guided_certificate_flow_passes_through_and_keeps_key_material_out(
         "--certificate-thumbprint", certificate_material.thumbprint,
         "--certificate-password-file", str(certificate_material.password_file),
         "--out", str(tmp_path / "runs"), "--run-name", "guided-certificate", "--collectors", "teams_policy",
-        "--throttle-mode", "fast", "--no-probe-first", "--non-interactive", "--skip-login-check", "--skip-tool-check",
+        "--throttle-mode", "fast", "--no-probe-first", "--non-interactive", "--skip-tool-check",
     ]
     assert guided.run_guided(guided.build_guided_parser().parse_args(argv)) == 0
     assert len(entra.token_requests) == 2 and len(seen_tokens) == 5
@@ -276,7 +281,7 @@ token = os.environ["AUDITEX_TEST_TOKEN_CANARY"]
 flags = SENSITIVE_ARG_FLAGS | SENSITIVE_CLI_ARGS | SENSITIVE_ARGS | RESPONSE_SENSITIVE_ARGS | _SENSITIVE_COMMAND_FLAGS
 failures = []
 for module in ("auditex", "azure_tenant_audit"):
-    prefix = ["auth", "inspect-token"] if module == "auditex" else ["--offline", "--sample", "__auditex_missing_sample_for_guard_test__"]
+    prefix = ["doctor"] if module == "auditex" else ["--offline", "--sample", "__auditex_missing_sample_for_guard_test__"]
     for flag in sorted(flags):
         for inline in (False, True):
             for nul in (False, True):
@@ -321,7 +326,8 @@ def test_long_token_cli_traceback_contains_no_secret_fragments(python: str) -> N
         cwd=root, env=env, capture_output=True, text=True, timeout=30, check=False,
     )
     output = result.stdout + result.stderr
-    assert "ValueError: token is not a JWT" in output
+    # DEC-108 D4: the token commands are gone; the old command line is refused without a fragment of the token.
+    assert result.returncode == 2 and "auditex auth was removed" in output
     assert not any(CANARY[i:i + 16] in output for i in range(len(CANARY) - 15))
 
 

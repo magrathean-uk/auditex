@@ -1,6 +1,6 @@
 {
   "skill_name": "microsoft_tenant_audit",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Collect and summarize Microsoft 365 tenant posture into a local Auditex evidence bundle.",
   "default_runtime": "python",
   "entry": {
@@ -10,7 +10,7 @@
   "actions": [
     {
       "name": "tenant_audit.run_full_audit",
-      "description": "Run the full default collector set (identity, security, intune, teams).",
+      "description": "Run the profile's full collector set as the reader app with its certificate.",
       "arguments": {
         "tenant_name": {
           "type": "string",
@@ -18,145 +18,17 @@
         },
         "tenant_id": {
           "type": "string",
-          "required": false
-        },
-        "client_id": {
-          "type": "string",
-          "required": false
-        },
-        "client_secret": {
-          "type": "string",
-          "required": false
-        },
-        "out": {
-          "type": "string",
-          "required": false
-        },
-        "top": {
-          "type": "integer",
-          "required": false,
-          "default": 0
-        },
-        "run_name": {
-          "type": "string",
-          "required": false
-        },
-        "include_exchange": {
-          "type": "boolean",
-          "required": false,
-          "default": false
-        },
-        "auditor_profile": {
-          "type": "string",
-          "required": false,
-          "default": "auto"
-        }
-      },
-      "command_template": "auditex --tenant-name {tenant_name} --tenant-id {tenant_id} --client-id {client_id} --client-secret {client_secret} --out {out} --top {top} --auditor-profile {auditor_profile}"
-    },
-    {
-      "name": "tenant_audit.run_full_audit_interactive",
-      "description": "Run the full default collector set using browser sign-in.",
-      "arguments": {
-        "tenant_name": {
-          "type": "string",
           "required": true
-        },
-        "tenant_id": {
-          "type": "string",
-          "required": false
         },
         "client_id": {
           "type": "string",
           "required": true
         },
-        "out": {
-          "type": "string",
-          "required": false
-        },
-        "top": {
-          "type": "integer",
-          "required": false,
-          "default": 0
-        },
-        "run_name": {
-          "type": "string",
-          "required": false
-        },
-        "include_exchange": {
-          "type": "boolean",
-          "required": false,
-          "default": false
-        },
-        "browser_command": {
-          "type": "string",
-          "required": false,
-          "default": "firefox"
-        },
-        "scopes": {
-          "type": "string",
-          "required": false,
-          "default": ""
-        },
-        "auditor_profile": {
-          "type": "string",
-          "required": false,
-          "default": "auto"
-        }
-      },
-      "command_template": "auditex --tenant-name {tenant_name} --interactive --client-id {client_id} --tenant-id {tenant_id} --browser-command {browser_command} --out {out} --top {top} --scopes \"{scopes}\" --auditor-profile {auditor_profile}"
-    },
-    {
-      "name": "tenant_audit.run_full_audit_azure_cli",
-      "description": "Run the full default collector set using the current Azure CLI session token.",
-      "arguments": {
-        "tenant_name": {
+        "certificate_path": {
           "type": "string",
           "required": true
         },
-        "tenant_id": {
-          "type": "string",
-          "required": false
-        },
-        "out": {
-          "type": "string",
-          "required": false
-        },
-        "top": {
-          "type": "integer",
-          "required": false,
-          "default": 0
-        },
-        "run_name": {
-          "type": "string",
-          "required": false
-        },
-        "include_exchange": {
-          "type": "boolean",
-          "required": false,
-          "default": false
-        },
-        "auditor_profile": {
-          "type": "string",
-          "required": false,
-          "default": "auto"
-        }
-      },
-      "command_template": "auditex --tenant-name {tenant_name} --tenant-id {tenant_id} --use-azure-cli-token --out {out} --top {top} --auditor-profile {auditor_profile}"
-    },
-    {
-      "name": "tenant_audit.run_full_audit_from_token",
-      "description": "Run the full default collector set with a supplied Graph access token.",
-      "arguments": {
-        "tenant_name": {
-          "type": "string",
-          "required": true
-        },
-        "tenant_id": {
-          "type": "string",
-          "required": false
-        },
-        "access_token": {
+        "certificate_thumbprint": {
           "type": "string",
           "required": true
         },
@@ -173,22 +45,17 @@
           "type": "string",
           "required": false
         },
-        "include_exchange": {
-          "type": "boolean",
-          "required": false,
-          "default": false
-        },
         "auditor_profile": {
           "type": "string",
           "required": false,
-          "default": "auto"
+          "default": "global-reader"
         }
       },
-      "command_template": "auditex --tenant-name {tenant_name} --tenant-id {tenant_id} --access-token {access_token} --out {out} --top {top} --auditor-profile {auditor_profile}"
+      "command_template": "auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} --client-id {client_id} --certificate-path {certificate_path} --certificate-thumbprint {certificate_thumbprint} --out {out} --top {top} --auditor-profile {auditor_profile}"
     },
     {
       "name": "tenant_audit.run_security_audit",
-      "description": "Run only identity/security collectors.",
+      "description": "Run only identity/security collectors as the reader app with its certificate.",
       "arguments": {
         "tenant_name": {
           "type": "string",
@@ -196,46 +63,17 @@
         },
         "tenant_id": {
           "type": "string",
-          "required": false
+          "required": true
         },
         "client_id": {
-          "type": "string",
-          "required": false
-        },
-        "client_secret": {
-          "type": "string",
-          "required": false
-        },
-        "out": {
-          "type": "string",
-          "required": false
-        },
-        "top": {
-          "type": "integer",
-          "required": false,
-          "default": 500
-        },
-        "auditor_profile": {
-          "type": "string",
-          "required": false,
-          "default": "auto"
-        }
-      },
-      "command_template": "PYTHONPATH=tenant-bootstrap python3 -m azure_tenant_audit --tenant-name {tenant_name} --collectors identity,security --tenant-id {tenant_id} --client-id {client_id} --client-secret {client_secret} --out {out} --top {top} --auditor-profile {auditor_profile}"
-    },
-    {
-      "name": "tenant_audit.run_security_audit_interactive",
-      "description": "Run identity/security collectors using browser sign-in.",
-      "arguments": {
-        "tenant_name": {
           "type": "string",
           "required": true
         },
-        "tenant_id": {
+        "certificate_path": {
           "type": "string",
-          "required": false
+          "required": true
         },
-        "client_id": {
+        "certificate_thumbprint": {
           "type": "string",
           "required": true
         },
@@ -248,23 +86,17 @@
           "required": false,
           "default": 500
         },
-        "browser_command": {
+        "run_name": {
           "type": "string",
-          "required": false,
-          "default": "firefox"
-        },
-        "scopes": {
-          "type": "string",
-          "required": false,
-          "default": ""
+          "required": false
         },
         "auditor_profile": {
           "type": "string",
           "required": false,
-          "default": "auto"
+          "default": "global-reader"
         }
       },
-      "command_template": "PYTHONPATH=tenant-bootstrap python3 -m azure_tenant_audit --tenant-name {tenant_name} --collectors identity,security --interactive --client-id {client_id} --tenant-id {tenant_id} --browser-command {browser_command} --out {out} --top {top} --scopes \"{scopes}\" --auditor-profile {auditor_profile}"
+      "command_template": "auditex run --tenant-name {tenant_name} --collectors identity,security --tenant-id {tenant_id} --client-id {client_id} --certificate-path {certificate_path} --certificate-thumbprint {certificate_thumbprint} --out {out} --top {top} --auditor-profile {auditor_profile}"
     },
     {
       "name": "tenant_audit.run_sample_audit",
@@ -425,7 +257,8 @@
     }
   ],
   "notes": [
-    "Do not store credentials in source files.",
+    "Microsoft 365 audits use one way: the reader app with a certificate. The tenant administrator grants it from docs/guides/reader-app-permissions.md.",
+    "Do not store credentials in source files. Keep the certificate's private key in an owner-only file; a key password comes only from --certificate-password-env or --certificate-password-file, never the command line.",
     "Use environment variables from configs/tenant-audit.example.env for local runs.",
     "A top of 0 means no row limit: every list is paged to its last row. A positive top is an explicit limit, and a list it cuts is recorded as a coverage gap."
   ]

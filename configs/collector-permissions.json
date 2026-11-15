@@ -73,17 +73,7 @@
         "Global Reader",
         "Compliance Administrator"
       ],
-      "notes": "Most collector commands are CLI-driven and require authenticated M365 CLI session plus app-level Purview/eDiscovery permissions.",
-      "command_tools": [
-        "m365"
-      ],
-      "optional_commands": [
-        "m365 purview auditlog list --output json",
-        "m365 purview retentionlabel list --output json",
-        "m365 purview retentionpolicy list --output json",
-        "m365 purview dlp policy list --output json",
-        "m365 purview auditlog list --output json"
-      ]
+      "notes": "Named gap: retention labels, retention policies, DLP policies and the audit log are not collected. They were read only by the CLI for Microsoft 365, which Auditex no longer runs; each operation is recorded in coverage with the error m365_cli_not_used. The reader app's certificate reads no Purview data in this collector."
     },
     "ediscovery": {
       "graph_scopes": [
@@ -95,17 +85,7 @@
         "Compliance Administrator",
         "Global Reader"
       ],
-      "notes": "Export and hold operations may be CLI-driven and require additional compliance/eDiscovery tenant permissions.",
-      "command_tools": [
-        "m365"
-      ],
-      "optional_commands": [
-        "m365 purview ediscovery case list --output json",
-        "m365 purview ediscovery search list --output json",
-        "m365 purview ediscoveryexport list --output json",
-        "m365 purview ediscovery reviewset list --output json",
-        "m365 purview hold list --output json"
-      ]
+      "notes": "eDiscovery cases, with each case's searches and operations, are read through Microsoft Graph with the reader app's certificate (eDiscovery.Read.All). Named gap: the case, search, export, review set and hold listings of the CLI for Microsoft 365 are not run, because Auditex no longer runs that CLI; each is recorded in coverage with the error m365_cli_not_used."
     },
     "auth_methods": {
       "graph_scopes": [
@@ -215,7 +195,7 @@
         "Global Reader",
         "SharePoint Administrator"
       ],
-      "notes": "Sampled site permissions (GET /sites/{id}/permissions) are read only in delegated runs; an app-only run records a named skip, so the default collectors need no write-capable scope."
+      "notes": "Sampled site permissions (GET /sites/{id}/permissions) are not read: the reader app records the named skip site_permissions_app_only_not_read, so the default collectors need no write-capable scope."
     },
     "onedrive_posture": {
       "graph_scopes": [
@@ -233,13 +213,12 @@
         "Sites.Read.All"
       ],
       "sharepoint_permissions": {
-        "application": "Sites.FullControl.All",
-        "delegated": "AllSites.FullControl"
+        "application": "Sites.FullControl.All"
       },
       "minimum_role_hints": [
         "SharePoint Administrator"
       ],
-      "notes": "Opt-in, off by default and in no profile or preset; select it with --collectors sharepoint_admin. Reads one thing: GET https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant (Accept application/json;odata=verbose), keeping only ODBSharingCapability, DefaultSharingLinkType, DefaultLinkPermission, RequireAnonymousLinksExpireInDays, FileAnonymousLinkType, FolderAnonymousLinkType, EmailAttestationRequired and EmailAttestationReAuthDays. {tenant} is the prefix of the tenant's current SharePoint host, siteCollection.hostname from GET /sites/root?$select=siteCollection (Sites.Read.All, read-only, in the default set), which follows a SharePoint rename; it must be <prefix>.sharepoint.com, otherwise the read is the named skip sharepoint_admin_host_unresolved. The host is never guessed and never taken from the initial onmicrosoft.com domain. App-only needs the SharePoint (Office 365 SharePoint Online, 00000003-0000-0ff1-ce00-000000000000) application permission Sites.FullControl.All with admin consent and a certificate credential (--certificate-path with --certificate-thumbprint): SharePoint refuses app-only tokens minted from a client secret, so a secret-only run records the named skip sharepoint_admin_certificate_required and requests no SharePoint token. Delegated runs mint the token silently from the run's one sign-in for the SharePoint delegated permission AllSites.FullControl (admin consent) and a signed-in SharePoint Administrator; when that would need a second prompt the read is the named skip sharepoint_admin_second_sign_in_required and no second sign-in is opened. Both permissions are write-capable: blast radius full control of every site collection (app-only: every site; delegated: every site the signed-in admin can reach). Auditex makes no mutating call: the read guard admits only that one body-free GET, and the API ledger records it under observed_ledger.sharepoint_admin_rest. Remove the permission after the engagement (Entra admin center > App registrations > the app > API permissions > SharePoint > remove, then revoke admin consent), or delete the app."
+      "notes": "Opt-in, off by default and in no profile or preset; select it with --collectors sharepoint_admin. Reads one thing: GET https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant (Accept application/json;odata=verbose), keeping only ODBSharingCapability, DefaultSharingLinkType, DefaultLinkPermission, RequireAnonymousLinksExpireInDays, FileAnonymousLinkType, FolderAnonymousLinkType, EmailAttestationRequired and EmailAttestationReAuthDays. {tenant} is the prefix of the tenant's current SharePoint host, siteCollection.hostname from GET /sites/root?$select=siteCollection (Sites.Read.All, read-only, in the default set), which follows a SharePoint rename; it must be <prefix>.sharepoint.com, otherwise the read is the named skip sharepoint_admin_host_unresolved. The host is never guessed and never taken from the initial onmicrosoft.com domain. The reader app needs the SharePoint (Office 365 SharePoint Online, 00000003-0000-0ff1-ce00-000000000000) application permission Sites.FullControl.All with admin consent; its token is minted from the certificate (--certificate-path with --certificate-thumbprint), the only credential Auditex accepts. The permission is write-capable: blast radius full control of every site collection. Auditex makes no mutating call: the read guard admits only that one body-free GET, and the API ledger records it under observed_ledger.sharepoint_admin_rest. Remove the permission after the engagement (Entra admin center > App registrations > the app > API permissions > SharePoint > remove, then revoke admin consent), or delete the app."
     },
     "power_bi": {
       "graph_scopes": [],
@@ -295,7 +274,7 @@
         "Reports Reader",
         "Global Reader"
       ],
-      "notes": "Capability-gated. Reads /copilot/admin/settings/limitedMode (delegated only; app-only runs record a coverage gap) and the aggregate /copilot/reports/getMicrosoft365CopilotUserCountSummary CSV. No per-user Copilot activity or interaction content is read. Requires Microsoft 365 Copilot licensing; failure modes map to 'service_not_available'."
+      "notes": "Capability-gated. Reads /copilot/admin/settings/limitedMode only with CopilotSettings-LimitedMode.Read, which Microsoft publishes as a delegated permission the reader app never takes, so the reader app records a coverage gap and the aggregate /copilot/reports/getMicrosoft365CopilotUserCountSummary CSV. No per-user Copilot activity or interaction content is read. Requires Microsoft 365 Copilot licensing; failure modes map to 'service_not_available'."
     },
     "teams": {
       "graph_scopes": [
@@ -400,20 +379,7 @@
         "Global Reader",
         "Exchange Administrator"
       ],
-      "notes": "Command-based Exchange posture relies on Microsoft 365 CLI tenant and report commands; mailbox presence falls back to Graph only when CLI reporting is unavailable.",
-      "command_tools": [
-        "m365"
-      ],
-      "optional_commands": [
-        "m365 status --output json",
-        "m365 tenant info get --output json",
-        "m365 outlook report mailboxusagemailboxcount --period D30 --output json",
-        "m365 outlook report mailboxusagedetail --period D30 --output json",
-        "m365 outlook report mailboxusagequotastatusmailboxcounts --period D30 --output json",
-        "m365 outlook report mailboxusagestorage --period D30 --output json",
-        "m365 outlook report mailactivitycounts --period D30 --output json",
-        "m365 outlook roomlist list --output json"
-      ]
+      "notes": "Retired: this collector read Exchange through the CLI for Microsoft 365, which Auditex no longer runs. It reads nothing and records each former operation as skipped with the reason m365_cli_not_used. exchange_policy reads Exchange Online with the reader app's certificate."
     },
     "mailbox_forwarding": {
       "graph_scopes": [

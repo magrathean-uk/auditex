@@ -7,14 +7,6 @@ it its own explicit inventory entry. Keep each tuple sorted.
 from __future__ import annotations
 
 WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
-    'auditex.auth:*': (
-        'auditex.auth:_product_auth_runtime',
-        'auditex.auth:_save_json',
-        'auditex.auth:save_local_auth_values',
-    ),
-    'auditex.auth_runtime:*': (
-        'auditex.auth_runtime:_save_json',
-    ),
     'auditex.demo:*': (
         'auditex.demo:_Console.line',
         'auditex.demo:_Console.pause',
@@ -26,8 +18,6 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
     ),
     'auditex.guided:*': (
         'auditex.guided:ProgressRenderer.__call__',
-        'auditex.guided:_offer_m365_setup',
-        'auditex.guided:_prompt_choice',
         'auditex.guided:_read_prompt',
         'auditex.guided:run_guided',
     ),
@@ -53,10 +43,8 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
         'azure_tenant_audit.exposure_lookup:RequestsHttpsFetcher.get_text',
     ),
     'azure_tenant_audit.graph:*': (
-        'azure_tenant_audit.graph:GraphClient._app_token',
         'azure_tenant_audit.graph:GraphClient._follow_redirects',
         'azure_tenant_audit.graph:GraphClient._request',
-        'azure_tenant_audit.graph:GraphClient.app_token_for',
     ),
     'azure_tenant_audit.output:*': (
         'azure_tenant_audit.output:AuditLogger.log',

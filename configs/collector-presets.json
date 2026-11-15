@@ -19,7 +19,7 @@
       "plane": "inventory"
     },
     "full": {
-      "description": "Run the broad collector set intended for a first delegated-reader assessment.",
+      "description": "Run the broad collector set intended for a first reader-app assessment.",
       "include": [
         "identity",
         "app_consent",

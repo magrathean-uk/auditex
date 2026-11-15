@@ -10,7 +10,12 @@ def test_registry_owns_tool_names_and_read_only_hints(monkeypatch) -> None:
 
     assert "auditex_list_profiles" in by_name
     assert by_name["auditex_list_profiles"]["readOnlyHint"] is True
-    assert by_name["auditex_run_delegated_audit"]["readOnlyHint"] is False
+    assert by_name["auditex_run_certificate_audit"]["readOnlyHint"] is False
+    assert by_name["auditex_run_certificate_audit"]["pathArguments"] == ["out_dir", "certificate_path", "certificate_password_file"]
+    assert by_name["auditex_probe_live"]["pathArguments"] == ["out_dir", "certificate_path", "certificate_password_file"]
+    # DEC-107: one certificate run tool; no delegated run and no auth tools.
+    assert "auditex_run_delegated_audit" not in by_name
+    assert not [name for name in by_name if name.startswith("auditex_auth_")]
     assert by_name["auditex_google_doctor"]["readOnlyHint"] is True
     assert by_name["auditex_google_probe"]["readOnlyHint"] is False
     assert by_name["auditex_run_google_workspace_audit"]["readOnlyHint"] is False

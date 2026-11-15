@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .features import response_disabled_message, response_enabled
 
 SUPPORTED_PLANES = ("inventory", "full", "export")
-SUPPORTED_PROBE_MODES = ("delegated", "app", "response")
+SUPPORTED_PROBE_MODES = ("app", "response")
 SUPPORTED_GOOGLE_COMMANDS = ("doctor", "probe", "run")
 SUPPORTED_GOOGLE_AUTH = ("domain-delegation", "oauth")
 
@@ -45,17 +45,13 @@ class AuditRunCommandSpec:
     tenant_id: str | None = None
     auditor_profile: str = "global-reader"
     plane: str = "inventory"
-    use_azure_cli_token: bool = True
-    access_token: str | None = None
+    # The reader app (DEC-107): its client ID (else AZURE_CLIENT_ID), the certificate key file path, its SHA-1
+    # thumbprint and at most one password source (an environment variable name or a file); never a secret.
     client_id: str | None = None
-    client_secret: str | None = None
-    # Certificate credential: the key file path, its SHA-1 thumbprint and at most one password source
-    # (an environment variable name or a file); never the password or key text itself.
     certificate_path: str | None = None
     certificate_thumbprint: str | None = None
     certificate_password_env: str | None = None
     certificate_password_file: str | None = None
-    include_exchange: bool = False
     collectors: str | Sequence[str] | None = None
     since: str | None = None
     until: str | None = None
@@ -64,15 +60,12 @@ class AuditRunCommandSpec:
     python_executable: str | None = None
 
 
-def _certificate_options(spec: AuditRunCommandSpec) -> list[str]:
-    selected = any((spec.certificate_path, spec.certificate_thumbprint,
-                    spec.certificate_password_env, spec.certificate_password_file))
-    if not selected:
-        return []
-    if spec.client_secret or spec.access_token:
-        raise ValueError("A certificate credential is never combined with a client secret or access token.")
+def _certificate_options(spec: AuditRunCommandSpec | ProbeCommandSpec) -> list[str]:
+    """The reader app's options; a live Microsoft 365 command always carries the certificate (DEC-107)."""
     if not (spec.certificate_path and spec.certificate_thumbprint):
-        raise ValueError("A certificate credential needs both certificate_path and certificate_thumbprint.")
+        raise ValueError(
+            "A live Microsoft 365 command needs the reader app's certificate: certificate_path and certificate_thumbprint."
+        )
     if spec.certificate_password_env and spec.certificate_password_file:
         raise ValueError("Name one certificate password source: an environment variable or a file.")
     options: list[str] = []
@@ -91,24 +84,13 @@ def build_audit_run_command(spec: AuditRunCommandSpec) -> list[str]:
     _add_option(command, "--tenant-id", spec.tenant_id)
     _add_option(command, "--auditor-profile", spec.auditor_profile)
     _add_option(command, "--plane", spec.plane)
-    _add_bool(command, "--include-exchange", spec.include_exchange)
     _add_option(command, "--collectors", _csv(spec.collectors))
     _add_option(command, "--since", spec.since)
     _add_option(command, "--until", spec.until)
     if spec.offline:
         command.extend(["--offline", "--sample", spec.sample_path])
         return command
-    certificate = _certificate_options(spec)
-    if certificate:
-        command.extend(certificate)
-        return command
-    if spec.access_token:
-        command.extend(["--access-token", spec.access_token])
-    elif spec.use_azure_cli_token:
-        command.append("--use-azure-cli-token")
-    else:
-        _add_option(command, "--client-id", spec.client_id)
-        _add_option(command, "--client-secret", spec.client_secret)
+    command.extend(_certificate_options(spec))
     return command
 
 
@@ -184,16 +166,16 @@ class ProbeCommandSpec:
     out_dir: str
     tenant_id: str | None = None
     auditor_profile: str = "global-reader"
-    mode: str = "delegated"
+    mode: str = "app"
     surface: str = "all"
     since: str | None = None
     until: str | None = None
     allow_lab_response: bool = False
-    use_azure_cli_token: bool = True
-    access_token: str | None = None
-    auth_context: str | None = None
     client_id: str | None = None
-    client_secret: str | None = None
+    certificate_path: str | None = None
+    certificate_thumbprint: str | None = None
+    certificate_password_env: str | None = None
+    certificate_password_file: str | None = None
     python_executable: str | None = None
 
 
@@ -208,14 +190,8 @@ def build_probe_command(spec: ProbeCommandSpec) -> list[str]:
     _add_option(command, "--since", spec.since)
     _add_option(command, "--until", spec.until)
     _add_bool(command, "--allow-lab-response", spec.allow_lab_response)
-    if spec.access_token:
-        command.extend(["--access-token", spec.access_token])
-    elif spec.auth_context:
-        command.extend(["--auth-context", spec.auth_context])
-    elif spec.use_azure_cli_token and spec.mode == "delegated":
-        command.append("--use-azure-cli-token")
-    _add_option(command, "--client-id", spec.client_id)
-    _add_option(command, "--client-secret", spec.client_secret)
+    if spec.mode == "app":
+        command.extend(_certificate_options(spec))
     return command
 
 
@@ -234,7 +210,6 @@ class ResponseCommandSpec:
     execute: bool = False
     allow_write: bool = False
     allow_lab_response: bool = False
-    auth_context: str | None = None
     adapter_override: str | None = None
     command_override: str | None = None
     allow_adapter_override: bool = False
@@ -276,7 +251,6 @@ def build_response_command(spec: ResponseCommandSpec, *, supported_actions: Iter
     _add_bool(command, "--allow-lab-response", spec.allow_lab_response)
     _add_bool(command, "--allow-adapter-override", spec.allow_adapter_override)
     _add_bool(command, "--allow-command-override", spec.allow_command_override)
-    _add_option(command, "--auth-context", spec.auth_context)
     _add_option(command, "--adapter-override", spec.adapter_override)
     _add_option(command, "--command-override", spec.command_override)
     return command

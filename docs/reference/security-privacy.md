@@ -104,12 +104,11 @@ call, and the audit log records both what ran and what was refused.
 | MCP tools | `mcp_registry.py`, `mcp_paths.py`, `mcp_server.py` | No tool takes a bearer token or client secret value: Microsoft auth comes from the local auth context and the server's environment (`AZURE_CLIENT_SECRET`), and the Google tools take confined paths to credential files (`service_account_key`, `oauth_client`, `token_cache`), never secret values. Every filesystem argument is resolved against the MCP root and refused when it contains `..`, starts with `~`, or lands outside the root (including through a symbolic link). Tenant and run names (which become part of a run directory name) are refused when they contain `/`, `\`, `..` or a control character; `AuditWriter` enforces the same rule. The server refuses to start, and every path argument is refused, when the root is `/`, or the home directory with `AUDITEX_MCP_ROOT` unset. Tools whose `read_only_hint` is false are listed below. | `McpPathError` from the tool |
 
 MCP tools with `read_only_hint` false (a test compares this list with the registry).
-None of them writes to a tenant; the hint is false because they write local files
-or local auth state, or, for the response tool, because it is a gated response action:
+None of them writes to a tenant; the hint is false because they write local files,
+or, for the response tool, because it is a gated response action:
 
-- `auditex_auth_use`: switches the active saved m365 connection (local auth state).
 - `auditex_run_offline_validation`: writes an offline sample run bundle locally.
-- `auditex_run_delegated_audit`: writes a run bundle locally; the audit itself is read-only.
+- `auditex_run_certificate_audit`: writes a run bundle locally as the reader app with its certificate; the audit itself is read-only.
 - `auditex_google_probe`: writes probe output locally; the probe is read-only.
 - `auditex_run_google_workspace_audit`: writes a run bundle locally; the audit itself is read-only.
 - `auditex_probe_live`: writes probe artifacts locally; the probe is read-only.

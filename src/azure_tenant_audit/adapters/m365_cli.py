@@ -1,28 +1,30 @@
 from __future__ import annotations
 
 import json
-import shlex
-import shutil
-import subprocess
-import time
 from collections.abc import Callable
 from typing import Any
 
-from ..m365_home import m365_subprocess_kwargs
 from ..secret_hygiene import (
-    collect_sensitive_argv_values,
     redact_command_string,
     redact_output,
 )
 from .base import Adapter, AdapterMetadata
 from .read_guard import CommandRefused, check_command, refusal_response
 
+# Error of every command handed to the adapter: the CLI for Microsoft 365 is no longer used for live collection.
+M365_CLI_NOT_USED = "m365_cli_not_used"
+
 
 class M365CLIAdapter(Adapter):
+    """The CLI for Microsoft 365 (``m365``) adapter, kept by name so old bundles and collectors still resolve it.
+
+    It never starts ``m365`` (DEC-108 D2): Exchange is read by exchange_policy with the reader app's certificate.
+    """
+
     metadata = AdapterMetadata(
         name="m365_cli",
-        auth_requirements=("delegated_or_app",),
-        tool_dependencies=("m365",),
+        auth_requirements=(),
+        tool_dependencies=(),
     )
 
     @staticmethod
@@ -121,16 +123,23 @@ class M365CLIAdapter(Adapter):
         return response
 
     def dependency_check(self) -> bool:
-        return shutil.which("m365") is not None
+        # The CLI for Microsoft 365 is no longer a dependency of any audit (DEC-108 D2).
+        return False
 
     def run(
         self,
         command: str,
         log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
+        """Never starts ``m365``: Microsoft 365 audits read only with the reader app's certificate (DEC-107).
+
+        A command off the read allowlist is still refused and logged first, as by every adapter. Any other answer is
+        a ``command_not_found`` error, the same class a machine without ``m365`` gave, so a collector that falls back
+        to Microsoft Graph still does. The output classifier above stays for replaying old bundles.
+        """
         safe_command = redact_command_string(command)
         try:
-            command_words = check_command(self.name, command)
+            check_command(self.name, command)
         except CommandRefused as exc:
             if log_event:
                 log_event(
@@ -139,82 +148,9 @@ class M365CLIAdapter(Adapter):
                     {"adapter": self.name, "command": safe_command, "reason": exc.reason},
                 )
             return refusal_response(safe_command, exc)
-        cmd_parts = shlex.split(command)
-        sensitive_values = collect_sensitive_argv_values(cmd_parts)
-        exe = shutil.which(cmd_parts[0]) if cmd_parts else None
-        if exe is None:
-            if log_event:
-                log_event(
-                    "command.failed",
-                    "Command executable not found",
-                    {"command": cmd_parts[0] if cmd_parts else safe_command},
-                )
-            return {
-                "error": f"command_not_found:{cmd_parts[0] if cmd_parts else command}",
-                "error_class": "command_not_found",
-                "command": safe_command,
-            }
-
-        try:
-            if log_event:
-                log_event(
-                    "command.started",
-                    "Exchange command started",
-                    {"adapter": self.name, "command": safe_command, "command_words": list(command_words), "executable": exe},
-                )
-            start = time.time()
-            result = subprocess.run(
-                cmd_parts,
-                text=True,
-                capture_output=True,
-                shell=False,
-                timeout=120,
-                **m365_subprocess_kwargs(cmd_parts),
-            )
-            duration_ms = round((time.time() - start) * 1000, 2)
-            stdout = result.stdout or ""
-            stderr = result.stderr or ""
-            response = self._classify_output(result.returncode, stdout, stderr, safe_command, sensitive_values)
-            # The status is logged after the output was classified: a help dump, an empty answer or output that is not
-            # JSON exits 0 but is not a successful read, and the observed ledger must not record it as ok.
-            status = "error" if response.get("error") else "ok"
-            if log_event:
-                log_event(
-                    "command.completed",
-                    "Exchange command completed",
-                    {
-                        "adapter": self.name,
-                        "command": safe_command,
-                        "command_words": list(command_words),
-                        "return_code": result.returncode,
-                        "duration_ms": duration_ms,
-                        "status": status,
-                        "stdout_bytes": len(stdout),
-                        "stderr_bytes": len(stderr),
-                        "stdout_sample": redact_output(stdout, sensitive_values),
-                    },
-                )
-
-            return response
-
-        except subprocess.CalledProcessError as exc:  # noqa: BLE001
-            if log_event:
-                log_event(
-                    "command.failed",
-                    "Exchange command failed",
-                    {"command": safe_command, "return_code": exc.returncode, "error": redact_output(str(exc), sensitive_values)},
-                )
-            return {
-                "error": f"command_failed:{exc.returncode}",
-                "error_class": "command_error",
-                "command": safe_command,
-                "output": redact_output(exc.output, sensitive_values),
-            }
-        except Exception as exc:  # noqa: BLE001
-            if log_event:
-                log_event(
-                    "command.failed",
-                    "Exchange command exception",
-                    {"command": safe_command, "error": redact_output(str(exc), sensitive_values)},
-                )
-            return {"error": redact_output(str(exc), sensitive_values), "error_class": "command_exception", "command": safe_command}
+        return {
+            "error": M365_CLI_NOT_USED,
+            "error_class": "command_not_found",
+            "command": safe_command,
+            "source": "command",
+        }

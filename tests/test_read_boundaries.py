@@ -77,12 +77,9 @@ _TRUSTED_WRAPPER_SITES: dict[tuple[str, str], tuple[frozenset[str], str]] = {
 }
 # Closed: operator-run local setup that never reaches an audit runner (adapter or probe). Its commands are
 # neither wrapper operations nor tenant reads; the site is pinned so a second one cannot appear unseen.
-_LOCAL_SETUP_SITES: dict[tuple[str, str], tuple[frozenset[str], str]] = {
-    ("src/auditex/auth.py", "ensure_exchange_online_module"): (
-        frozenset({"Install-Module"}),
-        "operator-run ExchangeOnlineManagement install from the guided setup; local PSGallery download",
-    ),
-}
+# The guided ExchangeOnlineManagement install went with the product auth module (DEC-107); the module is installed by
+# scripts/bootstrap-local-tools.sh only, outside src.
+_LOCAL_SETUP_SITES: dict[tuple[str, str], tuple[frozenset[str], str]] = {}
 
 # Closed: requests whose endpoint or parameters the source scan cannot resolve, each with why that is safe.
 # A new unresolved request fails the scan until it is resolved or reviewed into this table.
@@ -110,20 +107,11 @@ _LITERAL_FSTRINGS = (
     "part and field value is scanned as a site of its own"
 )
 _UNRESOLVED_RUNNER_INPUTS: dict[tuple[str, str], str] = {
-    ("src/auditex/auth.py", "_json_command"): _CALLER_ARGV,
-    ("src/auditex/auth.py", "_product_auth_runtime"): _CALLER_ARGV,
-    ("src/auditex/auth.py", "_pwsh_exchange_module_status"): _RUNTIME_ARGV,
-    ("src/auditex/auth.py", "ensure_exchange_online_module"): _RUNTIME_ARGV,
-    ("src/auditex/auth_runtime.py", "_default_exchange_module_status"): _RUNTIME_ARGV,
-    ("src/auditex/auth_runtime.py", "_default_json_command"): _CALLER_ARGV,
     ("src/auditex/auth_runtime.py", "_default_run_json_command"): _CALLER_ARGV,
-    ("src/auditex/auth_runtime.py", "_default_run_returncode"): _CALLER_ARGV,
+    ("src/auditex/auth_runtime.py", "exchange_module_status"): _RUNTIME_ARGV,
     ("src/auditex/bootstrap.py", "_run_json_command"): _CALLER_ARGV,
     ("src/auditex/bootstrap.py", "run_setup"): _CALLER_ARGV,
     ("src/auditex/command_runner.py", "run_cli_command"): _CALLER_ARGV,
-    ("src/auditex/guided.py", "_ensure_m365_login"): _RUNTIME_ARGV,
-    ("src/auditex/guided.py", "_run_azure_login"): _RUNTIME_ARGV,
-    ("src/azure_tenant_audit/adapters/m365_cli.py", "M365CLIAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/m365dsc.py", "M365DSCAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "PowerShellGraphAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "_run_bounded"): _ADAPTER_ENTRY,
@@ -2841,7 +2829,7 @@ def test_local_setup_install_is_not_reachable_from_an_audit_runner() -> None:
         for path in _python_files(SRC)
         if "ensure_exchange_online_module" in path.read_text(encoding="utf-8")
     }
-    assert callers == {"src/auditex/auth.py", "src/auditex/guided.py"}
+    assert callers == set()
 
 
 def test_config_command_fields_are_reads() -> None:

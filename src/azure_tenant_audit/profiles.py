@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Deprecated: every run is app-only (DEC-107), so the engine no longer filters collectors by auth mode. Kept only
-# for the product layer's setup guide and guided run, which M09-T03 rewrites; nothing in this package reads it.
-APP_MODE_ONLY_COLLECTORS: tuple[str, ...] = ("exchange_policy", "dns_posture", "teams_policy")
-
 
 @dataclass(frozen=True)
 class AuditProfile:
@@ -158,14 +154,14 @@ PROFILES: dict[str, AuditProfile] = {
     "exchange-reader": AuditProfile(
         name="exchange-reader",
         description="Focused audit for Exchange Online configuration and mail flow evidence.",
-        default_collectors=("exchange", "exchange_policy", "security", "identity"),
+        default_collectors=("exchange_policy", "security", "identity"),
         delegated_role_hints=("Exchange Reader", "Global Reader"),
         app_escalation_permissions=("Exchange.ManageAsApp",),
         supported_planes=("inventory", "full", "export"),
         supported_probe_modes=("app", "response"),
-        adapter_requirements=("m365_cli", "powershell_graph"),
+        adapter_requirements=("pwsh", "ExchangeOnlineManagement"),
         response_allowed=True,
-        notes="Uses command-based Exchange collection where Graph coverage is limited.",
+        notes="Reads Exchange Online policy through app-only Exchange Online PowerShell with the reader app's certificate.",
     ),
     "intune-reader": AuditProfile(
         name="intune-reader",
@@ -210,7 +206,6 @@ PROFILES: dict[str, AuditProfile] = {
             "teams_policy",
             "purview",
             "ediscovery",
-            "exchange",
             "exchange_policy",
             "dns_posture",
         ),
@@ -243,7 +238,7 @@ PROFILES: dict[str, AuditProfile] = {
         ),
         supported_planes=("inventory", "full", "export"),
         supported_probe_modes=("app",),
-        adapter_requirements=("m365_cli", "powershell_graph"),
+        adapter_requirements=("pwsh", "ExchangeOnlineManagement"),
         response_allowed=False,
         notes="Secondary pass only. Use a customer-local app registration and keep permissions read-only.",
     ),

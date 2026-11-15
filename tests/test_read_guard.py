@@ -36,8 +36,11 @@ def _shipped_m365_commands() -> list[str]:
     from azure_tenant_audit.collectors.ediscovery import EDiscoveryCollector
     from azure_tenant_audit.collectors.purview import PurviewCollector
 
+    # The retired CLI for Microsoft 365 Exchange collector declares no command (DEC-108 D2); the Purview and
+    # eDiscovery command variants stay declared, so the read allowlist and the replay classifier still judge them.
+    assert ExchangeCollector.command_collectors is None
     commands: list[str] = []
-    for collector in (PurviewCollector, EDiscoveryCollector, ExchangeCollector):
+    for collector in (PurviewCollector, EDiscoveryCollector):
         for entry in collector.command_collectors:
             variants = entry.get("commands") if isinstance(entry, dict) else None
             commands += list(variants or [entry.get("command", "")] if isinstance(entry, dict) else [])
@@ -208,17 +211,11 @@ def test_every_registered_adapter_has_a_guard() -> None:
         assert adapter.name == name
 
 
-def test_m365_adapter_runs_an_allowed_read_and_records_its_command_words(monkeypatch) -> None:
-    import subprocess
+def test_m365_adapter_never_starts_m365_for_an_allowed_read(monkeypatch) -> None:
+    """DEC-108 D2: a read passes the guard but is answered without a process; the Graph fallback class stays."""
+    from azure_tenant_audit.adapters.m365_cli import M365_CLI_NOT_USED
 
-    calls: list[list[str]] = []
-
-    def _run(cmd, **kwargs):  # noqa: ANN001, ARG001
-        calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout='{"value": [{"id": "1"}]}', stderr="")
-
-    monkeypatch.setattr("subprocess.run", _run)
-    monkeypatch.setattr("shutil.which", lambda name, *a, **k: f"/usr/bin/{name}")
+    started = _forbid_execution(monkeypatch)
     events: list[tuple[str, dict[str, Any]]] = []
 
     result = M365CLIAdapter().run(
@@ -226,11 +223,10 @@ def test_m365_adapter_runs_an_allowed_read_and_records_its_command_words(monkeyp
         log_event=lambda event, message, details=None: events.append((event, dict(details or {}))),
     )
 
-    assert result["value"] == [{"id": "1"}]
-    assert calls and calls[0][1:5] == ["purview", "dlp", "policy", "list"]
-    started = [details for event, details in events if event == "command.started"][0]
-    assert started["adapter"] == "m365_cli"
-    assert started["command_words"] == ["purview", "dlp", "policy", "list"]
+    assert started == []
+    assert (result["error"], result["error_class"]) == (M365_CLI_NOT_USED, "command_not_found")
+    assert events == []
+    assert check_command("m365_cli", "m365 purview dlp policy list --output json") == ("purview", "dlp", "policy", "list")
 
 
 def test_powershell_adapter_runs_an_allowed_read(monkeypatch) -> None:

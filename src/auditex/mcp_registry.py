@@ -17,10 +17,11 @@ class McpToolEntry:
     ``path_args`` name filesystem arguments that are confined to the MCP root (``mcp_paths``);
     ``resource_args`` name inputs whose default is a shipped read-only file and which are confined
     when the caller supplies another value; ``name_args`` name tenant and run names, which become
-    part of a run directory name and must not contain a path separator or ``..``. No tool takes a bearer token or client secret value: Microsoft
-    auth comes from the local auth context and the server's environment, and the Google tools take
-    confined paths to credential files (``service_account_key``, ``oauth_client``,
-    ``token_cache``), never secret values.
+    part of a run directory name and must not contain a path separator or ``..``. No tool takes a bearer token,
+    client secret or auth context: the Microsoft 365 tools take the reader app's client ID, its certificate
+    thumbprint and confined paths to its certificate key and password file (``certificate_path``,
+    ``certificate_password_file``), and the Google tools take confined paths to credential files
+    (``service_account_key``, ``oauth_client``, ``token_cache``), never secret values.
     """
 
     name: str
@@ -63,32 +64,12 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
     ),
     McpToolEntry(
         name="auditex_list_profiles",
-        description="List built-in delegated and app-readonly audit profiles.",
-        read_only_hint=True,
-    ),
-    McpToolEntry(
-        name="auditex_auth_status",
-        description="Show local Auditex auth state, including Azure CLI and saved m365 connections.",
-        read_only_hint=True,
-    ),
-    McpToolEntry(
-        name="auditex_auth_list",
-        description="List saved m365 connections for the local Auditex operator environment.",
-        read_only_hint=True,
-    ),
-    McpToolEntry(
-        name="auditex_auth_use",
-        description="Switch the active saved m365 connection.",
-        read_only_hint=False,
-    ),
-    McpToolEntry(
-        name="auditex_auth_capability",
-        description="Map a saved auth context to collector capability and missing read permissions.",
+        description="List built-in audit profiles (collector selections for the reader app).",
         read_only_hint=True,
     ),
     McpToolEntry(
         name="auditex_setup_guide",
-        description="Build provider setup scopes, roles, admin steps, and verification commands before tenant access.",
+        description="Build provider setup scopes, roles, admin steps, and verification commands before tenant access; Microsoft 365 uses the reader app with a certificate.",
         read_only_hint=True,
     ),
     McpToolEntry(
@@ -106,10 +87,10 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
         name_args=("tenant_name",),
     ),
     McpToolEntry(
-        name="auditex_run_delegated_audit",
-        description="Run the Azure CLI token audit path against a tenant and return the run manifest path. Credentials come from the local auth context and the server environment, never from tool arguments.",
+        name="auditex_run_certificate_audit",
+        description="Run a Microsoft 365 audit as the reader app with its certificate and return the command output. Takes the client ID (else AZURE_CLIENT_ID), the certificate key file and thumbprint; the key password only by environment variable name or file, never a secret value.",
         read_only_hint=False,
-        path_args=("out_dir",),
+        path_args=("out_dir", "certificate_path", "certificate_password_file"),
         name_args=("tenant_name",),
     ),
     McpToolEntry(
@@ -164,9 +145,9 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
     ),
     McpToolEntry(
         name="auditex_probe_live",
-        description="Run a live capability probe against a tenant and emit capability/toolchain/blocker artifacts. App-mode credentials come from the server environment, never from tool arguments.",
+        description="Run a live capability probe as the reader app with its certificate and emit capability/toolchain/blocker artifacts. Takes the client ID (else AZURE_CLIENT_ID), the certificate key file and thumbprint, never a secret value.",
         read_only_hint=False,
-        path_args=("out_dir",),
+        path_args=("out_dir", "certificate_path", "certificate_password_file"),
         name_args=("tenant_name",),
     ),
     McpToolEntry(

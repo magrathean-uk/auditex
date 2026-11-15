@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -339,14 +340,11 @@ def test_a_select_or_expand_inside_the_url_or_a_batch_inner_url_is_judged_like_a
 # ---- guided setup -----------------------------------------------------------------------------------------
 
 
-def test_the_exchange_module_install_does_not_change_the_psgallery_trust_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    from auditex import auth
-
-    seen: list[list[str]] = []
-    monkeypatch.setattr(auth, "_pwsh_exchange_module_status", lambda: {"status": "missing", "pwsh_path": "/usr/bin/pwsh"})
-    monkeypatch.setattr(auth.subprocess, "run", lambda command, **kwargs: seen.append(list(command)) or subprocess.CompletedProcess(command, 0))
-
-    assert auth.ensure_exchange_online_module() == 0
-
-    assert "Install-Module ExchangeOnlineManagement" in seen[0][-1]
-    assert "Set-PSRepository" not in seen[0][-1]
+def test_the_exchange_module_install_does_not_change_the_psgallery_trust_policy() -> None:
+    """The ExchangeOnlineManagement install lives only in the bootstrap script (the guided Python installer went with
+    the product auth module, DEC-107); it installs for the current user and never trusts PSGallery."""
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-local-tools.sh").read_text(encoding="utf-8")
+    assert "Install-Module ExchangeOnlineManagement -Scope CurrentUser" in script
+    assert "Set-PSRepository" not in script
+    assert not [path for path in (Path(__file__).resolve().parents[1] / "src").rglob("*.py")
+                if "Install-Module" in path.read_text(encoding="utf-8")]

@@ -357,7 +357,7 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
         pytest.fail("collection/auth/guided flow reached with invalid input")
 
     monkeypatch.setattr(cli, "load_certificate_credential", forbidden)
-    monkeypatch.setattr(guided, "_resolve_flow", forbidden)
+    monkeypatch.setattr(guided, "flow_plan", forbidden)
     if entrypoint == "guided":
         assert guided.run_guided(guided.build_guided_parser().parse_args([])) == 2
     elif entrypoint == "live-direct":
@@ -622,10 +622,9 @@ def test_guided_passes_loaded_input_without_rereading(tmp_path, monkeypatch, cap
     path = tmp_path / "input.txt"
     path.write_text(CANARIES[0])
     monkeypatch.setattr(guided, "build_doctor_report", lambda **kwargs: {
-        "system": {"os": "test", "machine": "test"}, "auth": {},
+        "system": {"os": "test", "machine": "test"},
         "readiness": {"core_ready": True, "exchange_ready": True},
     })
-    monkeypatch.setattr(guided, "_persist_local_defaults", lambda **kwargs: None)
     seen = []
 
     def engine(argv, event_listener=None, *, sensitive_users):
@@ -638,7 +637,7 @@ def test_guided_passes_loaded_input_without_rereading(tmp_path, monkeypatch, cap
     args = guided.build_guided_parser().parse_args([
         "--flow", "app-audit", "--tenant-id", "tenant.invalid", "--tenant-name", "test",
         "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
-        "--non-interactive", "--local-mode", "--out", str(tmp_path / "out"),
+        "--non-interactive", "--out", str(tmp_path / "out"),
         "--sensitive-users", str(path),
     ])
     assert guided.run_guided(args) == 0

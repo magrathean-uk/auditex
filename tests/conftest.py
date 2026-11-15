@@ -5,7 +5,7 @@ secrets path (``.secrets/m365-auth.env`` and friends) to an
 isolated tmp directory for the duration of every test session.
 
 Without this, a test that exercises the guided flow (or any code
-path that reaches ``save_local_auth_values`` / ``_persist_local_defaults``)
+path that once reached the removed local auth env writer)
 silently overwrites the developer's real credentials with the
 test's fixture values. Discovered live on 2026-05-09 when ``make test``
 clobbered a working app-registration secret with

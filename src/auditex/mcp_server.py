@@ -33,7 +33,6 @@ from azure_tenant_audit.scope_catalog import (
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 from azure_tenant_audit.versioning import package_version_line
 
-from . import auth as auditex_auth
 from .command_builders import (
     AuditRunCommandSpec,
     GoogleRunCommandSpec,
@@ -57,7 +56,7 @@ from .run_bundle import RunBundle
 from .setup_guide import build_setup_guide
 
 SUPPORTED_PLANES = ("inventory", "full", "export")
-SUPPORTED_PROBE_MODES = ("delegated", "app", "response")
+SUPPORTED_PROBE_MODES = ("app", "response")
 
 _SUMMARY_ARTIFACT_REASONS = {
     "run-manifest.json": "Run identity and bundle metadata.",
@@ -243,8 +242,6 @@ def setup_guide(
     token_cache: str = ".secrets/google-token.json",
     auditor_profile: str = "global-reader",
     plane: str = "full",
-    mode: str = "delegated",
-    include_exchange: bool = False,
 ) -> dict[str, Any]:
     payload = build_setup_guide(
         provider=provider,
@@ -262,8 +259,6 @@ def setup_guide(
         token_cache=token_cache,
         auditor_profile=auditor_profile,
         plane=plane,
-        mode=mode,
-        include_exchange=include_exchange,
     )
     citations = [
         {"artifact_path": "src/auditex/setup_guide.py", "reason": "Setup-guide rendering and provider setup logic."},
@@ -280,72 +275,6 @@ def setup_guide(
     else:
         citations.append({"artifact_path": "src/auditex/google_workspace/collectors.py", "reason": "Google Workspace collector registry and required scopes."})
     return _with_static_citations(payload, citations)
-
-
-def auth_capability(name: str = "", collectors: str = "", auditor_profile: str = "auto") -> dict[str, Any]:
-    selected_collectors = [item.strip() for item in collectors.split(",") if item.strip()]
-    payload = auditex_auth.capability_for_context(
-        name=name or None,
-        collectors=selected_collectors,
-        auditor_profile=auditor_profile,
-    )
-    citations = [
-        {"artifact_path": "src/auditex/auth.py", "reason": "Saved auth-context path resolution and product auth capability entrypoint."},
-        {"artifact_path": "src/auditex/auth_runtime.py", "reason": "Auth-context capability evaluation against collected token claims."},
-        {"artifact_path": "configs/collector-definitions.json", "reason": "Collector definitions used to derive required permissions for capability checks."},
-        {"artifact_path": "configs/collector-permissions.json", "reason": "Permission hints and role guidance used in capability evaluation."},
-        {"artifact_path": "src/azure_tenant_audit/scope_catalog.py", "reason": "Shared scope catalog used to map collectors to required permissions."},
-    ]
-    evidence_missing: list[str] = []
-    auth_context_name = str(payload.get("auth_context", {}).get("name") or "").strip()
-    store_path = auditex_auth.default_auth_contexts_path()
-    citations.append({"artifact_path": str(store_path), "reason": "Saved local auth context store used to resolve the selected context."})
-    if auth_context_name and not store_path.exists():
-        evidence_missing.append(str(store_path))
-    return _with_static_citations(payload, citations, evidence_missing=evidence_missing)
-
-
-def auth_status() -> dict[str, Any]:
-    payload = auditex_auth.get_auth_status()
-    local_auth_path = auditex_auth.default_local_auth_env_path()
-    contexts_path = auditex_auth.default_auth_contexts_path()
-    citations = [
-        {"artifact_path": "src/auditex/auth.py", "reason": "Product auth status entrypoint and local auth path resolution."},
-        {"artifact_path": "src/auditex/auth_runtime.py", "reason": "Local auth status command probes and context summary logic."},
-        {"artifact_path": str(local_auth_path), "reason": "Local masked auth-env location used for this status view."},
-        {"artifact_path": str(contexts_path), "reason": "Saved local auth-context store used for this status view."},
-        {"artifact_path": "command:az account show --output json", "reason": "Azure CLI status probe used for this status view."},
-        {"artifact_path": "command:m365 status --output json", "reason": "Microsoft 365 CLI status probe used for this status view."},
-        {"artifact_path": "command:m365 connection list --output json", "reason": "Saved Microsoft 365 connection listing used for this status view."},
-        {"artifact_path": "command:pwsh exchange-module-check", "reason": "Exchange Online PowerShell module readiness probe used for this status view."},
-        {"artifact_path": "src/azure_tenant_audit/adapters/__init__.py", "reason": "Adapter capability catalog surfaced in auth status."},
-    ]
-    evidence_missing: list[str] = []
-    if not local_auth_path.exists():
-        evidence_missing.append(str(local_auth_path))
-    if not contexts_path.exists():
-        evidence_missing.append(str(contexts_path))
-    return _with_static_citations(payload, citations, evidence_missing=evidence_missing)
-
-
-def auth_list() -> dict[str, Any]:
-    local_auth_path = auditex_auth.default_local_auth_env_path()
-    try:
-        payload = auditex_auth.list_connections()
-        evidence_missing: list[str] = [] if local_auth_path.exists() else [str(local_auth_path)]
-    except RuntimeError as exc:
-        payload = {"connections": [], "error": str(exc), "status": "blocked"}
-        evidence_missing = [str(local_auth_path)] if not local_auth_path.exists() else ["command:m365 connection list --output json"]
-    return _with_static_citations(
-        payload,
-        [
-            {"artifact_path": "src/auditex/auth.py", "reason": "Product auth connection-list entrypoint and local auth path resolution."},
-            {"artifact_path": "src/auditex/auth_runtime.py", "reason": "Microsoft 365 connection-list command handling for this helper."},
-            {"artifact_path": str(local_auth_path), "reason": "Local auth env used before listing saved Microsoft 365 connections."},
-            {"artifact_path": "command:m365 connection list --output json", "reason": "Saved Microsoft 365 connection listing returned by this helper."},
-        ],
-        evidence_missing=evidence_missing,
-    )
 
 
 def contract_schema_inventory(schema_dir: str = "schemas") -> dict[str, Any]:
@@ -366,16 +295,18 @@ def build_cli_command(
     tenant_id: str | None = None,
     auditor_profile: str = "global-reader",
     plane: str = "inventory",
-    use_azure_cli_token: bool = True,
     client_id: str | None = None,
-    include_exchange: bool = False,
+    certificate_path: str | None = None,
+    certificate_thumbprint: str | None = None,
+    certificate_password_env: str | None = None,
+    certificate_password_file: str | None = None,
     collectors: str | list[str] | None = None,
     since: str | None = None,
     until: str | None = None,
     offline: bool = False,
     sample_path: str = "examples/sample_audit_bundle/sample_result.json",
 ) -> list[str]:
-    """Audit command for the MCP tools. It takes no token or client secret: the CLI reads app credentials from the environment."""
+    """Audit command for the MCP tools: the reader app's certificate options, never a secret, token or auth context."""
     return build_audit_run_command(
         AuditRunCommandSpec(
             tenant_name=tenant_name,
@@ -383,9 +314,11 @@ def build_cli_command(
             tenant_id=tenant_id,
             auditor_profile=auditor_profile,
             plane=plane,
-            use_azure_cli_token=use_azure_cli_token,
             client_id=client_id,
-            include_exchange=include_exchange,
+            certificate_path=certificate_path,
+            certificate_thumbprint=certificate_thumbprint,
+            certificate_password_env=certificate_password_env,
+            certificate_password_file=certificate_password_file,
             collectors=collectors,
             since=since,
             until=until,
@@ -454,30 +387,33 @@ def build_probe_command(
     out_dir: str,
     tenant_id: str | None = None,
     auditor_profile: str = "global-reader",
-    mode: str = "delegated",
     surface: str = "all",
     since: str | None = None,
     until: str | None = None,
     allow_lab_response: bool = False,
-    use_azure_cli_token: bool = True,
-    auth_context: str | None = None,
     client_id: str | None = None,
+    certificate_path: str | None = None,
+    certificate_thumbprint: str | None = None,
+    certificate_password_env: str | None = None,
+    certificate_password_file: str | None = None,
 ) -> list[str]:
-    """Probe command for the MCP tools. It takes no token or client secret: use a saved auth context or the server environment."""
+    """Probe command for the MCP tools: the reader app with its certificate, never a secret, token or auth context."""
     return build_probe_tool_command(
         ProbeCommandSpec(
             tenant_name=tenant_name,
             out_dir=out_dir,
             tenant_id=tenant_id,
             auditor_profile=auditor_profile,
-            mode=mode,
+            mode="app",
             surface=surface,
             since=since,
             until=until,
             allow_lab_response=allow_lab_response,
-            use_azure_cli_token=use_azure_cli_token,
-            auth_context=auth_context,
             client_id=client_id,
+            certificate_path=certificate_path,
+            certificate_thumbprint=certificate_thumbprint,
+            certificate_password_env=certificate_password_env,
+            certificate_password_file=certificate_password_file,
             python_executable=sys.executable,
         )
     )
@@ -498,7 +434,6 @@ def build_response_command(
     execute: bool = False,
     allow_write: bool = False,
     allow_lab_response: bool = False,
-    auth_context: str | None = None,
     adapter_override: str | None = None,
     command_override: str | None = None,
     allow_adapter_override: bool = False,
@@ -521,7 +456,6 @@ def build_response_command(
             execute=execute,
             allow_write=allow_write,
             allow_lab_response=allow_lab_response,
-            auth_context=auth_context,
             adapter_override=adapter_override,
             command_override=command_override,
             allow_adapter_override=allow_adapter_override,
@@ -857,7 +791,8 @@ def _guard_tool(handler):
 def tool_handlers() -> dict[str, Any]:
     """The MCP tool handlers by name.
 
-    Tools take no bearer token or client secret; filesystem arguments are confined to the MCP root
+    Tools take no bearer token, client secret or auth context: Microsoft 365 tools take the reader app's client ID
+    and confined paths to its certificate key and password file. Filesystem arguments are confined to the MCP root
     by ``register_fastmcp_tools`` (see ``mcp_registry`` and ``mcp_paths``).
     """
     def auditex_list_profiles() -> dict[str, Any]:
@@ -871,18 +806,6 @@ def tool_handlers() -> dict[str, Any]:
 
     def auditex_list_response_actions() -> dict[str, Any]:
         return list_response_actions()
-
-    def auditex_auth_status() -> dict[str, Any]:
-        return auth_status()
-
-    def auditex_auth_list() -> dict[str, Any]:
-        return auth_list()
-
-    def auditex_auth_use(connection_name: str) -> dict[str, Any]:
-        return auditex_auth.use_connection(connection_name)
-
-    def auditex_auth_capability(name: str = "", collectors: str = "", auditor_profile: str = "auto") -> dict[str, Any]:
-        return auth_capability(name=name, collectors=collectors, auditor_profile=auditor_profile)
 
     def auditex_setup_guide(
         provider: str,
@@ -900,8 +823,6 @@ def tool_handlers() -> dict[str, Any]:
         token_cache: str = ".secrets/google-token.json",
         auditor_profile: str = "global-reader",
         plane: str = "full",
-        mode: str = "delegated",
-        include_exchange: bool = False,
     ) -> dict[str, Any]:
         return setup_guide(
             provider=provider,
@@ -919,8 +840,6 @@ def tool_handlers() -> dict[str, Any]:
             token_cache=token_cache,
             auditor_profile=auditor_profile,
             plane=plane,
-            mode=mode,
-            include_exchange=include_exchange,
         )
 
     def auditex_contract_schema_manifest(schema_dir: str = "schemas") -> dict[str, Any]:
@@ -940,29 +859,39 @@ def tool_handlers() -> dict[str, Any]:
         )
         return run_cli_command(command, scrub_operator_inputs=True)
 
-    def auditex_run_delegated_audit(
+    def auditex_run_certificate_audit(
         tenant_name: str,
-        tenant_id: str = "organizations",
+        certificate_path: str,
+        certificate_thumbprint: str,
+        tenant_id: str = "",
+        client_id: str = "",
+        certificate_password_env: str = "",
+        certificate_password_file: str = "",
         out_dir: str = "outputs/live",
         auditor_profile: str = "global-reader",
-        plane: str = "inventory",
-        include_exchange: bool = False,
+        plane: str = "full",
         collectors: str = "",
         since: str = "",
         until: str = "",
     ) -> dict[str, Any]:
-        command = build_cli_command(
-            tenant_name=tenant_name,
-            tenant_id=tenant_id,
-            out_dir=out_dir,
-            auditor_profile=auditor_profile,
-            plane=plane,
-            use_azure_cli_token=True,
-            include_exchange=include_exchange,
-            collectors=collectors or None,
-            since=since or None,
-            until=until or None,
-        )
+        try:
+            command = build_cli_command(
+                tenant_name=tenant_name,
+                tenant_id=tenant_id or None,
+                out_dir=out_dir,
+                auditor_profile=auditor_profile,
+                plane=plane,
+                client_id=client_id or None,
+                certificate_path=certificate_path,
+                certificate_thumbprint=certificate_thumbprint,
+                certificate_password_env=certificate_password_env or None,
+                certificate_password_file=certificate_password_file or None,
+                collectors=collectors or None,
+                since=since or None,
+                until=until or None,
+            )
+        except ValueError as exc:
+            return {"status": "blocked", "error": str(exc)}
         return run_cli_command(command)
 
     def auditex_google_doctor(
@@ -1084,30 +1013,37 @@ def tool_handlers() -> dict[str, Any]:
 
     def auditex_probe_live(
         tenant_name: str,
-        tenant_id: str = "organizations",
+        certificate_path: str,
+        certificate_thumbprint: str,
+        tenant_id: str = "",
+        client_id: str = "",
+        certificate_password_env: str = "",
+        certificate_password_file: str = "",
         out_dir: str = "outputs/probes",
         auditor_profile: str = "global-reader",
-        mode: str = "delegated",
         surface: str = "all",
         since: str = "",
         until: str = "",
         allow_lab_response: bool = False,
-        auth_context: str = "",
-        client_id: str = "",
     ) -> dict[str, Any]:
-        command = build_probe_command(
-            tenant_name=tenant_name,
-            tenant_id=tenant_id,
-            out_dir=out_dir,
-            auditor_profile=auditor_profile,
-            mode=mode,
-            surface=surface,
-            since=since or None,
-            until=until or None,
-            allow_lab_response=allow_lab_response,
-            auth_context=auth_context or None,
-            client_id=client_id or None,
-        )
+        try:
+            command = build_probe_command(
+                tenant_name=tenant_name,
+                tenant_id=tenant_id or None,
+                out_dir=out_dir,
+                auditor_profile=auditor_profile,
+                surface=surface,
+                since=since or None,
+                until=until or None,
+                allow_lab_response=allow_lab_response,
+                client_id=client_id or None,
+                certificate_path=certificate_path,
+                certificate_thumbprint=certificate_thumbprint,
+                certificate_password_env=certificate_password_env or None,
+                certificate_password_file=certificate_password_file or None,
+            )
+        except ValueError as exc:
+            return {"status": "blocked", "error": str(exc)}
         return run_cli_command(command)
 
     def auditex_probe_summarize(run_dir: str) -> dict[str, Any]:
@@ -1186,7 +1122,6 @@ def tool_handlers() -> dict[str, Any]:
         execute: bool = False,
         allow_write: bool = False,
         allow_lab_response: bool = False,
-        auth_context: str = "",
         adapter_override: str = "",
         command_override: str = "",
         allow_adapter_override: bool = False,
@@ -1206,7 +1141,6 @@ def tool_handlers() -> dict[str, Any]:
             execute=execute,
             allow_write=allow_write,
             allow_lab_response=allow_lab_response,
-            auth_context=auth_context or None,
             adapter_override=adapter_override or None,
             command_override=command_override or None,
             allow_adapter_override=allow_adapter_override,

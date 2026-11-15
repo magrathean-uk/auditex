@@ -8,8 +8,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import auth as auditex_auth
-from .auth_runtime import ToolchainRuntime, ToolchainRuntimeAdapters
+from .auth_runtime import (
+    ToolchainRuntime,
+    ToolchainRuntimeAdapters,
+    exchange_module_status,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP_SCRIPT = REPO_ROOT / "scripts" / "bootstrap-local-tools.sh"
@@ -86,59 +89,20 @@ def _venv_status() -> dict[str, Any]:
     return _toolchain_runtime().venv_status()
 
 
-def build_doctor_report(
-    *,
-    auth_mode: str = "delegated",
-    include_exchange: bool = True,
-    include_auth_checks: bool = True,
-) -> dict[str, Any]:
-    auth_status = auditex_auth.get_auth_status(
-        include_azure_cli=include_auth_checks and auth_mode == "delegated",
-        include_m365=include_auth_checks and include_exchange,
-        include_exchange=include_auth_checks and include_exchange,
-    )
+def build_doctor_report() -> dict[str, Any]:
+    """Local readiness for the reader-app audit: Python, the venv, PowerShell 7 and ExchangeOnlineManagement.
+
+    No sign-in is checked: Microsoft 365 audits use only the reader app with a certificate (DEC-107).
+    """
     python_status = _selected_python()
     venv_status = _venv_status()
-    tools = {
-        "az": _tool_status(
-            "az",
-            version_args=["version", "--output", "json"],
-            version_parser=lambda output: json.loads(output).get("azure-cli"),
-        ),
-        "node": _tool_status("node", version_args=["--version"]),
-        "npm": _tool_status("npm", version_args=["--version"]),
-        "m365": _tool_status(
-            "m365",
-            version_args=["version"],
-            version_parser=lambda output: output.splitlines()[0].strip() if output.strip() else None,
-        ),
-        "pwsh": _tool_status("pwsh", version_args=["--version"]),
-    }
-    exchange = auth_status.get("exchange") or {}
+    tools = {"pwsh": _tool_status("pwsh", version_args=["--version"])}
+    exchange = exchange_module_status()
     core_missing = [
-        name
-        for name, status in (
-            ("python", python_status),
-            ("venv", venv_status),
-            *((("az", tools["az"]),) if auth_mode == "delegated" else ()),
-        )
-        if status["status"] != "supported"
+        name for name, status in (("python", python_status), ("venv", venv_status)) if status["status"] != "supported"
     ]
-    exchange_missing = []
-    if include_exchange:
-        exchange_missing = [
-            name
-            for name, status in (
-                ("node", tools["node"]),
-                ("npm", tools["npm"]),
-                ("m365", tools["m365"]),
-                ("pwsh", tools["pwsh"]),
-            )
-            if status["status"] != "supported"
-        ]
-        if exchange.get("status") != "supported":
-            exchange_missing.append("exchange_online_module")
-    pwsh_missing = [name for name, status in (("pwsh", tools["pwsh"]),) if status["status"] != "supported"]
+    pwsh_missing = ["pwsh"] if tools["pwsh"]["status"] != "supported" else []
+    exchange_missing = [*pwsh_missing, *([] if exchange.get("status") == "supported" else ["exchange_online_module"])]
     return {
         "system": {
             "os": platform.system(),
@@ -153,7 +117,7 @@ def build_doctor_report(
         "python": python_status,
         "venv": venv_status,
         "tools": tools,
-        "auth": auth_status,
+        "exchange_module": exchange,
         "readiness": {
             "core_ready": not core_missing,
             "core_missing": core_missing,
@@ -186,22 +150,13 @@ def _format_missing(label: str, missing: list[str]) -> str:
 
 def format_doctor_report(report: dict[str, Any]) -> str:
     tools = report.get("tools") or {}
-    auth = report.get("auth") or {}
-    azure_cli = auth.get("azure_cli") or {}
-    m365 = auth.get("m365") or {}
-    exchange = auth.get("exchange") or {}
+    exchange = report.get("exchange_module") or {}
     readiness = report.get("readiness") or {}
     lines = [
         f"System: {report['system']['os']} {report['system']['machine']} ({report['system'].get('package_manager') or 'manual'})",
         _format_tool_line("Python", report["python"]),
         _format_tool_line("Venv", report["venv"]),
-        _format_tool_line("Azure CLI", tools.get("az", {})),
-        _format_tool_line("Node", tools.get("node", {})),
-        _format_tool_line("npm", tools.get("npm", {})),
-        _format_tool_line("m365", tools.get("m365", {})),
         _format_tool_line("pwsh", tools.get("pwsh", {})),
-        f"Azure auth: {azure_cli.get('status')}" + (f" [{azure_cli.get('user_name')}]" if azure_cli.get("user_name") else ""),
-        f"m365 auth: {m365.get('status')}" + (f" [{m365.get('active_connection')}]" if m365.get("active_connection") else ""),
         "Exchange module: "
         + ("supported" if exchange.get("status") == "supported" else "blocked")
         + (f" [{exchange.get('module_version')}]" if exchange.get("module_version") else ""),

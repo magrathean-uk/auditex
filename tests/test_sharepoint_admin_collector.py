@@ -126,8 +126,7 @@ def test_registered_defined_opt_in_and_in_no_profile_or_preset() -> None:
     assert permissions["sharepoint_admin"]["graph_scopes"] == ["Sites.Read.All"]
     assert definition["query_plan"] == [spa.ROOT_SITE_OPERATION, spa.OPERATION]
     assert "sharepoint_admin" in definitions["default_order"]
-    assert permissions["sharepoint_admin"]["sharepoint_permissions"] == {
-        "application": "Sites.FullControl.All", "delegated": "AllSites.FullControl"}
+    assert permissions["sharepoint_admin"]["sharepoint_permissions"] == {"application": "Sites.FullControl.All"}
     assert not any("sharepoint_admin" in (preset.get("include") or []) for preset in presets.values())
     assert not any("sharepoint_admin" in profile.default_collectors for profile in PROFILES.values())
 
@@ -135,10 +134,8 @@ def test_registered_defined_opt_in_and_in_no_profile_or_preset() -> None:
 def test_only_an_explicit_selection_runs_it() -> None:
     available = json.loads((ROOT / "configs/collector-definitions.json").read_text())["default_order"]
     for profile in PROFILES.values():
-        for mode in ("app", "interactive"):
-            selected = select_collectors(available=available, profile_default_collectors=profile.default_collectors,
-                                         auth_mode=mode)
-            assert "sharepoint_admin" not in selected
+        selected = select_collectors(available=available, profile_default_collectors=profile.default_collectors)
+        assert "sharepoint_admin" not in selected
     assert select_collectors(available=available, explicit_collectors=["sharepoint_admin"]) == ["sharepoint_admin"]
 
 

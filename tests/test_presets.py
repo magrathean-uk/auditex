@@ -205,13 +205,14 @@ def test_default_workload_selection_and_unchanged_presets(tmp_path):
     # M08: the reader profile and the full preset select the Teams admin policies for app-mode runs.
     assert list(PROFILES["global-reader"].default_collectors) == reader + ["teams_policy", "exchange_policy", "dns_posture"]
     assert presets["full"]["include"] == reader + ["teams_policy", "exchange_policy", "dns_posture"]
-    assert list(PROFILES["app-readonly-full"].default_collectors) == "identity app_consent security conditional_access defender service_health auth_methods reports_usage external_identity consent_policy domains_hybrid licensing identity_governance intune intune_depth sharepoint sharepoint_access onedrive_posture teams teams_policy purview ediscovery exchange exchange_policy dns_posture".split()
+    assert list(PROFILES["app-readonly-full"].default_collectors) == "identity app_consent security conditional_access defender service_health auth_methods reports_usage external_identity consent_policy domains_hybrid licensing identity_governance intune intune_depth sharepoint sharepoint_access onedrive_posture teams teams_policy purview ediscovery exchange_policy dns_posture".split()
     assert presets["config-only"]["include"] == "identity app_consent conditional_access auth_methods external_identity consent_policy domains_hybrid licensing identity_governance sharepoint teams".split()
     assert presets["power-platform"]["include"] == ["identity", "licensing", "power_platform", "power_bi"]
     unchanged = {
         "security-reader": "identity app_consent security conditional_access defender auth_methods identity_governance",
         "reports-reader": "identity security service_health reports_usage",
-        "exchange-reader": "exchange exchange_policy security identity",
+        # DEC-108 D2: the CLI for Microsoft 365 exchange collector is retired; Exchange is read by exchange_policy.
+        "exchange-reader": "exchange_policy security identity",
         "intune-reader": "intune intune_depth",
     }
     for profile, expected in unchanged.items():

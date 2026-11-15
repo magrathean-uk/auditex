@@ -14,9 +14,8 @@ def select_collectors(
     explicit_collectors: list[str] | None = None,
     excluded_collectors: list[str] | None = None,
     include_exchange: bool = False,
-    auth_mode: str = "app",  # noqa: ARG001 - deprecated and ignored; the product layer passes "app" until M09-T03
 ) -> list[str]:
-    """The run's collectors. Every run is app-only (DEC-107), so the selection never depends on an auth mode."""
+    """The run's collectors. Every run uses the reader app (DEC-107), so the selection never depends on a sign-in way."""
     ordered_available = list(available)
     selected = resolve_collector_selection(
         available=ordered_available,

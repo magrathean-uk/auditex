@@ -8,13 +8,16 @@ from typing import Any
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.data_handling import collector_activity_notices
 from azure_tenant_audit.presets import load_collector_presets
-from azure_tenant_audit.profiles import APP_MODE_ONLY_COLLECTORS, get_profile
+from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.scope_catalog import (
     aggregate_catalog_rows,
     build_google_scope_catalog,
     build_m365_scope_catalog,
 )
 from azure_tenant_audit.selection import select_collectors
+
+# Every permission, role and setting of the reader app, for the tenant administrator (DEC-107).
+READER_APP_GUIDE = "docs/guides/reader-app-permissions.md"
 
 GOOGLE_PROVIDER_ALIASES = {"google", "google_workspace", "workspace"}
 M365_PROVIDER_ALIASES = {"m365", "entra", "microsoft365", "microsoft_365"}
@@ -93,8 +96,6 @@ def build_setup_guide(
     token_cache: str = ".secrets/google-token.json",
     auditor_profile: str = "global-reader",
     plane: str = "full",
-    mode: str = "delegated",
-    include_exchange: bool = False,
     config_path: str | Path = "configs/collector-definitions.json",
     permission_hints_path: str | Path = "configs/collector-permissions.json",
 ) -> dict[str, Any]:
@@ -122,8 +123,6 @@ def build_setup_guide(
             tenant_id=tenant_id,
             auditor_profile=auditor_profile,
             plane=plane,
-            mode=mode,
-            include_exchange=include_exchange,
             config_path=config_path,
             permission_hints_path=permission_hints_path,
         )
@@ -251,6 +250,10 @@ def build_google_setup_guide(
     }
 
 
+# Collectors that read through the CLI for Microsoft 365 before DEC-108 D2; their guide step names the gaps.
+M365_CLI_GAP_COLLECTORS = frozenset({"purview", "ediscovery", "exchange"})
+
+
 def build_m365_setup_guide(
     *,
     collector_preset: str | None = None,
@@ -260,31 +263,22 @@ def build_m365_setup_guide(
     tenant_id: str = "<tenant-id-or-domain>",
     auditor_profile: str = "global-reader",
     plane: str = "full",
-    mode: str = "delegated",
-    include_exchange: bool = False,
     config_path: str | Path = "configs/collector-definitions.json",
     permission_hints_path: str | Path = "configs/collector-permissions.json",
 ) -> dict[str, Any]:
+    """The setup guide for the one Microsoft 365 way: the reader app with a certificate (DEC-107)."""
     config = CollectorConfig.from_path(config_path)
     profile = get_profile(auditor_profile)
     presets = load_collector_presets()
-    app_selection = select_collectors(
+    selected = select_collectors(
         available=config.default_order,
         profile_default_collectors=profile.default_collectors,
         preset_name=collector_preset, presets=presets,
         explicit_collectors=_split_values(collectors),
         excluded_collectors=_split_values(exclude),
-        include_exchange=include_exchange, auth_mode="app",
     )
-    # Generated delegated commands omit these app-only workloads.
-    delegated_omissions = [name for name in app_selection if name in APP_MODE_ONLY_COLLECTORS]
-    delegated_selection = [name for name in app_selection if name not in APP_MODE_ONLY_COLLECTORS]
-    if mode != "app" and not delegated_selection:
-        raise ValueError("No collectors selected for this authentication mode.")
-    selections = {"app": app_selection}
-    if delegated_selection:
-        selections["delegated"] = delegated_selection
-    selected = app_selection if mode == "app" else delegated_selection
+    if not selected:
+        raise ValueError("No collectors selected.")
     hints = _load_permission_hints(permission_hints_path)
     catalog = build_m365_scope_catalog(
         collector_config=config,
@@ -309,31 +303,17 @@ def build_m365_setup_guide(
             }
         )
 
-    authentication_plans = {}
-    for auth_mode, names in selections.items():
-        mode_aggregate = aggregate_catalog_rows(catalog, names)
-        tools = _dedupe([*profile.adapter_requirements, *mode_aggregate["tool_requirements"]])
-        if "exchange_policy" in names:
-            tools = _dedupe([*tools, "pwsh", "ExchangeOnlineManagement"])
-        elif auditor_profile in {"auto", "global-reader"}:
-            tools = [tool for tool in tools if tool not in {"pwsh", "ExchangeOnlineManagement"}]
-        authentication_plans[auth_mode] = {
-            "selected_collectors": names,
-            "graph_permissions": list(mode_aggregate["required_permissions"]),
-            "exchange_application_permissions": ["Exchange.ManageAsApp"] if "exchange_policy" in names else [],
-            "tool_requirements": tools,
-            "collection_notices": collector_activity_notices(names, auth_mode),
-        }
-    # Disclose requirements for every mode with generated commands.
-    exchange_permissions = authentication_plans["app"]["exchange_application_permissions"]
+    tool_requirements = _dedupe([*profile.adapter_requirements, *aggregate["tool_requirements"]])
+    if "exchange_policy" in selected:
+        tool_requirements = _dedupe([*tool_requirements, "pwsh", "ExchangeOnlineManagement"])
+    elif auditor_profile in {"auto", "global-reader"}:
+        tool_requirements = [tool for tool in tool_requirements if tool not in {"pwsh", "ExchangeOnlineManagement"}]
+    exchange_permissions = ["Exchange.ManageAsApp"] if "exchange_policy" in selected else []
     exchange_blast_radius = (
         "Write-capable Exchange application permission used read-only: read-only Get-* cmdlets only; "
         "no mutating cmdlet is issued; the Exchange.ManageAsApp role assignment gives Global Reader only. "
         "Tenant-wide Exchange policy visibility is granted; a write-capable scope does not authorise tenant writes."
     )
-    tool_requirements = _dedupe([
-        tool for plan in authentication_plans.values() for tool in plan["tool_requirements"]
-    ])
     broad_permissions = [
         {
             "permission": permission,
@@ -343,120 +323,76 @@ def build_m365_setup_guide(
         for permission in [*graph_permissions, *exchange_permissions]
         if any(token in permission for token in M365_WRITE_CAPABLE_TOKENS)
     ]
-
     for warning in broad_permissions:
         if warning["permission"] == "Exchange.ManageAsApp":
             warning["note"] = exchange_blast_radius
 
-    delegated_steps = [
-        "Assign the operator the minimum delegated reader role that matches the selected collectors.",
-        "Run az login against the tenant with --allow-no-subscriptions.",
-        "Run probe first and review live-readiness.json before the full audit.",
-        "Add only the missing read permission or role shown by the probe, then rerun probe.",
+    collection_notices = collector_activity_notices(selected, "app")
+    setup_steps = [
+        f"Give the tenant administrator {READER_APP_GUIDE}: it lists every permission, role and setting the reader "
+        "app needs, exactly as the Microsoft admin centres name them, and how to remove all of it afterwards.",
+        "Register one single-tenant app (the reader app) with no redirect URI, no client secret and no delegated "
+        "permission.",
+        "Add the listed Microsoft Graph application permissions and grant tenant-wide admin consent as an authorised "
+        "administrator.",
+        "Create a certificate on the audit machine, upload only its public part to the app and keep the private key "
+        "in a file readable only by the person running Auditex. The private key can sign in as the app with every "
+        "permission it holds; it is never copied into the run.",
+        "Run the probe with the certificate before the full run, add only what the probe shows missing, then run.",
+        *collection_notices,
     ]
-    app_steps = [
-        "Create a customer-owned Microsoft Entra app registration.",
-        "Add the listed Microsoft Graph application permissions.",
-        "Grant tenant-wide admin consent as an authorized administrator.",
-        "Create a local client secret or certificate and store it outside git.",
-        "Run app-mode probe before a full unattended run.",
-    ]
-    exchange_steps = [
-        "Install Microsoft 365 CLI only if Exchange or Purview command collectors are selected.",
-        "Install PowerShell and ExchangeOnlineManagement only if Exchange PowerShell policy depth is selected.",
-        "Keep command adapters read-only and review api-inventory.json after each run.",
-    ]
-
-    if delegated_omissions or (mode != "app" and not collectors and not collector_preset):
-        delegated_steps.append(
-            "Exchange policy, DNS posture and Teams admin policies are app-mode only in generated setup commands. "
-            "Delegated commands omit them, including explicitly selected names; DNS itself needs no Exchange session."
+    if "exchange_policy" in selected:
+        setup_steps.append(
+            "For Exchange, grant admin consent to Exchange.ManageAsApp and assign Global Reader to the reader app; "
+            "install pwsh and ExchangeOnlineManagement. " + exchange_blast_radius
         )
-    if delegated_selection:
-        delegated_steps.extend(authentication_plans["delegated"]["collection_notices"])
-    app_steps.extend(authentication_plans["app"]["collection_notices"])
-    if "exchange_policy" in selections["app"]:
-        app_steps.append(
-            "For Exchange app-only access, grant admin consent to Exchange.ManageAsApp and assign "
-            "Global Reader to the service principal; install pwsh and ExchangeOnlineManagement. "
-            + exchange_blast_radius
+    if "teams_policy" in selected:
+        setup_steps.append(
+            "Teams admin policies (teams_policy) are read with a Teams admin token minted from the certificate; the "
+            "Global Reader role on the reader app allows the reads. A token that cannot be minted is recorded as "
+            "teams_token_unavailable."
         )
-
-    if "teams_policy" in selections["app"]:
-        app_steps.append(
-            "Teams admin policies (teams_policy) need a certificate credential: the Teams admin API refuses a "
-            "secret-minted token, so a secret-only run records teams_token_unavailable. Add the certificate's "
-            "public part to the app registration, keep its private key in a file readable only by you, and run "
-            "with --certificate-path and --certificate-thumbprint (the key password, if any, through "
-            "--certificate-password-env or --certificate-password-file), never with --client-secret. "
-            "The private key can sign in as the app with every permission it holds; it is never copied into the run."
-        )
-    # DEC-065: the one-time set-up sign-ins are counted apart from the audit, which signs in to nothing.
-    app_steps.append(
+    # DEC-108 D2: collectors whose reads went through the CLI for Microsoft 365 state what the certificate reads and
+    # which reads are named gaps, from the permission metadata (configs/collector-permissions.json).
+    for name in selected:
+        if name in M365_CLI_GAP_COLLECTORS:
+            setup_steps.append(f"{name}: {_mapping(catalog.get(name)).get('notes') or ''}".rstrip())
+    # DEC-065: the one-time set-up sign-in is counted apart from the audit, which signs in to nothing.
+    setup_steps.append(
         "Sign-ins, certificate route: set-up takes one administrator sign-in to the Microsoft Entra admin centre "
         "(app registration, permissions and admin consent, role assignment and the certificate upload in the same "
         "session); creating the certificate and its key needs none. The audit itself takes no interactive sign-in: "
         "an app-only certificate run mints every service token silently from the certificate."
     )
-    authentication_plans["app"]["setup_steps"] = app_steps
-    if delegated_selection:
-        authentication_plans["delegated"]["setup_steps"] = delegated_steps
 
-    app_csv = ",".join(app_selection)
-    delegated_csv = ",".join(delegated_selection)
-    app_probe_selection = f" --surface {','.join(_dedupe([*app_selection, 'windows365']))}"
+    credential = (
+        "--client-id <app-id> --certificate-path <private-key-file> --certificate-thumbprint <sha1-thumbprint>"
+    )
     preset_flag = f" --collector-preset {collector_preset}" if collector_preset else ""
-    app_run_selection = f"{preset_flag} --collectors {app_csv}"
-    setup_notices = []
-    alternate_setup_steps = {"app": app_steps, "exchange_assisted": exchange_steps}
-    commands = {}
-    if delegated_selection:
-        delegated_run_selection = f"{preset_flag} --collectors {delegated_csv}"
-        delegated_probe_surface = ",".join(_dedupe([*delegated_selection, "windows365"]))
-        alternate_setup_steps["delegated"] = delegated_steps
-        commands.update({
-            "delegated_login": f"az login --allow-no-subscriptions --tenant {tenant_id}",
-            "delegated_probe": (
-                f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
-                f"--auditor-profile {auditor_profile} --mode delegated --surface {delegated_probe_surface} --use-azure-cli-token"
-            ),
-            "delegated_run": (
-                f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
-                f"--auditor-profile {auditor_profile} --plane {plane} --use-azure-cli-token --probe-first --throttle-mode safe{delegated_run_selection}"
-            ),
-        })
-    else:
-        setup_notices.append("Delegated setup omitted: no selected collectors support generated delegated commands.")
-    commands.update({
-        "app_probe": (
+    commands = {
+        "probe": (
             f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
-            f"--auditor-profile {auditor_profile} --mode app --client-id <app-id> --client-secret <client-secret>"
-            f"{app_probe_selection}"
+            f"--auditor-profile {auditor_profile} --mode app {credential} "
+            f"--surface {','.join(_dedupe([*selected, 'windows365']))}"
         ),
-        "app_run": (
+        "run": (
             f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
-            f"--auditor-profile {auditor_profile} --plane {plane} --client-id <app-id> --client-secret <client-secret> "
-            f"--probe-first --throttle-mode safe{app_run_selection}"
+            f"--auditor-profile {auditor_profile} --plane {plane} {credential} "
+            f"--probe-first --throttle-mode safe{preset_flag} --collectors {','.join(selected)}"
         ),
-        # Same run with a certificate credential: every app token, including the Teams admin token, from the key.
-        "app_run_certificate": (
-            f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
-            f"--auditor-profile {auditor_profile} --plane {plane} --client-id <app-id> "
-            "--certificate-path <private-key-file> --certificate-thumbprint <sha1-thumbprint> "
-            f"--probe-first --throttle-mode safe{app_run_selection}"
-        ),
-    })
+    }
 
     return {
         "schema_version": "2026-05-22",
         "kind": "auditex_setup_guide",
         "provider": "m365",
-        "mode": mode,
+        "mode": "app",
+        "credential": "reader app with a certificate",
+        "permissions_guide": READER_APP_GUIDE,
         "auditor_profile": auditor_profile,
         "plane": plane,
         "collector_preset": collector_preset,
         "selected_collectors": selected,
-        "authentication_plans": authentication_plans,
         "collector_permissions": collector_rows,
         "graph_permissions": graph_permissions,
         "graph_permissions_csv": ",".join(graph_permissions),
@@ -473,9 +409,8 @@ def build_m365_setup_guide(
             "onedrive_file_content_reads": False,
             "broad_permissions_recorded_as_scope_risk": bool(broad_permissions),
         },
-        "setup_steps": app_steps if mode == "app" else delegated_steps,
-        "setup_notices": setup_notices,
-        "alternate_setup_steps": alternate_setup_steps,
+        "setup_steps": setup_steps,
+        "collection_notices": collection_notices,
         "commands": commands,
         "review_artifacts": [
             "audit-plan.json",
@@ -496,7 +431,7 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
         f"# Auditex Setup Guide: {provider}",
         "",
         f"- Provider: {_md(payload.get('provider'))}",
-        f"- Mode/Auth: {_md(payload.get('mode') or payload.get('auth'))}",
+        f"- Mode/Auth: {_md(payload.get('credential') or payload.get('auth'))}",
         f"- Preset: {_md(payload.get('collector_preset'))}",
         f"- Read-only audit: {_md(_mapping(payload.get('provider_assertions')).get('read_only_audit'))}",
         f"- Production writes: {_md(_mapping(payload.get('provider_assertions')).get('production_writes'))}",
@@ -540,17 +475,10 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
     for index, step in enumerate(payload.get("setup_steps") or [], start=1):
         lines.append(f"{index}. {step}")
 
-    for notice in payload.get("setup_notices") or []:
-        lines.extend(["", str(notice)])
+    if payload.get("permissions_guide"):
+        lines.extend(["", f"Every permission, role and setting of the reader app: `{payload['permissions_guide']}`."])
 
     lines.extend(["", "## Verify Commands", ""])
-    for auth_mode, plan in _mapping(payload.get("authentication_plans")).items():
-        lines.extend([f"## {auth_mode.title()} command requirements", ""])
-        lines.append("Collectors: " + ", ".join(plan["selected_collectors"]))
-        lines.append("Graph permissions: " + (", ".join(plan["graph_permissions"]) or "none"))
-        lines.append("Exchange application permissions: " + (", ".join(plan["exchange_application_permissions"]) or "none"))
-        lines.append("Tools: " + (", ".join(plan["tool_requirements"]) or "none"))
-        lines.extend(["", *[f"- {step}" for step in plan["setup_steps"]], ""])
 
     commands = _mapping(payload.get("commands"))
     for name, command in commands.items():

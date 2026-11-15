@@ -1,6 +1,5 @@
 PYTHON := $(shell ./scripts/select-python.sh)
 VENV ?= .venv
-TENANT ?= organizations
 
 .PHONY: test
 test:
@@ -19,15 +18,6 @@ acceptance:
 	done
 	PYTHONPATH="$$PWD/src" perl -e 'alarm 300; exec @ARGV' $(PYTHON) -B -I -m pytest tests/test_explainer_integration.py -m explainer_acceptance -k twins -p no:cacheprovider -q -s -o addopts=
 	PYTHONPATH="$$PWD/src" perl -e 'alarm 300; exec @ARGV' $(PYTHON) -B -I -m pytest tests/test_explainer_integration.py -m explainer_acceptance -k byte_identical -p no:cacheprovider -q -s -o addopts=
-
-.PHONY: login
-login:
-	@if command -v az >/dev/null 2>&1; then \
-		BROWSER=firefox az login --tenant "$(TENANT)" --allow-no-subscriptions; \
-	else \
-		echo "Azure CLI is required. Install it with: brew install azure-cli"; \
-		exit 2; \
-	fi
 
 # Ruff is pinned once, in the `dev` extra of pyproject.toml, at the .pre-commit-config.yaml hook
 # version; the rule set and target version come from [tool.ruff] there. Lookup order: RUFF, .venv,
@@ -48,9 +38,11 @@ lint:
 sample:
 	$(PYTHON) -m azure_tenant_audit --offline --tenant-name sample --sample examples/sample_audit_bundle/sample_result.json
 
+# The reader app with its certificate (docs/guides/reader-app-permissions.md); no sign-in window opens.
 .PHONY: audit-full
 audit-full:
-	@./scripts/tenant-audit-full --tenant-id $(TENANT_ID) --tenant-name $(TENANT_NAME)
+	@./scripts/tenant-audit-full --tenant-id "$(TENANT_ID)" --tenant-name "$(TENANT_NAME)" --client-id "$(CLIENT_ID)" \
+		--certificate-path "$(CERTIFICATE_PATH)" --certificate-thumbprint "$(CERTIFICATE_THUMBPRINT)"
 
 .PHONY: install
 install:

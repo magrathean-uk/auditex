@@ -97,7 +97,7 @@ def test_audit_parsers_redact_rejected_sensitive_arguments(builder, flag, inline
 
 @pytest.mark.parametrize("flag", SENSITIVE_FLAGS)
 @pytest.mark.parametrize("inline", [False, True])
-@pytest.mark.parametrize("entry", ["engine", "legacy", "run", "guided", "probe", "login", "import-token", "inspect-token", "google-run", "google-probe", "google-doctor", "setup-google", "response", "mcp", "setup", "doctor", "assess"])
+@pytest.mark.parametrize("entry", ["engine", "legacy", "run", "guided", "probe", "google-run", "google-probe", "google-doctor", "setup-google", "response", "mcp", "setup", "doctor", "assess"])
 def test_entrypoints_reject_before_bundle_creation(entry, flag, inline, monkeypatch, tmp_path, capsys) -> None:
     from azure_tenant_audit.output import AuditWriter
 
@@ -110,8 +110,6 @@ def test_entrypoints_reject_before_bundle_creation(entry, flag, inline, monkeypa
     monkeypatch.setattr(engine_cli, "run_live", forbidden_writer)
     for name in ("run_guided", "run_live_probe", "run_response", "run_google_live", "run_google_probe", "google_doctor", "run_setup", "print_doctor_report", "build_setup_guide"):
         monkeypatch.setattr(product_cli, name, forbidden_writer)
-    for name in ("login_connection", "resolve_token_input", "import_token_context", "inspect_token_claims"):
-        monkeypatch.setattr(product_cli.auditex_auth, name, forbidden_writer)
     monkeypatch.setattr(rule_assessment, "assess_run", forbidden_writer)
     monkeypatch.setattr(mcp_server, "mcp_root", forbidden_writer)
     monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
@@ -122,9 +120,6 @@ def test_entrypoints_reject_before_bundle_creation(entry, flag, inline, monkeypa
         "run": (product_cli.main, ["run"]),
         "guided": (product_cli.main, ["guided-run"]),
         "probe": (product_cli.main, ["probe", "live", "--tenant-name", "constructed"]),
-        "login": (product_cli.main, ["auth", "login"]),
-        "import-token": (product_cli.main, ["auth", "import-token", "--name", "constructed"]),
-        "inspect-token": (product_cli.main, ["auth", "inspect-token"]),
         "google-run": (product_cli.main, ["google", "run", "--tenant-name", "constructed"]),
         "google-probe": (product_cli.main, ["google", "probe"]),
         "google-doctor": (product_cli.main, ["google", "doctor"]),
@@ -143,6 +138,22 @@ def test_entrypoints_reject_before_bundle_creation(entry, flag, inline, monkeypa
     assert exc.value.code == 2
     assert "error: invalid arguments" in capsys.readouterr().err
     assert not list(tmp_path.rglob("run-manifest.json"))
+
+
+@pytest.mark.parametrize("argv", [
+    ["auth", "login", "--client-secret", "{canary}"],
+    ["auth", "import-token", "--token={canary}"],
+    ["auth", "status"],
+])
+def test_removed_auth_command_refuses_without_echoing_or_creating_anything(argv, monkeypatch, tmp_path, capsys) -> None:
+    """DEC-108 D4: auditex auth is gone; any form is refused with the certificate way and no value is echoed."""
+    canary = "constructed-canary-argv-zz9"
+    monkeypatch.chdir(tmp_path)
+    assert product_cli.main([item.format(canary=canary) for item in argv]) == 2
+    captured = capsys.readouterr()
+    assert "auditex auth was removed" in captured.err and "--certificate-path" in captured.err
+    assert canary not in captured.err + captured.out
+    assert not list(tmp_path.rglob("*"))
 
 
 def test_all_parser_constructions_explicitly_disable_abbreviations() -> None:

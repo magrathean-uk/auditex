@@ -1,203 +1,131 @@
 #!/usr/bin/env bash
 set -euo pipefail
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${CURRENT_DIR}/load-local-auth.sh"
-source "${CURRENT_DIR}/m365-home.sh"
 ROOT="$(cd "${CURRENT_DIR}/.." && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: tenant-audit-full [--tenant-id TENANT_ID] [--tenant-name TENANT_NAME] [--collectors LIST] [--top N] [--include-exchange] [--run-name NAME] [--out PATH] [--dry-run] [--reauth] [--m365-app-id APP_ID]
+Usage: tenant-audit-full --tenant-id TENANT_ID --client-id APP_ID --certificate-path KEY_FILE
+                         --certificate-thumbprint SHA1 [--certificate-password-env NAME | --certificate-password-file FILE]
+                         [--tenant-name TENANT_NAME] [--collectors LIST] [--top N] [--run-name NAME] [--out PATH] [--dry-run]
+
+Runs a Microsoft 365 audit as the reader app with its certificate, the only way Auditex signs in
+(docs/guides/reader-app-permissions.md). No sign-in window opens.
 
 Defaults:
-  TENANT_ID: organizations
   TENANT_NAME: tenant_id
-  COLLECTORS: identity,security,intune,teams
+  COLLECTORS: the global-reader profile
   TOP: none (every list is paged to its last row; --top N sets an explicit limit and records the cut as a coverage gap)
   OUTPUT: ./audit-output
 
-The --include-exchange flag triggers Microsoft 365 CLI login (m365) and optional command collectors.
-
-Examples:
-  tenant-audit-full --tenant-id contoso.onmicrosoft.com --tenant-name CONTOSO --include-exchange
-  tenant-audit-full --tenant-id 00000000-0000-0000-0000-000000000000 --collectors identity,security --top 250
-  tenant-audit-full --tenant-id contoso.onmicrosoft.com --tenant-name CONTOSO --include-exchange --reauth
-  tenant-audit-full --tenant-id contoso.onmicrosoft.com --tenant-name CONTOSO --include-exchange --m365-app-id <app-id>
+Example:
+  tenant-audit-full --tenant-id contoso.onmicrosoft.com --tenant-name CONTOSO --client-id <app-id> \
+    --certificate-path auditex-reader.key.pem --certificate-thumbprint <thumbprint>
 USAGE
 }
 
-TENANT_ID="organizations"
+TENANT_ID=""
 TENANT_NAME=""
-COLLECTORS="identity,security,intune,teams"
+CLIENT_ID=""
+CERTIFICATE_PATH=""
+CERTIFICATE_THUMBPRINT=""
+PASSWORD_ARGS=()
+COLLECTORS=""
 TOP=""
 OUT_DIR="./audit-output"
 RUN_NAME=""
-INCLUDE_EXCHANGE=0
 DRY_RUN=0
-FORCE_LOGIN=0
-BROWSER_COMMAND="firefox"
-M365_APP_ID="${M365_CLI_APP_ID:-${M365_CLI_CLIENT_ID:-}}"
 
-ensure_m365_cli_login() {
-  if ! command -v m365 >/dev/null 2>&1; then
-    echo "Exchange checks requested but m365 CLI is not installed."
-    echo "Install with: npm install -g @pnp/cli-microsoft365@latest"
-    return 1
-  fi
+REMOVED_OPTIONS=" --client-secret --access-token --use-azure-cli-token --interactive --include-exchange --reauth --m365-app-id "
+VALUE_OPTIONS=" --tenant-id --tenant-name --client-id --certificate-path --certificate-thumbprint --certificate-password-env --certificate-password-file --collectors --top --out --run-name "
 
-  local status
-  status="$(run_m365 status 2>&1 || true)"
-  if [[ "${FORCE_LOGIN}" -eq 1 ]] || echo "${status}" | grep -qi "logged out"; then
-    if [[ -n "${BROWSER_COMMAND}" ]]; then
-      export BROWSER="${BROWSER_COMMAND}"
-    fi
-    echo "Starting Microsoft 365 CLI login in ${BROWSER_COMMAND}..."
-    if [[ -n "${M365_APP_ID}" ]]; then
-      export M365_CLI_APP_ID="${M365_APP_ID}"
-    fi
-    m365_login_cmd=(
-      run_m365
-      login
-      --authType
-      browser
-      --tenant
-      "${TENANT_ID}"
-      --output
-      text
-    )
-    if [[ -n "${M365_APP_ID}" ]]; then
-      m365_login_cmd+=(--appId "${M365_APP_ID}")
-    fi
-    if ! "${m365_login_cmd[@]}"; then
-      if [[ -z "${M365_APP_ID}" ]]; then
-        echo "Exchange flow requires a Microsoft 365 CLI appId."
-        echo "Provide --m365-app-id or set M365_CLI_APP_ID / M365_CLI_CLIENT_ID."
-        echo "If this is a one-off environment, run 'm365 setup --scripting' first, then retry."
-      fi
-      return 1
-    fi
-  fi
+# Rejection messages never echo a raw argument: only an exact option name this script knows is named.
+reject_argument() {
+  echo "$1" >&2
+  usage
+  exit 1
 }
 
+ARGC=$#
 while [[ $# -gt 0 ]]; do
+  POSITION=$((ARGC - $# + 1))
+  NAME="${1%%=*}"
+  if [[ "${REMOVED_OPTIONS}" == *" ${NAME} "* ]]; then
+    echo "${NAME} was removed: Microsoft 365 audits use only the reader app with a certificate (--client-id, --certificate-path, --certificate-thumbprint)." >&2
+    exit 1
+  fi
+  if [[ "$1" == *=* ]]; then
+    if [[ "${VALUE_OPTIONS}" == *" ${NAME} "* ]]; then
+      reject_argument "${NAME}=VALUE is not accepted; pass ${NAME} VALUE (value not shown)."
+    fi
+    reject_argument "Unknown argument ${POSITION} (not shown)."
+  fi
+  if [[ "${VALUE_OPTIONS}" == *" $1 "* && $# -lt 2 ]]; then
+    reject_argument "$1 needs a value."
+  fi
   case "$1" in
-    --tenant-id)
-      TENANT_ID="$2"
-      shift 2
-      ;;
-    --tenant-name)
-      TENANT_NAME="$2"
-      shift 2
-      ;;
-    --collectors)
-      COLLECTORS="$2"
-      shift 2
-      ;;
-    --top)
-      TOP="$2"
-      shift 2
-      ;;
-    --out)
-      OUT_DIR="$2"
-      shift 2
-      ;;
-    --run-name)
-      RUN_NAME="$2"
-      shift 2
-      ;;
-  --include-exchange)
-      INCLUDE_EXCHANGE=1
-      shift
-      ;;
-    --dry-run)
-      DRY_RUN=1
-      shift
-      ;;
-    --reauth)
-      FORCE_LOGIN=1
-      shift
-      ;;
-    --m365-app-id)
-      M365_APP_ID="${2:-}"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: $1"
-      usage
-      exit 1
-      ;;
+    --tenant-id) TENANT_ID="$2"; shift 2 ;;
+    --tenant-name) TENANT_NAME="$2"; shift 2 ;;
+    --client-id) CLIENT_ID="$2"; shift 2 ;;
+    --certificate-path) CERTIFICATE_PATH="$2"; shift 2 ;;
+    --certificate-thumbprint) CERTIFICATE_THUMBPRINT="$2"; shift 2 ;;
+    --certificate-password-env|--certificate-password-file) PASSWORD_ARGS=("$1" "$2"); shift 2 ;;
+    --collectors) COLLECTORS="$2"; shift 2 ;;
+    --top) TOP="$2"; shift 2 ;;
+    --out) OUT_DIR="$2"; shift 2 ;;
+    --run-name) RUN_NAME="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) reject_argument "Unknown argument ${POSITION} (not shown)." ;;
   esac
 done
 
-if [[ -z "${TENANT_NAME}" ]]; then
-  if [[ "${TENANT_ID}" == "organizations" ]]; then
-    TENANT_NAME="tenant"
-  else
-    TENANT_NAME="${TENANT_ID}"
-  fi
+if [[ -z "${TENANT_ID}" || -z "${CLIENT_ID}" || -z "${CERTIFICATE_PATH}" || -z "${CERTIFICATE_THUMBPRINT}" ]]; then
+  echo "The tenant ID, the reader app's client ID, its certificate key file and thumbprint are needed." >&2
+  usage
+  exit 2
 fi
+TENANT_NAME="${TENANT_NAME:-${TENANT_ID}}"
 
 CMD=(
-  env
-  "PYTHONPATH=${ROOT}/src"
-  python3
-  -m
-  azure_tenant_audit
-  --tenant-name
-  "${TENANT_NAME}"
-  --tenant-id
-  "${TENANT_ID}"
-  --use-azure-cli-token
-  --collectors
-  "${COLLECTORS}"
-  --out
-  "${OUT_DIR}"
+  env "PYTHONPATH=${ROOT}/src" python3 -m azure_tenant_audit
+  --tenant-name "${TENANT_NAME}" --tenant-id "${TENANT_ID}" --client-id "${CLIENT_ID}"
+  --certificate-path "${CERTIFICATE_PATH}" --certificate-thumbprint "${CERTIFICATE_THUMBPRINT}"
+  ${PASSWORD_ARGS[@]+"${PASSWORD_ARGS[@]}"}
+  --out "${OUT_DIR}"
 )
-
+if [[ -n "${COLLECTORS}" ]]; then
+  CMD+=(--collectors "${COLLECTORS}")
+fi
 if [[ -n "${TOP}" ]]; then
   CMD+=(--top "${TOP}")
 fi
-
-if [[ "${INCLUDE_EXCHANGE}" -eq 1 ]]; then
-  CMD+=(--include-exchange)
-fi
-
 if [[ -n "${RUN_NAME}" ]]; then
   CMD+=(--run-name "${RUN_NAME}")
 fi
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   echo "Dry run command:"
-  printf '  %q ' "${CMD[@]}"
+  redact_next=0
+  for word in "${CMD[@]}"; do
+    if [[ "${redact_next}" -eq 1 ]]; then
+      printf '%q ' "***redacted***"
+      redact_next=0
+      continue
+    fi
+    printf '%q ' "${word}"
+    case "${word}" in
+      --certificate-path|--certificate-thumbprint|--certificate-password-env|--certificate-password-file) redact_next=1 ;;
+    esac
+  done
   echo
   exit 0
 fi
 
-if ! command -v az >/dev/null 2>&1; then
-  echo "Azure CLI is required and not installed."
-  echo "  brew install azure-cli"
-  exit 2
-fi
-
-if [[ "${FORCE_LOGIN}" -eq 1 ]] || ! az account show >/dev/null 2>&1; then
-  echo "Starting browser login in ${BROWSER_COMMAND}..."
-  BROWSER="${BROWSER_COMMAND}" az login --tenant "${TENANT_ID}" --allow-no-subscriptions
-fi
-
-if [[ "${INCLUDE_EXCHANGE}" -eq 1 ]]; then
-  ensure_m365_cli_login
-fi
-
-printf 'Running tenant audit: '
-printf '  %q ' "${CMD[@]}"
-echo
-
+set +e
 "${CMD[@]}"
 STATUS=$?
+set -e
 if [[ ${STATUS} -eq 0 ]]; then
   echo "Audit completed successfully."
 else

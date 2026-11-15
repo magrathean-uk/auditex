@@ -23,10 +23,40 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   context and delegated roles are empty. Validation and replay still accept older bundles with other values, and the
   SharePoint admin skip reasons of the removed ways stay readable.
 - **Lab kit.** `tenant-bootstrap/scripts/run-audit-collector.sh` runs with the reader app's certificate options. It
-  passes the repository-level collector configs (it pointed at a missing `src/configs/` folder), and its dry run
+  passes the repository-level collector configs (it pointed at a configs folder under src that does not exist), and its dry run
   redacts the certificate path, thumbprint and password source.
-- The product layer (`auditex` guided run, setup guide, MCP tools, `auditex auth`, `auditex probe live` flags) follows in
-  the next change of this release.
+- **Guided run.** `auditex guided-run` has one flow, the reader app with a certificate (`--flow app-audit`, also what
+  `auto` means). It asks for or takes the tenant, the reader app's client ID, the certificate key file and thumbprint and
+  passes them to the engine. The `gr-audit` and `ga-setup-app` flows, `--auth-mode`, `--client-secret`,
+  `--browser-command`, `--local-mode`, `--skip-login-check` and `--include-exchange` go, with the Azure CLI login, the CLI
+  for Microsoft 365 sign-in and setup, and the saved local auth env file. A removed sign-in flag is refused by name.
+- **Setup guide.** `auditex setup-guide m365` builds only the reader-app guide: the commands carry `--client-id`,
+  `--certificate-path` and `--certificate-thumbprint` (keys `probe` and `run`), and every guide points the tenant
+  administrator to `docs/guides/reader-app-permissions.md`. `--mode` accepts only `app`; `--include-exchange` goes.
+- **`auditex auth` is removed (DEC-108 D4).** There is no sign-in, token or saved connection to manage: login,
+  import-token, inspect-token, status, list, use, export-env and capability go, and any `auditex auth` command is refused
+  with the certificate way. `auditex doctor` checks Python, the virtual environment, PowerShell 7 and
+  ExchangeOnlineManagement only.
+- **Probe and response.** `auditex probe live` takes the certificate options (default mode `app`) and refuses
+  `--client-secret`, `--access-token`, `--auth-context` and `--use-azure-cli-token` by name without echoing a value;
+  `auditex response run` loses `--auth-context`.
+- **MCP.** `auditex_run_delegated_audit` is replaced by `auditex_run_certificate_audit`, which takes the client ID, the
+  certificate thumbprint and confined paths to the key and password file. The `auditex_auth_status`, `auditex_auth_list`,
+  `auditex_auth_use` and `auditex_auth_capability` tools go; the probe, setup-guide and response tools lose their mode,
+  auth-context and include-exchange parameters. No tool takes a secret, token or auth context.
+- **CLI for Microsoft 365 no longer used for live collection (DEC-108 D2).** The `m365_cli` adapter never starts `m365`
+  (its read guard still refuses a non-read first, and its output classifier stays for replay), the `exchange` collector
+  records each former operation as the named skip `m365_cli_not_used`, and the `exchange-reader` and `app-readonly-full`
+  profiles read Exchange through `exchange_policy` with the certificate. The `purview`, `ediscovery` and `exchange`
+  permission metadata no longer asks for `m365` or a CLI session or lists CLI commands: setup guides that select them
+  state what the certificate reads (eDiscovery cases, searches and operations through Microsoft Graph) and name the
+  Purview and eDiscovery reads that are not collected.
+- **Scripts and config.** The `tenant-audit-login`, `load-local-auth.sh` and `m365-home.sh` scripts and the Makefile
+  `login` target go. `scripts/tenant-audit-full` (and `make audit-full`) runs with the certificate options;
+  `scripts/bootstrap-local-tools.sh` installs no sign-in tool. Neither script echoes a rejected argument: an unknown,
+  abbreviated or malformed one is named by its position only, and an inline `--option=value` names only a known option. The secret, token and CLI for Microsoft 365 lines of
+  `configs/tenant-audit.example.env`, the SharePoint delegated permission in `configs/collector-permissions.json` and
+  the delegated, token and secret actions of `agent/tenant-audit-skill.json` go.
 
 - Power Platform: `listTenantSettings` is now sent as the body-free POST Microsoft documents, instead of GET; the client admits POST
   for that one path only. The admin guide states the exact removal and blast radius of the Power BI read-only admin API setting and the

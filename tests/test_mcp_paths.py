@@ -23,7 +23,10 @@ from auditex.mcp_registry import (
 )
 from auditex.mcp_server import tool_handlers
 
-FORBIDDEN_ARGUMENTS = {"token", "access_token", "client_secret", "bearer_token", "refresh_token", "secret", "password"}
+FORBIDDEN_ARGUMENTS = {
+    "token", "access_token", "client_secret", "bearer_token", "refresh_token", "secret", "password",
+    "auth_context", "use_azure_cli_token", "certificate_password",
+}
 
 
 class _FakeFastMCP:
@@ -58,6 +61,26 @@ def test_no_tool_takes_a_bearer_token_or_client_secret() -> None:
     for name, handler in tool_handlers().items():
         offending = FORBIDDEN_ARGUMENTS & set(inspect.signature(handler).parameters)
         assert not offending, f"{name} takes {sorted(offending)}"
+
+
+def test_microsoft_365_tools_take_the_certificate_and_no_sign_in_mode() -> None:
+    handlers = tool_handlers()
+    for name in ("auditex_run_certificate_audit", "auditex_probe_live"):
+        parameters = inspect.signature(handlers[name]).parameters
+        assert {"client_id", "certificate_path", "certificate_thumbprint"} <= set(parameters), name
+        assert "mode" not in parameters and "include_exchange" not in parameters, name
+    assert "mode" not in inspect.signature(handlers["auditex_setup_guide"]).parameters
+    assert "auditex_run_delegated_audit" not in handlers
+
+
+def test_certificate_run_without_a_certificate_is_blocked_before_any_command(root: Path, registered: _FakeFastMCP) -> None:
+    run, _ = registered.tools["auditex_run_certificate_audit"]
+    probe, _ = registered.tools["auditex_probe_live"]
+
+    for tool in (run, probe):
+        result = tool(tenant_name="acme", certificate_path="", certificate_thumbprint="")
+        assert result["status"] == "blocked"
+        assert "certificate_path and certificate_thumbprint" in result["error"]
 
 
 def test_every_registry_entry_has_a_handler_and_declared_path_arguments_exist(registered: _FakeFastMCP) -> None:
@@ -95,7 +118,7 @@ def test_read_only_annotations_survive_registration(registered: _FakeFastMCP) ->
         assert metadata["annotations"] == {"readOnlyHint": entry.read_only_hint}
     assert registered.tools["auditex_api_inventory"][1]["annotations"]["readOnlyHint"] is True
     assert registered.tools["auditex_summarize_run"][1]["annotations"]["readOnlyHint"] is True
-    assert registered.tools["auditex_run_delegated_audit"][1]["annotations"]["readOnlyHint"] is False
+    assert registered.tools["auditex_run_certificate_audit"][1]["annotations"]["readOnlyHint"] is False
 
 
 def test_specs_list_the_confined_arguments() -> None:
@@ -202,14 +225,18 @@ def test_registered_handler_receives_the_resolved_path(root: Path, monkeypatch: 
 def test_defaults_of_path_arguments_are_confined_too(root: Path) -> None:
     seen: dict[str, Any] = {}
 
-    def auditex_run_delegated_audit(tenant_name: str, out_dir: str = "outputs/live") -> dict[str, Any]:
-        seen.update(tenant_name=tenant_name, out_dir=out_dir)
+    def auditex_run_certificate_audit(
+        tenant_name: str, certificate_path: str = "keys/reader.key.pem", certificate_password_file: str = "",
+        out_dir: str = "outputs/live",
+    ) -> dict[str, Any]:
+        seen.update(tenant_name=tenant_name, out_dir=out_dir, certificate_path=certificate_path)
         return {}
 
-    entry = next(item for item in TOOL_REGISTRY if item.name == "auditex_run_delegated_audit")
-    confine_handler(entry, auditex_run_delegated_audit)("acme")
+    entry = next(item for item in TOOL_REGISTRY if item.name == "auditex_run_certificate_audit")
+    confine_handler(entry, auditex_run_certificate_audit)("acme")
 
     assert seen["out_dir"] == str(root / "outputs" / "live")
+    assert seen["certificate_path"] == str(root / "keys" / "reader.key.pem")
 
 
 def test_list_arguments_are_confined_element_by_element(root: Path, registered: _FakeFastMCP) -> None:
@@ -242,6 +269,13 @@ def test_credential_paths_are_confined(root: Path, registered: _FakeFastMCP) -> 
         doctor(oauth_client="../client.json")
     with pytest.raises(McpPathError):
         doctor(token_cache="~/.cache/token.json")
+    for name in ("auditex_run_certificate_audit", "auditex_probe_live"):
+        tool, _ = registered.tools[name]
+        with pytest.raises(McpPathError):
+            tool(tenant_name="acme", certificate_path="/Users/someone/reader.key.pem", certificate_thumbprint="A" * 40)
+        with pytest.raises(McpPathError):
+            tool(tenant_name="acme", certificate_path="keys/reader.key.pem", certificate_thumbprint="A" * 40,
+                 certificate_password_file="../reader.pw")
 
 
 def test_confine_handler_refuses_an_entry_that_names_an_unknown_argument() -> None:

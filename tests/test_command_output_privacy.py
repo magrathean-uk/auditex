@@ -107,22 +107,29 @@ def test_toolchain_parser_nonstring_version_is_coerced_and_masked(value) -> None
     _assert_private(version)
 
 
-@pytest.mark.parametrize("value", [42, 1.5, [EMAIL], {"user": EMAIL}])
-def test_m365_cli_nonstring_exception_output_is_coerced_and_masked(monkeypatch, value) -> None:
-    def fake_run(cmd, **kwargs):
-        raise subprocess.CalledProcessError(1, cmd, output=value)
-
-    monkeypatch.setattr("shutil.which", lambda _: "/mock/m365")
-    monkeypatch.setattr("subprocess.run", fake_run)
-    response = M365CLIAdapter().run("m365 aad user list --output json")
-    assert response["error_class"] == "command_error"
-    assert response["output"] == redact_output(str(value))
+@pytest.mark.parametrize("outcome", ["nonzero", "invalid_json", "empty", "auth", "not_found", "help"])
+def test_m365_cli_output_classifier_kept_for_replay_masks_diagnostics(outcome: str) -> None:
+    """The adapter no longer runs ``m365`` (DEC-108 D2); the classifier it keeps for old answers still masks."""
+    stdout, stderr, returncode = json.dumps([{"UserPrincipalName": UPN}]), DIAGNOSTIC, 0
+    if outcome == "nonzero":
+        returncode = 1
+    elif outcome == "invalid_json":
+        stdout = DIAGNOSTIC
+    elif outcome == "empty":
+        stdout = ""
+    elif outcome == "auth":
+        stderr = "please sign in; " + DIAGNOSTIC
+    elif outcome == "not_found":
+        stderr = "command not found; " + DIAGNOSTIC
+    elif outcome == "help":
+        stdout = "CLI for Microsoft 365 v1 Commands: " + DIAGNOSTIC
+    response = M365CLIAdapter()._classify_output(returncode, stdout, stderr, "m365 aad user list --output json", set())
+    assert response.get("error")
     _assert_private(json.dumps(response))
 
 
 @pytest.mark.parametrize("adapter,command", [
     (PowerShellGraphAdapter, "Get-Mailbox"),
-    (M365CLIAdapter, "m365 aad user list --output json"),
 ])
 @pytest.mark.parametrize("outcome", ["success", "nonzero", "invalid_json", "empty", "auth", "not_found", "help", "exception", "called_process", "timeout"])
 def test_adapter_output_never_leaks_to_logs_or_error_artifacts(
@@ -222,7 +229,6 @@ def test_probe_raw_and_error_snippets_are_masked(tmp_path, monkeypatch, returnco
 
 @pytest.mark.parametrize("adapter,command", [
     (PowerShellGraphAdapter, "Get-Mailbox"),
-    (M365CLIAdapter, "m365 aad user list --output json"),
 ])
 def test_successful_adapter_evidence_retains_identifiers(tmp_path, monkeypatch, adapter, command) -> None:
     payload = {"SentTo": EMAIL, "UserPrincipalName": UPN, "ObjectId": GUID, "padding": "x" * 1000}
@@ -235,40 +241,24 @@ def test_successful_adapter_evidence_retains_identifiers(tmp_path, monkeypatch, 
     _assert_private((writer.run_dir / "audit-log.jsonl").read_text())
 
 
-@pytest.mark.parametrize("default", [False, True])
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
-def test_exchange_module_error_snippet_is_private(monkeypatch, default, stream) -> None:
-    from auditex import auth, auth_runtime
+def test_exchange_module_error_snippet_is_private(monkeypatch, stream) -> None:
+    from auditex import auth_runtime
 
     streams = {"stdout": "", "stderr": "", stream: DIAGNOSTIC + " detail" * 200}
     monkeypatch.setattr("shutil.which", lambda name: f"/mock/{name}")
     monkeypatch.setattr("subprocess.run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, **streams))
-    check = auth_runtime._default_exchange_module_status if default else auth._pwsh_exchange_module_status
-    response = check()
+    response = auth_runtime.exchange_module_status()
     _assert_private(json.dumps(response))
     assert len(response["error"]) == 500
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
-def test_auth_and_toolchain_report_boundaries_mask_diagnostics(tmp_path, stream) -> None:
-    from auditex.auth_runtime import (
-        AuthRuntimeAdapters,
-        ProductAuthRuntime,
-        ToolchainRuntime,
-        ToolchainRuntimeAdapters,
-    )
+def test_toolchain_report_boundaries_mask_diagnostics(tmp_path, stream) -> None:
+    from auditex.auth_runtime import ToolchainRuntime, ToolchainRuntimeAdapters
 
     def blocked(command):
         return {"status": "blocked", stream: DIAGNOSTIC + " detail" * 200}
-
-    auth = ProductAuthRuntime(AuthRuntimeAdapters(json_command=blocked))
-    response = auth.get_auth_status(include_exchange=False)
-    _assert_private(json.dumps(response))
-    for operation in (auth.list_connections, lambda: auth.use_connection("mocktenant")):
-        with pytest.raises(RuntimeError) as error:
-            operation()
-        _assert_private(str(error.value))
-        assert len(str(error.value)) == 500
 
     selector = tmp_path / "select-python.sh"
     selector.touch()

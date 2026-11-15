@@ -36,7 +36,8 @@ def test_fake_doctor_toolchain_installs_bootstrap_adapter(monkeypatch) -> None:
 
     assert report["python"]["status"] == "supported"
     assert report["tools"]["pwsh"]["status"] == "blocked"
-    assert report["auth"]["exchange"]["error"] == "module_not_found"
+    assert report["exchange_module"]["error"] == "module_not_found"
+    assert "auth" not in report
 
 
 def test_fake_graph_helpers_make_token_client_without_network() -> None:

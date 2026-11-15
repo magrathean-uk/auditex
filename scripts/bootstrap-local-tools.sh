@@ -14,7 +14,9 @@ usage() {
 Usage: bootstrap-local-tools.sh [--exchange] [--pwsh] [--mcp]
 
 Installs the local Python package into .venv and adds optional tool packs on demand.
-The default path stays runtime-only.
+The default path stays runtime-only. Microsoft 365 audits sign in only as the reader app
+with a certificate, so no sign-in tool (Azure CLI, CLI for Microsoft 365) is installed.
+--exchange installs PowerShell 7 and the ExchangeOnlineManagement module for exchange_policy.
 USAGE
 }
 
@@ -105,54 +107,6 @@ PY
   return 0
 }
 
-ensure_azure_cli() {
-  if command -v az >/dev/null 2>&1; then
-    return 0
-  fi
-
-  run_package_manager_plan \
-    "azure-cli" \
-    "Azure CLI missing. Install it with your platform package manager."
-}
-
-ensure_exchange_pack() {
-  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-    :
-  else
-    case "${PACKAGE_MANAGER}" in
-      brew)
-        echo "Plan: brew install node"
-        brew install node
-        ;;
-      apt)
-        echo "Plan: sudo apt-get update && sudo apt-get install -y nodejs npm"
-        sudo apt-get update
-        sudo apt-get install -y nodejs npm
-        ;;
-      dnf)
-        echo "Plan: sudo dnf install -y nodejs npm"
-        sudo dnf install -y nodejs npm
-        ;;
-      manual)
-        echo "Node.js 20+ and npm missing. Install them, then rerun."
-        exit 1
-        ;;
-    esac
-  fi
-
-  local node_major
-  node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
-  if [[ ! "${node_major}" =~ ^[0-9]+$ ]] || (( node_major < 20 )); then
-    echo "Node.js 20+ is required by the current CLI for Microsoft 365 release. Upgrade Node.js, then rerun." >&2
-    return 1
-  fi
-
-  if ! command -v m365 >/dev/null 2>&1; then
-    echo "Plan: npm install -g @pnp/cli-microsoft365@latest"
-    npm install -g @pnp/cli-microsoft365@latest
-  fi
-}
-
 ensure_pwsh_pack() {
   if command -v pwsh >/dev/null 2>&1; then
     return 0
@@ -194,7 +148,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "Unknown argument: $1"
+      echo "Unknown argument (not shown); the options are --exchange, --pwsh and --mcp." >&2
       usage
       exit 1
       ;;
@@ -234,14 +188,7 @@ if [[ "${INSTALL_MCP}" -eq 1 ]]; then
   venv_pip_install -e "${ROOT_DIR}[mcp]"
 fi
 
-if ! ensure_azure_cli; then
-  exit 1
-fi
-
 if [[ "${INSTALL_EXCHANGE}" -eq 1 ]]; then
-  if ! ensure_exchange_pack; then
-    exit 1
-  fi
   if ! ensure_pwsh_pack; then
     exit 1
   fi

@@ -321,12 +321,6 @@ def make_contract_valid(run_dir: Path) -> Path:
 class FakeDoctorToolchain:
     blocked_tools: set[str] = field(default_factory=set)
     versions: dict[str, str] = field(default_factory=dict)
-    azure_auth: dict[str, Any] = field(
-        default_factory=lambda: {"status": "supported", "user_name": "reader@contoso.test"}
-    )
-    m365_auth: dict[str, Any] = field(
-        default_factory=lambda: {"status": "supported", "active_connection": "tenant-user"}
-    )
     exchange_auth: dict[str, Any] = field(
         default_factory=lambda: {"status": "supported", "module_version": "3.7.0"}
     )
@@ -344,7 +338,7 @@ class FakeDoctorToolchain:
         )
         monkeypatch.setattr(bootstrap_module, "detect_package_manager", lambda: "brew")
         monkeypatch.setattr(bootstrap_module, "_tool_status", self.tool_status)
-        monkeypatch.setattr("auditex.auth.get_auth_status", self.auth_status)
+        monkeypatch.setattr(bootstrap_module, "exchange_module_status", lambda: self.exchange_auth)
 
     def tool_status(self, name: str, **_: object) -> dict[str, object]:
         if name in self.blocked_tools:
@@ -357,12 +351,6 @@ class FakeDoctorToolchain:
             "error": None,
         }
 
-    def auth_status(self, **_: object) -> dict[str, Any]:
-        return {
-            "azure_cli": self.azure_auth,
-            "m365": self.m365_auth,
-            "exchange": self.exchange_auth,
-        }
 
 
 class FakeGraphResponse:

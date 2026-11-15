@@ -13,7 +13,7 @@ from test_secret_cli_matrix import _pythons
 
 _CHILD = r'''
 import sys
-from auditex.auth import resolve_token_input
+from azure_tenant_audit.guarded_io import read_guarded_stdin
 from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError
 if sys.argv[2] == "prebuffer":
     sys.stdin.read(1)
@@ -22,7 +22,7 @@ elif sys.argv[2] == "prebuffer-binary":
 with GuardContext() as context:
     context.bind_run(sys.argv[1])
     try:
-        token, _ = resolve_token_input(token_stdin=True)
+        token = read_guarded_stdin().strip()
     except UnsafeRunFileError:
         print("REFUSED")
     else:

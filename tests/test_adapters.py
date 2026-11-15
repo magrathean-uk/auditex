@@ -8,11 +8,24 @@ from azure_tenant_audit.adapters.m365dsc import M365DSCAdapter
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 
 
-def test_adapter_registry_exposes_m365_cli() -> None:
+def test_adapter_registry_keeps_the_retired_m365_cli_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DEC-108 D2: the CLI for Microsoft 365 adapter resolves for old callers but never starts ``m365``."""
+    import subprocess
+
+    from azure_tenant_audit.adapters.m365_cli import M365_CLI_NOT_USED
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no m365 process")))
     adapter = get_adapter("m365_cli")
     assert isinstance(adapter, M365CLIAdapter)
     assert adapter.name == "m365_cli"
-    assert adapter.auth_requirements
+    assert adapter.dependency_check() is False
+    assert adapter.metadata.tool_dependencies == ()
+    response = adapter.run("m365 purview hold list --output json")
+    assert response["error"] == M365_CLI_NOT_USED
+    assert response["error_class"] == "command_not_found"  # collectors with a Graph fallback still fall back
+    refused = adapter.run("m365 purview hold list --output json --secret constructed-canary")
+    assert refused["error_class"] == "command_refused"  # the read guard still runs first
+    assert "constructed-canary" not in str(refused)
 
 
 def test_adapter_registry_exposes_powershell_graph_and_m365dsc() -> None:

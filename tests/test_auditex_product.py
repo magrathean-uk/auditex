@@ -14,9 +14,6 @@ from auditex import cli as auditex_cli
 from auditex.mcp_server import (
     analyze_report,
     api_inventory,
-    auth_capability,
-    auth_list,
-    auth_status,
     build_cli_command,
     build_google_command,
     build_probe_command,
@@ -119,7 +116,8 @@ def test_offline_manifest_records_profile(tmp_path: Path) -> None:
 def test_mcp_tool_specs_present(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AUDITEX_ENABLE_RESPONSE", raising=False)
     names = {item["name"] for item in tool_specs()}
-    assert "auditex_run_delegated_audit" in names
+    assert "auditex_run_certificate_audit" in names
+    assert "auditex_run_delegated_audit" not in names
     assert "auditex_google_doctor" in names
     assert "auditex_google_probe" in names
     assert "auditex_run_google_workspace_audit" in names
@@ -142,10 +140,8 @@ def test_mcp_tool_specs_present(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "auditex_rules_inventory" in names
     assert "auditex_list_response_actions" not in names
     assert "auditex_run_response_action" not in names
-    assert "auditex_auth_status" in names
-    assert "auditex_auth_inspect_token" not in names  # bearer tokens never travel through MCP arguments
-    assert "auditex_auth_import_token" not in names
-    assert "auditex_auth_capability" in names
+    # DEC-107: no sign-in, token or saved connection to manage, so no auth tool.
+    assert not {name for name in names if name.startswith("auditex_auth_")}
     assert "auditex_contract_schema_manifest" in names
 
 
@@ -287,101 +283,6 @@ def test_contract_schema_inventory_returns_citations() -> None:
     assert result["evidence_missing"] == []
 
 
-def test_auth_capability_helper_returns_citations(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    auth_contexts_path = tmp_path / "auth-contexts.json"
-    auth_contexts_path.write_text(
-        json.dumps(
-            {
-                "active_context": "demo",
-                "contexts": {
-                    "demo": {
-                        "name": "demo",
-                        "tenant_id": "tenant-1",
-                        "auth_type": "delegated",
-                        "token_claims": {
-                            "tenant_id": "tenant-1",
-                            "audience": "https://graph.microsoft.com",
-                            "delegated_scopes": ["Directory.Read.All", "Policy.Read.All"],
-                            "app_roles": [],
-                        },
-                    }
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("AUDITEX_AUTH_CONTEXTS_PATH", str(auth_contexts_path))
-
-    result = auth_capability(name="demo", collectors="identity", auditor_profile="global-reader")
-
-    artifact_paths = [row["artifact_path"] for row in result["citations"]]
-    assert "src/auditex/auth.py" in artifact_paths
-    assert "src/auditex/auth_runtime.py" in artifact_paths
-    assert "configs/collector-definitions.json" in artifact_paths
-    assert "configs/collector-permissions.json" in artifact_paths
-    assert "src/azure_tenant_audit/scope_catalog.py" in artifact_paths
-    assert str(auth_contexts_path) in artifact_paths
-    assert result["citation_summary"]["artifact_count"] == 6
-    assert result["evidence_missing"] == []
-    assert result["auth_context"]["name"] == "demo"
-
-
-def test_auth_status_helper_returns_citations(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    env_path = tmp_path / "m365-auth.env"
-    env_path.write_text("AUDITEX_TENANT_ID=tenant-1\n", encoding="utf-8")
-    contexts_path = tmp_path / "contexts.json"
-    contexts_path.write_text(json.dumps({"active_context": None, "contexts": {}}), encoding="utf-8")
-    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(env_path))
-    monkeypatch.setenv("AUDITEX_AUTH_CONTEXTS_PATH", str(contexts_path))
-    monkeypatch.setattr(
-        "auditex.auth.get_auth_status",
-        lambda: {
-            "local_auth": {"path": str(env_path), "present": True},
-            "azure_cli": {"status": "supported"},
-            "m365": {"status": "supported", "authenticated": True},
-            "exchange": {"status": "supported"},
-            "auth_contexts": {"active_context": None, "contexts": []},
-            "adapter_capabilities": [],
-        },
-    )
-
-    result = auth_status()
-
-    artifact_paths = {row["artifact_path"] for row in result["citations"]}
-    assert str(env_path) in artifact_paths
-    assert str(contexts_path) in artifact_paths
-    assert "command:az account show --output json" in artifact_paths
-    assert "command:m365 status --output json" in artifact_paths
-    assert "command:m365 connection list --output json" in artifact_paths
-    assert "command:pwsh exchange-module-check" in artifact_paths
-    assert result["citation_summary"]["artifact_count"] == 9
-    assert result["evidence_missing"] == []
-
-
-def test_auth_list_helper_returns_citations(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    env_path = tmp_path / "m365-auth.env"
-    env_path.write_text("M365_CLI_APP_ID=app-1\n", encoding="utf-8")
-    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(env_path))
-    monkeypatch.setattr(
-        "auditex.auth.list_connections",
-        lambda: {
-            "connections": [
-                {"name": "tenant-app", "active": False},
-                {"name": "tenant-user", "active": True},
-            ]
-        },
-    )
-
-    result = auth_list()
-
-    artifact_paths = {row["artifact_path"] for row in result["citations"]}
-    assert str(env_path) in artifact_paths
-    assert "command:m365 connection list --output json" in artifact_paths
-    assert result["citation_summary"]["artifact_count"] == 4
-    assert result["evidence_missing"] == []
-    assert result["connections"][1]["name"] == "tenant-user"
-
-
 def test_list_adapters_tool_shape() -> None:
     result = list_adapters()
     assert result["count"] >= 1
@@ -391,17 +292,23 @@ def test_list_adapters_tool_shape() -> None:
     assert {"m365_cli", "m365dsc", "powershell_graph"}.issubset(adapter_names)
 
 
-def test_build_cli_command_uses_profile_and_cli_token() -> None:
+def test_build_cli_command_uses_profile_and_the_certificate() -> None:
     command = build_cli_command(
         tenant_name="ACME",
         tenant_id="contoso.onmicrosoft.com",
         out_dir="outputs/live",
         auditor_profile="global-reader",
         plane="full",
+        client_id="app-id",
+        certificate_path="reader.key.pem",
+        certificate_thumbprint="A" * 40,
         since="2026-04-01T00:00:00Z",
         until="2026-04-02T00:00:00Z",
     )
-    assert "--use-azure-cli-token" in command
+    assert "--use-azure-cli-token" not in command
+    assert command[command.index("--client-id") + 1] == "app-id"
+    assert command[command.index("--certificate-path") + 1] == "reader.key.pem"
+    assert command[command.index("--certificate-thumbprint") + 1] == "A" * 40
     assert command[0]
     assert "--auditor-profile" in command
     assert "global-reader" in command
@@ -421,18 +328,24 @@ def test_build_cli_command_rejects_unimplemented_response_plane() -> None:
 
 
 def test_build_probe_command_rejects_response_mode_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from auditex.command_builders import ProbeCommandSpec
+    from auditex.command_builders import (
+        build_probe_command as build_local_probe_command,
+    )
+
     monkeypatch.delenv("AUDITEX_ENABLE_RESPONSE", raising=False)
     with pytest.raises(ValueError, match="response plane is disabled"):
-        build_probe_command(
-            tenant_name="ACME",
-            out_dir="outputs/probes",
-            mode="response",
-        )
+        build_local_probe_command(ProbeCommandSpec(tenant_name="ACME", out_dir="outputs/probes", mode="response"))
 
 
 def test_build_probe_command_uses_mode_surface_and_lab_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    from auditex.command_builders import ProbeCommandSpec
+    from auditex.command_builders import (
+        build_probe_command as build_local_probe_command,
+    )
+
     monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
-    command = build_probe_command(
+    command = build_local_probe_command(ProbeCommandSpec(
         tenant_name="ACME",
         out_dir="outputs/probes",
         tenant_id="contoso.onmicrosoft.com",
@@ -442,7 +355,7 @@ def test_build_probe_command_uses_mode_surface_and_lab_guard(monkeypatch: pytest
         allow_lab_response=True,
         since="2026-04-01T00:00:00Z",
         until="2026-04-02T00:00:00Z",
-    )
+    ))
     assert command[:3] == [command[0], "-m", "auditex"]
     assert "probe" in command
     assert "live" in command
@@ -455,37 +368,44 @@ def test_build_probe_command_uses_mode_surface_and_lab_guard(monkeypatch: pytest
     assert "--until" in command
 
 
-def test_mcp_probe_command_rejects_secret_and_token_arguments() -> None:
-    """The MCP wrapper accepts no secret values; the local CLI builder can."""
+def test_mcp_probe_command_takes_the_certificate_and_no_secret_token_or_mode() -> None:
+    """The MCP probe runs as the reader app with its certificate; it takes no secret, token, auth context or mode."""
     command = build_probe_command(
         tenant_name="ACME",
         out_dir="outputs/probes",
         tenant_id="contoso.onmicrosoft.com",
-        mode="app",
         client_id="app-id",
+        certificate_path="reader.key.pem",
+        certificate_thumbprint="B" * 40,
+        certificate_password_env="READER_KEY_PASSWORD",
     )
-    assert "--client-id" in command
-    assert "app-id" in command
-    assert "--client-secret" not in command
-    with pytest.raises(TypeError):
-        build_probe_command(tenant_name="ACME", out_dir="o", mode="app", client_secret="app-secret")  # type: ignore[call-arg]
-    with pytest.raises(TypeError):
-        build_probe_command(tenant_name="ACME", out_dir="o", access_token="eyJ")  # type: ignore[call-arg]
+    assert command[command.index("--mode") + 1] == "app"
+    assert command[command.index("--client-id") + 1] == "app-id"
+    assert command[command.index("--certificate-path") + 1] == "reader.key.pem"
+    assert command[command.index("--certificate-password-env") + 1] == "READER_KEY_PASSWORD"
+    for removed in ("--client-secret", "--access-token", "--auth-context", "--use-azure-cli-token"):
+        assert removed not in command
+    for keyword in ("client_secret", "access_token", "auth_context", "use_azure_cli_token", "mode"):
+        with pytest.raises(TypeError):
+            build_probe_command(tenant_name="ACME", out_dir="o", **{keyword: "x"})  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="certificate_path and certificate_thumbprint"):
+        build_probe_command(tenant_name="ACME", out_dir="o", client_id="app-id")
 
 
-def test_local_probe_command_preserves_auth_and_redacts_its_display() -> None:
+def test_local_probe_command_carries_the_certificate_and_redacts_the_key_path_in_its_display() -> None:
     from auditex.command_builders import ProbeCommandSpec
     from auditex.command_builders import (
         build_probe_command as build_local_probe_command,
     )
     from auditex.command_runner import redact_command
 
-    secret = "constructed-probe-secret-canary"
+    key_path = "constructed-key-path-canary.pem"
     command = build_local_probe_command(
-        ProbeCommandSpec(tenant_name="ACME", out_dir="o", mode="app", client_id="app-id", client_secret=secret)
+        ProbeCommandSpec(tenant_name="ACME", out_dir="o", client_id="app-id", certificate_path=key_path,
+                         certificate_thumbprint="C" * 40)
     )
-    assert command[command.index("--client-secret") + 1] == secret
-    assert secret not in str(redact_command(command))
+    assert command[command.index("--certificate-path") + 1] == key_path
+    assert key_path not in str(redact_command(command))
 
 
 def test_build_google_command_uses_workspace_path() -> None:
@@ -506,51 +426,52 @@ def test_build_google_command_uses_workspace_path() -> None:
     assert command[command.index("--service-account-key") + 1] == "/creds/key.json"
 
 
-def test_build_cli_command_app_mode_takes_the_secret_from_the_environment_only() -> None:
+def test_build_cli_command_needs_the_certificate_and_takes_no_secret_or_token() -> None:
     command = build_cli_command(
         tenant_name="ACME",
         tenant_id="contoso.onmicrosoft.com",
         out_dir="outputs/live",
-        use_azure_cli_token=False,
-        client_id="app-id",
+        certificate_path="reader.key.pem",
+        certificate_thumbprint="D" * 40,
     )
-    assert "--use-azure-cli-token" not in command
-    assert "--client-id" in command
-    assert "app-id" in command
-    assert "--client-secret" not in command
-    assert "--access-token" not in command
-    with pytest.raises(TypeError):
-        build_cli_command(tenant_name="ACME", out_dir="o", client_secret="app-secret")  # type: ignore[call-arg]
-    with pytest.raises(TypeError):
-        build_cli_command(tenant_name="ACME", out_dir="o", access_token="eyJ")  # type: ignore[call-arg]
+    assert "--client-id" not in command  # the engine then reads AZURE_CLIENT_ID
+    for removed in ("--use-azure-cli-token", "--client-secret", "--access-token", "--include-exchange"):
+        assert removed not in command
+    with pytest.raises(ValueError, match="certificate_path and certificate_thumbprint"):
+        build_cli_command(tenant_name="ACME", out_dir="o", client_id="app-id")
+    for keyword in ("client_secret", "access_token", "use_azure_cli_token", "include_exchange"):
+        with pytest.raises(TypeError):
+            build_cli_command(tenant_name="ACME", out_dir="o", **{keyword: "x"})  # type: ignore[arg-type]
 
 
-def test_build_probe_command_supports_saved_auth_context() -> None:
-    command = build_probe_command(
-        tenant_name="ACME",
-        out_dir="outputs/probes",
-        auditor_profile="global-reader",
-        mode="delegated",
-        auth_context="customer-token",
-    )
-    assert "--auth-context" in command
-    assert "customer-token" in command
-    assert "--use-azure-cli-token" not in command
-
-
-def test_probe_parser_accepts_saved_auth_context() -> None:
+def test_probe_parser_takes_the_certificate_options() -> None:
     from auditex.cli import _build_probe_parser
 
     args = _build_probe_parser().parse_args(
-        [
-            "live",
-            "--tenant-name",
-            "ACME",
-            "--auth-context",
-            "customer-token",
-        ]
+        ["live", "--tenant-name", "ACME", "--client-id", "app-id", "--certificate-path", "reader.key.pem",
+         "--certificate-thumbprint", "E" * 40, "--certificate-password-file", "reader.pw"]
     )
-    assert args.auth_context == "customer-token"
+    assert (args.mode, args.client_id, args.certificate_path) == ("app", "app-id", "reader.key.pem")
+    assert args.certificate_thumbprint == "E" * 40 and args.certificate_password_file == "reader.pw"
+    with pytest.raises(SystemExit):
+        _build_probe_parser().parse_args(["live", "--tenant-name", "ACME", "--mode", "delegated"])
+
+
+@pytest.mark.parametrize("flag", ["--client-secret", "--access-token", "--auth-context", "--use-azure-cli-token"])
+@pytest.mark.parametrize("form", ["separate", "equals"])
+def test_probe_live_refuses_a_removed_sign_in_flag_by_name_without_its_value(
+    flag: str, form: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    canary = "constructed-removed-flag-canary"
+    value = [] if flag == "--use-azure-cli-token" else ([f"{flag}={canary}"] if form == "equals" else [flag, canary])
+    argv = ["probe", "live", "--tenant-name", "ACME", *(value or [flag])]
+    with pytest.raises(SystemExit) as exc:
+        auditex_cli.main(argv)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert f"error: {flag} was removed." in err
+    assert "--certificate-path" in err and "docs/guides/reader-app-permissions.md" in err
+    assert canary not in err
 
 
 def test_list_response_actions_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -587,7 +508,6 @@ def test_build_response_command_uses_guarded_namespace(monkeypatch: pytest.Monke
         auditor_profile="exchange-reader",
         target="user@contoso.com",
         intent="triage mail flow",
-        auth_context="customer-token",
     )
     assert command[:3] == [command[0], "-m", "auditex"]
     assert "response" in command
@@ -598,39 +518,19 @@ def test_build_response_command_uses_guarded_namespace(monkeypatch: pytest.Monke
     assert "triage mail flow" in command
 
 
-def test_build_response_command_supports_saved_auth_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
-    command = build_response_command(
-        tenant_name="ACME",
-        out_dir="outputs/response",
-        action="message_trace",
-        tenant_id="contoso.onmicrosoft.com",
-        auditor_profile="exchange-reader",
-        target="user@contoso.com",
-        intent="triage mail flow",
-        auth_context="customer-token",
-    )
-    assert "--auth-context" in command
-    assert "customer-token" in command
-
-
-def test_response_parser_accepts_saved_auth_context() -> None:
+def test_response_takes_no_saved_auth_context(monkeypatch: pytest.MonkeyPatch) -> None:
     from auditex.cli import _build_response_parser
 
-    args = _build_response_parser().parse_args(
-        [
-            "run",
-            "--tenant-name",
-            "ACME",
-            "--action",
-            "message_trace",
-            "--intent",
-            "triage mail flow",
-            "--auth-context",
-            "customer-token",
-        ]
-    )
-    assert args.auth_context == "customer-token"
+    monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
+    with pytest.raises(TypeError):
+        build_response_command(  # type: ignore[call-arg]
+            tenant_name="ACME", out_dir="o", action="message_trace", intent="x", auth_context="customer-token"
+        )
+    with pytest.raises(SystemExit):
+        _build_response_parser().parse_args(
+            ["run", "--tenant-name", "ACME", "--action", "message_trace", "--intent", "x",
+             "--auth-context", "customer-token"]
+        )
 
 
 def test_summarize_run_reads_manifest(tmp_path: Path) -> None:
