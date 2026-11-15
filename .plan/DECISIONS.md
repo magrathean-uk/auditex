@@ -795,3 +795,8 @@
 - decision: PP 3.1 is now decided by the product (M08-T04's tenant isolation read), so only PP 2.3 stays not assessed by product design; MS.AAD.3.4 reads null because Microsoft retired the authentication methods policy migration (the kit marks it manual for the same reason), so it carries the tenant reason `migration-state-retired` instead of met or not met. The DoD line counts decided plus named tenant reason as 63 and product design as 1.
 - why: the run decides one more row than plan v4 assumed, and 3.4 cannot be decided on any tenant now; neither is a product gap.
 - approver: auto
+
+## DEC-095 M07 phase D record: kit 7t and listed out-of-kit writes
+- decision: the phase D DoD line checks the kit actually run, round 7t (frozen c3285015a186, DEC-085: the 7s handover plus the 05 fix), and accepts out-of-kit writes when each is listed with its OUT-OF-KIT-WRITES row and rollback line (rows 12 and 13), instead of 7s and zero.
+- why: both were decided during phase D (DEC-084, DEC-085); the DoD text predates them.
+- approver: auto
