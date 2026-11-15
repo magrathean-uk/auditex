@@ -1,0 +1,40 @@
+{
+  "version": "answer-frames-v1",
+  "about": [
+    "The fixed sentences a local model may select for its answer (DEC-119), read by auditex.answer_digest and auditex.answer_checks.",
+    "The model never writes a sentence: per item it selects ids from that item's bank, for the run it selects run frame ids and item numbers.",
+    "A frame states only what its precondition makes true; every precondition is checked on the rule facts of the digest, never on model text.",
+    "Item preconditions: verdicts (the rule verdict is one of them), severity (the catalogue severity is one of them), has (the item holds these values), catalogue (the item's bank holds a sentence of this name). shows: values Auditex renders, quoted, when the frame is used.",
+    "Run preconditions: min and max over the counts checks, not_met, met, not_assessed, not_applicable and shall_not_met; a run frame's {count} placeholders are filled by Auditex.",
+    "catalogue: the verdicts for which the item's bank holds its baseline requirement and its baseline remediation steps (from the shipped explainer template).",
+    "Rules for a change: no tenant text, plain ASCII, no digit, each text closed by a full stop (a heading by a colon), a precondition that makes the text true for every item it admits, and a review; tests/test_answer_checks.py checks the file."
+  ],
+  "limits": {"use": 8, "summary": 6, "highlight": 5},
+  "catalogue": {
+    "requirement": {"verdicts": ["not_met", "met", "not_assessed", "not_applicable"]},
+    "step": {"verdicts": ["not_met"]}
+  },
+  "item": [
+    {"id": "is-not-met", "text": "This check is not met.", "verdicts": ["not_met"]},
+    {"id": "is-met", "text": "This check is met.", "verdicts": ["met"]},
+    {"id": "not-assessed", "text": "Auditex could not assess this check.", "verdicts": ["not_assessed"]},
+    {"id": "not-applicable", "text": "This check does not apply to this tenant.", "verdicts": ["not_applicable"]},
+    {"id": "change-needed", "text": "The tenant needs a change to meet this requirement.", "verdicts": ["not_met"]},
+    {"id": "no-change-needed", "text": "No change is needed for this check.", "verdicts": ["met", "not_applicable"]},
+    {"id": "mandatory", "text": "The baseline makes this requirement mandatory (SHALL).", "verdicts": ["not_met", "met", "not_assessed", "not_applicable"], "severity": ["Shall"]},
+    {"id": "recommended", "text": "The baseline recommends this requirement (SHOULD).", "verdicts": ["not_met", "met", "not_assessed", "not_applicable"], "severity": ["Should"]},
+    {"id": "mandatory-not-met", "text": "This mandatory requirement is not met.", "verdicts": ["not_met"], "severity": ["Shall"]},
+    {"id": "steps-follow", "text": "The baseline instructions give the steps to meet this requirement.", "verdicts": ["not_met"], "catalogue": ["step"]},
+    {"id": "reason-shown", "text": "The rule's reason for this verdict is shown below.", "verdicts": ["not_met", "met", "not_assessed", "not_applicable"], "has": ["reason"], "shows": ["reason"]},
+    {"id": "setting-shown", "text": "The setting Auditex read is shown below.", "verdicts": ["not_met", "met", "not_assessed", "not_applicable"], "has": ["setting"], "shows": ["field", "setting"]}
+  ],
+  "run": [
+    {"id": "run-counts", "text": "Not met: {not_met}. Met: {met}. Not assessed: {not_assessed}. Not applicable: {not_applicable}."},
+    {"id": "run-total", "text": "Checks the rules answered in this run: {checks}."},
+    {"id": "run-not-met-first", "text": "Checks that are not met come first, the most severe first.", "min": {"not_met": 1}},
+    {"id": "run-mandatory-not-met", "text": "Mandatory (SHALL) requirements that are not met: {shall_not_met}.", "min": {"shall_not_met": 1}},
+    {"id": "run-none-not-met", "text": "No check in this run is not met.", "min": {"checks": 1}, "max": {"not_met": 0}},
+    {"id": "run-not-assessed", "text": "Checks Auditex could not assess: {not_assessed}. Each one's reason says why.", "min": {"not_assessed": 1}}
+  ],
+  "highlight": {"verdicts": ["not_met"], "heading": "Checks to look at first:"}
+}
