@@ -37,7 +37,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T10 | Validation pilot 3 on the system (option 2, cap 20 GPU-hours) | terra | M | hard | done |
 | M03-T11 | Pilot 4 writer: choose, fetch and qualify a stronger example writer | codex | M | hard | todo |
 | M03-T12 | Validation pilot 4 on the system (changed writer) | terra | M | hard | todo |
-| M03-T13 | One-page proposal: a different job for the model | lead | S | - | todo |
+| M03-T13 | One-page proposal: a different job for the model | lead | S | - | done |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
