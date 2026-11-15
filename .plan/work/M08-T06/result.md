@@ -84,5 +84,5 @@ finding: AAD 2.1, 3.6, 3.9 expected met, got not met: the DT policies stay repor
 finding: AAD 9.1 expected met, got not met: the policy was never created (no agent SKU, DEC-008 named gap).
 finding: SS 4.1 expected not met, got met: phase D could not disable 'Messages have been delayed' (kit finding, DEC-091).
 finding: TEAMS 5.1 expected met, got not met: the org-wide Microsoft apps setting is portal-only and was left manual (DEC-091); app-only cannot read the unified settings.
-finding: AAD 7.5 expected not met, got met: the kit expects direct GA and bg assignments without StartDateTime to fail; needs a look (product or kit) in a later round.
+finding: AAD 7.5 expected not met, got met: the four Global Administrator assignments all carry StartDateTime equal to the collection time (15 Nov 07:16Z), so a direct, permanent assignment reads as dated; the product should treat an instance start at evaluation time as no start date (ScubaGear's null), or read the schedule's own start. Product finding for a later round.
 finding: PP 3.1 is now decided (not met, tenant isolation off) through M08-T04's read; DEC-061 had it not assessed by design (DEC-094).
