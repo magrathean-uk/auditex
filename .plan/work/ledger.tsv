@@ -679,3 +679,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-15T04:57:23Z	REV-M08-T03-codex	codex	codex	gpt-6.1-sol	high	readonly	0	96		done	main	v4
 2026-11-15T05:26:46Z	REV-M08-T13	codex	codex	gpt-6.1-sol	high	readonly	0	162		done	task/M08-T13-live-shapes	v4
 2026-11-15T05:55:24Z	CHK-M08-T13	terra	claude-4	claude-sonnet-5-5	high	readonly	0	1876	0.4173	done	task/M08-T13-live-shapes	v4
+2026-11-15T08:00:22Z	REV-M07-T17-extras	codex	codex	gpt-6.1-sol	high	readonly	0	115		done	main	v4
+2026-11-15T08:02:31Z	REV-M07-T17-extras	codex	codex	gpt-6.1-sol	high	readonly	0	90		done	main	v4
