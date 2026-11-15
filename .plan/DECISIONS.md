@@ -891,3 +891,9 @@
 - decision: REV-M03-T11 approved the pilot-4 writer (Qwen3.8-Flash-Next 812d96e1, medium reasoning, four candidates per row, first passing kept; 13.7612 GPU-hours to qualify) and found the dataround check has no scored pilot-4 verifier yet, so M03-T12's verify cannot pass. M03-T16 (codex, CPU) adds it, reviewed by the other vendor. M03-T12 starts generation and judging at once, because the pass rule, judge and selection rule are frozen; its verify waits for M03-T16. Generation runs all four candidates per row as qualified (no change to the reviewed generate.py), sharded across many nodes (about 84 node-hours for 760 candidates; no GPU cap, DEC-100) so it ends inside G's sign-in window where possible.
 - why: REV-M03-T11 findings 1 to 3.
 - approver: auto
+
+## DEC-111 The question-answering job stops: its pilot failed (amendment 10)
+- date: 2026-11-15
+- decision: M03-T15 ran the one validation pilot (pilot-4 writer, four candidates per question, first passing the fail-closed hard checks kept, gpt-oss judge in both orders) and missed both parts of the pass rule: hard-check rate 0.9015 (833 of 924 candidates) against 0.95, preference 0.5281 band 0.5065-0.5519 against 0.729 (21 wins, 202 ties, 8 losses). 275.7845 GPU-hours. Under amendment 10 the job stops; no training on it; the shipped release is unchanged. The lead restored the pinned pass rule text in the kit runbook's section 16, which an older copy had replaced (the pilot's own pass rule matched the pinned sha256 bfcc1a4c).
+- why: as with the explainer, the fixed-text baseline already answers well; most model answers tie with it.
+- approver: auto (amendment 10 rule under G's DEC-104)
