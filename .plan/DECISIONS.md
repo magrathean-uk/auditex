@@ -883,4 +883,5 @@
 - date: 2026-11-15
 - decision: M09-T02 leaves 40 product-layer tests failing because the product still emits the removed flags; merging it alone would break `main`. M09-T03 branches from the M09-T02 head (ead2ec0) while REV-M09-T02 and CHK-M09-T02 run; both merge together, M09-T02 first, with one `make test` after the pair. M09-T03's files gain the engine files D2 needs (the Microsoft 365 CLI Exchange collector and adapter, `m365_home.py`) and the deprecated helpers M09-T02 kept for the product (`profiles.py`, `selection.py`), so that M09-T03 removes them once the product no longer calls them. A REV-M09-T02 repair lands on the M09-T02 branch and M09-T03 rebases onto it.
 - why: M09-T02's result.
+- addendum (REV-M09-T02 item 3): `tenant-bootstrap/tests/test_remaining_population_gaps.py` joins M09-T02's files; it asserts the lab collector script's options, which M09-T02 had to change.
 - approver: auto
