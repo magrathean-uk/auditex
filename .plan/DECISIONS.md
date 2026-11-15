@@ -819,3 +819,8 @@
 - why: G wants the explainer in the end, on several base families; the one blocking question is the example writer's quality.
 - consequences: DEC-053's open choice is closed by this entry; the parked-case amendment (AMEND-4) does not merge. M03 is re-planned (amendment 8) by the lead as auto.
 - approver: G (delegated to the manager, who decided; relayed 15 Nov 2026)
+
+## DEC-099 M08-T14 files widened for its repair round
+- decision: the files line adds the remediated-demo generator, output_redaction.py (the D5 field-name list) and three tests whose fixtures or counts the new read changes, and the adapter doc the lead fixed.
+- why: REV-M08-T14 and CHK-M08-T14 at 1310ec1 named them.
+- approver: auto
