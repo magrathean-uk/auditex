@@ -842,3 +842,9 @@
 - decision: G, through the manager (11:05 GMT), on stop / another pilot with a different writer / a different job: "ok do all im back". The manager, on G's delegation: the release ships with the fixed-text explainer; one more pilot of the same job with a changed example writer, one attempt, same bar (a fail closes that line); in parallel a one-page proposal for a different job for the model, recommended job first, which G picks before any training on it; the pipeline stays base-agnostic (Qwen, Mistral, Gemma); GPU uncapped (DEC-100), usage reported.
 - lead's writer change for pilot 4: the strongest open-weight instruct model that runs on one node of the system, from a family other than the judge's (gpt-oss) and other than the pilot 1-3 writer if a stronger one fits (EU-first inside the noise band), with its reasoning on; four candidates per row, the first that passes every frozen check kept (the judge never selects); prompt v3 and its exemplars unchanged.
 - approver: G (delegated to the manager, who decided)
+
+## DEC-103 Manager chat passover
+- date: 2026-11-15
+- decision: the manager role moved to session local_a865e722-53ca-49b6-a31a-c8c65b33d91c ("Manager chat passover", 12:40 GMT); the old manager chat is closed. The lead sends DEC-073 messages (G's hands, G-only decisions, milestone landings, full stops) there from now on.
+- why: the manager's passover message.
+- approver: manager
