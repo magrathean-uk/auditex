@@ -728,3 +728,12 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-15T19:54:49Z	CHK-M09-T03	terra	claude-4	claude-sonnet-5-5	xhigh	readonly	0	462	1.3815	done	task/M09-T03-product-cert-only	v4
 2026-11-15T19:57:07Z	REV-M09-T03	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	600		done	task/M09-T03-product-cert-only	v4
 2026-11-15T20:36:07Z	M03-T12	terra	claude-5	claude-sonnet-5-5	xhigh	branch	0	9668	2.4313	done	task/M03-T12-pilot4	v4
+2026-11-15T20:59:09Z	ASTRA-trackB	astra	codex2	gpt-6-astra	high	readonly	0	98		done	main	v4
+2026-11-15T21:27:41Z	M10-T02	sol	claude-4	claude-opus-5-5	xhigh	branch	0	1361	6.4309	done	task/M10-T02-answer-checks	v4
+2026-11-15T21:33:08Z	REV-M10-T02	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	303		done	task/M10-T02-answer-checks	v4
+2026-11-15T21:47:21Z	M10-T02	sol	claude-4	claude-opus-5-5	xhigh	branch	0	807	4.1001	done	task/M10-T02-answer-checks	v4
+2026-11-15T21:55:00Z	REV-M10-T02	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	427		done	task/M10-T02-answer-checks	v4
+2026-11-15T22:00:15Z	M09-T03	sol	claude-1	claude-opus-5-5	xhigh	branch	0	4926	5.5663	done	task/M09-T03-product-cert-only	v4
+2026-11-15T22:09:23Z	REV-M09-T03	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	533		done	task/M09-T03-product-cert-only	v4
+2026-11-15T22:12:41Z	M10-T02	sol	claude-4	claude-opus-5-5	xhigh	branch	0	1025	4.7134	done	task/M10-T02-answer-checks	v4
+2026-11-15T22:16:58Z	CHK-M09-T03	terra	claude-3	claude-sonnet-5-5	xhigh	readonly	0	988	2.0469	done	task/M09-T03-product-cert-only	v4
