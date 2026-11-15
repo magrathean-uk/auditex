@@ -830,3 +830,9 @@
 - decision: G, in the lead chat (15 Nov, about 09:04 GMT): "also no GPU cap, use whatever u want". The Track B stage caps (DEC-001, DEC-098) no longer stop a run; the only limit is the allocation itself (20,000 GPU-hours, ends 31 Jan 2027). Usage is still inventoried per task and reported.
 - why: G's instruction.
 - approver: G
+
+## DEC-101 Track B stops: pilot 3 failed (DEC-098 rule 4)
+- date: 2026-11-15
+- decision: M03-T10 ran the one option 2 attempt (prompt v3 with nine lab-run exemplars) and missed: 11 of 190 headroom rows won in both orders, filtered preference 0.5206 band 0.5094-0.5337 against 0.729, 2.77 GPU-hours. Under DEC-098 rule 4 Track B stops; M03-T07, M03-T02, M03-T03 and M03-T04 do not run; no further pilot without G. The release keeps the fixed-text explainer.
+- why: the exemplars cut misread values (frozen-check passes 213 to 238 of 267, unfiltered losses 73 to 43) but most rewritten explanations still tie with the plain template (213 ties); the bar is far out of reach.
+- approver: auto (the manager's rule 4 under G's delegation)

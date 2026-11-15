@@ -34,7 +34,7 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T07 | Regenerate, judge-filter and register data v2 | terra | M | - | todo |
 | M03-T08 | Add the data-round checks to the kit verifier | sol | M | hard | done |
 | M03-T09 | Teacher prompt v3 seeded with real lab-run explanations, and the pilot-3 checks | codex | M | hard | done |
-| M03-T10 | Validation pilot 3 on the system (option 2, cap 20 GPU-hours) | terra | M | hard | todo |
+| M03-T10 | Validation pilot 3 on the system (option 2, cap 20 GPU-hours) | terra | M | hard | done |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
