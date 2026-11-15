@@ -793,13 +793,44 @@ class Bundle:
 
 
 SPO_SCALARS = ("RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays")
+# The opt-in SharePoint admin read (collector sharepoint_admin, the SharePoint admin API tenant read) carries
+# the fields Graph's sharePointSettings lacks; SharingCapability and SharingDomainRestrictionMode still come from Graph.
+SPO_ADMIN_COLLECTOR = "sharepoint_admin"
+SPO_ADMIN_OPERATION = "tenantSettings"
+SPO_ADMIN_FIELDS = ("ODBSharingCapability", "DefaultSharingLinkType", "DefaultLinkPermission", "FileAnonymousLinkType",
+                    "FolderAnonymousLinkType", *SPO_SCALARS)
+
+
+def spo_admin_settings(bundle: Bundle) -> dict[str, Any]:
+    """The SharePoint admin read's settings, or ``{}`` when the run has none to use.
+
+    A run without the collector, or whose admin read was skipped or failed (its coverage gap names why), keeps the
+    Graph-only answers. A read reported ``ok`` must be one row of known fields, else the section withholds.
+    """
+    payload, _ = bundle._collector_payload(SPO_ADMIN_COLLECTOR)
+    section = payload.get(SPO_ADMIN_OPERATION) if isinstance(payload, dict) else None
+    if not isinstance(section, dict) or section.get("status") != "ok":
+        return {}
+    rows = bundle.operation(SPO_ADMIN_COLLECTOR, SPO_ADMIN_OPERATION)
+    _require(len(rows) == 1, SPO_ADMIN_OPERATION)
+    bundle.known_fields(rows[0], set(SPO_ADMIN_FIELDS))
+    return {key: rows[0][key] for key in SPO_ADMIN_FIELDS if key in rows[0]}
+
+
+def spo_with_admin(raw: dict[str, Any], admin: dict[str, Any]) -> dict[str, Any]:
+    """Graph's settings row with each admin field in place of any Graph spelling of it."""
+    drop = {alias for key in admin for alias in (key, key[0].lower() + key[1:])}
+    if "ODBSharingCapability" in admin:
+        drop |= {"oneDriveSharingCapability", "odbSharingCapability"}
+    return {**{key: value for key, value in raw.items() if key not in drop}, **admin}
 
 
 def _spo(bundle: Bundle) -> Any:
     normal = bundle.normalised("sharepoint_tenant_settings")
     rows = bundle.alternatives([("sharepoint_access", "sharePointSettings"), ("onedrive_posture", "sharePointSettings")])
     _require(len(rows) == 1)
-    raw, result = rows[0], {}
+    admin = spo_admin_settings(bundle)
+    raw, result = spo_with_admin(rows[0], admin), {}
     read = [*ENUM_NAME_KEYS, *SPO_SCALARS]
     bundle.known_fields(raw, {*read, *(k[0].lower() + k[1:] for k in read), "oneDriveSharingCapability", "odbSharingCapability"})
     canonical = {"SharingCapability": "sharing_capability", "ODBSharingCapability": "onedrive_sharing_capability"}
@@ -809,6 +840,8 @@ def _spo(bundle: Bundle) -> Any:
             value = raw.get(key, raw.get("oneDriveSharingCapability", raw.get("odbSharingCapability")))
         if key in canonical:
             values = [r[canonical[key]] for r in normal if r.get("read_state") == "collected" and canonical[key] in r]
+        # A field only the admin read carries (Graph never reads the OneDrive level) is judged as read from it.
+        if key in canonical and (values or key not in admin):
             _require(bool(values), key, "missing_field")
             _require(all(v == values[0] for v in values), key)
             reverse = {str(v).split(" (")[0]: n for n, v in names.items()}

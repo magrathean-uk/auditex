@@ -22,6 +22,10 @@ Allowed:
   documented Graph pattern rules: any ``Get-Mg*Attachment*`` and any ``Get-Mg*Content``.
 * Microsoft365DSC: the PowerShell rules plus ``Export-M365DSCConfiguration``, the one export
   cmdlet that reads the tenant (it writes only local files).
+* SharePoint admin REST (``sharepoint_admin_request_violation``): the opt-in ``sharepoint_admin``
+  collector sends one request, ``GET https://<tenant>-admin.sharepoint.com/_api/SPO.Tenant``, with no
+  body, no query and only the Authorization, Accept and User-Agent headers. Any other verb, host,
+  path, query, header or body is refused before a token is attached or the network is touched.
 
 Both languages are checked as plain ASCII: any non-ASCII character or control character other
 than tab, line feed and carriage return is refused, because the CLI and PowerShell parsers treat
@@ -34,6 +38,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePath
 
@@ -537,3 +542,80 @@ def refusal_response(command: str, exc: CommandRefused) -> dict[str, str]:
         "command": command,
         "refusal_reason": exc.reason,
     }
+
+
+# SharePoint admin REST -----------------------------------------------------------------------------
+#
+# Pinned from ScubaGear's API catalogue (schemas/ScubaGearApiCatalog.json, entries
+# Get-SharePointAdminApiEndpoint and Get-SPOTenantRest): the tenant settings are one GET of
+# ``/_api/SPO.Tenant`` on ``https://{domain}-admin.sharepoint.com`` with Accept
+# ``application/json;odata=verbose``. ``{domain}`` is the prefix of the tenant's current SharePoint
+# host, read from the Graph root site (``siteCollection.hostname``; commercial and GCC).
+SHAREPOINT_ADMIN_METHOD = "GET"
+SHAREPOINT_ADMIN_READ_PATHS = frozenset({"/_api/SPO.Tenant"})
+SHAREPOINT_ADMIN_ACCEPT = "application/json;odata=verbose"
+SHAREPOINT_ADMIN_HOST_SUFFIX = "-admin.sharepoint.com"
+# Header names the read may carry, compared case-insensitively; nothing else (no method override).
+SHAREPOINT_ADMIN_HEADERS = frozenset({"authorization", "accept", "user-agent"})
+_SHAREPOINT_PREFIX = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,55}[a-z0-9])?")
+_PRINTABLE_URL = re.compile(r"[\x21-\x7e]+")
+
+
+class RequestRefused(ValueError):
+    """An HTTP request that is not one of the pinned SharePoint admin reads; nothing was sent."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def sharepoint_admin_host(prefix: object) -> str | None:
+    """``<prefix>-admin.sharepoint.com`` for a plain lower-case tenant prefix, else None."""
+    if not isinstance(prefix, str) or not _SHAREPOINT_PREFIX.fullmatch(prefix):
+        return None
+    return f"{prefix}{SHAREPOINT_ADMIN_HOST_SUFFIX}"
+
+
+def sharepoint_admin_request_violation(
+    method: object, url: object, *, headers: Mapping[str, object] | None = None, body: object = None,
+) -> str | None:
+    """Why a request to the SharePoint admin host is refused, or None when it is the pinned read.
+
+    The URL must be exactly ``https://<prefix>-admin.sharepoint.com/_api/SPO.Tenant`` in canonical
+    form: printable ASCII only (urlsplit would silently drop a tab or line feed), lower-case host, no
+    user information, port, trailing dot, parameters, query or fragment, and no percent-encoding.
+    """
+    if method != SHAREPOINT_ADMIN_METHOD:
+        return f"{method!r} is not the pinned GET" if isinstance(method, str) else "the method must be the string GET"
+    if body is not None:
+        return "a SharePoint admin read must not carry a body"
+    if not isinstance(url, str) or not _PRINTABLE_URL.fullmatch(url):
+        return "the URL must be printable ASCII without spaces"
+    for path in sorted(SHAREPOINT_ADMIN_READ_PATHS):
+        if not url.startswith("https://") or not url.endswith(path):
+            continue
+        host = url[len("https://"):len(url) - len(path)]
+        if host.endswith(SHAREPOINT_ADMIN_HOST_SUFFIX) and sharepoint_admin_host(host[: -len(SHAREPOINT_ADMIN_HOST_SUFFIX)]) == host:
+            break
+    else:
+        return "requests may only be GET https://<tenant>-admin.sharepoint.com/_api/SPO.Tenant"
+    if headers is not None:
+        if not isinstance(headers, Mapping):
+            return "headers must be a mapping"
+        names = [str(name).strip().lower() for name in headers]
+        if len(set(names)) != len(names) or set(names) - SHAREPOINT_ADMIN_HEADERS:
+            return "only the Authorization, Accept and User-Agent headers are allowed"
+        accept = next((value for name, value in headers.items() if str(name).strip().lower() == "accept"), None)
+        if accept is not None and accept != SHAREPOINT_ADMIN_ACCEPT:
+            return "the Accept header must be the pinned application/json;odata=verbose"
+    return None
+
+
+def check_sharepoint_admin_request(
+    method: object, url: object, *, headers: Mapping[str, object] | None = None, body: object = None,
+) -> str:
+    """Return ``url`` when the request is the pinned SharePoint admin read; raise RequestRefused otherwise."""
+    reason = sharepoint_admin_request_violation(method, url, headers=headers, body=body)
+    if reason is not None:
+        raise RequestRefused(reason)
+    return str(url)

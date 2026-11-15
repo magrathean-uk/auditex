@@ -241,3 +241,59 @@ def test_compliance_session_reads_are_declared_read_only_commands() -> None:
     )
     assert ledger["commands"]["write_calls"] == [{"adapter": "powershell_graph", "command": "Set-DlpCompliancePolicy"}]
     assert ledger["outside_declared"]["commands"] == [{"adapter": "powershell_graph", "command": "Set-DlpCompliancePolicy"}]
+
+
+SHAREPOINT_ADMIN_ROW = {
+    "collector": "sharepoint_admin", "type": "sharepoint_admin_rest", "method": "GET", "name": "tenantSettings",
+    "endpoint": "https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant", "status": "ok", "item_count": 1,
+}
+
+
+def _sharepoint_event(method: str = "GET", path: str = "/_api/SPO.Tenant", status: int | None = 200) -> dict:
+    return {"event": "sharepoint_admin_rest.request", "details": {
+        "method": method, "host": "{tenant}-admin.sharepoint.com", "path": path, "status_code": status}}
+
+
+def _sharepoint_inventory(events: list[dict]) -> dict:
+    return build_api_call_inventory(platform="m365", selected_collectors=["sharepoint_admin"], capability_rows=[],
+                                    coverage_rows=[SHAREPOINT_ADMIN_ROW], data_handling={"read_only": True},
+                                    audit_events=[{"event": "run.started", "details": {}}, *events])
+
+
+def test_the_sharepoint_admin_read_is_a_declared_observed_get() -> None:
+    inventory = _sharepoint_inventory([_sharepoint_event(status=429), _sharepoint_event()])
+    [call] = inventory["observed_calls"]
+    assert call["method"] == "GET" and call["access_mode"] == "read" and not call["write_actions"]
+    ledger = inventory["observed_ledger"]["sharepoint_admin_rest"]
+    assert ledger["request_attempts"] == 2 and ledger["methods_seen"] == ["GET"] and ledger["write_calls"] == []
+    assert ledger["endpoints"][0]["endpoint"] == SHAREPOINT_ADMIN_ROW["endpoint"]
+    assert ledger["endpoints"][0]["statuses"] == {"429": 1, "200": 1}
+    assert inventory["observed_ledger"]["outside_declared"]["sharepoint_admin_rest"] == []
+    assert inventory["counts"]["observed_sharepoint_admin_rest_requests"] == 2
+    assert inventory["safety"]["read_only"] is True and "GET" in inventory["safety"]["observed_methods"]
+
+
+def test_a_non_get_or_refused_sharepoint_admin_call_is_never_read_only() -> None:
+    written = _sharepoint_inventory([_sharepoint_event(method="POST")])
+    assert written["safety"]["read_only"] is False and written["safety"]["write_actions"] is True
+    assert {"method": "POST", "endpoint": SHAREPOINT_ADMIN_ROW["endpoint"]} in written["safety"]["observed_write_calls"]
+    refused = _sharepoint_inventory([{"event": "sharepoint_admin_rest.refused", "details": {
+        "method": "GET", "host": "{tenant}-admin.sharepoint.com", "path": "/_api/SPO.Tenant", "reason": "query"}}])
+    assert refused["safety"]["refused_calls"] == 1 and refused["safety"]["read_only"] is False
+
+
+def test_an_undeclared_sharepoint_admin_path_is_listed_outside_the_declaration() -> None:
+    inventory = _sharepoint_inventory([_sharepoint_event(path="/_api/SPO.Tenant/sites")])
+    outside = inventory["observed_ledger"]["outside_declared"]
+    assert outside["sharepoint_admin_rest"] == [
+        {"method": "GET", "endpoint": "https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant/sites"}]
+    assert outside["count"] == 1
+
+
+def test_a_ledger_written_before_the_sharepoint_section_still_applies() -> None:
+    from azure_tenant_audit.api_inventory import _apply_ledger, observe_audit_events
+
+    ledger = observe_audit_events([{"event": "run.started", "details": {}}])
+    del ledger["sharepoint_admin_rest"]
+    applied = _apply_ledger({"safety": {"read_only": True}, "counts": {}}, ledger)
+    assert applied["counts"]["observed_sharepoint_admin_rest_requests"] == 0

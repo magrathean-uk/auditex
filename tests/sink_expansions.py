@@ -40,6 +40,7 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
     'azure_tenant_audit.collectors.*': (
         'azure_tenant_audit.collectors.power_bi:PowerBICollector.run',
         'azure_tenant_audit.collectors.power_platform:PowerPlatformCollector._safe_get',
+        'azure_tenant_audit.collectors.sharepoint_admin:_send',
     ),
     'azure_tenant_audit.dns_lookup:*': (
         'azure_tenant_audit.dns_lookup:DohClient.query_detailed',

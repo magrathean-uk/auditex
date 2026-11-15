@@ -2760,3 +2760,22 @@ def test_neighbouring_valid_users_shapes_still_project_and_redact(complete_bundl
     assert all(u['DisplayName'].startswith('User ') and u['DisplayName'] != PERSON for u in p['privileged_users'].values())
     assert all(u['OnPremisesImmutableId'] is None or u['OnPremisesImmutableId'].startswith('Id ')
                for u in p['privileged_users'].values()) and 'immutable' not in canonical(p)
+
+
+def test_spo_admin_read_fills_what_graph_settings_lack(complete_bundle):
+    # Graph's sharePointSettings carries the sharing level and domain mode only; the opt-in admin read the rest.
+    graph_only = {'SharingCapability': 2, 'SharingDomainRestrictionMode': 1}
+    operation(complete_bundle, 'sharepoint_access', 'sharePointSettings', [graph_only])
+    write(complete_bundle, 'normalized/sharepoint_tenant_settings.json', {'records': [{
+        'read_state': 'collected', 'sharing_capability': 'externalUserAndGuestSharing'}]})
+    p = project_run(complete_bundle, redact=False)
+    assert p['SPO_tenant'] == NOT_COLLECTED
+    assert p.report['sections']['SPO_tenant']['detail'] == {'field': 'ODBSharingCapability', 'kind': 'missing_field'}
+    operation(complete_bundle, 'sharepoint_admin', 'tenantSettings', [{k: v for k, v in SPO.items() if k not in graph_only}],
+              item_count=1)
+    p = project_run(complete_bundle, redact=False)
+    assert p['SPO_tenant'] == EXPECTED['SPO_tenant']
+    assert 'raw/sharepoint_admin.json' in p.report['sections']['SPO_tenant']['source']
+    operation(complete_bundle, 'sharepoint_admin', 'tenantSettings', [], status='skipped',
+              reason='sharepoint_admin_certificate_required', section_scoped=True)
+    assert project_run(complete_bundle, redact=False)['SPO_tenant'] == NOT_COLLECTED

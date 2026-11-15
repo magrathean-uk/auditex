@@ -13,6 +13,20 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ### Collection
 
+- **Opt-in SharePoint admin settings (MS.SHAREPOINT 1.2, 2.1, 2.2, 3.1-3.3).** A new collector, `sharepoint_admin`, off by
+  default and in no profile or preset (select it with `--collectors sharepoint_admin`), reads the eight SharePoint tenant
+  settings Graph does not carry with one `GET https://<prefix>-admin.sharepoint.com/_api/SPO.Tenant`; the prefix is the
+  tenant's current SharePoint host from Graph's root site (`siteCollection.hostname`, so a renamed tenant is read at its
+  new name), never guessed and never the initial `onmicrosoft.com` domain (route pinned from ScubaGear's API catalogue).
+  App-only runs need a certificate and the SharePoint application permission `Sites.FullControl.All`; a secret-only run
+  records the named skip `sharepoint_admin_certificate_required` and requests no SharePoint token. Delegated runs mint
+  the token (SharePoint `AllSites.FullControl`) silently from the run's one sign-in, or record
+  `sharepoint_admin_second_sign_in_required` and open no second prompt. Both permissions are write-capable (full control
+  of every site collection); Auditex makes no mutating call: a read guard admits only that body-free GET, `app_token_for`
+  never mints a SharePoint token from a client secret, and the API ledger records the read under
+  `observed_ledger.sharepoint_admin_rest`. `SPO_tenant` and the SharePoint rule view take the eight fields from it; runs
+  without it keep their Graph-only answers. The admin guide and the security and privacy reference state the blast
+  radius and the removal.
 - **Permission docs and config list exactly what the default collectors need.** `SharePointTenantSettings.Read.All` (SharePoint
   and OneDrive tenant settings) and `DeviceManagementScripts.Read.All` (Intune script metadata; Auditex drops the body) are
   now declared by the SharePoint, OneDrive and Intune collectors, `collector-definitions.json`, `collector-permissions.json`,

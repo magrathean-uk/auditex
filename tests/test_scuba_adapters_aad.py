@@ -848,3 +848,93 @@ def test_pascal_drops_annotations_and_copies_containers():
     assert result == {"Outer": [{"Id": "mock-id"}]}
     result["Outer"].append({})
     assert len(value["outer"]) == 1
+
+
+# The opt-in SharePoint admin read (M08-T12) -----------------------------------------------------------
+
+SPO_ADMIN_POLICIES = ("MS.SHAREPOINT.1.2v1", "MS.SHAREPOINT.2.1v1", "MS.SHAREPOINT.2.2v1",
+                      "MS.SHAREPOINT.3.1v1", "MS.SHAREPOINT.3.2v1", "MS.SHAREPOINT.3.3v2")
+GRAPH_SPO = {"SharingCapability": 2, "SharingDomainRestrictionMode": 1}
+ADMIN_SPO = {k: v for k, v in SPO.items() if k not in GRAPH_SPO}
+
+
+def graph_settings_only(run):
+    """What Graph's sharePointSettings carries: no OneDrive level, link, expiry or attestation field."""
+    operation(run, "sharepoint_access", "sharePointSettings", [GRAPH_SPO])
+    write(run, "normalized/sharepoint_tenant_settings.json", {"records": [{
+        "read_state": "collected", "sharing_capability": "externalUserAndGuestSharing"}]})
+
+
+def spo_verdicts(run):
+    import auditex.rule_assessment as rule_assessment
+
+    rule_assessment.assess_run(run, policies=[*SPO_ADMIN_POLICIES, "MS.SHAREPOINT.1.1v1"])
+    result = json.loads((run / "model_assessment.json").read_text())
+    return {row["policy_id"]: value_rule_verdict(row) for row in result["policies"]}
+
+
+def test_sp_admin_read_decides_the_six_rows_and_keeps_the_graph_rows(run):
+    graph_settings_only(run)
+    before = spo_verdicts(run)
+    assert all(before[policy] == "not_assessed" for policy in SPO_ADMIN_POLICIES)
+    assert before["MS.SHAREPOINT.1.1v1"] != "not_assessed"
+    operation(run, "sharepoint_admin", "tenantSettings", [ADMIN_SPO], item_count=1)
+    assert projection._spo(bundle(run)) == aad._spo_rule(bundle(run)) == [SPO]
+    assert projection.project_run(run).rule_sections["SPO_tenant"] == [SPO]
+    after = spo_verdicts(run)
+    assert all(after[policy] in {"met", "not_met"} for policy in SPO_ADMIN_POLICIES), after
+    assert after["MS.SHAREPOINT.1.1v1"] == before["MS.SHAREPOINT.1.1v1"]
+
+
+@pytest.mark.parametrize("metadata", [
+    {"status": "skipped", "reason": "sharepoint_admin_certificate_required", "section_scoped": True},
+    {"status": "skipped", "reason": "sharepoint_admin_second_sign_in_required", "section_scoped": True},
+    {"status": "failed", "error_class": "sharepoint_admin_access_denied"},
+], ids=["secret_skip", "delegated_skip", "failed"])
+def test_sp_skipped_or_failed_admin_read_keeps_the_graph_only_answers(run, metadata):
+    graph_settings_only(run)
+    graph_only = projection.project_run(run).rule_sections["SPO_tenant"]
+    assert graph_only == [GRAPH_SPO]
+    operation(run, "sharepoint_admin", "tenantSettings", [], **metadata)
+    assert projection.project_run(run).rule_sections["SPO_tenant"] == graph_only
+    assert aad._spo_rule(bundle(run)) == [GRAPH_SPO]
+
+
+@pytest.mark.parametrize("admin", [
+    {**ADMIN_SPO, "FileAnonymousLinkType": 99},
+    {**ADMIN_SPO, "EmailAttestationRequired": 1},
+    {**ADMIN_SPO, "DefaultSharingLinkType": 3},
+], ids=["unseen_enum", "invalid_type", "outside_model_domain"])
+def test_sp_invalid_admin_value_withholds_the_model_view(run, admin):
+    graph_settings_only(run)
+    operation(run, "sharepoint_admin", "tenantSettings", [admin], item_count=1)
+    with pytest.raises(projection.Unavailable):
+        projection._spo(bundle(run))
+
+
+def test_sp_admin_onedrive_level_must_agree_with_a_graph_reading_of_it(run):
+    operation(run, "sharepoint_access", "sharePointSettings", [GRAPH_SPO])
+    write(run, "normalized/sharepoint_tenant_settings.json", {"records": [{
+        "read_state": "collected", "sharing_capability": "externalUserAndGuestSharing",
+        "onedrive_sharing_capability": "existingExternalUserSharingOnly"}]})
+    operation(run, "sharepoint_admin", "tenantSettings", [ADMIN_SPO], item_count=1)
+    assert projection._spo(bundle(run)) == [SPO]
+    operation(run, "sharepoint_admin", "tenantSettings", [{**ADMIN_SPO, "ODBSharingCapability": 0}], item_count=1)
+    with pytest.raises(projection.Unavailable):
+        projection._spo(bundle(run))
+
+
+def test_sp_admin_read_must_be_one_row(run):
+    graph_settings_only(run)
+    operation(run, "sharepoint_admin", "tenantSettings", [ADMIN_SPO, ADMIN_SPO], item_count=2)
+    with pytest.raises(projection.Unavailable):
+        projection._spo(bundle(run))
+    with pytest.raises(projection.Unavailable):
+        aad._spo_rule(bundle(run))
+
+
+def test_sp_admin_fields_replace_any_graph_spelling_of_them():
+    raw = {"sharingCapability": "anyone", "oneDriveSharingCapability": "disabled", "defaultSharingLinkType": "view"}
+    merged = projection.spo_with_admin(raw, {"ODBSharingCapability": 3, "DefaultSharingLinkType": 1})
+    assert merged == {"sharingCapability": "anyone", "ODBSharingCapability": 3, "DefaultSharingLinkType": 1}
+    assert projection.spo_with_admin(raw, {}) == raw

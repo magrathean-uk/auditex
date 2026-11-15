@@ -14,7 +14,7 @@ Auditex writes `api-inventory.json` into every finalized bundle. This artifact i
 
 ## Observed ledger
 
-`AuditWriter` builds `observed_ledger` from the `graph.request.*`, `graph.token.*`, `teams_admin_rest.request` and `command.*` events in `audit-log.jsonl` every time it writes `api-inventory.json`, so a caller cannot write the ledger from declarations alone. The declared rows above stay as the expected set the observed calls are compared with.
+`AuditWriter` builds `observed_ledger` from the `graph.request.*`, `graph.token.*`, `teams_admin_rest.request`, `sharepoint_admin_rest.*` and `command.*` events in `audit-log.jsonl` every time it writes `api-inventory.json`, so a caller cannot write the ledger from declarations alone. The declared rows above stay as the expected set the observed calls are compared with.
 
 ```
 observed_ledger
@@ -29,12 +29,17 @@ observed_ledger
     request_attempts, methods_seen
     endpoints[]  method, host, path, endpoint, count, statuses
     write_calls[]  method, endpoint (non-GET, or UNVERIFIED for a missing method)
+  sharepoint_admin_rest
+    request_attempts, methods_seen
+    endpoints[]  method, host ({tenant}-admin.sharepoint.com), path, endpoint, count, statuses
+    write_calls[]  method, endpoint (non-GET, or UNVERIFIED for a missing method)
+    refused[], refused_count  (requests the read guard refused before sending; they count into refused_calls)
   commands
     executed[]   adapter, command (the command words), family, read_only, count, statuses
     write_calls[], refused[], refused_count
   log            readable, malformed_lines
   auth           token_requests, token_succeeded, token_failed
-  outside_declared  graph[], teams_admin_rest[], commands[], count
+  outside_declared  graph[], teams_admin_rest[], sharepoint_admin_rest[], commands[], count
 ```
 
 `auth` counts every app-token exchange with the Entra token endpoint. With a certificate credential each exchange is an msal client-credentials grant signed with the key; its `graph.token.*` events carry `mode: certificate`, the token endpoint and the scope (and a plain OAuth error code on failure), never the assertion, the key, its password, the thumbprint or a token.
@@ -231,6 +236,25 @@ In app-only runs a certificate-authenticated Teams admin API token and Global Re
 | `teams_policy` | `Get-CsTeamsMeetingBroadcastPolicy` | `Identity`, `BroadcastRecordingMode` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsMeetingBroadcastPolicy` |
 | `teams_policy` | `Get-CsTeamsClientConfiguration` | `Identity`, `AllowEmailIntoChannel` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsClientConfiguration` |
 | `teams_policy` | `Get-M365UnifiedTenantSettings` (`tenantAppSettings`) | `SettingName`, `SettingValue` (`Users` and `Groups` are dropped) | A user sign-in only; never sent by an app-only run (named skip `teams_powershell_not_supported`). Pinned read: `GET https://substrate.office.com/AdminAppCatalog/ps/v2/admin/unifiedApp/settings` with a token for resource `08ff1ce2-4973-4b08-86a3-ebed13badc7f`, commercial and GCC only (source: ScubaGear `PowerShell/ScubaGear/schemas/ScubaGearApiCatalog.json`, entries `Get-TeamsM365UnifiedTenantSettingsRest` and `Get-TeamsUnifiedApiEndpoint`; Microsoft Learn `Get-M365UnifiedTenantSettings`). The adapter sends only a token for that audience, never the Teams admin or Graph token |
+
+## SharePoint Admin Settings (opt-in)
+
+The `sharepoint_admin` collector is off by default and in no profile or preset; `--collectors sharepoint_admin` selects
+it. It closes MS.SHAREPOINT 1.2, 2.1, 2.2, 3.1, 3.2 and 3.3, whose settings Graph does not carry. The route and the host
+rule are pinned from ScubaGear's API catalogue (`PowerShell/ScubaGear/schemas/ScubaGearApiCatalog.json`, entries
+`Get-SharePointAdminApiEndpoint` and `Get-SPOTenantRest`); the permissions from Microsoft Learn, "SharePoint admin APIs
+authentication and authorization". The
+[permission guide](../guides/admin-permission-guide.md#sharepoint-admin-settings-opt-in) describes the write-capable
+permission, its blast radius and its removal.
+
+| Collector | Call | Retained fields | Permission or role |
+| --- | --- | --- | --- |
+| `sharepoint_admin` | `GET /sites/root?$select=siteCollection` (Microsoft Graph) | Nothing is stored; the root site's `siteCollection.hostname` (`<prefix>.sharepoint.com`, the current host after any SharePoint rename) gives the admin host prefix, else the named skip `sharepoint_admin_host_unresolved` | `Sites.Read.All` (read-only, already in the default set) |
+| `sharepoint_admin` | `GET https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant` (`Accept: application/json;odata=verbose`, no body, no query, redirects not followed) | `ODBSharingCapability`, `DefaultSharingLinkType`, `DefaultLinkPermission`, `RequireAnonymousLinksExpireInDays`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`, `EmailAttestationRequired`, `EmailAttestationReAuthDays`; everything else in the answer is discarded | App-only: SharePoint `Sites.FullControl.All` with a certificate (a secret run records `sharepoint_admin_certificate_required`). Delegated: SharePoint `AllSites.FullControl`, minted silently from the run's one sign-in, else `sharepoint_admin_second_sign_in_required`. Both write-capable; Auditex sends only this GET |
+
+The read guard (`check_sharepoint_admin_request`) refuses any other verb, host, path, query, header or body before the
+request is sent, and the coverage row and the `sharepoint_admin_rest.*` audit events name the host as
+`{tenant}-admin.sharepoint.com` (the token events name the token scope, as for every resource).
 
 ## Customer Use
 

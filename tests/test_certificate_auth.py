@@ -475,3 +475,25 @@ def test_password_file_and_key_paths_stay_out_of_the_module_state(certificate_ma
     state = json.dumps({key: repr(value) for key, value in vars(loaded).items()}, default=str)
     assert str(certificate_material.root) not in state and certificate_material.password not in state
     assert not any(Path(certificate_material.root).glob("*.tmp"))
+
+
+SHAREPOINT_ADMIN_ORIGIN = "https://contoso-admin.sharepoint.com"
+
+
+def test_the_sharepoint_admin_token_is_minted_from_the_certificate(certificate_material, entra):
+    from azure_tenant_audit.collectors.sharepoint_admin import token_fits
+
+    client = certificate_client(certificate_material)
+    token = client.app_token_for(SHAREPOINT_ADMIN_ORIGIN + "/.default")
+    assert [request["scope"] for request in entra.token_requests] == [SHAREPOINT_ADMIN_ORIGIN + "/.default"]
+    assert entra.token_requests[0]["grant_type"] == "client_credentials"
+    assert token_fits(token, SHAREPOINT_ADMIN_ORIGIN, delegated=False)
+
+
+@pytest.mark.parametrize("scope", [SHAREPOINT_ADMIN_ORIGIN + "/.default", "00000003-0000-0ff1-ce00-000000000000/.default"])
+def test_secret_run_never_mints_a_sharepoint_token(scope):
+    session = _SecretSession()
+    client = GraphClient(AuthConfig(tenant_id=TENANT, client_id=CLIENT_ID, client_secret="constructed-secret"),
+                         session=session)
+    assert client.app_token_for(scope) is None
+    assert session.posts == []

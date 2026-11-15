@@ -296,6 +296,17 @@
         "oneDriveSites"
       ]
     },
+    "sharepoint_admin": {
+      "enabled": false,
+      "description": "Opt-in SharePoint admin tenant settings (GET https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant, host from the Graph root site's current SharePoint hostname): OneDrive sharing, default link type and permission, anonymous link expiry and types, email attestation (MS.SHAREPOINT 1.2, 2.1, 2.2, 3.1-3.3). App-only certificate (SharePoint Sites.FullControl.All) or the run's one sign-in (SharePoint AllSites.FullControl); in no profile or preset.",
+      "required_permissions": [
+        "Sites.Read.All"
+      ],
+      "query_plan": [
+        "rootSite",
+        "tenantSettings"
+      ]
+    },
     "teams": {
       "enabled": true,
       "description": "Teams and channel configuration",
@@ -960,6 +971,7 @@
     "sharepoint",
     "sharepoint_access",
     "onedrive_posture",
+    "sharepoint_admin",
     "power_bi",
     "power_platform",
     "sentinel_xdr",

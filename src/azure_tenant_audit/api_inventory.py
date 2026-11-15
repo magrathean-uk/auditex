@@ -229,7 +229,7 @@ def _collector_plan(
 # --------------------------------------------------------------------------------------------
 # Observed ledger: facts read back from the run's own audit log, not declarations.
 #
-# GraphClient._request, Teams REST and command adapters write transport events for
+# GraphClient._request, Teams REST, SharePoint admin REST and command adapters write transport events for
 # every call they make (and for every call they refuse). The ledger below is built from those
 # events, so "read-only" and "no content read" are statements about what was sent, and the
 # declared ledger (the collectors' coverage rows) is only the expected set to compare against.
@@ -490,7 +490,7 @@ def observe_audit_events(
     platform: str = "m365",
     declared_calls: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Summarise Graph, Teams REST and command audit events into the observed ledger.
+    """Summarise Graph, Teams REST, SharePoint admin REST and command audit events into the observed ledger.
 
     Only transport and command events are counted, so the result does not change when later
     events (completion, validation) are appended to the same log.
@@ -507,6 +507,10 @@ def observe_audit_events(
     graph_refused: list[dict[str, Any]] = []
     teams: dict[tuple[str, str, str], dict[str, Any]] = {}
     teams_writes: list[dict[str, Any]] = []
+    # SharePoint admin REST (the opt-in sharepoint_admin collector): host recorded as its template, never the tenant's.
+    sharepoint: dict[tuple[str, str, str], dict[str, Any]] = {}
+    sharepoint_writes: list[dict[str, Any]] = []
+    sharepoint_refused: list[dict[str, Any]] = []
     # Redirect hops the client followed (host and path only; the query of a download URL is a credential).
     graph_redirects: dict[tuple[str, str, str], dict[str, Any]] = {}
     redirects_refused = 0
@@ -619,6 +623,27 @@ def observe_audit_events(
             entry["statuses"][str(status) if status is not None else "transport_error"] += 1
             if method != "GET":
                 teams_writes.append({"method": method, "endpoint": entry["endpoint"]})
+        elif name == "sharepoint_admin_rest.request":
+            # One event per attempted request (retries and transport failures included); no headers or token.
+            method = _text(details.get("method")).upper() or "UNVERIFIED"
+            host = _text(details.get("host"))
+            path = _text(details.get("path"))
+            entry = sharepoint.setdefault(
+                (method, host, path),
+                {"method": method, "host": host, "path": path, "endpoint": f"https://{host}{path}",
+                 "count": 0, "statuses": Counter()},
+            )
+            entry["count"] += 1
+            status = details.get("status_code")
+            entry["statuses"][str(status) if status is not None else "transport_error"] += 1
+            if method != "GET":
+                sharepoint_writes.append({"method": method, "endpoint": entry["endpoint"]})
+        elif name == "sharepoint_admin_rest.refused":
+            sharepoint_refused.append({
+                "method": _text(details.get("method")).upper(),
+                "endpoint": f"https://{_text(details.get('host'))}{_text(details.get('path'))}",
+                "reason": _text(details.get("reason")),
+            })
         elif name in {"graph.token.requested", "graph.token.interactive"}:
             auth["token_requests"] += 1
         elif name == "graph.token.succeeded":
@@ -689,6 +714,15 @@ def observe_audit_events(
         for row in _sorted_entries(teams)
         if (row["method"], row["endpoint"]) not in declared_teams
     ]
+    declared_sharepoint = {
+        (_text(call.get("method")).upper(), _text(call.get("endpoint")))
+        for call in declared if call.get("collector") == "sharepoint_admin" and call.get("method") != "COMMAND"
+    }
+    outside_sharepoint = [
+        {"method": row["method"], "endpoint": row["endpoint"]}
+        for row in _sorted_entries(sharepoint)
+        if (row["method"], row["endpoint"]) not in declared_sharepoint
+    ]
     declared_families = _declared_command_families(declared)
     if declared_families:
         outside_commands = [
@@ -728,6 +762,14 @@ def observe_audit_events(
             "endpoints": _sorted_entries(teams),
             "write_calls": teams_writes,
         },
+        "sharepoint_admin_rest": {
+            "request_attempts": sum(row["count"] for row in sharepoint.values()),
+            "methods_seen": sorted({row["method"] for row in sharepoint.values()}),
+            "endpoints": _sorted_entries(sharepoint),
+            "write_calls": sharepoint_writes,
+            "refused": sharepoint_refused[:_MAX_LISTED],
+            "refused_count": len(sharepoint_refused),
+        },
         "commands": {
             "executed": _sorted_entries(commands),
             "write_calls": [command_writes[key] for key in sorted(command_writes)],
@@ -738,8 +780,9 @@ def observe_audit_events(
         "outside_declared": {
             "graph": outside_graph[:_MAX_LISTED],
             "teams_admin_rest": outside_teams[:_MAX_LISTED],
+            "sharepoint_admin_rest": outside_sharepoint[:_MAX_LISTED],
             "commands": outside_commands[:_MAX_LISTED],
-            "count": len(outside_graph) + len(outside_teams) + len(outside_commands),
+            "count": len(outside_graph) + len(outside_teams) + len(outside_sharepoint) + len(outside_commands),
         },
     }
 
@@ -748,8 +791,11 @@ def _apply_ledger(inventory: dict[str, Any], ledger: dict[str, Any]) -> dict[str
     """Fold the observed ledger into an inventory's safety flags and counts; the flags can only get stricter."""
     graph = ledger["graph"]
     teams = ledger["teams_admin_rest"]
+    # A ledger written before the SharePoint admin read existed has no section: it observed none.
+    sharepoint = ledger.get("sharepoint_admin_rest") or {
+        "request_attempts": 0, "methods_seen": [], "endpoints": [], "write_calls": [], "refused_count": 0}
     commands = ledger["commands"]
-    write_calls = [*graph["write_calls"], *teams["write_calls"], *commands["write_calls"]]
+    write_calls = [*graph["write_calls"], *teams["write_calls"], *sharepoint["write_calls"], *commands["write_calls"]]
     content_calls = list(graph["content_read_calls"])
     safety = dict(inventory.get("safety") or {})
     counts = dict(inventory.get("counts") or {})
@@ -759,10 +805,12 @@ def _apply_ledger(inventory: dict[str, Any], ledger: dict[str, Any]) -> dict[str
     replay = ledger.get("replay")
     if isinstance(replay, Mapping):
         safety["replay_source"] = replay.get("source_file")
-    safety["observed_methods"] = sorted(set(graph["data_methods_seen"]) | set(teams["methods_seen"]))
+    safety["observed_methods"] = sorted(
+        set(graph["data_methods_seen"]) | set(teams["methods_seen"]) | set(sharepoint["methods_seen"]))
     safety["observed_write_calls"] = write_calls
     safety["observed_content_read_calls"] = content_calls
-    safety["refused_calls"] = int(graph["refused_count"]) + int(commands["refused_count"])
+    safety["refused_calls"] = (
+        int(graph["refused_count"]) + int(sharepoint.get("refused_count", 0)) + int(commands["refused_count"]))
     safety["observed_outside_declared"] = int(ledger["outside_declared"]["count"])
     log = ledger.get("log") or {}
     log_complete = (
@@ -785,6 +833,8 @@ def _apply_ledger(inventory: dict[str, Any], ledger: dict[str, Any]) -> dict[str
     counts["observed_graph_endpoints"] = len(graph["endpoints"])
     counts["observed_teams_admin_rest_requests"] = teams["request_attempts"]
     counts["observed_teams_admin_rest_endpoints"] = len(teams["endpoints"])
+    counts["observed_sharepoint_admin_rest_requests"] = sharepoint["request_attempts"]
+    counts["observed_sharepoint_admin_rest_endpoints"] = len(sharepoint["endpoints"])
     counts["observed_commands"] = sum(int(row["count"]) for row in commands["executed"])
     counts["refused_calls"] = safety["refused_calls"]
     counts["observed_outside_declared"] = safety["observed_outside_declared"]

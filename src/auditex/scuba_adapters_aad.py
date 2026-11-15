@@ -18,6 +18,8 @@ from auditex.scuba_projection import (
     _require,
     _strings,
     _text,
+    spo_admin_settings,
+    spo_with_admin,
 )
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS
 from azure_tenant_audit.resources import load_json_resource
@@ -300,7 +302,8 @@ def _ca_rule(bundle: Bundle) -> Any:
 def _spo_rule(bundle: Bundle) -> Any:
     rows = bundle.alternatives([("sharepoint_access", "sharePointSettings"), ("onedrive_posture", "sharePointSettings")])
     _require(len(rows) == 1)
-    raw, result = rows[0], {}
+    # The opt-in SharePoint admin read supplies the fields Graph lacks; without it the Graph-only answers stand.
+    raw, result = spo_with_admin(rows[0], spo_admin_settings(bundle)), {}
     for key, names in ENUM_NAME_KEYS.items():
         aliases = [key, key[0].lower() + key[1:]]
         if key == "ODBSharingCapability":

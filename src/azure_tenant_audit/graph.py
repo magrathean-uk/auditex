@@ -30,6 +30,20 @@ def _is_teams_admin_scope(scope: str) -> bool:
     return str(scope).casefold().removesuffix("/.default").rstrip("/") in _TEAMS_ADMIN_RESOURCES
 
 
+# Office 365 SharePoint Online. SharePoint refuses app-only tokens minted from a client secret ("In Entra ID when doing
+# app-only you must use a certificate to request access to SharePoint CSOM/REST API's", Microsoft Learn, Granting access
+# via Entra ID App-Only), so app_token_for mints a SharePoint token only from a certificate credential.
+_SHAREPOINT_RESOURCE_APP_ID = "00000003-0000-0ff1-ce00-000000000000"
+
+
+def _is_sharepoint_scope(scope: str) -> bool:
+    text = str(scope).strip().casefold()
+    if text.startswith(_SHAREPOINT_RESOURCE_APP_ID):
+        return True
+    host = (urlparse(text).hostname or "") if "://" in text else ""
+    return host == "sharepoint.com" or host.endswith(".sharepoint.com")
+
+
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 # Beta is opt-in per endpoint: only surfaces without a v1.0 equivalent use it, and
 # every beta call is recorded with api_version="beta" in coverage and the API ledger.
@@ -397,8 +411,8 @@ class GraphClient:
         """Client-credentials token for another resource (e.g. Exchange Online), or None outside app mode.
 
         A certificate credential mints every app token through msal; a non-Graph token that cannot be
-        acquired is None (the collector records a named gap). The Teams admin token comes only from a
-        certificate: a secret-only, delegated or token run gets None and never a secret-minted token.
+        acquired is None (the collector records a named gap). The Teams admin and SharePoint tokens come only
+        from a certificate: a secret-only, delegated or token run gets None and never a secret-minted token.
         """
         if self.auth.certificate is not None:
             try:
@@ -407,7 +421,7 @@ class GraphClient:
                 if scope == self.auth.graph_scope:
                     raise
                 return None
-        if _is_teams_admin_scope(scope):
+        if _is_teams_admin_scope(scope) or _is_sharepoint_scope(scope):
             return None
         if self.auth.access_token or self.auth.auth_mode == "interactive" or not self.auth.client_secret or not self.auth.client_id:
             return None

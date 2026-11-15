@@ -360,3 +360,97 @@ def test_static_checks_catch_a_planted_sign_in() -> None:
     )
     assert az_login_sites(planted) == ["<module>", "login", "shell"]
     assert connect_without_token(planted) == [6]
+
+
+# The opt-in SharePoint admin read (M08-T12) -----------------------------------------------------------------
+
+# A renamed tenant: the initial domain (--tenant-id) stays constructed.onmicrosoft.com; Graph's root site names the
+# current host, and every token scope and request goes there.
+SHAREPOINT_ORIGIN = "https://renamed-admin.sharepoint.com"
+
+
+class SharePointAdminEdge:
+    """Graph answers the root site's current SharePoint host; the admin host answers one tenant settings object."""
+
+    def __init__(self, session: FakeSession) -> None:
+        self.gets: list[tuple[str, str]] = []
+        real = session.request
+
+        def request(method, url, **kwargs):  # noqa: ANN001
+            if url.split("?", 1)[0].endswith("/sites/root"):
+                return _response({"id": "constructed", "siteCollection": {"hostname": "renamed.sharepoint.com"}})
+            return real(method, url, **kwargs)
+
+        session.request = request
+
+    def session(self):  # noqa: ANN201
+        edge = self
+
+        class Session:
+            def get(self, url, headers=None, **kwargs):  # noqa: ANN001
+                edge.gets.append((url, headers["Authorization"]))
+                response = _response({"d": {"ODBSharingCapability": 0, "EmailAttestationRequired": True}})
+                response.headers["Content-Type"] = "application/json;odata=verbose"
+                response._content_consumed = True  # iter_content then streams the constructed body
+                return response
+
+            def close(self) -> None:
+                return None
+
+        return Session()
+
+
+@pytest.fixture
+def sharepoint_admin(edge, monkeypatch):  # noqa: ANN001
+    from azure_tenant_audit.collectors import sharepoint_admin as spa
+
+    admin = SharePointAdminEdge(edge.session)
+    collector = spa.SharePointAdminCollector()
+    collector.session_factory = admin.session
+    monkeypatch.setitem(tenant_cli.REGISTRY, "sharepoint_admin", collector)
+    # The constructed tokens are opaque; the gate is proved in tests/test_sharepoint_admin_collector.py.
+    monkeypatch.setattr(spa, "token_fits", lambda token, origin, *, delegated: token in {
+        f"delegated:{origin}/AllSites.FullControl", f"certificate:{origin}/.default"})
+    return admin
+
+
+def _run_sharepoint_admin(tmp_path, *mode_args: str) -> int:  # noqa: ANN001
+    args = tenant_cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "constructed.onmicrosoft.com", "--out", str(tmp_path),
+        "--run-name", "sharepoint-admin", "--collectors", "sharepoint_admin", "--no-probe-first", *mode_args,
+    ])
+    return tenant_cli.run_live(args)
+
+
+def test_delegated_sharepoint_admin_read_rides_the_one_sign_in(edge, sharepoint_admin, tmp_path) -> None:  # noqa: ANN001
+    assert _run_sharepoint_admin(tmp_path, "--interactive", "--client-id", "constructed-public-app") == 0
+    assert edge.msal.interactive_count == 1
+    assert [SHAREPOINT_ORIGIN + "/AllSites.FullControl"] in edge.msal.silent_calls
+    assert sharepoint_admin.gets == [(SHAREPOINT_ORIGIN + "/_api/SPO.Tenant",
+                                      f"Bearer delegated:{SHAREPOINT_ORIGIN}/AllSites.FullControl")]
+    # The SharePoint permission never joins the Graph sign-in.
+    assert not any("sharepoint" in scope.lower() or "FullControl" in scope for scope in edge.msal.interactive_calls[0])
+
+
+def test_delegated_sharepoint_admin_read_without_consent_is_a_skip_not_a_prompt(edge, sharepoint_admin, tmp_path) -> None:  # noqa: ANN001
+    edge.msal.silent_refuses = (SHAREPOINT_ORIGIN + "/AllSites.FullControl",)
+    assert _run_sharepoint_admin(tmp_path, "--interactive", "--client-id", "constructed-public-app") == 0
+    assert edge.msal.interactive_count == 1
+    assert sharepoint_admin.gets == []
+
+
+def test_certificate_sharepoint_admin_read_never_prompts(edge, sharepoint_admin, tmp_path, certificate_material) -> None:  # noqa: ANN001
+    assert _run_sharepoint_admin(
+        tmp_path, "--client-id", "constructed-app",
+        "--certificate-path", str(certificate_material.pem), "--certificate-thumbprint", certificate_material.thumbprint,
+    ) == 0
+    assert edge.msal.interactive_count == 0 and edge.msal.public_clients == []
+    assert SHAREPOINT_ORIGIN + "/.default" in edge.confidential.scopes and edge.session.token_posts == []
+    assert sharepoint_admin.gets == [(SHAREPOINT_ORIGIN + "/_api/SPO.Tenant", f"Bearer certificate:{SHAREPOINT_ORIGIN}/.default")]
+
+
+def test_secret_run_requests_no_sharepoint_token_and_sends_nothing(edge, sharepoint_admin, tmp_path) -> None:  # noqa: ANN001
+    assert _run_sharepoint_admin(tmp_path, "--client-id", "constructed-app", "--client-secret", "constructed-secret") == 0
+    assert edge.msal.interactive_count == 0
+    assert not any("sharepoint" in scope for scope in edge.session.token_posts)
+    assert sharepoint_admin.gets == []

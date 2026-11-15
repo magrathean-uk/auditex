@@ -31,6 +31,7 @@ from .sentinel_xdr import SentinelXdrCollector
 from .service_health import ServiceHealthCollector
 from .sharepoint import SharePointCollector
 from .sharepoint_access import SharePointAccessCollector
+from .sharepoint_admin import SharePointAdminCollector
 from .teams import TeamsCollector
 from .teams_policy import TeamsPolicyCollector
 
@@ -62,6 +63,7 @@ REGISTRY = {
     "copilot_governance": CopilotGovernanceCollector(),
     "sharepoint": SharePointCollector(),
     "sharepoint_access": SharePointAccessCollector(),
+    "sharepoint_admin": SharePointAdminCollector(),
     "teams": TeamsCollector(),
     "teams_policy": TeamsPolicyCollector(),
     "reports_usage": ReportsUsageCollector(),

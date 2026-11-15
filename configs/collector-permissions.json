@@ -228,6 +228,19 @@
       ],
       "notes": "OneDrive posture uses SharePoint read APIs and site URL heuristics; admin-center-only OneDrive details may still be unavailable to Global Reader."
     },
+    "sharepoint_admin": {
+      "graph_scopes": [
+        "Sites.Read.All"
+      ],
+      "sharepoint_permissions": {
+        "application": "Sites.FullControl.All",
+        "delegated": "AllSites.FullControl"
+      },
+      "minimum_role_hints": [
+        "SharePoint Administrator"
+      ],
+      "notes": "Opt-in, off by default and in no profile or preset; select it with --collectors sharepoint_admin. Reads one thing: GET https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant (Accept application/json;odata=verbose), keeping only ODBSharingCapability, DefaultSharingLinkType, DefaultLinkPermission, RequireAnonymousLinksExpireInDays, FileAnonymousLinkType, FolderAnonymousLinkType, EmailAttestationRequired and EmailAttestationReAuthDays. {tenant} is the prefix of the tenant's current SharePoint host, siteCollection.hostname from GET /sites/root?$select=siteCollection (Sites.Read.All, read-only, in the default set), which follows a SharePoint rename; it must be <prefix>.sharepoint.com, otherwise the read is the named skip sharepoint_admin_host_unresolved. The host is never guessed and never taken from the initial onmicrosoft.com domain. App-only needs the SharePoint (Office 365 SharePoint Online, 00000003-0000-0ff1-ce00-000000000000) application permission Sites.FullControl.All with admin consent and a certificate credential (--certificate-path with --certificate-thumbprint): SharePoint refuses app-only tokens minted from a client secret, so a secret-only run records the named skip sharepoint_admin_certificate_required and requests no SharePoint token. Delegated runs mint the token silently from the run's one sign-in for the SharePoint delegated permission AllSites.FullControl (admin consent) and a signed-in SharePoint Administrator; when that would need a second prompt the read is the named skip sharepoint_admin_second_sign_in_required and no second sign-in is opened. Both permissions are write-capable: blast radius full control of every site collection (app-only: every site; delegated: every site the signed-in admin can reach). Auditex makes no mutating call: the read guard admits only that one body-free GET, and the API ledger records it under observed_ledger.sharepoint_admin_rest. Remove the permission after the engagement (Entra admin center > App registrations > the app > API permissions > SharePoint > remove, then revoke admin consent), or delete the app."
+    },
     "power_bi": {
       "graph_scopes": [],
       "minimum_role_hints": [

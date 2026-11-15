@@ -537,3 +537,18 @@ def test_the_graph_batch_helper_refuses_a_non_get_spec_before_the_wire() -> None
     with pytest.raises(GraphError):
         _graph_client(wire).get_batch([{"id": "0", "method": "DELETE", "url": "/users/u1"}])
     assert wire.sent == []
+
+
+def test_the_shipped_sharepoint_admin_read_is_the_one_the_guard_admits() -> None:
+    from azure_tenant_audit.adapters.read_guard import (
+        sharepoint_admin_host,
+        sharepoint_admin_request_violation,
+    )
+    from azure_tenant_audit.collectors import sharepoint_admin as spa
+
+    url = f"https://{sharepoint_admin_host('contoso')}{spa.TENANT_PATH}"
+    headers = spa._read_headers("constructed-token")
+    assert sharepoint_admin_request_violation(spa.SHAREPOINT_ADMIN_METHOD, url, headers=headers) is None
+    for method in ("POST", "PUT", "PATCH", "DELETE", "MERGE"):
+        assert sharepoint_admin_request_violation(method, url, headers=headers)
+    assert sharepoint_admin_request_violation("GET", url, headers=headers, body=b"<Request/>")

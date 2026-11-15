@@ -24,6 +24,9 @@ _INTENTIONAL_EXCEPTIONS = {
     # Opt-in rule evidence: scuba_adapters_powerplat reads tenantSettings and
     # accessState directly from the bundle; no flattened inventory section.
     "power_bi",
+    # Opt-in rule evidence: scuba_projection reads sharepoint_admin's
+    # tenantSettings directly into SPO_tenant; no flattened inventory section.
+    "sharepoint_admin",
 }
 
 

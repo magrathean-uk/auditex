@@ -512,6 +512,7 @@ _DIRECT_GET_JSON_ALLOWED = {
     "identity_protection.py": "a bounded riskyUsers sample (page size), summarised as counts",
     "mailbox_forwarding.py": "per-user messageRules and mailboxSettings",
     "reports_usage.py": "one report settings object per call",
+    "sharepoint_admin.py": "one root site object ($select=siteCollection) for the admin host",
 }
 # Endpoints a collector spec may read unpaged (``"page": False``): each answers one object, never a list.
 _UNPAGED_OBJECT_ENDPOINTS = {

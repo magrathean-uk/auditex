@@ -112,10 +112,10 @@ sign-in cannot serve silently (no consent for it) is recorded as a named coverag
 
 | Run mode | Interactive sign-ins per run | Service tokens |
 |---|---|---|
-| App-only, certificate (`--certificate-path`, `--certificate-thumbprint`) | 0 | All minted silently from the certificate: Microsoft Graph, Exchange Online, Security & Compliance (`exchange_policy` alert and DLP reads), the Teams admin API, Power BI and Power Platform |
-| App-only, client secret (`--client-secret`) | 0 | Minted silently from the secret: Microsoft Graph, Exchange Online, Power BI and Power Platform; the Teams admin policies (`teams_token_unavailable`) and the Security & Compliance reads (`ipps_session_not_opened`) are skipped, never prompted |
+| App-only, certificate (`--certificate-path`, `--certificate-thumbprint`) | 0 | All minted silently from the certificate: Microsoft Graph, Exchange Online, Security & Compliance (`exchange_policy` alert and DLP reads), the Teams admin API, Power BI, Power Platform and the SharePoint admin API (opt-in `sharepoint_admin`) |
+| App-only, client secret (`--client-secret`) | 0 | Minted silently from the secret: Microsoft Graph, Exchange Online, Power BI and Power Platform; the Teams admin policies (`teams_token_unavailable`), the Security & Compliance reads (`ipps_session_not_opened`) and the SharePoint admin read (`sharepoint_admin_certificate_required`) are skipped, never prompted |
 | Guided `app-audit` with Exchange | 0 | As app-only; the Microsoft 365 CLI signs in with the client secret, without a browser |
-| Delegated, one sign-in (`--interactive --client-id <sign-in app>`, and guided `gr-audit` when the sign-in app id is saved or passed) | 1 | Microsoft Graph from the sign-in; Exchange Online (`exchange_policy`) minted silently from the same sign-in. Teams admin, Power BI, Power Platform and Security & Compliance are not collected in delegated mode and never prompt |
+| Delegated, one sign-in (`--interactive --client-id <sign-in app>`, and guided `gr-audit` when the sign-in app id is saved or passed) | 1 | Microsoft Graph from the sign-in; Exchange Online (`exchange_policy`) and, when selected, the SharePoint admin API (`sharepoint_admin`) minted silently from the same sign-in; a SharePoint token the sign-in cannot give silently is the named skip `sharepoint_admin_second_sign_in_required`. Teams admin, Power BI, Power Platform and Security & Compliance are not collected in delegated mode and never prompt |
 | Delegated, Azure CLI token (`--use-azure-cli-token`, and guided `gr-audit` without a sign-in app id and without Exchange) | 0 inside Auditex | Microsoft Graph from the operator's existing Azure CLI sign-in (one `az login` made before the run and reused until it expires). Auditex never runs `az login` during a run |
 | Access token (`--access-token`) | 0 | Microsoft Graph only |
 
@@ -126,6 +126,7 @@ One-time set-up steps, each counted on its own:
 | App registration, permissions, admin consent, role assignment and certificate upload in the Microsoft Entra admin centre | 1 administrator sign-in covers all of them; creating the certificate and its key needs none |
 | Delegated Exchange permission on the sign-in app (`Exchange.Manage`, admin consent) | 0 when added in the same Entra admin centre session, otherwise 1 |
 | Security & Compliance permission on the audit app (`Exchange.ManageAsApp` on **Microsoft Exchange Online Protection**, admin consent) | 0 when added in the same Entra admin centre session as the app registration, otherwise 1 |
+| SharePoint admin permission for the opt-in `sharepoint_admin` collector (`Sites.FullControl.All` application or `AllSites.FullControl` delegated on **Office 365 SharePoint Online**, admin consent) | 0 when added in the same Entra admin centre session as the app registration, otherwise 1 |
 | Guided `ga-setup-app` (saves the Microsoft 365 CLI app as the sign-in app) | At most 3 browser sign-ins: `az login` (skipped when Azure CLI is already signed in to the tenant), the Microsoft 365 CLI setup's own sign-in (it signs in as Azure CLI to create the app) and the `m365 login` check (skipped when the CLI is already signed in) |
 | Power BI read-only admin API setting (Fabric admin portal) | 1 sign-in to the Fabric admin portal |
 | Power Platform management-app registration (`Add-PowerAppsAccount`, `New-PowerAppManagementApp`) | 1 sign-in with the Power Apps administration module |
@@ -509,3 +510,57 @@ Commercial and GCC are supported; GCC High, DoD and unknown environments are not
 Certificate authentication is evidenced by ScubaGear at pinned commit `2446ad72`, `Modules/Connection/Connection.psm1` (`Get-MsalAccessToken -CertificateThumbprint` for the Teams scope); its API catalogue specifies Global Reader. In an app-mode run with a certificate credential (see "Certificate credential for app-only runs" above) Auditex mints the Teams admin token from it through msal and the five REST reads run (meeting policies, broadcast policies, federation configuration, client configuration and app permission policies), covering every Teams section the assessed SCuBA policies cite. The other two Teams operations, messaging policies (`Get-CsTeamsMessagingPolicy`) and app setup policies (`Get-CsTeamsAppSetupPolicy`), stay named skips with reason `teams_powershell_not_supported` in every app-only run, certificate included: they have no Teams admin REST read and would need a Teams PowerShell session, which Auditex does not open, and no assessed SCuBA policy cites them. A secret-only run never asks for a Teams token and records `teams_token_unavailable`, and a delegated run is unchanged. The `global-reader` profile and the `full` preset select `teams_policy` for app-mode runs. The reader requires the Teams audience and certificate credential claim (`appidacr` or `azpacr` equal to `2`); the service validates the token itself.
 
 Client-secret token acceptance was **not verified live** (playground check not run) and that credential path is disabled for Teams policy reads. Certificate-authenticated reads and actual REST response shapes have also not been verified live. Org-wide `tenant_app_settings` remain uncollected on app-only runs, so TEAMS 5.1-5.3 remain not assessed; no certificate marker is synthesised to bypass that gap.
+
+## SharePoint admin settings (opt-in)
+
+Graph's SharePoint settings (`GET /admin/sharepoint/settings`) do not carry the OneDrive sharing level, the default
+sharing link type and permission, the anonymous link expiry and file and folder link types, or the email attestation
+settings, so MS.SHAREPOINT 1.2, 2.1, 2.2, 3.1, 3.2 and 3.3 read not assessed from Graph alone. The opt-in
+`sharepoint_admin` collector reads them from SharePoint's admin API. It is off by default and in no profile or preset;
+only an explicit `--collectors sharepoint_admin` (on its own or with the other collectors) runs it.
+
+What it sends, and nothing else:
+
+1. `GET /sites/root?$select=siteCollection` on Microsoft Graph (Sites.Read.All, read-only and already in the default
+   set). The root site's `siteCollection.hostname`, `<prefix>.sharepoint.com`, names the tenant's current SharePoint
+   host and gives the admin host `https://<prefix>-admin.sharepoint.com`, so a tenant whose SharePoint was renamed is
+   read at its new name. The initial `onmicrosoft.com` domain is never used: it does not change when SharePoint is
+   renamed. An answer without a plain `<prefix>.sharepoint.com` hostname (another suffix, a port, a dotted prefix, or
+   an admin or OneDrive host) is the named skip `sharepoint_admin_host_unresolved`; no host is guessed and no
+   SharePoint token is requested.
+2. `GET https://<prefix>-admin.sharepoint.com/_api/SPO.Tenant` with `Accept: application/json;odata=verbose`, no body
+   and no query. The route and the `-admin` host form are pinned from ScubaGear's API catalogue (`Get-SharePointAdminApiEndpoint`
+   and `Get-SPOTenantRest`). Only `ODBSharingCapability`, `DefaultSharingLinkType`, `DefaultLinkPermission`,
+   `RequireAnonymousLinksExpireInDays`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`, `EmailAttestationRequired`
+   and `EmailAttestationReAuthDays` are kept. One retry follows a 429 or 503 (Retry-After capped at 30 seconds); a
+   redirect is not followed; the answer is capped at 1 MiB.
+
+Permissions (Microsoft Learn, "SharePoint admin APIs authentication and authorization"), both on **Office 365
+SharePoint Online** (resource `00000003-0000-0ff1-ce00-000000000000`) with admin consent:
+
+- App-only: the application permission Sites.FullControl.All and a certificate credential (see
+  [Certificate credential for app-only runs](#certificate-credential-for-app-only-runs)). SharePoint refuses app-only
+  tokens minted from a client secret (Microsoft Learn, "Granting access via Entra ID App-Only"), so a secret-only run
+  records the named skip `sharepoint_admin_certificate_required` and requests no SharePoint token. ScubaGear's catalogue
+  lists the same permission for this read.
+- Delegated: the delegated permission AllSites.FullControl on the sign-in app and a signed-in SharePoint Administrator.
+  The token comes silently from the run's one sign-in; when Microsoft would need a second prompt (no consent, or
+  conditional access asking again) the read is the named skip `sharepoint_admin_second_sign_in_required` and no second
+  sign-in is opened. An access-token or Azure CLI run records `sharepoint_admin_token_unavailable`.
+- GCC High, DoD and other clouds are not collected (`sharepoint_admin_unsupported_environment`).
+
+Blast radius: both permissions are write-capable. Sites.FullControl.All lets anyone who holds the app's certificate
+key take full control of every site collection in the tenant (read, change and delete content, permissions and
+settings); AllSites.FullControl gives the same over every site the signed-in administrator can reach, for as long as
+the sign-in lasts. Auditex makes no mutating call: the read guard (`check_sharepoint_admin_request`) admits only the
+one body-free GET above, refuses any other verb, host, path, query, header or body before a token is attached, and the
+API ledger records every request under `observed_ledger.sharepoint_admin_rest`. Before sending, Auditex also checks that
+the token's audience is the SharePoint admin host (and, app-only, that it is a certificate token), so no Graph token
+reaches SharePoint.
+
+Removal: when the engagement ends, open the Microsoft Entra admin centre > App registrations > the audit app > API
+permissions, remove the SharePoint Sites.FullControl.All (and, on the sign-in app, AllSites.FullControl) entry and
+revoke its admin consent, or delete the app; remove the certificate key credential too.
+
+Without the collector, or when it is skipped or fails, MS.SHAREPOINT 1.1 and 1.3 keep their Graph answers and the six
+rows above stay not assessed, with the skip reason in the coverage gaps.

@@ -172,7 +172,8 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "msal interactive sign-in token exchange"),
     Allowed(_GRAPH, "GraphClient._certificate_exchange", "app.acquire_token_for_client", TOKEN_POST, 1, 2, "A1, A2",
             "msal client-credentials token from the certificate credential for Graph and the resource scopes "
-            "(Exchange Online, Teams admin, Power BI, Power Platform); assertion only to a pinned Entra authority"),
+            "(Exchange Online, Teams admin, Power BI, Power Platform, SharePoint admin); assertion only to a pinned "
+            "Entra authority"),
     Allowed(_GRAPH, "GraphClient._request", "self.session.request", VARIABLE, 1, 3, "A4a, A4b",
             "Graph dispatch: body-free GET, or POST only to /v1.0/$batch or /beta/$batch with GET-only "
             "sub-requests; its first statement is _enforce_read_only, which applies read_only_violation",
@@ -1022,6 +1023,8 @@ def test_the_scanner_sees_the_known_get_call_sites() -> None:
         (_GRAPH, "GraphClient.get_json"),
         ("src/azure_tenant_audit/power_bi.py", "PowerBIClient.get"),
         ("src/azure_tenant_audit/adapters/teams_admin_rest.py", "_read_attempt.read"),
+        # M08-T12: the one SharePoint admin read, guarded by check_sharepoint_admin_request (tests/test_sharepoint_admin_guard.py).
+        ("src/azure_tenant_audit/collectors/sharepoint_admin.py", "_send"),
         ("src/azure_tenant_audit/dns_lookup.py", "DohClient.query_detailed"),
         ("src/azure_tenant_audit/exposure_lookup.py", "RequestsHttpsFetcher.get_text"),
         (_NOTIFY, "_jira_search_existing"),
@@ -1485,3 +1488,8 @@ def test_the_power_platform_post_read_opens_with_its_path_guard_and_sends_no_bod
     posts = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and ast.unparse(n.func) == "self.session.post"]
     assert len(posts) == 1
     assert not {kw.arg for kw in posts[0].keywords} & {"data", "json", "files", None}
+
+
+def test_the_sharepoint_admin_module_sends_only_get() -> None:
+    sites = [site for site in SITES if site.path == "src/azure_tenant_audit/collectors/sharepoint_admin.py"]
+    assert [(site.function, site.method) for site in sites] == [("_send", "GET")]
