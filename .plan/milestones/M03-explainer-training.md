@@ -33,6 +33,8 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | M03-T06 | Teacher prompt v2 and the validation pilot | terra | M | hard | done |
 | M03-T07 | Regenerate, judge-filter and register data v2 | terra | M | - | todo |
 | M03-T08 | Add the data-round checks to the kit verifier | sol | M | hard | done |
+| M03-T09 | Teacher prompt v3 seeded with real lab-run explanations, and the pilot-3 checks | codex | M | hard | todo |
+| M03-T10 | Validation pilot 3 on the system (option 2, cap 20 GPU-hours) | terra | M | hard | todo |
 
 ## Acceptance criteria
 ### M03-T01 Compare the candidate bases on the explainer job
@@ -109,3 +111,23 @@ G has looked at the budget against the allocation balance before any M03 run; th
 - Writes `data-version: data/explainer-v2 <64 hex>`, `data-v2-rows: train <n> validation <n>`, `data-v2-outcomes: kept <n> filtered-to-template <n> no-headroom <n>`, `heldout-reads: 0` and `round-gpu-hours: dataround <used>` under `### Findings`.
 - verify: `grep -qx 'pilot: pass' .plan/work/M03-T06/result.md && grep -q '^data-version: data/explainer-v2 [0-9a-f]\{64\}$' .plan/work/M03-T07/result.md && "$AIRR_KIT/bin/kit-check" checks --prose data/explainer-v2 >/dev/null && "$AIRR_KIT/bin/kit-check" dataround --result .plan/work/M03-T07/result.md && h=$(sed -n 's/^data-manifest-sha256: data\/explainer\/SHA256SUMS \([0-9a-f]\{64\}\)$/\1/p' .plan/work/M02-T03/result.md) && test -n "$h" && test "$(shasum -a 256 "$AIRR_KIT/data/explainer/SHA256SUMS" | cut -d' ' -f1)" = "$h" && s=$(sed -n 's/^data-splits-sha256: data\/splits.json \([0-9a-f]\{64\}\)$/\1/p' .plan/work/M02-T03/result.md) && test -n "$s" && test "$(shasum -a 256 "$AIRR_KIT/data/splits.json" | cut -d' ' -f1)" = "$s"`
 - files: `runs/data-round/train/**`, `data/explainer-v2/**`, `runs/usage/M03-T07/**` and `runbook/README.md` (the data-round section only) in the AIRR kit folder; `.plan/work/M03-T07/result.md`
+
+### M03-T09 Teacher prompt v3 seeded with real lab-run explanations, and the pilot-3 checks
+- Added by DEC-098 (amendment 8). CPU only, no job, no system access. Facts: pilot 2 (M03-T06) failed mostly on misread field values in the added sentences (`loss-reasons.json`).
+- Exemplars: 6 to 10 worked examples built from the lab tenant's assessed run (the M08-T06 run `m08e3` in the internal records folder; the lead names the path in the brief), spanning met, not met and not assessed rows of several policy families. Each pairs the explainer input record (the same form the teacher sees) with a reference explanation that passes every frozen check, keeps the template's sentences and adds only sentences whose field values are copied verbatim from the input. The exemplars hold no tenant id, domain, user name or other identifier (pseudonymise to the kit's redaction form) and no validation or held-out case id; `exemplars.jsonl` and its provenance note go in `runs/data-round/pilot-3/`.
+- Teacher prompt v3 is prompt v2 (pilot 2) plus those exemplars and one rule: every value an added sentence states is copied from the input field it names. Same teacher model, revision and decoding; pass rule, headroom script and list, judge, judge config and prompt v3 of the judge unchanged (byte copies of pilot 2).
+- `kit-check dataround` accepts a third attempt folder (`pilot-3`) under DEC-098, refuses a validation or held-out case id in the prompt or exemplars, and checks the byte copies; its tests cover both. The check change is reviewed by the other vendor (`REV-M03-T09`).
+- verify: `"$AIRR_KIT/bin/kit-check" selftest && test -s "$AIRR_KIT/runs/data-round/pilot-3/exemplars.jsonl" && grep -qx 'pilot-3-prompt: ready' .plan/work/M03-T09/result.md`
+- files: `runs/data-round/pilot-3/**` (no targets or judgements yet), `checks/**` (dataround kind only) and `runbook/README.md` (the data-round section only) in the AIRR kit folder; `.plan/work/M03-T09/result.md`
+
+### M03-T10 Validation pilot 3 on the system (option 2)
+- Added by DEC-098. Preconditions: M03-T09 done and `REV-M03-T09` approves; G has signed in to the system (the only step that needs him).
+- One attempt with prompt v3 on the 190 headroom rows of the 267 validation rows, exactly as M03-T06 ran attempt 2 (same teacher, judge, both orders, pass rule unchanged: after the judge filter the preference band lies wholly above 0.729). No revision: this attempt decides. At most 20 GPU-hours, every job counted, inventoried under `runs/usage/M03-T10/` (stage `dataround`); the run stops at the cap.
+- On `pilot: pass` M03-T07, then the widened M03-T02 and M03-T03, follow without a new ask (DEC-098); on `pilot: fail` Track B stops and the lead writes the manager three plain lines.
+- Writes the M03-T06 finding lines for attempt 3 (`pilot: pass|fail`, `pilot-wins`, `pilot-preference`, `pilot-unfiltered`, `heldout-reads: 0`, `round-gpu-hours: dataround <used>`).
+- verify: `grep -qE '^pilot: (pass|fail)$' .plan/work/M03-T10/result.md && grep -qx 'heldout-reads: 0' .plan/work/M03-T10/result.md && "$AIRR_KIT/bin/kit-check" dataround --result .plan/work/M03-T10/result.md`
+- files: `runs/data-round/pilot-3/**`, `runs/usage/M03-T10/**` and `runbook/README.md` (the data-round section only) in the AIRR kit folder; `.plan/work/M03-T10/result.md`
+
+### Amendment 8 (DEC-098): option 3 widened to three base families
+- On `pilot: pass` in M03-T10, M03-T07 registers data v2 from the pilot-3 prompt; M03-T02 trains the explainer on three base families (a Qwen base: Qwen 4 if open weights are released and usable on the system when the task starts, else the M03-T01 Qwen candidate; a Mistral base; a Gemma base), three seeds each, the same data, recipe family and selection rule, base named only in config; M03-T03 builds and judges one build per family; M03-T04 compares them. The data and judging pipeline stays base-independent: adding a base is a config entry. Caps: `large` 6,500 and `build` 192 GPU-hours, with `dataround` 180, inside DEC-098's 7,000 for option 3 (more needs the manager). On `pilot: fail` none of this runs.
+

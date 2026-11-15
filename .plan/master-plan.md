@@ -75,9 +75,9 @@ The dataround tasks write `round-gpu-hours: dataround <used>`, recomputed by `ki
 | prose | M02-T03 | 256 | DEC-001 |
 | judging | M02-T04, M02-T05 | 128 | DEC-001 |
 | basecmp | M03-T01 | 1,024 | DEC-001 |
-| large | M03-T02 | 2,048 | DEC-001 |
-| build | M03-T03 | 64 | DEC-001 |
-| dataround | M03-T06, M03-T07 | 160 | DEC-037 |
+| large | M03-T02 | 6,500 | DEC-098 |
+| build | M03-T03 | 192 | DEC-098 |
+| dataround | M03-T06, M03-T07, M03-T10 | 180 | DEC-098 |
 | reserve | - | 16,224 | DEC-037 |
 | total | - | 20,000 | DEC-002 |
 

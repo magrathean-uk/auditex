@@ -21,6 +21,7 @@
 - amendment 1 (2026-11-11): balance read by G on the awards portal: 20,000 GPU-hours allocated, 0 used, allocation ends 31 Jan 2027. reserve 384 -> 16,384 and total 4,000 -> 20,000. The working stage caps stay as they are until M01-T05 has measured what a run costs on the system; the budget look before M03-T01 then moves hours from the reserve into the prose, judging, basecmp and large stages.
 - amendment 2 (2026-11-13, DEC-037): new stage dataround 0 -> 160 for M03-T06 and M03-T07; reserve 16,384 -> 16,224; total stays 20,000. Balance: 20,000 allocated, about 300 used by the recorded stage figures (not re-read on the system for this line).
 
+- amendment (15 Nov 2026, DEC-098): stage caps resized inside the reserve: large 2,048 to 6,500, build 64 to 192, dataround 160 to 180 (option 3 on three base families, cap 7,000 set by the manager on G's delegation).
 ## DEC-003 Kit verifier: merge bar after two repair rounds
 - date: 2026-11-11
 - status: approved
@@ -810,3 +811,11 @@
 - decision: the M08-T14 files line adds normalize.py (feed the instance rows to build_privileged_roles and check their read status), configs/collector-definitions.json (the identity_governance query plan), scuba_projection.py and its test (PRIVILEGED_ROLES_READS), and the sample bundles under examples/ the contract smoke reads, for privileged roles only. roleAssignmentSchedules stays (effective admins, findings, baselines, governance records use it).
 - why: the worker's blocked report showed the new read cannot reach privileged_roles without them.
 - approver: auto
+
+## DEC-098 Track B resumes: option 2 now, a three-family option 3 on a pass (G delegated to the manager)
+- date: 2026-11-15
+- status: decided
+- decision: G, through the manager (15 Nov), on the Track B brief: "you decide. qwen4 is coming, but i want this model to be availbel with minstral, gemma too." The manager, on G's delegation: (1) the current release ships with the fixed-text explainer and does not wait for Track B; (2) run option 2 now: one small retry seeded with real explanations from the lab run, capped at 20 GPU hours, to answer whether better source material fixes the writing; (3) if it passes its bar, option 3 follows without a new ask, widened to three base families (Qwen, Mistral, Gemma; Qwen 4 once it is released and usable on Isambard, else the current Qwen), capped at 7,000 GPU hours in total inside the allocation ending 31 Jan 2027 (more needs the manager); (4) if option 2 fails, Track B stops and the manager gets three plain lines why; no third pilot without G; (5) the data and judging pipeline stays independent of the base model, so a base is a config change; agent work on Codex seats where possible.
+- why: G wants the explainer in the end, on several base families; the one blocking question is the example writer's quality.
+- consequences: DEC-053's open choice is closed by this entry; the parked-case amendment (AMEND-4) does not merge. M03 is re-planned (amendment 8) by the lead as auto.
+- approver: G (delegated to the manager, who decided; relayed 15 Nov 2026)
