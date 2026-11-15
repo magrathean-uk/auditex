@@ -230,6 +230,7 @@ def test_runtime_resources_resolve_from_non_repo_cwd(tmp_path: Path, monkeypatch
     assert "run_manifest.schema.json" in manifest["schemas"]
     assert "configs/collector-definitions.json" in shipped["resources"]
     assert "schemas/run_manifest.schema.json" in shipped["resources"]
+    assert "docs/guides/reader-app-permissions.md" in shipped["resources"]
 
 
 def test_shipped_content_truth_matches_packaging_manifest() -> None:

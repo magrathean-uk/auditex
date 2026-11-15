@@ -1,5 +1,7 @@
 # Auditex Administrator Permission Guide
 
+The exact list of what the reader app needs (API permissions, role, certificate, Power BI and Power Platform settings, check and removal) is in [Reader app permissions](reader-app-permissions.md).
+
 See [default Exchange and public DNS collection](setup-guide.md#default-exchange-and-public-dns-collection) for app-mode selection, external requests, deselection and failure semantics.
 
 `Exchange.ManageAsApp` is an Office 365 Exchange Online application permission, not Graph. It is write-capable-named and used read-only: read-only Get-* cmdlets only; no mutating cmdlet is issued; the Exchange.ManageAsApp role assignment gives Global Reader only. Its blast radius is tenant-wide Exchange policy visibility under that reader role. Install `pwsh` and `ExchangeOnlineManagement`, grant tenant admin consent to this Exchange permission and assign Global Reader to the service principal before app-mode collection. A write-capable scope does not authorise tenant writes.

@@ -1,5 +1,7 @@
 # Auditex Setup Guide
 
+Tenant administrators: every permission, role and setting the reader app needs is in [Reader app permissions](reader-app-permissions.md).
+
 ## Default Exchange and public DNS collection
 
 App-mode runs with the `auto` or `global-reader` profile select `exchange_policy`
