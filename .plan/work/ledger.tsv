@@ -741,3 +741,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-15T22:24:31Z	M09-T04	terra	claude-3	claude-sonnet-5-5	high	branch	1	323	1.5778	partial	task/M09-T04-docs-one-way	v4
 2026-11-15T22:35:57Z	M10-T02	sol	claude-4	claude-opus-5-5	xhigh	branch	0	963	5.4014	done	task/M10-T02-answer-checks	v4
 2026-11-15T22:42:20Z	REV-M10-T02	codex	codex	gpt-6.1-sol	xhigh	readonly	0	368		done	task/M10-T02-answer-checks	v4
+2026-11-16T01:05:00Z	M10-T01	sol	claude-5	claude-opus-5-5	xhigh	inplace	124	14402		timeout	main	v4
+2026-11-16T01:42:58Z	M09-T05	terra	claude-3	claude-sonnet-5-5	xhigh	branch	0	8703	0.8041	done	task/M09-T05-rc-1-6-0	v4
