@@ -957,3 +957,9 @@
 - decision: M10-T03's files gain `src/azure_tenant_audit/bundle_integrity.py` (names `local_answer.json` as a post-finalisation output, so bundle verification, packs and gates accept an explained run) and `src/auditex/output_writers.py` (classifies the new writers and MCP tool); both additive. ARCHITECTURE's MCP interface line records the read-only `auditex_local_answer` tool and M09's tool changes.
 - why: M10-T03's result (risks).
 - approver: auto
+
+## DEC-122 Auditex 1.6.0 released
+- date: 2026-11-16
+- decision: G, through the manager (asked "Publish Auditex 1.6.0?"; then "say \"Release 1.6.0\" if you want Auditex 1.6.0 published"): "Both go". Released: signed tag v1.6.0 on 963bad3, GitHub release https://github.com/magrathean-uk/auditex/releases/tag/v1.6.0 with the wheel (sha256 3d804433c9a9bb6c7e75a9ed1035438136e64edaf9dc9e14c8c98d10535ea816) and sdist (280f9562970e766bf232f41b15a768c73e0d493b068e533c58c1d1306c74bdce), rebuilt under umask 022 in a clean worktree at the tag; make dist, audit-deps (no known vulnerabilities), the reproducible-build check and the wheel and sdist release smoke passed; make release-check passed on the candidate (M09-T05). Notes are the CHANGELOG 1.6.0 section. No PyPI upload.
+- why: G's yes naming the version.
+- approver: G
