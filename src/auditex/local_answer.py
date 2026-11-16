@@ -575,8 +575,9 @@ def file_sha256(path: Path) -> str:
 
 
 def fetch_model(spec: ModelSpec, target: Path, progress: Notice | None = None) -> None:
-    """Download the pinned file into ``target`` (resuming a ``.part`` left by an earlier attempt), checking its size
-    and SHA-256 before the final rename. ModelError("download_failed" or "model_unverified") otherwise."""
+    """Download the pinned file into ``target`` (resuming a ``.part`` left by an earlier attempt; a complete one is
+    checked and renamed without a request, and one the hub refuses to resume is deleted), checking its size and
+    SHA-256 before the final rename. ModelError("download_failed" or "model_unverified") otherwise."""
     import requests
 
     part = target.with_name(target.name + ".part")
@@ -594,6 +595,12 @@ def fetch_model(spec: ModelSpec, target: Path, progress: Notice | None = None) -
         with open(part, "rb") as handle:
             while block := handle.read(CHUNK):
                 digest.update(block)
+    if have == spec.size:                        # an earlier attempt received every byte but stopped before the rename
+        if digest.hexdigest() == spec.sha256:
+            os.replace(part, target)
+            return
+        part.unlink()
+        have, digest = 0, hashlib.sha256()
     if progress:
         progress(f"Downloading the {spec.choice} model {spec.file} ({_gigabytes(spec.size)}) from "
                  f"{HUB}/{spec.repo} at revision {spec.revision[:12]}; one time only, then Auditex answers offline."
@@ -603,6 +610,10 @@ def fetch_model(spec: ModelSpec, target: Path, progress: Notice | None = None) -
         with requests.get(spec.url, headers=headers, stream=True, timeout=(30, 120)) as response:
             if have and response.status_code == 200:          # the server ignored the range: start again
                 have, digest = 0, hashlib.sha256()
+            elif have and response.status_code == 416:        # the hub refused the range: the next run starts again
+                part.unlink()
+                raise ModelError("download_failed", "the hub refused to resume the download; the partial file was "
+                                                    "deleted, run again to download it afresh")
             elif have and (response.status_code != 206
                            or not response.headers.get("Content-Range", "").startswith(f"bytes {have}-")):
                 raise ModelError("download_failed", f"the hub answered {response.status_code} to a resumed download")

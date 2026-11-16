@@ -374,11 +374,58 @@ def test_a_broken_download_resumes_with_a_range_request(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: FakeResponse(b"", status=416))
     with pytest.raises(la.ModelError) as exc:
         la.ensure_model(spec)
-    assert exc.value.code == "download_failed"
+    assert exc.value.code == "download_failed" and not part.exists()
     monkeypatch.setattr(requests, "get", lambda *a, **k: FakeResponse(b"", status=404))
-    part.unlink()
     with pytest.raises(la.ModelError):
         la.ensure_model(spec)
+
+
+def test_a_complete_partial_download_is_checked_and_renamed_without_a_request(monkeypatch):
+    """An attempt that received every byte but stopped before the rename must not ask for an empty range (the hub
+    answers 416 and the file would stay stuck); a range the hub refuses deletes the partial so the next run recovers."""
+    import requests
+
+    data = bytes(range(40))
+    spec, calls = spec_for(data), []
+    target = la.model_file(spec)
+    part = target.with_name("tiny.gguf.part")
+    part.parent.mkdir(parents=True)
+    part.write_bytes(data)
+    monkeypatch.setattr(requests, "get", lambda *a, **k: FakeResponse(b"", status=416))
+    assert la.ensure_model(spec).read_bytes() == data and not part.exists()
+
+    def get(url, headers=None, stream=False, timeout=None):
+        calls.append(headers)
+        return FakeResponse(data)
+
+    target.unlink()
+    part.write_bytes(bytes(len(data)))                  # complete in size, wrong bytes: deleted and fetched afresh
+    monkeypatch.setattr(requests, "get", get)
+    assert la.ensure_model(spec).read_bytes() == data and calls == [{}] and not part.exists()
+    target.unlink()
+    part.write_bytes(data[:8])
+    monkeypatch.setattr(requests, "get", lambda *a, **k: FakeResponse(b"", status=416))
+    with pytest.raises(la.ModelError) as exc:           # the refused range never leaves the partial behind
+        la.ensure_model(spec)
+    assert exc.value.code == "download_failed" and "run again" in str(exc.value) and not part.exists()
+    calls.clear()
+    monkeypatch.setattr(requests, "get", get)
+    assert la.ensure_model(spec).read_bytes() == data and calls == [{}]
+
+
+def test_no_test_can_reach_the_model_hub(monkeypatch, tmp_path):
+    """The suite's guard (tests/conftest.py): with the runtime check passing and no fake download, the answer would
+    fetch the real pinned model; the guard fails the test before any byte is requested."""
+    import shutil
+    from collections import namedtuple
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: namedtuple("u", "total used free")(10**13, 0, 10**13))
+    with pytest.raises(pytest.fail.Exception, match="model hub"):
+        la.fetch_model(la.MODELS["small"], tmp_path / "small.gguf")
+    monkeypatch.setattr(la, "runtime_version", lambda: la.RUNTIME_VERSION)
+    with pytest.raises(pytest.fail.Exception, match="model hub"):
+        la.explain_digest(digest(), "small")
+    assert not list(tmp_path.rglob("*.gguf*")) or all(p.stat().st_size == 0 for p in tmp_path.rglob("*.gguf*"))
 
 
 def test_not_enough_disk_space_stops_before_downloading(monkeypatch):
@@ -471,6 +518,19 @@ def test_explain_writes_a_checked_artefact_that_every_read_checks_again(tmp_path
     tampered(lambda p: p.update(schema_version="local-answer-v0"))
     path.write_text(json.dumps(stored))
     assert la.load_answer(run)["text"] == answer["text"]
+
+
+def test_a_sealed_answer_is_never_overwritten(tmp_path, ready):
+    run = assessed_run(tmp_path)
+    first = la.explain_run(run, "small")
+    sealed = (run / la.ANSWER_PATH).read_bytes()
+    (run / "bundle-hashes.json").write_text(json.dumps({"artifacts": [{"path": la.ANSWER_PATH,
+                                                                       "sha256": hashlib.sha256(sealed).hexdigest()}]}))
+    with pytest.raises(la.LocalAnswerError, match="already sealed"):
+        la.write_answer(run, first)
+    with pytest.raises(la.LocalAnswerError, match="already sealed"):
+        la.explain_run(run, "qwen")
+    assert (run / la.ANSWER_PATH).read_bytes() == sealed
 
 
 def test_a_damaged_answer_is_a_validation_warning_and_a_link_is_refused(tmp_path, ready):
@@ -627,6 +687,73 @@ def test_auditex_run_explain_answers_the_new_run_and_keeps_the_run_exit_status(t
     code = main(["run", "--offline", "--as-of", "2026-11-11", "--sample", str(ROOT / "examples/demo_tenant/demo_tenant.json"),
                  "--tenant-name", "ci", "--run-name", "second", "--out", str(out), "--explain"])
     assert code == 0 and json.loads((out / "ci-second" / la.ANSWER_PATH).read_text())["reason"] == "runtime_missing"
+
+
+def test_run_explain_answers_the_folder_the_engine_wrote_when_options_repeat(tmp_path, ready, capsys):
+    """The engine takes the last of a repeated option; the answer goes to the folder it wrote, never an older one."""
+    from auditex.cli import main
+
+    out, other = tmp_path / "out", tmp_path / "other"
+    base = ["run", "--offline", "--as-of", "2026-11-11", "--sample", str(ROOT / "examples/demo_tenant/demo_tenant.json")]
+    assert main([*base, "--tenant-name", "ci", "--run-name", "old", "--out", str(out)]) == 0
+    assert main([*base, "--tenant-name", "x", "--tenant-name", "ci", "--run-name", "old", "--run-name", "new",
+                 "--out", str(other), "--out", str(out), "--explain", "--model", "small"]) == 0
+    assert json.loads((out / "ci-new" / la.ANSWER_PATH).read_text())["model"]["choice"] == "small"
+    assert not (out / "ci-old" / la.ANSWER_PATH).exists() and not other.exists()
+    assert "could not tell" not in capsys.readouterr().err
+
+
+def _fake_engine(written: list[Path]):
+    """An engine that reads its arguments with the real engine parser and completes the run as the engine does: into
+    ``--resume-from`` when given, else ``<out>/<tenant>-<run name>``, replacing ``run-manifest.json``."""
+    from azure_tenant_audit.cli import build_parser
+
+    def engine(argv):
+        args = build_parser().parse_args(argv)
+        folder = Path(args.resume_from) if args.resume_from else Path(args.out) / f"{args.tenant_name}-{args.run_name}"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "manifest.tmp").write_text('{"completed": true}')
+        os.replace(folder / "manifest.tmp", folder / "run-manifest.json")
+        written.append(folder)
+        return 0
+
+    return engine
+
+
+def test_run_explain_answers_the_folder_a_resumed_run_completed(tmp_path, monkeypatch, capsys):
+    from auditex import cli
+
+    out, resumed = tmp_path / "out", tmp_path / "elsewhere" / "ci-first"
+    for folder in (resumed, out / "ci-later"):
+        folder.mkdir(parents=True)
+        (folder / "run-manifest.json").write_text("{}")
+    written, answered = [], []
+    monkeypatch.setattr(cli, "tenant_audit_main", _fake_engine(written))
+    monkeypatch.setattr(cli, "_explain_run", lambda run_dir, model, assess_first: answered.append((run_dir, model)))
+    live = ["run", "--tenant-id", "t", "--client-id", "c", "--tenant-name", "ci", "--out", str(out)]
+    assert cli.main([*live, "--resume-from", str(tmp_path / "gone"), "--resume-from", str(resumed), "--explain"]) == 0
+    assert written == [resumed] and answered == [(str(resumed), "qwen")]
+    assert cli.main([*live, "--run-name", "later", "--explain", "--model", "gemma"]) == 0
+    assert written[-1] == out / "ci-later" and answered[-1] == (str(out / "ci-later"), "gemma")
+    assert "could not tell" not in capsys.readouterr().err
+
+
+def test_run_explain_answers_nothing_when_no_single_folder_was_completed(tmp_path, monkeypatch, capsys):
+    from auditex import cli
+
+    out = tmp_path / "out"
+    (out / "ci-old").mkdir(parents=True)
+    (out / "ci-old" / "run-manifest.json").write_text("{}")
+    answered = []
+    monkeypatch.setattr(cli, "_explain_run", lambda *a, **k: answered.append(a))
+    monkeypatch.setattr(cli, "tenant_audit_main", lambda argv: 0)          # completed nothing
+    assert cli.main(["run", "--out", str(out), "--run-name", "old", "--explain"]) == 0
+    written = []
+    twice = _fake_engine(written)
+    monkeypatch.setattr(cli, "tenant_audit_main", lambda argv: twice(argv) or twice([*argv, "--run-name", "b"]))
+    assert cli.main(["run", "--out", str(out), "--run-name", "a", "--explain"]) == 0
+    assert len(written) == 2 and answered == []
+    assert capsys.readouterr().err.count("could not tell which run folder this run wrote") == 2
 
 
 # -- the real small model (opt-in) -------------------------------------------------------------------------------------

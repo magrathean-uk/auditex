@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 from collections.abc import Callable
 from functools import wraps
@@ -754,20 +755,50 @@ def _split_run_explain(argv: list[str]) -> tuple[list[str], str | None]:
     return rest, known.model or DEFAULT_MODEL
 
 
-def _option_value(argv: list[str], flag: str, default: str | None) -> str | None:
-    for index, token in enumerate(argv):
-        if token == flag and index + 1 < len(argv):
-            return argv[index + 1]
-        if token.startswith(flag + "="):
-            return token[len(flag) + 1:]
-    return default
-
-
 def _child_dirs(path: Path) -> set[str]:
     try:
         return {child.name for child in path.iterdir() if child.is_dir() and not child.is_symlink()}
     except OSError:
         return set()
+
+
+def _engine_run_places(engine_argv: list[str]) -> tuple[list[Path], Path | None] | None:
+    """Where the engine may write this run, read by the engine's own parser (the last of a repeated option wins):
+    the base folders it may name under (``--out`` as the offline replay and as the live run take it) and the folder
+    a live ``--resume-from`` completes into. None when the engine parser refuses the arguments (the engine reports
+    that itself)."""
+    import contextlib
+    import io
+
+    from azure_tenant_audit.cli import build_parser as build_engine_parser
+
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            args, _ = build_engine_parser().parse_known_args(engine_argv)
+    except SystemExit:
+        return None
+    out = str(getattr(args, "out", None) or "audit-output")
+    resume = getattr(args, "resume_from", None)
+    return [Path(out), Path(out).expanduser()], Path(resume).expanduser() if resume else None
+
+
+def _manifest_marks(bases: list[Path], resume: Path | None) -> dict[str, tuple[Path, tuple[int, ...]]]:
+    """Every run folder the engine may complete into, keyed by its real path, with the identity of its
+    ``run-manifest.json`` (device, inode, size, modified and changed times); folders without a regular manifest
+    are left out."""
+    folders = [base / name for base in bases for name in sorted(_child_dirs(base))]
+    if resume is not None and resume.is_dir() and not resume.is_symlink():
+        folders.append(resume)
+    marks: dict[str, tuple[Path, tuple[int, ...]]] = {}
+    for folder in folders:
+        try:
+            info = (folder / "run-manifest.json").lstat()
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode):
+            marks.setdefault(os.path.realpath(folder), (folder, (info.st_dev, info.st_ino, info.st_size,
+                                                                 info.st_mtime_ns, info.st_ctime_ns)))
+    return marks
 
 
 def _notice(text: str) -> None:
@@ -805,16 +836,16 @@ def _run_with_explain(argv: list[str]) -> int:
             return tenant_audit_main(engine_argv)
         finally:
             _build_run_explain_parser().print_help()
-    out = Path(_option_value(engine_argv, "--out", "audit-output") or "audit-output")
-    before = _child_dirs(out)
+    places = _engine_run_places(engine_argv)
+    before = _manifest_marks(*places) if places else {}
     code = tenant_audit_main(engine_argv)
     if code not in (0, 1):                    # 1 is a partial run: it still wrote a bundle
         return code
-    run_name = _option_value(engine_argv, "--run-name", None)
-    tenant = _option_value(engine_argv, "--tenant-name", "tenant")
-    named = out / f"{tenant}-{run_name}" if run_name else None
-    new = [out / name for name in sorted(_child_dirs(out) - before) if (out / name / "run-manifest.json").is_file()]
-    run_dir = named if named is not None and (named / "run-manifest.json").is_file() else new[0] if len(new) == 1 else None
+    # The run folder is the one whose manifest the engine wrote during this call: a new run's folder, or the folder
+    # a resumed run completed, whatever names the arguments repeat.
+    after = _manifest_marks(*places) if places else {}
+    written = [folder for key, (folder, mark) in sorted(after.items()) if before.get(key, (None, None))[1] != mark]
+    run_dir = written[0] if len(written) == 1 else None
     if run_dir is None:
         _notice("auditex run --explain: could not tell which run folder this run wrote; answer it with "
                 "auditex explain <run folder>.")
