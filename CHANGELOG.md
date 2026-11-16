@@ -5,7 +5,16 @@ All notable changes to Auditex are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The run-bundle contract has its own
 date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`).
 
-## [Unreleased]
+## [1.6.0] - 2026-11-15
+
+Auditex now has one way to audit Microsoft 365: the reader app with a certificate (DEC-107, DEC-108). This is a breaking
+change for anyone who ran an audit another way. These ways are removed, each with its flags: the client secret, the
+access token, the saved auth context, the Azure CLI token, the interactive (delegated) sign-in and the Microsoft 365 CLI
+sign-in. The `auditex auth` command group, the `gr-audit` and `ga-setup-app` guided flows and the
+`auditex_run_delegated_audit` MCP tool go with them. A removed flag or command is refused by name with the certificate
+way; a removed guided flow is no longer an accepted value. Beside it, collection reads more of the tenant (certificate app-only tokens, Power BI, Power Platform,
+the compliance session, the opt-in SharePoint admin read) and the first live collection's fixes land. The run-bundle
+`CONTRACT_VERSION` stays `2026-11-11`. Groundwork for the local answer ships but is not used yet (see the last section).
 
 ### One way to audit Microsoft 365: the reader app with a certificate
 
@@ -169,6 +178,11 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   redactors), so they are scrubbed from the run manifest, the audit log, MCP command output and diagnostics, and
   every public parser refuses their abbreviations. PEM private key blocks and certificate field names are masked in
   diagnostic text.
+
+### Groundwork, not yet used
+
+- `src/auditex/answer_digest.py`, `answer_checks.py` and `answer_frames.json` are groundwork for the local answer, not
+  yet used: no command, report or MCP tool calls them, and they change no verdict.
 
 ## [1.5.0] - 2026-11-14
 
