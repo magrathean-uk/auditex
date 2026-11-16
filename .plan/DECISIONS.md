@@ -945,3 +945,9 @@
 - decision: REV-M10-T02 round 3 showed that any free composition of allowed words can assert tenant state ("The passwords expire." beside a met verdict whose reason is "passwords never expire"); no checker can read meaning. The model's job becomes selection and arrangement, correct by construction: per item it returns `{"use": [sentence ids], "show": [reference ids]}`, choosing from that item's sentence bank (the catalogue's requirement, rationale and remediation sentences and Auditex's fixed frames, all written and reviewed ahead of time and never containing tenant text); for the whole run it returns `{"summary": [frame ids], "highlight": [item ids]}` from a fixed frame bank with counts and verdict lines rendered by Auditex. The rules still decide every verdict and the order; Auditex renders every word. The checks verify only ids (exist, belong to the item, frame preconditions such as "only for not met" hold). G's acceptance (99 per cent pass, zero contradictions, injection tests) is then met by construction; the model's value is choosing what to say for this tenant and how much, which M10-T04 judges for usefulness. Supersedes the free-prose parts of DEC-116 and DEC-118.
 - why: REV-M10-T02 round 3; G: "model should really focus on getting the answer right".
 - approver: auto
+
+## DEC-120 Local answer: no failing finding can be dropped or hidden
+- date: 2026-11-16
+- decision: manager ruling accepting DEC-119: the model may choose emphasis (which prepared sentences and values to show, which items the summary highlights) but can never drop or hide a failing finding. Auditex always renders every not-met item, in the rules' order, whatever the model selects; hostile tenant text must not change which items appear. M10-T03 enforces it in the renderer with tests; M10-T04 checks completeness for every model and every injected test run.
+- why: the manager's guard on DEC-119.
+- approver: manager (on G's delegation)
