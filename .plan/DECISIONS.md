@@ -963,3 +963,9 @@
 - decision: G, through the manager (asked "Publish Auditex 1.6.0?"; then "say \"Release 1.6.0\" if you want Auditex 1.6.0 published"): "Both go". Released: signed tag v1.6.0 on 963bad3, GitHub release https://github.com/magrathean-uk/auditex/releases/tag/v1.6.0 with the wheel (sha256 3d804433c9a9bb6c7e75a9ed1035438136e64edaf9dc9e14c8c98d10535ea816) and sdist (280f9562970e766bf232f41b15a768c73e0d493b068e533c58c1d1306c74bdce), rebuilt under umask 022 in a clean worktree at the tag; make dist, audit-deps (no known vulnerabilities), the reproducible-build check and the wheel and sdist release smoke passed; make release-check passed on the candidate (M09-T05). Notes are the CHANGELOG 1.6.0 section. No PyPI upload.
 - why: G's yes naming the version.
 - approver: G
+
+## DEC-123 Re-baseline after amendments 11 to 13, and wind-down
+- date: 2026-11-16
+- decision: the weights summed to 132 after M09 (10), M10 (10) and M11 (12) were added; they are rescaled to 100 in proportion (M00 5, M01 8, M02 8, M03 11, M04 10, M05 6, M06 8, M07 9, M08 11, M09 8, M10 7, M11 9). G, through the manager, 16 Nov about 06:50 GMT: "1: update me on development. 2: tell each project to wind down development and create handover .md files again on desktop . then archive them." Wind-down: nothing runs on this Mac or the system; M10-T03's repair round is committed as unreviewed work in progress on `task/M10-T03-local-answer` (cd9b225), resume from `.plan/work/M10-T03/continue-1.md`; the handover is `~/Desktop/auditex.md`.
+- why: percent.py refuses weights that do not sum to 100; G's wind-down.
+- approver: auto (re-baseline); G (wind-down)

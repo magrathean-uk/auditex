@@ -1,7 +1,7 @@
 ---
 id: M03
 name: explainer-training
-weight: 15
+weight: 11
 status: done
 ---
 # M03 explainer-training

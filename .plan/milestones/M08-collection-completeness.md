@@ -1,7 +1,7 @@
 ---
 id: M08
 name: collection-completeness
-weight: 14
+weight: 11
 status: done
 ---
 # M08 collection-completeness

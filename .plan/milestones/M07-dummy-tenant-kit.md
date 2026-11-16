@@ -1,8 +1,8 @@
 ---
 id: M07
 name: dummy-tenant-kit
-weight: 12
-status: planned
+weight: 9
+status: active
 ---
 # M07 dummy-tenant-kit
 The dummy-tenant kit and the trial-tenant work G put ahead of everything (DEC-006), scoped by DEC-008, DEC-010 and DEC-014. The kit lives in the development kit, outside this repository (`$DT_KIT`, the dummy-tenant-kit row of ARCHITECTURE.md); its tasks write only `.plan/work/<id>/result.md` here, and every predicate below works from recorded evidence: manifest hashes of frozen kit copies, the suite driver's logs and the review records. Live steps (phase D and the rollback) are run by the tenant chat on G's sign-ins, one fresh sign-in per script and service (DEC-010); this plan records their gates and findings and no task of this plan contacts a tenant. Rounds 7m, 7n and 7o and the shared sign-in opener stay out of scope. The population scripts the tenant chat uses were reviewed separately (`REV-M07-populator`, approve on the last diff) and are not kit source.

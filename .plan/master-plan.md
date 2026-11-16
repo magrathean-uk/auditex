@@ -90,18 +90,18 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 <!-- milestones:begin -->
 | id | name | weight | % | status |
 |---|---|---|---|---|
-| M00 | foundation | 6 | 100 | done |
-| M01 | airr-bring-up | 11 | 100 | done |
-| M02 | explainer-data-and-judging | 11 | 100 | done |
-| M03 | explainer-training | 15 | 100 | done |
-| M04 | d5-keyed-pseudonyms | 13 | 100 | done |
-| M05 | scanners-and-hygiene | 8 | 100 | done |
-| M06 | release-1-5-0 | 10 | 100 | done |
-| M07 | dummy-tenant-kit | 12 | 89 | planned |
-| M08 | collection-completeness | 14 | 100 | done |
-| M09 | certificate-only | 10 | 100 | done |
-| M10 | local-answer | 10 | 0 | active |
-| M11 | auditex-model | 12 | 0 | planned |
+| M00 | foundation | 5 | 100 | done |
+| M01 | airr-bring-up | 8 | 100 | done |
+| M02 | explainer-data-and-judging | 8 | 100 | done |
+| M03 | explainer-training | 11 | 100 | done |
+| M04 | d5-keyed-pseudonyms | 10 | 100 | done |
+| M05 | scanners-and-hygiene | 6 | 100 | done |
+| M06 | release-1-5-0 | 8 | 100 | done |
+| M07 | dummy-tenant-kit | 9 | 89 | active |
+| M08 | collection-completeness | 11 | 100 | done |
+| M09 | certificate-only | 8 | 100 | done |
+| M10 | local-answer | 7 | 20 | planned |
+| M11 | auditex-model | 9 | 0 | planned |
 <!-- milestones:end -->
 Weights after amendment 5 (applied): M00 7 to 6, M01 13 to 11, M02 14 to 11, M04 16 to 13, M05 10 to 8, M06 13 to 10,
 M08 0 to 14, from the done milestones in proportion. Amendment 7 keeps every weight: M08 grows by small fixes and one L.

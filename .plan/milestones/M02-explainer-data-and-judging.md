@@ -1,7 +1,7 @@
 ---
 id: M02
 name: explainer-data-and-judging
-weight: 11
+weight: 8
 status: done
 ---
 # M02 explainer-data-and-judging

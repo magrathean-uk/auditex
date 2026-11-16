@@ -1,15 +1,14 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 87% (was 85%)
-milestone: M03-explainer-training 20%
+overall: 84% (was 87%)
+milestone: M07-dummy-tenant-kit 89%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 7aa0f7a 2026-11-15T11:00:39Z
+last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 
 ## Next tasks
-- M03-T02 Train three seeds of the chosen base on data v2 (terra)
-- M03-T03 Build, hash and judge the final explainer build (terra)
-- M03-T04 Write the recommendation and the product-integration options (sol)
+- M07-T16 Record phase D on the trial tenant (run by the tenant chat) (orchestrator)
+- M07-T17 Record the rollback of the trial tenant before the trial ends (orchestrator)
 
 ## Blockers
 - Host: the WGEX hold is over (DEC-069; sitting stopped at 2d); one heavy slot through hostload.sh, PLAN_LOAD_MAX=12.
@@ -29,12 +28,12 @@ last_checkpoint: 7aa0f7a 2026-11-15T11:00:39Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 74% orchestrator
-claude-1 79% ok
-claude-2 7% shared
-claude-3 75% ok
-claude-4 62% ok
-claude-5 80% ok
-codex 7% ok
-codex2 0% ok
+claude 88% orchestrator
+claude-1 82% ok
+claude-2 19% shared
+claude-3 83% ok
+claude-4 74% ok
+claude-5 85% hot
+codex 37% ok
+codex2 29% ok
 <!-- quota:end -->

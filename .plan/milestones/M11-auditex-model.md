@@ -1,7 +1,7 @@
 ---
 id: M11
 name: auditex-model
-weight: 12
+weight: 9
 status: planned
 ---
 # M11 auditex-model

@@ -1,7 +1,7 @@
 ---
 id: M01
 name: airr-bring-up
-weight: 11
+weight: 8
 status: done
 ---
 # M01 airr-bring-up

@@ -1,7 +1,7 @@
 ---
 id: M09
 name: certificate-only
-weight: 10
+weight: 8
 status: done
 ---
 # M09 certificate-only
