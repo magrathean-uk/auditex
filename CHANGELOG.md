@@ -5,6 +5,29 @@ All notable changes to Auditex are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The run-bundle contract has its own
 date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`).
 
+## [Unreleased]
+
+### Local answer
+
+- **`auditex explain <run>` and `auditex run --explain` (M10, DEC-113).** After a run, a local model answers what is
+  wrong in the tenant, the most severe first, then what is right. The value rules decide every verdict and the order;
+  the model only selects prepared sentences and values for each check and the checks the summary highlights (DEC-119),
+  and Auditex renders every word. A selection that fails the answer checks shows that check's fixed text, and the answer
+  says how many checks did. Every check that is not met is always shown, in the rules' order, whatever the model
+  selects (DEC-120). `auditex run --explain` never changes the run's exit status.
+- **Models.** `--model qwen` (the default), `mistral`, `gemma` or `small` (for 8 GB laptops), each pinned by revision,
+  size and SHA-256. The first use downloads the chosen file once from its publisher's hub into the user cache
+  (`AUDITEX_MODEL_DIR` moves it), with a size line and progress, resuming an interrupted download; the file is checked
+  before every load and the answer then runs offline. That download is the only network call; no telemetry.
+- **Runtime.** The new optional extra `local-answer` installs `llama-cpp-python` 0.3.36, which pip builds from source
+  (CMake and a C and C++ compiler; Metal on a Mac). Without it, `auditex explain` says what to install and every check
+  shows the fixed text.
+- **Bundle, report and MCP.** The answer is written into the run as `local_answer.json` (schema
+  `schemas/local_answer.schema.json`; a named post-finalisation output, checked by bundle validation as
+  `invalid_local_answer`). Rendered reports gain a `local_answer` section and the new read-only MCP tool
+  `auditex_local_answer` returns it; both re-check the stored answer against the run first and never show one that does
+  not match. `CONTRACT_VERSION` stays `2026-11-11`.
+
 ## [1.6.0] - 2026-11-15
 
 Auditex now has one way to audit Microsoft 365: the reader app with a certificate (DEC-107, DEC-108). This is a breaking

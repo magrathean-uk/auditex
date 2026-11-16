@@ -981,6 +981,48 @@ Gmail vacation-responder text (`responseSubject`, `responseBodyPlainText`, `resp
 
 `reports/report-pack.json` carries `baseline_alignment`. For each of `cis_m365_v7`, `cisa_scuba`, `ms_secure_score`, `ms_zero_trust`, and `mcsb` it lists the controls the shipped rules map to, with `status` (`fail`, `accepted_risk`, `pass`, or `not_assessed`), the mapped `rule_ids`, per-rule `rule_statuses`, and open `finding_ids`. Each `rule_statuses` entry has `rule_id`, `status`, and `evaluated`; a rule that was not evaluated also has a `reason`. A rule passes only when it was evaluated: every collector that feeds it completed and the evidence it reads was present. A control passes only when every mapped rule passed. `baseline_alignment.unmapped_findings` (`count`, `open_count`, `accepted_count`, `collectors` as a list of `{collector, count}`, `finding_ids`) counts findings with no `rule_id`, which no control can see. Every finding this version emits carries a `rule_id` (the finalizer refuses one without), so `count` is 0 for these bundles; a non-zero count marks a bundle from an earlier version or findings imported from elsewhere, and its open findings are not in any control row. `baseline_alignment.frameworks.cyber_essentials` is the exception: it lists every requirement in the catalog (Cyber Essentials Requirements for IT Infrastructure v3.3), not only the mapped ones, and each row adds `theme`, `requirement_status` (`automated`, `partial`, `manual`, `ce_plus_assessor_test`, or `provider_responsibility`), `citation`, `evidence_limits`, an `evidence` count object (including `rules_supporting`), a per-rule `confidence` (`full`, `partial` or `supporting`; a `supporting` rule is listed with its status but never decides the row), a row-level `confidence` for a failing row (`full` when a failing rule tests the condition the requirement names for the audited tenant, otherwise `partial`), and `ce_plus_test` where one applies. A row whose deciding rules were not all evaluated is `not_assessed` with `reason` `rules_not_evaluated` and `not_assessed_reasons` (the per-rule reasons); a row mapped only to supporting rules has `reason` `supporting_evidence_only`. A Google Workspace bundle lists only Google rules (a Microsoft rule on a Google tenant reads for a collector the run never had), and a Google rule that ran clean appears as evaluated; a Microsoft 365 bundle lists only Microsoft rules. Its `status` keeps the four values above, but a `manual`, `ce_plus_assessor_test` or `provider_responsibility` row is always `not_assessed` with `reason` `requirement_status:<status>`, and it is never `pass`. A `partial` row can be `fail` or `accepted_risk`; when its mapped rules are all evaluated and clean it is `not_assessed` with `reason` `partial_requirement_no_gap_found`, never `pass`. Only an `automated` row can be `pass`, and v3.3 has none. The section also carries `requirement_status_counts`, `uncatalogued_requirement_ids`, `document_url`, `effective_date` and a `disclaimer` that the output is assessor evidence, not a certification. `baseline_alignment.schema_version` is `2026-10-20` for this shape. `baseline_alignment.secure_score` reconciles the latest Microsoft Secure Score snapshot with Auditex findings: `overall` (score, maximum, percentage) and one row per mapped control profile with Microsoft's score and maximum, `microsoft_state`, `auditex_state`, and `agreement` (`agrees`, `auditex_only`, `microsoft_only`, or `no_microsoft_data`). `normalized/security_score_control_profiles.json` holds the control profile ids, titles, and maximum scores used for that table.
 
+### Local answer (optional, additive)
+
+`local_answer.json` is an optional root artefact written by `auditex explain <run>` and by `auditex run --explain`
+(both write the run's rule assessment first when it is missing). Its schema is `schemas/local_answer.schema.json`
+(`schema_version` `local-answer-v1`), listed by the schema manifest and checked when present by bundle validation: a
+damaged file, counts that disagree with its items or another run's `run_id` give the warning `invalid_local_answer`
+and never change the deterministic gate result. Like `model_assessment.json` it is a named post-finalisation output:
+it is not hashed, the integrity check reports it as unlisted, a copy already sealed into the hash manifest cannot be
+replaced and a symbolic link is refused. `CONTRACT_VERSION` is unchanged.
+
+It holds `run_id`, `generated_at`, the digest and frame versions it was made with (`answer-digest-v2`,
+`answer-frames-v1`), `status` (`model`, or `fixed_text` when no model ran), `reason` (null, `runtime_missing`,
+`runtime_version`, `download_failed`, `model_unverified` or `model_failed`), `model` (the choice and the pinned
+repository, revision, file, size and SHA-256, or null), `runtime` (`llama-cpp-python` and its version, or null), the
+counts by verdict, `fixed_text_items`, the run `summary`, one entry per item of the run's digest (`item`, `policy_id`,
+`verdict`, the model's `selection` of sentence ids and value references or null, `fallback`, `failures` and the rendered
+`text`) and the whole printed `text`.
+
+- The value rules decide every verdict and the order: wrong first and the most severe first, then right, then the
+  checks the run could not assess and those that do not apply. The model only selects sentence ids from each item's
+  bank and value references (DEC-119); Auditex renders every word and every value, quoted.
+- A selection that fails the answer checks, or an item the model did not answer, shows the item's fixed text and is
+  counted in `fixed_text_items`; the printed answer states that count.
+- Every item of the digest appears once, in the rules' order, whatever the model selected (DEC-120); no model output
+  and no tenant text can drop, hide or reorder a not met item.
+- Readers never trust the stored text. The report section and `auditex_local_answer` rebuild the run's digest from
+  `model_assessment.json`, check every stored selection again, recompute every fixed text, the counts and the printed
+  text, and show the answer only when all of it matches; otherwise the report leaves the section out and the MCP tool
+  returns `status: unavailable` with the reason.
+- The report holds a `local_answer` section (JSON, Markdown and HTML; CSV, SARIF and OSCAL leave it out) when the run
+  holds an answer that checks.
+
+The runtime is the optional extra `local-answer` (`llama-cpp-python` 0.3.36; PyPI ships it as source, so pip builds
+llama.cpp, which needs CMake and a C and C++ compiler). Without it every item shows the fixed text and the answer says
+what to install. Models (`--model qwen`, the default, `mistral`, `gemma` or `small`) are pinned by repository, revision,
+file, size and SHA-256 in `src/auditex/local_answer.py`. The first use downloads the chosen file from its publisher's
+hub at the pinned revision into the user cache (`AUDITEX_MODEL_DIR` overrides the place), resuming an interrupted
+download, and checks its size and SHA-256 before the file is used; every later load checks the SHA-256 again and needs
+no network. That download is the only network call: nothing about the run or the tenant is sent, and there is no
+telemetry. A failed download, a file that does not verify or a model that stops early gives the fixed text for the
+affected items; the audit is never lost and the run's exit status never changes.
+
 ### Evidence references and traceability
 
 A reference `{artifact_path, artifact_kind, collector, record_key, ...}` resolves when all of these hold:
@@ -1594,7 +1636,7 @@ within one tenant and optionally includes a valid finalized Auditex run.
 Both tools are read-only and make no tenant or inference calls. See
 [external assessment comparison](../guides/external-assessments.md).
 
-`auditex_summarize_run` returns the same contract status and evidence index path exposed by CLI output. `auditex_api_inventory` exposes the API call ledger, `auditex_permissions_ledger` exposes required and missing scopes, `auditex_proof_table` exposes finding-to-evidence rows, `auditex_enterprise_handoff` exposes the customer handoff index for review, and `auditex_verify_customer_pack` verifies generated customer pack integrity. `auditex_contract_schema_manifest` lists shipped schema files and the active contract version so MCP clients can detect drift before interpreting a bundle.
+`auditex_summarize_run` returns the same contract status and evidence index path exposed by CLI output. `auditex_api_inventory` exposes the API call ledger, `auditex_permissions_ledger` exposes required and missing scopes, `auditex_proof_table` exposes finding-to-evidence rows, `auditex_enterprise_handoff` exposes the customer handoff index for review, and `auditex_verify_customer_pack` verifies generated customer pack integrity. `auditex_contract_schema_manifest` lists shipped schema files and the active contract version so MCP clients can detect drift before interpreting a bundle. `auditex_local_answer` returns a run's local answer, re-checked as described in "Local answer" and redacted for sharing; it runs no model and writes nothing.
 
 ### Default Exchange/DNS coverage
 
