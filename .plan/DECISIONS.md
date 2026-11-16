@@ -951,3 +951,9 @@
 - decision: manager ruling accepting DEC-119: the model may choose emphasis (which prepared sentences and values to show, which items the summary highlights) but can never drop or hide a failing finding. Auditex always renders every not-met item, in the rules' order, whatever the model selects; hostile tenant text must not change which items appear. M10-T03 enforces it in the renderer with tests; M10-T04 checks completeness for every model and every injected test run.
 - why: the manager's guard on DEC-119.
 - approver: manager (on G's delegation)
+
+## DEC-121 M10-T03 scope additions
+- date: 2026-11-16
+- decision: M10-T03's files gain `src/azure_tenant_audit/bundle_integrity.py` (names `local_answer.json` as a post-finalisation output, so bundle verification, packs and gates accept an explained run) and `src/auditex/output_writers.py` (classifies the new writers and MCP tool); both additive. ARCHITECTURE's MCP interface line records the read-only `auditex_local_answer` tool and M09's tool changes.
+- why: M10-T03's result (risks).
+- approver: auto
