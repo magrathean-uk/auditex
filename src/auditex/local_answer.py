@@ -833,8 +833,8 @@ def explain_digest(digest: Mapping[str, Any], model: str = DEFAULT_MODEL, *, not
     else:
         try:
             path = ensure_model(spec, progress=progress)
-        except ModelError as exc:
-            reason = exc.code
+        except (ModelError, OSError) as exc:              # an unwritable cache never loses the audit either
+            reason = exc.code if isinstance(exc, ModelError) else "download_failed"
             if notice:
                 notice(f"The {spec.choice} model is not ready: {exc}")
         else:

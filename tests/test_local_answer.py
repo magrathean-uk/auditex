@@ -412,6 +412,13 @@ def test_a_cached_file_that_changed_is_deleted_and_the_answer_falls_back(monkeyp
     answer = la.explain_digest(digest(), "qwen", backend_factory=lambda path: pytest.fail("never loaded"))
     assert answer["reason"] == "model_unverified" and answer["status"] == "fixed_text"
 
+    def unwritable(spec, **kwargs):
+        raise PermissionError("read-only cache")
+
+    monkeypatch.setattr(la, "ensure_model", unwritable)
+    answer = la.explain_digest(digest(), "qwen", backend_factory=lambda path: pytest.fail("never loaded"))
+    assert answer["reason"] == "download_failed" and answer["fixed_text_items"] == 8
+
 
 def test_the_cache_follows_the_platform_and_the_override(monkeypatch, tmp_path):
     monkeypatch.setenv(la.MODEL_DIR_ENV, str(tmp_path / "models"))
