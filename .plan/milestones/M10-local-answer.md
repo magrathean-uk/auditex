@@ -14,7 +14,7 @@ Plan v4 amendment 12 (DEC-113). G's product shape: "CLI tool, user runs, ads pri
 `auditex run` (and `auditex explain <run folder>`) prints a correct plain-language answer of what is wrong and right in the tenant, produced by a local model on a 16 GB laptop, offline after a one-time model download, with every sentence checked against the run.
 
 ## Definition of Done
-- [ ] The runtime and models are chosen by measurement on this Mac: `grep -qx 'models: chosen' .plan/work/M10-T01/result.md`
+- [x] The runtime and models are chosen by measurement on this Mac: `grep -qx 'models: chosen' .plan/work/M10-T01/result.md`
 - [ ] The digest and the fail-closed answer checks are in the product: `grep -qx 'answer-checks: ready' .plan/work/M10-T02/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M10-T02/result.md`
 - [ ] The local answer runs from `auditex run --explain` and `auditex explain`, in the report and through MCP: `grep -qx 'local-answer: ready' .plan/work/M10-T03/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M10-T03/result.md`
 - [ ] Hostile tenant data never changes the order, softens, drops or hides a wrong finding or passes the checks, and every not-met item always appears (DEC-120), for every shipped model: `grep -qx 'injection: pass' .plan/work/M10-T04/result.md`
@@ -23,7 +23,7 @@ Plan v4 amendment 12 (DEC-113). G's product shape: "CLI tool, user runs, ads pri
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M10-T01 | Measure runtime and models on this Mac (about 8B for 16 GB; about 4B for 8 GB) | sol | M | hard | todo |
+| M10-T01 | Measure runtime and models on this Mac (about 8B for 16 GB; about 4B for 8 GB) | sol | M | hard | done |
 | M10-T02 | Run digest with value references, and the fail-closed answer checks in the product | sol | M | risk:high | done |
 | M10-T03 | Local model runner, auditex explain, run --explain, report section, MCP tool | sol | L | risk:high | todo |
 | M10-T04 | Acceptance on the test tenants, docs | terra | M | gate | todo |
