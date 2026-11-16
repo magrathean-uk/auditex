@@ -24,6 +24,8 @@ def test_registry_owns_tool_names_and_read_only_hints(monkeypatch) -> None:
     assert by_name["auditex_permissions_ledger"]["readOnlyHint"] is True
     assert by_name["auditex_proof_table"]["readOnlyHint"] is True
     assert by_name["auditex_enterprise_handoff"]["readOnlyHint"] is True
+    assert by_name["auditex_local_answer"]["readOnlyHint"] is True
+    assert by_name["auditex_local_answer"]["pathArguments"] == ["run_dir"]
     assert by_name["auditex_verify_customer_pack"]["readOnlyHint"] is True
     assert by_name["auditex_normalize_external_assessment"]["readOnlyHint"] is True
     assert by_name["auditex_compare_external_assessments"]["readOnlyHint"] is True

@@ -79,6 +79,7 @@ _RUN_TOOLS = (
     "auditex_permissions_ledger",
     "auditex_proof_table",
     "auditex_enterprise_handoff",
+    "auditex_local_answer",
     "auditex_notify_preview",
     "auditex_compare_external_assessments",
 )
@@ -167,6 +168,8 @@ def test_mcp_tools_reject_unsafe_manifests(tmp_path: Path, tool: str, kind: str)
     ("auditex_enterprise_handoff", "model_assessment.json"),
     ("auditex_enterprise_handoff", "ai_safe/custom.json"),
     ("auditex_enterprise_handoff", "normalized/custom.json"),
+    ("auditex_local_answer", "local_answer.json"),
+    ("auditex_local_answer", "model_assessment.json"),
     ("auditex_compare_runs:left", "bundle-hashes.json"),
 ))
 @pytest.mark.parametrize("kind", ("fifo", "symlink", "hardlink", "directory", "oversize"))
