@@ -2,7 +2,7 @@
 id: M09
 name: certificate-only
 weight: 10
-status: active
+status: done
 ---
 # M09 certificate-only
 Plan v4 amendment 11 (DEC-107, G: "Reader app"; DEC-108, the lead's rulings). Auditex audits Microsoft 365 one way only: the app-only reader app with a certificate credential, set up once by the customer's Global Administrator, no sign-in per audit. Every other Microsoft 365 authentication way goes: delegated interactive sign-in, the Azure CLI token mode, the client-secret mode, the access-token and saved-auth-context modes, the guided delegated path (`gr-audit`, `ga-setup-app`), the Microsoft 365 CLI sign-in, and the `auditex auth` token surfaces, with their guides, scripts and tests. Google Workspace authentication is untouched. G also asked (manager, 15 Nov): "reader app: ensure you write down exactly, in document or how to, what permissions it needs so tenant admin will know. be precise." That guide is M09-T01. M09 ends at a release candidate; the release itself waits for G's yes naming the version.
@@ -15,11 +15,11 @@ Plan v4 amendment 11 (DEC-107, G: "Reader app"; DEC-108, the lead's rulings). Au
 A customer's tenant admin can set up the reader app from one exact guide; every Auditex Microsoft 365 entry point (both CLIs, guided run, probe, setup guide, MCP tools, scripts) runs with the certificate and nothing else; no code, flag, guide or test for another Microsoft 365 sign-in way remains, except redaction entries and the replay of old bundles; a release candidate passes `make release-check`.
 
 ## Definition of Done
-- [ ] The reader-app permissions guide lists every permission, role and admin setting the collectors use, matched against the lab app of run m08e3, and the other vendor approves it for exactness: `grep -qx 'permissions-guide: exact' .plan/work/M09-T01/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M09-T01/result.md`
-- [ ] The engine accepts only the certificate: `grep -qx 'engine-certificate-only: yes' .plan/work/M09-T02/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M09-T02/result.md`
-- [ ] The product layer accepts only the certificate: `grep -qx 'product-certificate-only: yes' .plan/work/M09-T03/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M09-T03/result.md`
-- [ ] No removed mode survives outside redaction lists, replay code, CHANGELOG history and tenant-bootstrap: ``! git grep -nE -- '--(interactive|use-azure-cli-token|access-token|auth-context|client-secret|browser-command)\b|az login|m365 login|gr-audit|ga-setup-app' -- src docs README.md configs agent skills scripts Makefile ':!src/azure_tenant_audit/secret_hygiene.py' ':!src/azure_tenant_audit/auth_runtime.py' ':!src/azure_tenant_audit/command_runner.py' ':!src/azure_tenant_audit/response.py' | grep -v -i 'replay\|redact'``
-- [ ] The release candidate passes: `grep -qx 'release-check: pass' .plan/work/M09-T05/result.md`
+- [x] The reader-app permissions guide lists every permission, role and admin setting the collectors use, matched against the lab app of run m08e3, and the other vendor approves it for exactness: `grep -qx 'permissions-guide: exact' .plan/work/M09-T01/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M09-T01/result.md`
+- [x] The engine accepts only the certificate: `grep -qx 'engine-certificate-only: yes' .plan/work/M09-T02/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M09-T02/result.md`
+- [x] The product layer accepts only the certificate: `grep -qx 'product-certificate-only: yes' .plan/work/M09-T03/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M09-T03/result.md`
+- [x] No removed mode survives outside redaction lists, replay code, CHANGELOG history and tenant-bootstrap: ``! git grep -nE -- '--(interactive|use-azure-cli-token|access-token|auth-context|client-secret|browser-command)\b|az login|m365 login|gr-audit|ga-setup-app' -- src docs README.md configs agent skills scripts Makefile ':!src/azure_tenant_audit/secret_hygiene.py' ':!src/azure_tenant_audit/auth_runtime.py' ':!src/azure_tenant_audit/command_runner.py' ':!src/azure_tenant_audit/response.py' | grep -v -i 'replay\|redact'``
+- [x] The release candidate passes: `grep -qx 'release-check: pass' .plan/work/M09-T05/result.md`
 
 ## Tasks
 | id | title | owner | size | tags | status |

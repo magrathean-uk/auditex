@@ -12,3 +12,6 @@ Taking each option out of the redaction list in turn fails its own canary: thumb
 risks: The live wrapper test needs the cryptography package (already an engine dependency) and runs the full engine to the sign-in boundary. The blocked sign-in retries add a few seconds, and every connection attempt is refused and asserted to be login.microsoftonline.com only.
 The earlier risks still stand: 40 product tests fail until M09-T03, and D2 (the exchange collector still uses CLI for Microsoft 365) is deferred to T03 under DEC-109.
 questions_for_g: none
+### Findings
+engine-certificate-only: yes
+(lead: the repair-round RESULT block dropped the Findings section; the marker stands on REV-M09-T02 approve and CHK-M09-T02 pass at cbfedfb244fe)

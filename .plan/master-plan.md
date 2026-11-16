@@ -99,7 +99,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M06 | release-1-5-0 | 10 | 100 | done |
 | M07 | dummy-tenant-kit | 12 | 89 | planned |
 | M08 | collection-completeness | 14 | 100 | done |
-| M09 | certificate-only | 10 | 0 | active |
+| M09 | certificate-only | 10 | 100 | done |
 | M10 | local-answer | 10 | 0 | active |
 | M11 | auditex-model | 12 | 0 | planned |
 <!-- milestones:end -->
