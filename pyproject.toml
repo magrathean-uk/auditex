@@ -28,6 +28,13 @@ test = [
     "pytest>=8",
     "jsonschema>=4.18,<5",
 ]
+# The local answer (auditex explain, auditex run --explain), pinned to the measured runtime; the runner checks the
+# version. PyPI ships llama-cpp-python as source only, so installing this extra builds llama.cpp: it needs CMake and
+# a C and C++ compiler (the Xcode command line tools on macOS, where the build uses Metal; the MSVC build tools on
+# Windows). Models are downloaded on first use, never installed by pip.
+local-answer = [
+    "llama-cpp-python==0.3.36",
+]
 google = [
     "google-auth>=2.58.1,<3",
     "google-auth-oauthlib>=1.4.1,<2",
