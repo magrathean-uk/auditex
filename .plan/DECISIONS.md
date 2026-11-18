@@ -1023,3 +1023,9 @@
 - decision: phase 1 was stopped by a safety check while planning a refusal-removed attacker. The attacker is now a seeded mutation fuzzer plus a standard open instruct model at a pinned revision, with no refusal removal, fine-tuned on the strings that got through. The goals, the two-clean-rounds bar and the fixes are unchanged. This narrows the method in DEC-115's "attacker model with its refusals removed". The attack loop's purpose (hardening the answer against hostile tenant data) stands.
 - why: the refusal-removal part cannot be built in a worker session, and the loop does not need it, because injection strings against our own pipeline are ordinary test data.
 - approver: lead
+
+## DEC-133 M11-T02 phase 2 order and the rule-level class
+- date: 2026-11-18
+- decision: phase 1 is ready (`.plan/work/M11-T02/result-p1.md`). Round 1 runs now, in G's sign-in window, and collects tricks only. The fixes then go on a branch with focused tests (value-rule fixes also keep the vectors passing and regenerate the rule packs). The retrained rounds follow. The fix paths add value_rules and the rule config, for the class phase 1 found (an unusable character in a value read by a rule can turn not met into not assessed).
+- why: use the open window; DEC-114 says a wrong finding is never softened.
+- approver: lead
