@@ -975,3 +975,9 @@
 - decision: the lead resumed from the wind-down handover (G: "continue", then "go"). The manager session is now local_b5c6f93c-44a1-4cc8-87d9-132b635a68f3 ("Manager chat handover"), replacing local_a865e722 from 18 Nov 13:05 GMT. G to the manager: "manage auditex, clean-dev, wgex, tesatlas, trackex. (they all open now)". The manager reads the chain of command as unchanged; only its session id changes. M10-T03 repair round 3 dispatched from `.plan/work/M10-T03/continue-2.md` (the round 2 edits are WIP commit cd9b225).
 - why: work restarts after DEC-123; the manager handed over.
 - approver: G (resume); manager (chain-of-command reading)
+
+## DEC-125 Pause on G's order
+- date: 2026-11-18
+- decision: G to the manager about 13:08 GMT: "pause all down in safely ... tell all, to use least amount of tokens to communicate, sparesly use astra". M10-T03 round 3 was stopped before any edit (job-3 killed, worktree clean and removed); the branch stays at cd9b225. Nothing runs; start nothing until the manager's restart plan. Astra only for a concrete need nothing cheaper meets; shortest messages.
+- why: G's pause.
+- approver: G (through the manager)

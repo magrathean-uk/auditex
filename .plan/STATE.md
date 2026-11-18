@@ -7,13 +7,13 @@ release_scope: 1.6.0 RELEASED 16 Nov (DEC-122; M08 collection completeness + M09
 last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 
 ## Next tasks
-- M10-T03 resume the repair round on `task/M10-T03-local-answer` (WIP cd9b225, unreviewed): `.plan/work/M10-T03/continue-1.md` + `review-1.md`; then REV-M10-T03 (Codex, prior result-1.md) + CHK-M10-T03, merge, full suite.
+- M10-T03 resume the repair round on `task/M10-T03-local-answer` (WIP cd9b225, unreviewed): dispatch with REVIEW=`.plan/work/M10-T03/continue-2.md` (round 3 stopped on 18 Nov before any edit; its progress.md says the WIP already holds all four fixes, only tests, commits and checks are left; FILES and TITLE from `brief-round2.md`, `--rounds-ok`); then REV-M10-T03 (Codex, prior result-1.md) + CHK-M10-T03, merge, full suite.
 - M10-T04 acceptance on the test tenants (99% checks, zero contradictions, DEC-114 injection, DEC-120 completeness), docs; CPU-only speed needs the lean prompt.
 - M11 after M10: write each task's criteria before dispatch (amendment 13); first GPU job needs G's Isambard sign-in (send the manager the line).
 - M07-T17 rollback of the lab tenant: week of 30 Nov, latest 3 Dec, only after the manager passes on G's word (ROLLBACK-PLAN-2026-11-15.md in records dt-live).
 
 ## Blockers
-- None running: wind-down 16 Nov (DEC-123); nothing on this Mac or the system; no worktree but main.
+- Paused 18 Nov 13:15 GMT on G's order through the manager (DEC-125): nothing running, no worktree but main; start nothing until the manager's restart plan.
 - Host: hostload slots are contended by other projects; heavy runs wait or run directly only with lead authorisation.
 
 ## Pending G decisions
