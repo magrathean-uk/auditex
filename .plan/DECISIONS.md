@@ -1029,3 +1029,9 @@
 - decision: phase 1 is ready (`.plan/work/M11-T02/result-p1.md`). Round 1 runs now, in G's sign-in window, and collects tricks only. The fixes then go on a branch with focused tests (value-rule fixes also keep the vectors passing and regenerate the rule packs). The retrained rounds follow. The fix paths add value_rules and the rule config, for the class phase 1 found (an unusable character in a value read by a rule can turn not met into not assessed).
 - why: use the open window; DEC-114 says a wrong finding is never softened.
 - approver: lead
+
+## DEC-134 Second pause on G's order
+- date: 2026-11-18
+- decision: G to the manager (about 17:30 GMT): "pause down all development safely." The M10-T04, M11-T01 part B and M11-T02 round 1 workers were stopped. M10-T04's two commits stay on its branch, with its worktree kept. The Isambard jobs already submitted may run to their end, and their results are not collected until the manager says. Nothing new starts. Where each task stopped: STATE Next tasks.
+- why: G's pause.
+- approver: G (through the manager)

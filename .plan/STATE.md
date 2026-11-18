@@ -7,13 +7,14 @@ release_scope: 1.6.0 RELEASED 16 Nov (DEC-122; M08 collection completeness + M09
 last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 
 ## Next tasks
-- M10-T03 resume the repair round on `task/M10-T03-local-answer` (WIP cd9b225, unreviewed): dispatch with REVIEW=`.plan/work/M10-T03/continue-2.md` (round 3 stopped on 18 Nov before any edit; its progress.md says the WIP already holds all four fixes, only tests, commits and checks are left; FILES and TITLE from `brief-round2.md`, `--rounds-ok`); then REV-M10-T03 (Codex, prior result-1.md) + CHK-M10-T03, merge, full suite.
-- M10-T04 acceptance on the test tenants (99% checks, zero contradictions, DEC-114 injection, DEC-120 completeness), docs; CPU-only speed needs the lean prompt.
-- M11 after M10: write each task's criteria before dispatch (amendment 13); first GPU job needs G's Isambard sign-in (send the manager the line).
-- M07-T17 rollback of the lab tenant: week of 30 Nov, latest 3 Dec, only after the manager passes on G's word (ROLLBACK-PLAN-2026-11-15.md in records dt-live).
+- M10-T04 resume on `task/M10-T04-acceptance` (worktree kept; 950f9a7 lean prompt and CPU warning, 063de89 docs; all four models measured and passing). Left: re-run qwen on Metal (the judge self-test overwrote its answer files; originals in its out/qwen-metal-original), re-judge, write sample-answer.txt, the result table, final checks. Then merge, full suite, 1.7.0 (release-check, GitHub, no further ask; sample answer in the line to the manager).
+- M11-T01 part B: array 8589989 submitted on Isambard (setup 8588839, smoke 8589567 clean, 10 to 25 s per tenant). Left: resubmit failed indices, aggregate, inventory, rsync, `.plan/work/M11-T01/result-b.md` (scale: pass|fail). Kit `scale/airr/SUBMIT.md`.
+- M11-T02 round 1: gen job 8590293 submitted. Left: gen pass, answer smoke, full answers, classify, `.plan/work/M11-T02/result-r1.md`. Then the fixes on a branch (incl. the rule-level class and O2, DEC-133), then the retrained rounds. Kit `attack/SUBMIT.md`.
+- Each Isambard step needs a live sign-in window (G); check `ssh -O check` first.
+- M07-T17 lab rollback by 30 Nov (G approved, DEC-126), then G passes `~/Desktop/cancel-lab-trials.md` to Codex.
 
 ## Blockers
-- Paused 18 Nov 13:15 GMT on G's order through the manager (DEC-125): nothing running, no worktree but main; start nothing until the manager's restart plan.
+- Paused 18 Nov 18:25 GMT on G's order ("pause down all development safely", DEC-134). Nothing runs on this Mac. On Isambard, already-submitted jobs may finish (m11t01-answer array 8589989, m11t02-gen 8590293); results not collected until the manager says.
 - Host: hostload slots are contended by other projects; heavy runs wait or run directly only with lead authorisation.
 
 ## Pending G decisions
