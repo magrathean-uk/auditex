@@ -969,3 +969,9 @@
 - decision: the weights summed to 132 after M09 (10), M10 (10) and M11 (12) were added; they are rescaled to 100 in proportion (M00 5, M01 8, M02 8, M03 11, M04 10, M05 6, M06 8, M07 9, M08 11, M09 8, M10 7, M11 9). G, through the manager, 16 Nov about 06:50 GMT: "1: update me on development. 2: tell each project to wind down development and create handover .md files again on desktop . then archive them." Wind-down: nothing runs on this Mac or the system; M10-T03's repair round is committed as unreviewed work in progress on `task/M10-T03-local-answer` (cd9b225), resume from `.plan/work/M10-T03/continue-1.md`; the handover is `~/Desktop/auditex.md`.
 - why: percent.py refuses weights that do not sum to 100; G's wind-down.
 - approver: auto (re-baseline); G (wind-down)
+
+## DEC-124 Resume and new manager chat
+- date: 2026-11-18
+- decision: the lead resumed from the wind-down handover (G: "continue", then "go"). The manager session is now local_b5c6f93c-44a1-4cc8-87d9-132b635a68f3 ("Manager chat handover"), replacing local_a865e722 from 18 Nov 13:05 GMT. G to the manager: "manage auditex, clean-dev, wgex, tesatlas, trackex. (they all open now)". The manager reads the chain of command as unchanged; only its session id changes. M10-T03 repair round 3 dispatched from `.plan/work/M10-T03/continue-2.md` (the round 2 edits are WIP commit cd9b225).
+- why: work restarts after DEC-123; the manager handed over.
+- approver: G (resume); manager (chain-of-command reading)
