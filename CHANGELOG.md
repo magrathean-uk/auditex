@@ -30,6 +30,14 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   `auditex_local_answer` returns it; both re-check the stored answer against the run first and never show one that does
   not match. `CONTRACT_VERSION` stays `2026-11-11`.
 
+### Fixed
+
+- **A tenant with no Power Platform tenant isolation set no longer stops the assessment (M11, DEC-129).** When the
+  tenant isolation API answered null, the adapter withheld the section with `tenant_isolation_unconfirmed`, which the
+  assessment schema's projection reason list did not name, so `assess_run` raised and answered no policy. The reason is
+  now in the list: `MS.POWERPLATFORM.3.1v1` is not assessed (evidence section not collected) and every other policy is
+  answered as usual. `CONTRACT_VERSION` stays `2026-11-11`.
+
 ## [1.6.0] - 2026-11-15
 
 Auditex now has one way to audit Microsoft 365: the reader app with a certificate (DEC-107, DEC-108). This is a breaking

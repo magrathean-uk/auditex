@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from auditex import scuba_adapters_powerplat as adapters
+from auditex.rule_assessment import assess_run
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
@@ -367,6 +368,41 @@ def test_never_configured_switch(tmp_path, monkeypatch):
     operation(tmp_path, "power_platform", "tenantIsolation", [{"never_configured": True}])
     monkeypatch.setattr(adapters, "NEVER_CONFIRMED_NULL_SENTINEL", True)
     assert project_run(tmp_path, redact=False).rule_sections["tenant_isolation"] == ["null"]
+
+
+def _requirement_met(row):
+    return next(claim for claim in row["claims"] if claim["id"] == "requirement_met")
+
+
+def test_never_configured_isolation_does_not_stop_assessment(tmp_path):
+    """An unconfigured tenant isolation withholds only 3.1v1; assess_run still validates and answers the rest."""
+    case = next(item for item in RAW["cases"] if item["id"] == "never-configured")
+    bundle(tmp_path)
+    write(tmp_path, "run-manifest.json", {"platform": "m365", "run_id": "run"})
+    operation(tmp_path, *READS[case["section"]], case["rows"])
+    result = assess_run(tmp_path)
+    rows = {row["policy_id"]: row for row in result["policies"]}
+    withheld = rows["MS.POWERPLATFORM.3.1v1"]
+    assert _requirement_met(withheld)["status"] == "unknown"
+    assert withheld["reason"] == "rule_precheck"
+    assert withheld["rule_precheck"]["reason_code"] == "required_evidence_section_not_collected"
+    assert "tenant_isolation" in withheld["rule_precheck"]["reason_text"]
+    section = result["projection"]["sections"]["tenant_isolation"]
+    assert (section["status"], section["reason"]) == ("not_collected", "tenant_isolation_unconfirmed")
+    answered = [pid for pid, row in rows.items() if _requirement_met(row)["status"] == "confirmed"]
+    assert "MS.POWERPLATFORM.1.1v1" in answered and "MS.POWERPLATFORM.3.1v1" not in answered
+    assert len(rows) > 1 and result["totals"]["answered"] > 0
+
+
+def test_never_configured_isolation_one_operation_sample(tmp_path):
+    """The kit reproduction: a run whose only collected operation is the never-configured isolation answer."""
+    bundle(tmp_path, {"power_platform": {"tenantIsolation": [{"never_configured": True}]}})
+    write(tmp_path, "run-manifest.json", {"platform": "m365", "run_id": "run"})
+    result = assess_run(tmp_path)
+    rows = {row["policy_id"]: row for row in result["policies"]}
+    assert _requirement_met(rows["MS.POWERPLATFORM.3.1v1"])["status"] == "unknown"
+    assert rows["MS.POWERPLATFORM.3.1v1"]["rule_precheck"]["reason_code"] == "required_evidence_section_not_collected"
+    assert len(rows) > 1
 
 
 @pytest.mark.parametrize("plan", RAW["plans"], ids=[p["name"] + p["status"] for p in RAW["plans"]])

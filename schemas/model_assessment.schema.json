@@ -1039,7 +1039,8 @@
             "dns_posture_not_run",
             "dns_records_not_saved",
             "collector_error",
-            "optional_collection_not_enabled"
+            "optional_collection_not_enabled",
+            "tenant_isolation_unconfirmed"
           ]
         },
         "source": {
