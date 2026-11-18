@@ -14,7 +14,7 @@ last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 - M07-T17 lab rollback by 30 Nov (G approved, DEC-126), then G passes `~/Desktop/cancel-lab-trials.md` to Codex.
 
 ## Blockers
-- Paused 18 Nov 18:25 GMT on G's order ("pause down all development safely", DEC-134). Nothing runs on this Mac. On Isambard, already-submitted jobs may finish (m11t01-answer array 8589989, m11t02-gen 8590293); results not collected until the manager says.
+- Restarted 18 Nov 18:45 GMT (G: "drive is back in, restart all"): M10-T04, M11-T01 part B collect and M11-T02 round 1 resumed from their progress files.
 - Host: hostload slots are contended by other projects; heavy runs wait or run directly only with lead authorisation.
 
 ## Pending G decisions
