@@ -7,6 +7,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-18
+
 ### Local answer
 
 - **`auditex explain <run>` and `auditex run --explain` (M10, DEC-113).** After a run, a local model answers what is
