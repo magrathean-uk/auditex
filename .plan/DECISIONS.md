@@ -1005,3 +1005,9 @@
 - decision: M11-T01 part A covered 2,048 synthetic tenants: 0 verdict disagreements in 112,320 rows, but F1 (a never-configured Power Platform tenant isolation crashes `assess_run` on a schema enum, so the whole assessment fails, one tenant in seven) is a product defect. It is fixed before 1.7.0 in M11-T01F (schema change, so one Codex review), and then part A is rerun. O2 (a lone UTF-16 surrogate in any collected name makes finalisation refuse the whole run) is a hostile-data stop: it goes to M11-T02 as a named item, without blocking 1.7.0. O1 (AAD 5.6 and 5.7 day limits) gets a read-only Rego check in M11-T01F. O3 is guarded IO by design.
 - why: scale findings; G wants audits that answer.
 - approver: lead
+
+## DEC-130 Messages only for G's hands
+- date: 2026-11-18
+- decision: G to the manager (about 15:45 GMT): "for all: keep it simple. talk less, just update me what is needed from me." The lead messages the manager only when G must do or decide something, in one line saying exactly what. No milestone or status notes; the manager reads the plan files.
+- why: G's order.
+- approver: G (through the manager)
