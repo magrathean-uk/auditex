@@ -41,6 +41,7 @@ def _isolate_auditex_secrets():
         ("AUDITEX_LOCAL_AUTH_ENV", str(auth_env_path)),
         ("AUDITEX_AUTH_CONTEXTS_PATH", str(contexts_path)),
         ("AUDITEX_M365_HOME", str(Path(tmp_dir) / "m365-home")),
+        ("AUDITEX_MODEL_DIR", str(Path(tmp_dir) / "model-cache")),
     ):
         previous[key] = os.environ.get(key)
         os.environ[key] = value
@@ -53,6 +54,27 @@ def _isolate_auditex_secrets():
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = prev
+
+
+MODEL_HUBS = ("https://huggingface.co/", "http://huggingface.co/", "https://hf.co/", "http://hf.co/")
+
+
+@pytest.fixture(autouse=True)
+def _no_model_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test downloads a local answer model: any request to the model hub fails the test, so a test whose guard
+    stops working cannot fall through to a multi-gigabyte download. A test that fakes the download replaces
+    ``requests.get`` itself; the opt-in real model test reads a model folder the operator names and downloads
+    nothing. The session fixture above points the model cache at a temp folder."""
+    import requests
+
+    real = requests.Session.request
+
+    def guarded(self, method, url, *args, **kwargs):
+        if str(url).lower().startswith(MODEL_HUBS):
+            pytest.fail(f"a test reached the model hub ({method} {url}); fake the download instead")
+        return real(self, method, url, *args, **kwargs)
+
+    monkeypatch.setattr(requests.Session, "request", guarded)
 
 
 @pytest.fixture(autouse=True)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 from collections.abc import Callable
 from functools import wraps
@@ -93,6 +94,7 @@ def _build_root_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("export", allow_abbrev=False, help="List and run exporters.")
     subparsers.add_parser("assessment", allow_abbrev=False, help="Import and compare local Microsoft assessment reports.")
     subparsers.add_parser("assess", allow_abbrev=False, help="Write the rule-only SCuBA assessment for a finished run; rows without a rule are not assessed.")
+    subparsers.add_parser("explain", allow_abbrev=False, help="Answer what is wrong (worst first) and right in a finished run with a local model; also auditex run --explain.")
     subparsers.add_parser("notify", allow_abbrev=False, help="Build or send post-run notifications.")
     subparsers.add_parser("rules", allow_abbrev=False, help="Inspect built-in rule packs.")
     subparsers.add_parser("google", allow_abbrev=False, help="Run Google Workspace audit flows.")
@@ -709,6 +711,149 @@ def _build_assess_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_explain_parser() -> argparse.ArgumentParser:
+    from .local_answer import DEFAULT_MODEL, MODELS
+
+    parser = build_argument_parser(
+        allow_abbrev=False,
+        prog="auditex explain",
+        description="Answer what is wrong (worst first) and what is right in a finished run. The value rules decide "
+                    "every verdict and the order; a local model only chooses which checked sentences to show. The "
+                    "first use downloads the model once; afterwards it runs offline. Without the local answer "
+                    "runtime every item shows the fixed text.",
+    )
+    parser.add_argument("run_dir", help="A finished audit run directory (its rule assessment is written first when "
+                                        "missing).")
+    parser.add_argument("--model", choices=tuple(MODELS), default=DEFAULT_MODEL,
+                        help=f"The local model (default: {DEFAULT_MODEL}; small suits 8 GB laptops).")
+    return parser
+
+
+def _build_run_explain_parser() -> argparse.ArgumentParser:
+    from .local_answer import DEFAULT_MODEL, MODELS
+
+    parser = build_argument_parser(allow_abbrev=False, add_help=False, prog="auditex run",
+                                   description="Local answer options of auditex run.")
+    parser.add_argument("--explain", action="store_true",
+                        help="After the run, answer what is wrong and right with a local model (auditex explain).")
+    parser.add_argument("--model", choices=tuple(MODELS), default=None,
+                        help=f"The local model for --explain (default: {DEFAULT_MODEL}).")
+    return parser
+
+
+def _split_run_explain(argv: list[str]) -> tuple[list[str], str | None]:
+    """The engine's arguments and the --explain model (None without --explain). Only the exact flags are taken;
+    anything else, abbreviations included, goes to the engine parser, which refuses what it does not know."""
+    parser = _build_run_explain_parser()
+    known, rest = parser.parse_known_args(argv)
+    if known.model is not None and not known.explain:
+        parser.error_prevalidated("--model applies only with --explain")
+    if not known.explain:
+        return argv, None
+    from .local_answer import DEFAULT_MODEL
+
+    return rest, known.model or DEFAULT_MODEL
+
+
+def _child_dirs(path: Path) -> set[str]:
+    try:
+        return {child.name for child in path.iterdir() if child.is_dir() and not child.is_symlink()}
+    except OSError:
+        return set()
+
+
+def _engine_run_places(engine_argv: list[str]) -> tuple[list[Path], Path | None] | None:
+    """Where the engine may write this run, read by the engine's own parser (the last of a repeated option wins):
+    the base folders it may name under (``--out`` as the offline replay and as the live run take it) and the folder
+    a live ``--resume-from`` completes into. None when the engine parser refuses the arguments (the engine reports
+    that itself)."""
+    import contextlib
+    import io
+
+    from azure_tenant_audit.cli import build_parser as build_engine_parser
+
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            args, _ = build_engine_parser().parse_known_args(engine_argv)
+    except SystemExit:
+        return None
+    out = str(getattr(args, "out", None) or "audit-output")
+    resume = getattr(args, "resume_from", None)
+    return [Path(out), Path(out).expanduser()], Path(resume).expanduser() if resume else None
+
+
+def _manifest_marks(bases: list[Path], resume: Path | None) -> dict[str, tuple[Path, tuple[int, ...]]]:
+    """Every run folder the engine may complete into, keyed by its real path, with the identity of its
+    ``run-manifest.json`` (device, inode, size, modified and changed times); folders without a regular manifest
+    are left out."""
+    folders = [base / name for base in bases for name in sorted(_child_dirs(base))]
+    if resume is not None and resume.is_dir() and not resume.is_symlink():
+        folders.append(resume)
+    marks: dict[str, tuple[Path, tuple[int, ...]]] = {}
+    for folder in folders:
+        try:
+            info = (folder / "run-manifest.json").lstat()
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode):
+            marks.setdefault(os.path.realpath(folder), (folder, (info.st_dev, info.st_ino, info.st_size,
+                                                                 info.st_mtime_ns, info.st_ctime_ns)))
+    return marks
+
+
+def _notice(text: str) -> None:
+    """A progress or status line for the operator (stderr)."""
+    print(text, file=sys.stderr, flush=True)
+
+
+def _explain_run(run_dir: str, model: str, *, assess_first: bool) -> int:
+    """Write the local answer into a finished run and print it; 2 when the run cannot be answered."""
+    from .answer_digest import DigestError
+    from .local_answer import LocalAnswerError, explain_run
+
+    try:
+        if assess_first or not (Path(run_dir) / "model_assessment.json").exists():
+            _notice("Writing the rule assessment first (auditex assess).")
+            from .rule_assessment import assess_run
+
+            assess_run(run_dir)
+        answer = explain_run(run_dir, model, notice=_notice, progress=_notice)
+    except (DigestError, LocalAnswerError, OSError, ValueError, TypeError) as exc:
+        _notice(f"auditex explain: {exc}")
+        return 2
+    print(answer["text"], end="")
+    return 0
+
+
+def _run_with_explain(argv: list[str]) -> int:
+    """``auditex run``; with --explain, the run is answered afterwards. The answer never changes the run's exit
+    status and a failed answer never loses the audit."""
+    engine_argv, model = _split_run_explain(argv)
+    if model is None:
+        return tenant_audit_main(argv)
+    if any(token in {"-h", "--help"} for token in engine_argv):
+        try:
+            return tenant_audit_main(engine_argv)
+        finally:
+            _build_run_explain_parser().print_help()
+    places = _engine_run_places(engine_argv)
+    before = _manifest_marks(*places) if places else {}
+    code = tenant_audit_main(engine_argv)
+    if code not in (0, 1):                    # 1 is a partial run: it still wrote a bundle
+        return code
+    # The run folder is the one whose manifest the engine wrote during this call: a new run's folder, or the folder
+    # a resumed run completed, whatever names the arguments repeat.
+    after = _manifest_marks(*places) if places else {}
+    written = [folder for key, (folder, mark) in sorted(after.items()) if before.get(key, (None, None))[1] != mark]
+    run_dir = written[0] if len(written) == 1 else None
+    if run_dir is None:
+        _notice("auditex run --explain: could not tell which run folder this run wrote; answer it with "
+                "auditex explain <run folder>.")
+        return code
+    _explain_run(str(run_dir), model, assess_first=True)
+    return code
+
+
 def _build_assessment_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(
         allow_abbrev=False,
@@ -1014,6 +1159,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Assessment failed: {exc}", file=sys.stderr)
             return 2
         return 0
+    if argv[0] == "explain":
+        args = parse_guarded(_build_explain_parser(), argv[1:])
+        return _explain_run(args.run_dir, args.model, assess_first=False)
     if argv[0] == "demo":
         from .demo import main as demo_main
 
@@ -1276,7 +1424,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
     if argv[0] == "run":
-        return tenant_audit_main(argv[1:])
+        return _run_with_explain(argv[1:])
     if argv[0] == "summarize":
         if len(argv) != 2:
             print("usage: auditex summarize <run-dir>", file=sys.stderr)

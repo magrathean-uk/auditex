@@ -626,6 +626,22 @@ def analyze_report(run_dir: str) -> dict[str, Any]:
     return result
 
 
+def read_local_answer(run_dir: str) -> dict[str, Any]:
+    """The run's local answer re-checked against its rule assessment (``local_answer.load_answer``), shareable
+    redaction applied; runs no model and writes nothing. ``status: unavailable`` with the reason when the run has no
+    answer or it does not check."""
+    from .local_answer import LocalAnswerError, load_answer
+
+    before = snapshot_run(run_dir)
+    try:
+        answer = load_answer(run_dir)
+    except LocalAnswerError as exc:
+        answer = {"status": "unavailable", "detail": str(exc)}
+    result = redact_payload(answer, run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    assert_snapshot_stable(run_dir, before)
+    return result
+
+
 def api_inventory(run_dir: str) -> dict[str, Any]:
     from .reporting import api_call_inventory as _api_call_inventory
 
@@ -1067,6 +1083,9 @@ def tool_handlers() -> dict[str, Any]:
 
     def auditex_report_analyze(run_dir: str) -> dict[str, Any]:
         return analyze_report(run_dir)
+
+    def auditex_local_answer(run_dir: str) -> dict[str, Any]:
+        return read_local_answer(run_dir)
 
     def auditex_api_inventory(run_dir: str) -> dict[str, Any]:
         return api_inventory(run_dir)

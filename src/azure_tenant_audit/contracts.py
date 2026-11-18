@@ -87,6 +87,10 @@ _SENSITIVE_CONTRACT_ARTIFACTS = (
     "reports/report-pack.json",
     "normalized/auth_context.json",
 )
+# The optional local answer written by ``auditex explain`` (M10): validated against its schema when present; the
+# product re-checks its content against the run's rule assessment whenever it reads it.
+LOCAL_ANSWER_PATH = "local_answer.json"
+LOCAL_ANSWER_SCHEMA = "schemas/local_answer.schema.json"
 _OPTIONAL_MANIFEST_ARTIFACT_FIELDS = (
     "data_handling_path",
     "live_readiness_path",
@@ -936,6 +940,21 @@ def _validate_report_pack(
         )
 
 
+def validate_local_answer(payload: Any) -> None:
+    """Check a local answer against ``schemas/local_answer.schema.json``; ValueError otherwise."""
+    from .resources import open_text_resource
+    from .scuba_assessment import _check
+
+    schema = json.loads(open_text_resource(LOCAL_ANSWER_SCHEMA))
+    _check(payload, schema, schema, "local_answer")
+    counts, items = payload["counts"], payload["items"]
+    if (counts["items"] != len(items) or payload["fixed_text_items"] != sum(item["fallback"] for item in items)
+            or any(counts[verdict] != sum(item["verdict"] == verdict for item in items)
+                   for verdict in ("not_met", "met", "not_assessed", "not_applicable"))
+            or [item["item"] for item in items] != list(range(1, len(items) + 1))):
+        raise ValueError("Inconsistent local answer counts or item numbers")
+
+
 def build_validation_report(
     *,
     run_dir: str | Path,
@@ -985,6 +1004,18 @@ def _build_validation_report(
             raise
         except (OSError, ValueError, TypeError, KeyError, RecursionError):
             issues.append(_issue("invalid_model_assessment", path=MODEL_ASSESSMENT_PATH, severity="warning"))
+    answer_path = run_path / LOCAL_ANSWER_PATH
+    if answer_path.exists() or answer_path.is_symlink():
+        try:
+            answer = json.loads(read_run_file(run_path, LOCAL_ANSWER_PATH).decode("utf-8"))
+            validate_local_answer(answer)
+            run_manifest = _read_json(run_path / "run-manifest.json", {}, run_dir=run_path)
+            if not isinstance(run_manifest, Mapping) or answer["run_id"] != run_manifest.get("run_id"):
+                raise ValueError("Local answer run_id mismatch")
+        except UnsafeRunFileError:
+            raise
+        except (OSError, ValueError, TypeError, KeyError, RecursionError):
+            issues.append(_issue("invalid_local_answer", path=LOCAL_ANSWER_PATH, severity="warning"))
     loaded_findings = _load_findings(run_path, findings)
     # Each cited artifact is read once for the findings, the proof table and the report sections.
     report_pack = _read_json(run_path / "reports" / "report-pack.json", fallback=None, run_dir=run_path)

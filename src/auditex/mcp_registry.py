@@ -175,6 +175,12 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
         path_args=("run_dir",),
     ),
     McpToolEntry(
+        name="auditex_local_answer",
+        description="Read a completed run's local answer (written by auditex explain or auditex run --explain), re-checked against the run's rule assessment: what is wrong, worst first, then what is right, and how many items used the fixed text. Runs no model and writes nothing.",
+        read_only_hint=True,
+        path_args=("run_dir",),
+    ),
+    McpToolEntry(
         name="auditex_api_inventory",
         description="Read the enterprise API call inventory from a completed run bundle.",
         read_only_hint=True,

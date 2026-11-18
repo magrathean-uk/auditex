@@ -67,7 +67,8 @@ _PRIVATE_TEMPORARY = re.compile(
 )
 
 # Outputs written on request after finalisation, outside the original seal.
-# Optional model assessment JSON is checked by contract validation when present.
+# Optional model assessment JSON and the local answer (``auditex explain``) are checked by contract validation when
+# present; the product re-checks the local answer against the run whenever it reads it.
 # ``model_assessment_prompts.jsonl`` is no longer written by any command; bundles from older runs may still carry
 # it, so it stays accepted as an unhashed post-finalisation file.
 _LEGACY_POST_FINALIZATION_OUTPUTS = frozenset({"model_assessment_prompts.jsonl"})
@@ -83,7 +84,7 @@ _CONSUMED_DIRECTORIES = ("normalized/", "findings/", "blockers/", "reports/", "a
 def is_post_finalization_output(relative: str) -> bool:
     """Whether ``relative`` is a named output written into a run after it was finalized."""
     return (
-        relative == "model_assessment.json"
+        relative in ("model_assessment.json", "local_answer.json")
         or relative in _LEGACY_POST_FINALIZATION_OUTPUTS
         or bool(_POST_FINALIZATION_OUTPUT.match(relative))
     )

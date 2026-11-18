@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://magrathean.uk/solutions/auditex/schemas/local_answer.schema.json",
+  "title": "Optional local answer: the rules' verdicts in their order, worded from checked selections (never changes a verdict)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "run_id", "digest_version", "frames_version", "status", "reason",
+               "model", "runtime", "counts", "fixed_text_items", "summary", "items", "text"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "local-answer-v1"},
+    "generated_at": {"type": "string", "minLength": 1, "maxLength": 64},
+    "run_id": {"type": "string", "minLength": 1},
+    "digest_version": {"type": "string", "const": "answer-digest-v2"},
+    "frames_version": {"type": "string", "const": "answer-frames-v1"},
+    "status": {"type": "string", "enum": ["model", "fixed_text"]},
+    "reason": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "string", "enum": ["runtime_missing", "runtime_version", "download_failed", "model_unverified", "model_failed"]}
+      ]
+    },
+    "model": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/model"}]},
+    "runtime": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/runtime"}]},
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "not_met", "met", "not_assessed", "not_applicable"],
+      "properties": {
+        "items": {"type": "integer", "minimum": 0},
+        "not_met": {"type": "integer", "minimum": 0},
+        "met": {"type": "integer", "minimum": 0},
+        "not_assessed": {"type": "integer", "minimum": 0},
+        "not_applicable": {"type": "integer", "minimum": 0}
+      }
+    },
+    "fixed_text_items": {"type": "integer", "minimum": 0},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selection", "fallback", "failures", "text"],
+      "properties": {
+        "selection": {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["summary", "highlight"],
+              "properties": {
+                "summary": {"type": "array", "uniqueItems": true, "maxItems": 64, "items": {"$ref": "#/$defs/id"}},
+                "highlight": {"type": "array", "uniqueItems": true, "maxItems": 64, "items": {"type": "integer", "minimum": 1}}
+              }
+            }
+          ]
+        },
+        "fallback": {"type": "boolean"},
+        "failures": {"$ref": "#/$defs/failures"},
+        "text": {"type": "string", "minLength": 1}
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item", "policy_id", "verdict", "selection", "fallback", "failures", "text"],
+        "properties": {
+          "item": {"type": "integer", "minimum": 1},
+          "policy_id": {"type": "string", "minLength": 1},
+          "verdict": {"type": "string", "enum": ["not_met", "met", "not_assessed", "not_applicable"]},
+          "selection": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["use", "show"],
+                "properties": {
+                  "use": {"type": "array", "uniqueItems": true, "maxItems": 64, "items": {"$ref": "#/$defs/id"}},
+                  "show": {"type": "array", "uniqueItems": true, "maxItems": 64, "items": {"type": "string", "pattern": "^v[1-9][0-9]*$"}}
+                }
+              }
+            ]
+          },
+          "fallback": {"type": "boolean"},
+          "failures": {"$ref": "#/$defs/failures"},
+          "text": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "text": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64},
+    "failures": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "detail"],
+        "properties": {
+          "check": {"type": "string", "enum": ["form", "empty", "limit", "duplicate", "precondition", "unknown", "reference", "no_answer"]},
+          "detail": {"type": "string", "maxLength": 160}
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["choice", "family", "repo", "revision", "file", "size", "sha256"],
+      "properties": {
+        "choice": {"type": "string", "enum": ["qwen", "mistral", "gemma", "small"]},
+        "family": {"type": "string", "minLength": 1, "maxLength": 32},
+        "repo": {"type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "file": {"type": "string", "pattern": "^[A-Za-z0-9._-]+\\.gguf$"},
+        "size": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string", "const": "llama-cpp-python"},
+        "version": {"type": "string", "pattern": "^[0-9A-Za-z.+-]{1,40}$"}
+      }
+    }
+  }
+}

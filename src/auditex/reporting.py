@@ -103,6 +103,7 @@ AUDITEX_OSCAL_NS = "https://magrathean.uk/auditex/oscal"
 
 _SECTION_ORDER = (
     "summary",
+    "local_answer",
     "executive_summary",
     "technical_appendix",
     "reviewer_index",
@@ -499,6 +500,8 @@ def _preview_section_citations(
 
     if "policy_explanations" in selected_sections:
         citations.append(_citation("model_assessment.json", reason="Validated policy explanations used in this preview."))
+    if "local_answer" in selected_sections:
+        citations.append(_citation("local_answer.json", reason="Local answer re-checked against the run's rule assessment."))
 
     findings_path, _ = bundle.findings()
     if "findings" in selected_sections:
@@ -586,7 +589,31 @@ def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[
     explanations = _load_policy_explanations(run_path, manifest)
     if explanations:
         sections["policy_explanations"] = explanations
+    local_answer = _load_local_answer(run_path)
+    if local_answer:
+        sections["local_answer"] = local_answer
     return {"run_dir": str(run_path), "manifest": manifest, "summary_json": fallback_summary, "sections": sections}
+
+
+def _load_local_answer(run_path: Path) -> dict[str, Any] | None:
+    """The run's local answer (``local_answer.json``) re-checked against the run's rule assessment; None when the
+    run has none or it is damaged or no longer matches (it is never shown unchecked). Unsafe files still refuse."""
+    from .local_answer import ANSWER_PATH, LocalAnswerError, load_answer
+
+    if not (run_path / ANSWER_PATH).exists() and not (run_path / ANSWER_PATH).is_symlink():
+        return None
+    try:
+        answer = load_answer(run_path)
+    except (UnsafeRunFileError, MemoryError):
+        raise
+    except (LocalAnswerError, OSError, ValueError, TypeError, KeyError):
+        return None
+    return {"status": answer["status"], "reason": answer["reason"],
+            "model": answer["model"]["choice"] if answer["model"] else None,
+            "counts": answer["counts"], "fixed_text_items": answer["fixed_text_items"],
+            "items": [{"item": entry["item"], "policy_id": entry["policy_id"], "verdict": entry["verdict"],
+                       "fixed_text": entry["fallback"]} for entry in answer["items"]],
+            "text": answer["text"]}
 
 
 def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -2851,6 +2878,17 @@ def _markdown_plain(value: Any) -> str:
                    for index, part in enumerate(parts))
 
 
+def _append_local_answer_markdown(lines: list[str], payload: Mapping[str, Any]) -> None:
+    """The local answer as Auditex prints it, line for line, every line escaped."""
+    text = payload.get("text")
+    if not isinstance(text, str) or not text:
+        return
+    lines.extend(["", "## Local answer", ""])
+    for block in text.rstrip("\n").split("\n\n"):
+        lines.append("  \n".join(_markdown_plain(line) for line in block.split("\n")))
+        lines.append("")
+
+
 def _append_policy_explanations_markdown(lines: list[str], rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
@@ -3100,6 +3138,7 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     if surface_coverage:
         lines.append("- Coverage: " + ", ".join(f"{_text(row.get('surface'))}: {_text(row.get('status'))}" for row in surface_coverage))
         lines.append("")
+    _append_local_answer_markdown(lines, _mapping(selected_sections.get("local_answer")))
     _append_mapping_markdown(lines, "Executive Summary", _mapping(selected_sections.get("executive_summary")))
     _append_mapping_markdown(lines, "Technical Appendix", _mapping(selected_sections.get("technical_appendix")))
     _append_reviewer_index_markdown(lines, _mapping(selected_sections.get("reviewer_index")))
@@ -3393,6 +3432,9 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
 
     if "summary" in selected_sections:
         sections.append(_render_key_values("Summary", summary))
+    local_answer = _mapping(selected_sections.get("local_answer"))
+    if isinstance(local_answer.get("text"), str) and local_answer["text"]:
+        sections.append(f"<section><h2>Local answer</h2><pre>{_html(local_answer['text'])}</pre></section>")
     for key, title in (
         ("executive_summary", "Executive Summary"),
         ("technical_appendix", "Technical Appendix"),
@@ -3975,6 +4017,7 @@ def preview_report(
     selected = _select_sections(bundle, include_sections=include_sections, exclude_sections=exclude_sections)
     if format_name in {"csv", "sarif", "oscal"}:
         selected.pop("policy_explanations", None)
+        selected.pop("local_answer", None)
     run_path = Path(run_dir)
     citations, evidence_missing = _preview_section_citations(
         run_path=run_path,
