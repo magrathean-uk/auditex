@@ -621,7 +621,8 @@ The required `projection` envelope is separate from the assessment-case evidence
 - `sections`: every section referenced by the shipped policy catalogue, with
   `status` (`projected` or `not_collected`), `reason` (null for projected;
   `missing_artifact`, `optional_collection_not_enabled`, `incomplete_shape`, `collector_error`, `oversize`, `powershell_only`,
-  `not_applicable_to_platform`, or for the DNS sections `dns_posture_not_run` and
+  `not_applicable_to_platform`, `tenant_isolation_unconfirmed` (Power Platform tenant isolation never configured),
+  or for the DNS sections `dns_posture_not_run` and
   `dns_records_not_saved` otherwise), optional `unsupported_conditions` (CA
   field paths that cannot be represented), and `source` (relative artefact paths
   actually read, including authoritative chunks). New `incomplete_shape` results
