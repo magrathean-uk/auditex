@@ -10,3 +10,4 @@ questions_for_g: none
 
 ### Lead rerun (18 Nov)
 - After M11-T01F (F1 fix, eb074e8) and a generator fix (coexistence domain now listed in the signing configuration, as Exchange does; the pinned EXOConfig.rego CoexistenceDomain skips it only from there), the regenerated seed-1111 corpus of 2,048 tenants gave 0 disagreements and 0 errors in 131,072 rows (job scale-a-r3, report in kit scale/runs/s1111/report).
+scale-rules: pass
