@@ -999,3 +999,9 @@
 - decision: M10-T04 follows `.plan/work/M10-T04/instructions.md`. Owned files widen from the criteria to the CPU-only speed attempt and its warning in src/auditex/local_answer.py, plus tests/test_local_answer.py. This applies the manager's rulings in DEC-126: ship slow CPU-only answers with a warning after one attempt to speed them up; ship without 8 GB support if the small model fails. Test windows, G to the manager (about 14:35 GMT): "to all: for anything testing, use the internal mac monitor and not this large. so my work is not interrupted". Manager reading: run tests headless where possible. Any window that has to appear (browser sign-in, computer use) opens on the Mac's built-in display, never on the external monitor, and never takes keyboard focus or the mouse. Every worker brief carries this.
 - why: DEC-126 rulings; G's order.
 - approver: lead (scope); G (windows)
+
+## DEC-129 Scale part A findings
+- date: 2026-11-18
+- decision: M11-T01 part A covered 2,048 synthetic tenants: 0 verdict disagreements in 112,320 rows, but F1 (a never-configured Power Platform tenant isolation crashes `assess_run` on a schema enum, so the whole assessment fails, one tenant in seven) is a product defect. It is fixed before 1.7.0 in M11-T01F (schema change, so one Codex review), and then part A is rerun. O2 (a lone UTF-16 surrogate in any collected name makes finalisation refuse the whole run) is a hostile-data stop: it goes to M11-T02 as a named item, without blocking 1.7.0. O1 (AAD 5.6 and 5.7 day limits) gets a read-only Rego check in M11-T01F. O3 is guarded IO by design.
+- why: scale findings; G wants audits that answer.
+- approver: lead
