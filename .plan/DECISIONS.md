@@ -993,3 +993,9 @@
 - decision: the allocation ends 31 Jan 2027, so M11 is prepared beside M10. M11-T01 part A (generator, expected verdicts, rules over at least 2,000 synthetic tenants; CPU, no GPU) starts now. Part B (answer runs on Isambard GPUs) and M11-T02 start when M10-T03 merges. Target: GPU training (M11-T04) finished by 15 Jan 2027, leaving two weeks of margin. Criteria in the M11 milestone.
 - why: the allocation date, not hours, is the limit (DEC-002, DEC-126).
 - approver: lead
+
+## DEC-128 M10-T04 scope, and test windows
+- date: 2026-11-18
+- decision: M10-T04 follows `.plan/work/M10-T04/instructions.md`. Owned files widen from the criteria to the CPU-only speed attempt and its warning in src/auditex/local_answer.py, plus tests/test_local_answer.py. This applies the manager's rulings in DEC-126: ship slow CPU-only answers with a warning after one attempt to speed them up; ship without 8 GB support if the small model fails. Test windows, G to the manager (about 14:35 GMT): "to all: for anything testing, use the internal mac monitor and not this large. so my work is not interrupted". Manager reading: run tests headless where possible. Any window that has to appear (browser sign-in, computer use) opens on the Mac's built-in display, never on the external monitor, and never takes keyboard focus or the mouse. Every worker brief carries this.
+- why: DEC-126 rulings; G's order.
+- approver: lead (scope); G (windows)
