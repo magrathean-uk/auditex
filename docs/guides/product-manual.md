@@ -436,6 +436,25 @@ Assessments can attach deterministic template explanations to supported rule res
 Each policy's status is in the run's `model_assessment.json`; see [AI assessment](ai-assessment.md#run-and-read-the-result) for coverage and output.
 The deterministic rule pre-checks are described in [AI assessment](ai-assessment.md#rule-pre-checks).
 
+## Local answer
+
+After a run, `auditex explain <run-dir>` (or `auditex run ... --explain`) answers in plain sentences what is wrong in
+the tenant, the most severe first, and what is right. The value rules decide every verdict and the order. A local model
+only chooses which prepared sentences and values to show for each check, and Auditex checks and renders every word, so
+the model cannot change a verdict, drop a check that is not met or follow instructions hidden in tenant text. A choice
+that does not pass the checks shows that check's fixed text, and the answer says how many checks did.
+
+- The answer is written into the run as `local_answer.json`, shown as a `local_answer` section by `auditex report
+  render`, and returned by the read-only MCP tool `auditex_local_answer`; each re-checks the stored answer against the
+  run first.
+- The optional runtime is installed with `python -m pip install -e '.[local-answer]'`. The first use of a model downloads
+  one pinned, verified file once; after that the answer runs offline. Nothing about the run or the tenant is sent
+  anywhere.
+- `--model` chooses the model; the guide lists the shipped choices, the download sizes, the measured speed and what
+  happens on a computer without a GPU.
+
+See [the local answer guide](local-answer.md) for how to start, what it downloads and what it never does.
+
 ## Validation before release
 
 Review the checks in [the runbook](../development/runbook.md#development-and-release-checks). Offline validation and local tests do not establish live provider acceptance. At minimum:

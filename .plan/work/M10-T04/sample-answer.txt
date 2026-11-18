@@ -1,0 +1,1021 @@
+Auditex answer for run "lab-4"
+Worded by the local model qwen (Qwen3.5-9B-Q4_K_M.gguf) on llama-cpp-python 0.3.36; the rules decided every verdict and the order.
+Items shown with the fixed text: 0 of 102.
+
+Not met: 52. Met: 44. Not assessed: 6. Not applicable: 0.
+Checks the rules answered in this run: 102.
+Checks that are not met come first, the most severe first.
+Mandatory (SHALL) requirements that are not met: 25.
+Checks Auditex could not assess: 6. Each one's reason says why.
+Checks to look at first:
+Check: "MS.AAD.1.1v1". Verdict: not met.
+Check: "MS.AAD.2.1v1". Verdict: not met.
+Check: "MS.AAD.2.3v1". Verdict: not met.
+Check: "MS.AAD.3.1v1". Verdict: not met.
+Check: "MS.AAD.3.5v2". Verdict: not met.
+
+What is wrong: 52 checks not met, the most severe first.
+1. Check: "MS.AAD.1.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Determine if an agency’s existing applications use legacy authentication before blocking legacy authentication across the entire application base.
+   Create a Conditional Access policy to block legacy authentication, following the steps below:
+   Severity: "Shall"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (legacy authentication is not blocked for all users)."
+2. Check: "MS.AAD.2.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Create a conditional access policy blocking users categorized as high-risk by the Identity Protection service. Configure the following policy settings in the new conditional access policy per the values below:
+   Users > Include > All users; Target resources > Include > All resources (formerly 'All cloud apps'); Conditions > User risk > High; Access controls > Grant > Block access
+   Severity: "Shall"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (high-risk users are not blocked)."
+3. Check: "MS.AAD.2.3v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Create a Conditional Access policy blocking sign-ins determined high-risk by the Identity Protection service. Configure the following policy settings in the new Conditional Access policy per the values below:
+   Users > Include > All users; Target resources > Include > All resources (formerly 'All cloud apps'); Conditions > Sign-in risk > High; Access controls > Grant > Block access
+   Severity: "Shall"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (high-risk sign-ins are not blocked)."
+4. Check: "MS.AAD.3.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The baseline instructions give the steps to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   Create a conditional access policy enforcing phishing-resistant MFA for all users. Configure the following policy settings in the new conditional access policy, per the values below:
+   Users > Include > All users; Target resources > Include > All resources (formerly 'All cloud apps')
+   Severity: "Shall"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (phishing-resistant MFA is not enforced for all users)."
+5. Check: "MS.AAD.3.5v2"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The baseline instructions give the steps to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   In Microsoft Entra admin center, click Authentication methods Click on the SMS, voice call, and email OTP authentication methods and disable each of them.
+   Their statuses should be Enabled > No on the Authentication methods > Policies page.
+   The authentication methods of short message service (SMS), voice call, and email one-time passcode (OTP) SHALL be disabled.
+   Severity: "Shall"
+   Reason: "Requirement not met: Email authentication is enabled."
+6. Check: "MS.AAD.3.6v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Create a conditional access policy enforcing phishing-resistant MFA for highly privileged roles. Configure the following policy settings in the new conditional access policy, per the values below:
+   Users > Include > Select users and groups > Directory roles > Select each of the roles listed in the "Highly Privileged Roles" section at the top of this document
+   Severity: "Shall"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (phishing-resistant MFA is not required for every highly privileged role)."
+7. Check: "MS.AAD.5.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   In the Microsoft Entra admin center, select Users. Select User settings. For Users can register applications, select No. Click Save.
+   Severity: "Shall"
+   Reason: "Requirement not met: non-admin users can register applications (found in authorization_policies)."
+8. Check: "MS.AAD.7.2v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   This policy is based on the ratio below: X = (Number of users assigned to the Global Administrator role) / (Number of users assigned to other highly privileged roles)
+   Follow the instructions for policy MS.AAD.7.1v1, above, to get a count of users assigned to the Global Administrator role.
+   Follow the instructions for policy MS.AAD.7.1v1 above but get a count of users assigned to the other highly privileged roles (not Global Administrator).
+   Severity: "Shall"
+   Reason: "Requirement not met: Global Administrators outnumber the privileged users without that role."
+9. Check: "MS.AAD.7.4v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   In Microsoft Entra admin center, select Roles and admins. Perform the steps below for each highly privileged role. We reference the Global Administrator role as an example.
+   Select the Global Administrator role. Under Manage, select Assignments and click the Active assignments tab.
+   Severity: "Shall"
+   Reason: "Requirement not met: a role has a permanent active assignment that the configuration does not allow."
+10. Check: "MS.AAD.7.7v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   In Microsoft Entra admin center, under Identity Governance, select Privileged Identity Management (PIM), and then select Microsoft Entra roles. Under Manage, select Roles.
+   Perform the steps below for each highly privileged role. We reference the Global Administrator role as an example: Click the Global Administrator role. Click Role settings and then click Edit.
+   Severity: "Shall"
+   Reason: "Requirement not met: a role assignment sends no alert."
+11. Check: "MS.AAD.9.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Create a conditional access policy blocking High Risk AI Agents. Configure the following policy settings in the new conditional access policy, per the values below:
+   Assignments > Users, agents (preview) or workload identities > What does this policy apply to? > Agents (preview) > Include > All agent identities (preview)
+   Severity: "Shall"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (risky AI agents are not blocked)."
+12. Check: "MS.EXO.1.1v2"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To disable automatic forwarding to external domains: Sign in to the Exchange admin center. Select Mail flow, then select Remote domains. Select Default.
+   Under Email reply types, select Edit reply types. Clear the checkbox next to Allow automatic forwarding, then click Save.
+   Severity: "Shall"
+   Reason: "Requirement not met: automatic forwarding is enabled (found in remote_domains)."
+13. Check: "MS.EXO.4.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   See Form the DMARC TXT record for your domain | Microsoft Learn for Microsoft guidance. A DMARC record published at the second-level domain will protect all subdomains.
+   In other words, a DMARC record published for example.com will protect both a.example.com and b.example.com, but a separate record would need to be published for c.example.gov.
+   Resolve-DnsName _dmarc.example.com txt
+   Severity: "Shall"
+   Reason: "Requirement not met: at least one domain has no DMARC record."
+14. Check: "MS.EXO.4.2v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   See MS.EXO.4.1v1 Instructions for an overview of how to publish and check a DMARC record. Ensure the record published includes p=reject.
+   See Form the DMARC TXT record for your domain | Microsoft Learn for Microsoft guidance. A DMARC record published at the second-level domain will protect all subdomains.
+   Resolve-DnsName _dmarc.example.com txt
+   Severity: "Shall"
+   Reason: "Requirement not met: at least one domain has no DMARC record."
+15. Check: "MS.EXO.4.3v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   See MS.EXO.4.1v1 Instructions for an overview of how to publish and check a DMARC record. Ensure the record published includes reports@dmarc.cyber.dhs.gov as one of the emails for the RUA field.
+   See Form the DMARC TXT record for your domain | Microsoft Learn for Microsoft guidance. A DMARC record published at the second-level domain will protect all subdomains.
+   Resolve-DnsName _dmarc.example.com txt
+   Severity: "Shall"
+   Reason: "Requirement not met: at least one domain has no DMARC record."
+16. Check: "MS.EXO.5.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To disable SMTP AUTH for the organization: Sign in to the Exchange admin center. On the left-hand pane, select Settings. Then select Mail flow from the settings list.
+   Make sure the setting Turn off SMTP AUTH protocol for your organization is checked.
+   Severity: "Shall"
+   Reason: "Requirement not met: SMTP client authentication is not disabled (found in transport_config)."
+17. Check: "MS.EXO.6.2v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To restrict sharing calendar details with all domains: Refer to step 5 in MS.EXO.6.1v1 Instructions to implement this policy.
+   For all sharing rules under all existing policies, ensure Sharing with all domains is not selected.
+   The baseline makes this requirement mandatory (SHALL).
+   Severity: "Shall"
+   Reason: "Requirement not met: calendar details are shared with all domains (found in sharing_policy)."
+18. Check: "MS.POWERPLATFORM.1.2v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Follow the MS.POWERPLATFORM.1.1v1 instructions up to step 3. Under Trial environment assignments, select Only specific admins. Sign in to your tenant environment's respective Power Platform admin center.
+   In the upper-right corner of the Microsoft Power Platform site, select the Gear icon (Settings icon). Select Power Platform settings.
+   Severity: "Shall"
+   Reason: "Requirement not met: non-admin users can create trial environments (found in environment_creation)."
+19. Check: "MS.POWERPLATFORM.3.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Sign in to your tenant environment's respective Power Platform admin center. On the left pane, select Policies -> Tenant isolation.
+   Set the slider labeled Restrict cross-tenant connections and move it to On, then click Save at the bottom of the screen.
+   Severity: "Shall"
+   Reason: "Requirement not met: tenant isolation is not enabled (found in tenant_isolation)."
+20. Check: "MS.SECURITYSUITE.1.2v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Sign in to Microsoft 365 Defender. Under Email & collaboration, select Policies & rules. Select Threat policies. Under Policies, select Anti-malware. If modifying an existing policy:
+   Click the name of the policy from the policy list to open the policy summary. Click Edit user and domains.
+   Note: The Default (default) policy applies to all users, so skip this step if modifying the default policy. Add users, groups, and domains as needed.
+   Severity: "Shall"
+   Reason: "Requirement not met: the anti-malware policy that applies to all recipients does not enable zero-hour auto purge."
+21. Check: "MS.SHAREPOINT.1.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The baseline instructions give the steps to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   External sharing for SharePoint SHALL be limited to "Existing guests" or "Only people in your organization."
+   Sign in to the SharePoint admin center. Select Policies > Sharing. Adjust external sharing slider for SharePoint to Existing guests or Only people in your organization. Select Save.
+   Severity: "Shall"
+   Reason: "Requirement not met: SharePoint external sharing is wider than Existing guests or Only people in your organization."
+22. Check: "MS.SHAREPOINT.2.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Sign in to the SharePoint admin center. Select Policies > Sharing Under File and folder links, set the default link type to Specific people (only the people the user specifies).
+   Select Save.
+   Severity: "Shall"
+   Reason: "Requirement not met: the default sharing link type is not Specific people."
+23. Check: "MS.SHAREPOINT.3.1v1"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Sign in to the SharePoint admin center. Select Policies > Sharing. Scroll to the section titled, Choose expiration and permissions options for Anyone links.
+   Select the checkbox labeled These links must expire within this many days. Enter 30 days or less. Select Save.
+   Severity: "Shall"
+   Reason: "Requirement not met: Anyone links do not expire within 30 days."
+24. Check: "MS.SHAREPOINT.3.3v2"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The baseline makes this requirement mandatory (SHALL).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Sign in to the SharePoint admin center. Select Policies > Sharing. Expand More external sharing settings. Select People who use a verification code must reauthenticate after this many days.
+   Enter 30 days or less. Select Save. TLP:CLEAR
+   Severity: "Shall"
+   Reason: "Requirement not met: verification-code reauthentication is off or longer than 30 days."
+25. Check: "MS.TEAMS.2.1v2"
+   Verdict: not met.
+   This check is not met.
+   This mandatory requirement is not met.
+   The tenant needs a change to meet this requirement.
+   The baseline instructions give the steps to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   To enable external access for specific domains only: Sign in to the Microsoft Teams admin center. Select External collaboration > External access > Organization settings (Tab).
+   Next to Teams and Skype for Business users in external organizations, select Allow only specific external domains. Select Add a domain.
+   Enter the allowed domain in the text box, press Add, and then select Done to save your changes.
+   Severity: "Shall"
+   Reason: "Requirement not met: external access is open to all domains (found in federation_configuration)."
+26. Check: "MS.AAD.3.7v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Create a conditional access policy requiring a user's device to be either Microsoft Entra ID hybrid joined or compliant during authentication.
+   Configure the following policy settings in the new conditional access policy, per the values below:
+   Users > Include > All users; Target resources > Include > All resources (formerly 'All cloud apps')
+   Severity: "Should"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (managed devices are not required for authentication)."
+27. Check: "MS.AAD.3.8v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Create a conditional access policy requiring a user to be on a managed device when registering for MFA.
+   Configure the following policy settings in the new conditional access policy, per the values below:
+   Access controls > Grant > Grant Access > Require device to be marked as compliant
+   Severity: "Should"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (managed devices are not required to register MFA)."
+28. Check: "MS.AAD.3.9v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Create a Conditional Access policy to block device code flow:
+   Users > Include > All users; Target resources > Include > All resources (formerly 'All cloud apps'); Conditions > Authentication Flows > Configure > Yes > Select Device code flow
+   Access controls > Grant > Block Access
+   Severity: "Should"
+   Reason: "Requirement not met: no Conditional Access policy meets every condition (device code authentication is not blocked)."
+29. Check: "MS.AAD.5.5v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   In the Microsoft Entra admin center, select Enterprise apps. Under Security, select Application policies. Select Block password addition. Set status to On. Ensure Applies to is set to All applications.
+   Leave Only apply to apps created after blank. Setting a date allows apps created before that date to bypass this restriction. Click Save.
+   Severity: "Should"
+   Reason: "Requirement not met: the restriction is not enabled (password addition is not blocked for all apps)."
+30. Check: "MS.AAD.5.7v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   In the Microsoft Entra admin center, select Enterprise apps. Under Security, select Application policies. Select Restrict max certificate lifetime. Set status to On. Set maximum lifetime to 366 days.
+   Ensure Applies to is set to All applications. Leave Only apply to apps created after blank. Setting a date allows apps created before that date to bypass this restriction.
+   Click Save.
+   Severity: "Should"
+   Reason: "Requirement not met: a lifetime exceeds the limit (certificate lifetime is not restricted to 365 days or less)."
+31. Check: "MS.AAD.7.9v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Follow the same instructions as MS.AAD.7.8v1 for each of the highly privileged roles (other than Global Administrator).
+   However, the security monitoring mailbox entered must be different from the one used to monitor Global Administrator activations.
+   For each of the highly privileged roles, if a user has any PIM groups actively assigned to them
+   Severity: "Should"
+   Reason: "Requirement not met: activation of another privileged role sends no alert."
+32. Check: "MS.AAD.8.2v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   Open the Microsoft Entra admin center. Select External Identities > External collaboration settings. Under Guest invite settings, select Only users assigned to specific admin roles can invite guest users.
+   Click Save.
+   Severity: "Should"
+   Reason: "Requirement not met: guest invitations are open beyond administrators and Guest Inviters (found in authorization_policies)."
+33. Check: "MS.EXO.3.1v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To enable DKIM, follow the instructions listed on Steps to Create, enable and disable DKIM from Microsoft 365 Defender portal | Microsoft Learn.
+   Severity: "Should"
+   Reason: "Requirement not met: at least one domain has no DKIM signing configuration."
+34. Check: "MS.EXO.4.4v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   See MS.EXO.4.1v1 Instructions for an overview of how to publish and check a DMARC record. Ensure the record published includes:
+   A point of contact specific to your agency in the RUA field. reports@dmarc.cyber.dhs.gov as one of the emails in the RUA field.
+   One or more agency-defined points of contact in the RUF field. See Form the DMARC TXT record for your domain | Microsoft Learn for Microsoft guidance.
+   Severity: "Should"
+   Reason: "Requirement not met: at least one domain has no DMARC record."
+35. Check: "MS.POWERBI.1.1v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Navigate to the Power BI admin portal. Click on Tenant settings. Scroll to Export and sharing settings. Click Publish to web and set it to Disabled.
+   Severity: "Should"
+   Reason: "Requirement not met: PublishToWeb is enabled."
+36. Check: "MS.POWERBI.3.1v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To disable completely: Navigate to the Power BI admin portal. Click on Tenant settings. Scroll to Export and sharing settings.
+   Click on Users can invite guest users to collaborate through item sharing and permissions and set it to Disabled. To enable with security groups:
+   Navigate to the Power BI admin portal. Click on Tenant settings. Scroll to Export and sharing settings.
+   Severity: "Should"
+   Reason: "Requirement not met: ExternalSharingV2 is enabled and no security group restricts it."
+37. Check: "MS.POWERBI.4.2v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Navigate to the Power BI admin portal. Click on Tenant settings. Scroll to Developer settings. Click on Allow service principals to create and use profiles.
+   If there are not service principals needing to create and use profiles, then configure the setting to Disabled. Otherwise, go to step 6.
+   If there are service principals needing to create and use profiles, then configure the setting to Enabled.
+   Severity: "Should"
+   Reason: "Requirement not met: AllowServicePrincipalsCreateAndUseProfiles is enabled and no security group restricts it."
+38. Check: "MS.POWERBI.6.1v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Navigate to the Power BI admin portal. Click on Tenant settings. Scroll to R and Python visuals settings.
+   Click on Interact with and share R and Python visuals and set it to Disabled.
+   Severity: "Should"
+   Reason: "Requirement not met: RScriptVisual is enabled."
+39. Check: "MS.POWERPLATFORM.6.1v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   This setting can currently only be enabled through the Power Apps PowerShell modules.
+   After installing the Power Apps PowerShell modules, run Add-PowerAppsAccount -Endpoint $YourTenantsEndpoint to authenticate to your tenant's Power Platform. Discover the valid endpoint parameter here.
+   Commercial tenants use -Endpoint prod, while GCC tenants use -Endpoint usgov. Run the following PowerShell commands to get the settings object and set the variable disableShareWithEveryone to $true.
+   Severity: "Should"
+   Reason: "Requirement not met: Share with everyone is enabled (found in environment_creation)."
+40. Check: "MS.SECURITYSUITE.1.4v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   This baseline policy is not covered by the preset policies, so these steps need to be taken even if the standard or strict policies are used.
+   Sign in to Microsoft 365 Defender. Under Email and collaboration, select Policies and rules. Select Threat policies. Under Policies, select Safe attachments. Select Global settings.
+   Toggle the Turn on Defender for Office 365 for SharePoint, OneDrive, and Microsoft Teams slider to On. Click Save.
+   Severity: "Should"
+   Reason: "Requirement not met: no object in atp_policy_for_o365 shows that Safe Attachments for SharePoint, OneDrive and Teams is enabled."
+41. Check: "MS.SECURITYSUITE.2.4v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Sign in to Microsoft 365 Defender. Under Email & collaboration, select Policies & rules. Select Threat policies. Under Policies, select Anti-phishing. Select the Office365 AntiPhish Default (Default) policy.
+   Click Edit actions. Under Safety tips & indicators, enable each safety tip and indicator. Click Save.
+   Severity: "Should"
+   Reason: "Requirement not met: no anti-phish policy that applies to all recipients shows all safety tips."
+42. Check: "MS.SECURITYSUITE.3.2v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   See MS.SECURITYSUITE.3.1v1 Instructions step 9 for details on enforcing DLP policy in specific M365 service locations.
+   Under Choose where to apply the policy, set Status to On for at least the Exchange email, OneDrive accounts, SharePoint sites, Teams chat and channel messages, and Devices locations.
+   Then click Next. (MS.SECURITYSUITE.3.2v1)
+   Severity: "Should"
+   Reason: "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Devices)."
+43. Check: "MS.SECURITYSUITE.3.4v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   See MS.SECURITYSUITE.3.1v1 Instructions steps 19-20 for details on configuring DLP policy to notify users when accessing sensitive information.
+   Under User notifications, turn on Use notifications to inform your users and help educate them on the proper use of sensitive info. (MS.SECURITYSUITE.3.4v1)
+   that appears after user notifications are turned on, check the box next to Notify users in Office 365 service with a policy tip or email notifications. (MS.SECURITYSUITE.3.4v1)
+   Severity: "Should"
+   Reason: "Requirement not met: a DLP rule protecting the three information types notifies no user, or no such rule exists."
+44. Check: "MS.SECURITYSUITE.7.2v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   Sign in to Microsoft 365 Defender. Under Email & collaboration, select Policies & rules. Select Threat policies. Under Policies, select Safe links. If modifying an existing policy:
+   Click the name of the policy from the policy list to open the policy summary. Click Edit users and domains. Add users, groups, and domains as needed.
+   To make the policy apply to all users, under Domains, enter all the tenant domains.
+   Severity: "Should"
+   Reason: "Requirement not met: the applied Safe Links policy does not enable direct download link scanning."
+45. Check: "MS.SECURITYSUITE.8.1v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To modify the connection filters, follow the instructions found in Use the Microsoft 365 Defender portal to modify the default connection filter policy. Sign in to Microsoft 365 Defender portal.
+   From the left-hand menu, find Email & collaboration and select Policies & rules. Select Threat policies from the list of policy names. Under Policies, select Anti-spam.
+   Select Connection filter policy (Default). Click Edit connection filter policy. Ensure no addresses are specified under Always allow messages from the following IP addresses or address range.
+   Severity: "Should"
+   Reason: "Requirement not met: an IP allow list exists (found in conn_filter)."
+46. Check: "MS.TEAMS.1.1v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To help ensure external participants do not have the ability to request control of the shared desktop or window in the meeting: Sign in to the Microsoft Teams admin center.
+   Select Meetings > Meeting policies. Select the Global (Org-wide default) policy. Under the Content sharing section, ensure External participants can give or request control is set to the Off position.
+   Select Save (if applicable). If custom policies exist on the tenant, repeat these steps for each policy, selecting the appropriate policy in step 3.
+   Severity: "Should"
+   Reason: "Requirement not met: external participants can give or request control (found in meeting_policies)."
+47. Check: "MS.TEAMS.1.5v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   To configure settings for anonymous users so that they are not able to bypass the lobby: Sign in to the Microsoft Teams admin center. Select Meetings > Meeting policies.
+   Select the Global (Org-wide default) policy. Under the Meeting join & lobby section, ensure People dialing in can bypass the lobby is set to the Off position.
+   Select Save (if applicable). If custom policies exist on the tenant, repeat these steps for each policy, selecting the appropriate policy in step 3.
+   Severity: "Should"
+   Reason: "Requirement not met: dial-in users can bypass the lobby (found in meeting_policies)."
+48. Check: "MS.TEAMS.1.6v1"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   To configure the settings that control meeting recordings: Sign in to the Microsoft Teams admin center. Select Meetings > Meeting policies. Select the Global (Org-wide default) policy.
+   Under the Recording & transcription section, ensure Meeting recording is set to the Off position. Select Save (if applicable).
+   If custom policies exist on the tenant, repeat these steps for each policy, selecting the appropriate policy in step 3.
+   Severity: "Should"
+   Reason: "Requirement not met: meeting recording is not disabled in the Global policy."
+49. Check: "MS.TEAMS.2.3v2"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To ensure internal users cannot initiate contact with unmanaged users: Sign in to the Microsoft Teams admin center. Select External collaboration > External access > Policies (Tab).
+   Select Global (Org-wide Default).
+   To completely block contact with unmanaged users, under Edit policy details, set People in my org can chat
+   Severity: "Should"
+   Reason: "Requirement not met: internal users can contact unmanaged users (found in federation_configuration)."
+50. Check: "MS.TEAMS.5.1v2"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   To ensure users can only install Microsoft apps approved by the agency: Sign in to the Microsoft Teams admin center. Select Teams apps > Manage apps.
+   In the upper right-hand corner select Actions. Select Org-wide app settings. Under the Microsoft apps section, ensure it is set to the On position. Click Save (if applicable).
+   NOTE: This will make all "Microsoft apps" in the application list available to "Everyone." If custom adjustments are needed, on an app by app basis, follow the remaining instructions below.
+   Additionally, previously configured availability settings for individual apps may persist after changing the global toggle and should be reviewed to ensure they remain appropriate.
+   Severity: "Should"
+   Reason: "Requirement not met: an app permission policy uses DefaultCatalogAppsType BlockedAppList."
+51. Check: "MS.TEAMS.5.2v2"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   The baseline instructions give the steps to meet this requirement.
+   To ensure users can only install third-party apps approved by the agency: Sign in to the Microsoft Teams admin center. Select Teams apps > Manage apps.
+   In the upper right-hand corner select Actions. Select Org-wide app settings. Under the Third-party apps section, ensure it is set to the Off position. Click Save (if applicable).
+   NOTE: This will make all "Third-party" apps in the application list available to "No one."
+   Severity: "Should"
+   Reason: "Requirement not met: an app permission policy uses GlobalCatalogAppsType BlockedAppList."
+52. Check: "MS.TEAMS.5.3v2"
+   Verdict: not met.
+   This check is not met.
+   The baseline recommends this requirement (SHOULD).
+   The tenant needs a change to meet this requirement.
+   The rule's reason for this verdict is shown below.
+   To ensure users can only install custom apps approved by the agency: Sign in to the Microsoft Teams admin center. Select Teams apps > Manage apps.
+   In the upper right-hand corner select Actions. Select Org-wide app settings. Under the Custom apps section, ensure it is set to the Off position. Click Save (if applicable).
+   NOTE: This will make all "Custom apps" in the application list available to "No one."
+   If custom adjustments are needed, on an app by app basis, follow the remaining instructions below.
+   Severity: "Should"
+   Reason: "Requirement not met: an app permission policy uses PrivateCatalogAppsType BlockedAppList."
+
+What is right: 44 checks met.
+53. Check: "MS.AAD.3.3v2"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   If Microsoft Authenticator is enabled, it SHALL be configured to show login context information.
+   Reason: "Requirement met: Microsoft Authenticator shows application and location context to all users and software OATH is off."
+54. Check: "MS.AAD.5.2v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: users may consent only under the low-risk policy and no risky delegated permission is classified."
+55. Check: "MS.AAD.5.3v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   An administrative consent workflow SHALL be configured for applications.
+   Severity: "Shall"
+   Reason: "Requirement met: the admin consent workflow is enabled (reviewers are not part of the evidence and were not checked)."
+56. Check: "MS.AAD.6.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   User passwords SHALL NOT expire.
+   Severity: "Shall"
+   Reason: "Requirement met: passwords never expire for every verified managed domain."
+57. Check: "MS.AAD.7.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: two to eight users hold the Global Administrator role."
+58. Check: "MS.AAD.7.3v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Privileged users SHALL be provisioned cloud-only accounts separate from an on-premises directory or other federated identity providers.
+   Severity: "Shall"
+   Reason: "Requirement met: no privileged user has an on-premises identity."
+59. Check: "MS.AAD.7.5v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: every assignment of every role has a start date."
+60. Check: "MS.AAD.7.6v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Activation of the Global Administrator role SHALL require approval.
+   Severity: "Shall"
+   Reason: "Requirement met: every rule the policy reads is set as required."
+61. Check: "MS.AAD.7.8v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   User activation of the Global Administrator role SHALL trigger an alert.
+   Reason: "Requirement met: every rule the policy reads is set as required."
+62. Check: "MS.EXO.2.2v3"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: no object in spf_records shows that a domain has a non-compliant SPF policy."
+63. Check: "MS.EXO.6.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Contact folders SHALL NOT be shared with all domains.
+   Severity: "Shall"
+   Reason: "Requirement met: no object in sharing_policy shows that contact folders are shared with all domains."
+64. Check: "MS.EXO.7.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: an enabled enforcing transport rule prepends a subject warning to mail from outside the organisation."
+65. Check: "MS.EXO.13.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Mailbox auditing SHALL be enabled.
+   Severity: "Shall"
+   Reason: "Requirement met: no object in org_config shows that mailbox auditing is disabled."
+66. Check: "MS.POWERPLATFORM.1.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: no object in environment_creation shows that non-admin users can create production and sandbox environments."
+67. Check: "MS.POWERPLATFORM.2.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: a DLP policy applies to the default environment."
+68. Check: "MS.SECURITYSUITE.1.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: the anti-malware policy that applies to all recipients enables the common attachments filter for .exe, .cmd and .vbe files."
+69. Check: "MS.SECURITYSUITE.1.3v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Emails identified as containing malware SHALL be quarantined or dropped.
+   Severity: "Shall"
+   Reason: "Requirement met: the safe attachments policy that applies to all recipients blocks or dynamically delivers detected malware."
+70. Check: "MS.SECURITYSUITE.3.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   A DLP policy SHALL be configured to protect PII and sensitive information, as defined by the agency, blocking at a minimum: credit card numbers, U.S. Individual Taxpayer Identification Numbers (ITIN), and U.S. Social Security numbers (SSN).
+   Severity: "Shall"
+   Reason: "Requirement met: enabled DLP rules cover U.S. Social Security numbers, ITINs and credit card numbers."
+71. Check: "MS.SECURITYSUITE.4.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   At a minimum, the following alerts SHALL be enabled: a. Suspicious email sending patterns detected. b. Suspicious Connector Activity. c. Suspicious Email Forwarding Activity. d. Messages have been delayed. e. Tenant restricted from sending unprovisioned email. f. Tenant restricted from sending email. g. A potentially malicious URL click was detected.
+   Severity: "Shall"
+   Reason: "Requirement met: every required alert is present and enabled."
+72. Check: "MS.SECURITYSUITE.5.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Unified audit logging SHALL be enabled.
+   Severity: "Shall"
+   Reason: "Requirement met: unified audit log ingestion is enabled."
+73. Check: "MS.SECURITYSUITE.6.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: no anti-spam policy that applies to recipients delivers detected spam or phishing to the inbox."
+74. Check: "MS.SHAREPOINT.1.2v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   External sharing for OneDrive SHALL be limited to "Existing guests" or "Only people in your organization."
+   Reason: "Requirement met: ODBSharingCapability holds a compliant setting."
+75. Check: "MS.SHAREPOINT.1.3v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   External sharing SHALL be restricted to approved external domains and/or users in approved security groups per interagency collaboration needs.
+   Severity: "Shall"
+   Reason: "Requirement met: external sharing is restricted to approved domains."
+76. Check: "MS.SHAREPOINT.2.2v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   File and folder default sharing permissions SHALL be set to view only.
+   Severity: "Shall"
+   Reason: "Requirement met: DefaultLinkPermission holds a compliant setting."
+77. Check: "MS.SHAREPOINT.3.2v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: Anyone links are limited to view permission."
+78. Check: "MS.TEAMS.1.2v2"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Anonymous users SHALL NOT be enabled to start Microsoft Teams meetings.
+   Reason: "Requirement met: no object in meeting_policies shows that anonymous users can start meetings."
+79. Check: "MS.TEAMS.2.2v2"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Unmanaged users SHALL NOT be enabled to initiate contact with internal users.
+   Severity: "Shall"
+   Reason: "Requirement met: no object in federation_configuration shows that unmanaged users can initiate contact."
+80. Check: "MS.TEAMS.4.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Shall"
+   Reason: "Requirement met: no object in client_configuration shows that email into channels is enabled."
+81. Check: "MS.AAD.5.6v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: the passwordLifetime restriction is enabled for every app in both scopes within 181 days."
+82. Check: "MS.AAD.8.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: no object in authorization_policies shows that guest users have the same access as members."
+83. Check: "MS.POWERBI.2.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: AllowGuestUserToAccessSharedContent is disabled."
+84. Check: "MS.POWERBI.4.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: ServicePrincipalAccessPermissionAPIs is disabled."
+85. Check: "MS.POWERBI.5.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: BlockResourceKeyAuthentication is enabled."
+86. Check: "MS.POWERBI.7.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: EimInformationProtectionEdit is enabled."
+87. Check: "MS.POWERPLATFORM.2.2v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: a DLP policy applies to all environments."
+88. Check: "MS.POWERPLATFORM.5.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: no object in environment_creation shows that non-admin users can create Power Pages sites."
+89. Check: "MS.SECURITYSUITE.2.2v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: an enabled anti-phish policy that applies to all recipients protects the organisation's own domains with an acceptable action."
+90. Check: "MS.SECURITYSUITE.3.3v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: every enabled DLP rule protecting the three information types blocks access for everyone."
+91. Check: "MS.SECURITYSUITE.7.1v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: the applied Safe Links policy enables URL comparison with a block-list."
+92. Check: "MS.SECURITYSUITE.7.3v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: the applied Safe Links policy enables user click tracking."
+93. Check: "MS.SECURITYSUITE.8.2v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: no object in conn_filter shows that a safe list is enabled."
+94. Check: "MS.TEAMS.1.3v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: anonymous and dial-in users are not admitted automatically in the Global policy."
+95. Check: "MS.TEAMS.1.4v1"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: internal users are admitted automatically in the Global policy."
+96. Check: "MS.TEAMS.1.7v2"
+   Verdict: met.
+   This check is met.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   No change is needed for this check.
+   Severity: "Should"
+   Reason: "Requirement met: live event recording is not always on in the Global policy."
+
+Not assessed: 6 checks Auditex could not assess.
+97. Check: "MS.AAD.3.2v2"
+   Verdict: not assessed.
+   Auditex could not assess this check.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   MFA SHALL be enforced for all users.
+   Severity: "Shall"
+   Reason: "Data unavailable: required evidence section(s) not collected: scuba_config."
+98. Check: "MS.AAD.3.4v1"
+   Verdict: not assessed.
+   Auditex could not assess this check.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   The "Authentication methods manage migration" feature SHALL be set to "Migration complete."
+   Severity: "Shall"
+   Reason: "Data unavailable: migration state absent; the policy was not assessed."
+99. Check: "MS.SECURITYSUITE.6.2v1"
+   Verdict: not assessed.
+   Auditex could not assess this check.
+   The baseline makes this requirement mandatory (SHALL).
+   The rule's reason for this verdict is shown below.
+   Allowed domains SHALL NOT be added to inbound anti-spam protection policies.
+   Severity: "Shall"
+   Reason: "Data unusable: AllowedSenderDomains of an applied anti-spam policy is absent, null or not a list of strings; the policy was not assessed."
+100. Check: "MS.SECURITYSUITE.2.1v1"
+   Verdict: not assessed.
+   Auditex could not assess this check.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   User impersonation protection SHOULD be enabled for sensitive accounts.
+   Severity: "Should"
+   Reason: "Data unavailable: required evidence section(s) not collected: scuba_config."
+101. Check: "MS.SECURITYSUITE.2.3v1"
+   Verdict: not assessed.
+   Auditex could not assess this check.
+   The baseline recommends this requirement (SHOULD).
+   The rule's reason for this verdict is shown below.
+   Domain impersonation protection SHOULD be added for key suppliers and partners.
+   Severity: "Should"
+   Reason: "Data unavailable: required evidence section(s) not collected: scuba_config."
+102. Check: "MS.POWERPLATFORM.2.3v1"
+   Verdict: not assessed.
+   Auditex could not assess this check.
+   The rule's reason for this verdict is shown below.
+   Reason: "Data unavailable: the ScubaGear baselines hold no text for this policy, so the policy was not assessed."

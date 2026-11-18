@@ -168,6 +168,25 @@ def test_prompts_carry_tenant_text_only_quoted_after_the_data_notice():
     assert hits == 4
 
 
+def test_the_shorter_prompt_states_each_fixed_sentence_once_and_names_ids_per_item():
+    from auditex.answer_digest import frames
+
+    system = la.item_system()
+    for fid, frame in frames()["item"].items():
+        assert system.count(f"[{fid}] {frame['text']}") == 1
+    d = digest()
+    item = next(i for i in d["items"] if i["verdict"] == "not_met" and item_bank(i).get("requirement"))
+    block, bank = la.item_block(item), item_bank(item)
+    frame_ids = [sid for sid, entry in bank.items() if entry["kind"] == "frame"]
+    assert "Fixed sentences: " + " ".join(f"[{sid}]" for sid in frame_ids) in block
+    assert not any(bank[sid]["text"] in block for sid in frame_ids)                  # no fixed text repeated per item
+    long = [entry["text"] for entry in bank.values() if entry["kind"] != "frame" and len(entry["text"].split()) > 12]
+    assert long and all(text not in block for text in long)                          # opening words only
+    assert all(" ".join(text.split()[:12]) in block for text in long)
+    assert "the [requirement] sentence" in block                                     # the value is the sentence's
+    assert la.CATALOGUE_WORDS == 12 and len(block) < 1800
+
+
 # -- the answer: DEC-120 -------------------------------------------------------------------------------------------
 
 def test_every_item_is_rendered_in_the_rules_order_with_a_passing_model(pinned):
@@ -277,6 +296,41 @@ def test_without_the_runtime_every_item_shows_the_fixed_text_and_the_answer_says
     assert "python -m pip install -e '.[local-answer]'" in answer["text"] and "CMake" in answer["text"]
     monkeypatch.setattr(la, "runtime_version", lambda: "0.3.37")
     assert la.explain_digest(digest(), "qwen")["reason"] == "runtime_version"
+
+
+def test_cpu_only_reads_the_runtimes_gpu_offload_flag(monkeypatch):
+    import types
+
+    fake = types.ModuleType("llama_cpp")
+    monkeypatch.setitem(la.sys.modules, "llama_cpp", fake)
+    fake.llama_supports_gpu_offload = lambda: False
+    assert la.cpu_only() is True
+    fake.llama_supports_gpu_offload = lambda: True
+    assert la.cpu_only() is False
+    monkeypatch.setitem(la.sys.modules, "llama_cpp", None)                      # does not import: cannot tell
+    assert la.cpu_only() is False
+
+
+def test_a_cpu_only_runtime_warns_once_before_the_model_is_fetched(monkeypatch, tmp_path):
+    events = []
+    monkeypatch.setattr(la, "runtime_version", lambda: la.RUNTIME_VERSION)
+    monkeypatch.setattr(la, "cpu_only", lambda: True)
+    monkeypatch.setattr(la, "ensure_model", lambda spec, **kwargs: events.append("fetch") or tmp_path / spec.file)
+    answer = la.explain_digest(digest(), "qwen", notice=events.append, backend_factory=lambda path: FakeBackend())
+    assert events[:2] == [la.CPU_ONLY_NOTICE, "fetch"] and events.count(la.CPU_ONLY_NOTICE) == 1
+    assert "\n" not in la.CPU_ONLY_NOTICE and "processor alone" in la.CPU_ONLY_NOTICE
+    assert answer["status"] == "model" and answer["reason"] is None and answer["fixed_text_items"] == 0
+
+
+def test_no_cpu_warning_with_a_gpu_or_without_the_runtime(pinned, monkeypatch):
+    seen = []
+    monkeypatch.setattr(la, "cpu_only", lambda: False)
+    la.explain_digest(digest(), "qwen", notice=seen.append, backend_factory=lambda path: FakeBackend())
+    assert la.CPU_ONLY_NOTICE not in seen
+    monkeypatch.setattr(la, "cpu_only", lambda: True)
+    monkeypatch.setattr(la, "runtime_version", lambda: None)                    # nothing runs, so nothing to warn about
+    la.explain_digest(digest(), "qwen", notice=seen.append)
+    assert la.CPU_ONLY_NOTICE not in seen
 
 
 class FakeResponse:

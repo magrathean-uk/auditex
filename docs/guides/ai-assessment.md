@@ -152,4 +152,5 @@ replay.
 
 The parked verdict model and its tooling were removed (see the [retirement note](model-development.md) and the
 changelog). No product answer ever came from a model. A deterministic template explainer ships and is wired
-into reports; it describes rule results and never changes a verdict.
+into reports; it describes rule results and never changes a verdict. The optional [local answer](local-answer.md) is
+not that layer: a local model there only selects prepared sentences, and the rules decide every verdict.

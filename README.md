@@ -131,6 +131,12 @@ Assessment runs locally from the run bundle; no endpoint or model name is involv
 Assessments can attach deterministic template explanations to supported rule results. JSON, Markdown and HTML reports show them when present; findings are unchanged.
 Each policy's status is in the run's `model_assessment.json`; see [AI assessment](docs/guides/ai-assessment.md#run-and-read-the-result) for coverage and output.
 
+For an optional plain-language answer, `auditex explain <run-dir>` (or `auditex run ... --explain`) has a local model say
+what is wrong in the tenant, the most severe first, and what is right. The value rules still decide every verdict and the
+order; the model only selects prepared sentences, Auditex renders every word, and a selection that fails the checks shows
+fixed text. It needs the optional `local-answer` extra and downloads one pinned model file on first use, then runs
+offline with nothing sent anywhere; see [the local answer guide](docs/guides/local-answer.md).
+
 ```bash
 auditex report render <run-dir> --format md
 auditex report api-calls <run-dir> --format md

@@ -17,10 +17,17 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   selects (DEC-120). `auditex run --explain` never changes the run's exit status and answers the folder the engine
   completed in that call, a `--resume-from` folder included.
 - **Models.** `--model qwen` (the default), `mistral`, `gemma` or `small` (for 8 GB laptops), each pinned by revision,
-  size and SHA-256. The first use downloads the chosen file once from its publisher's hub into the user cache
+  size and SHA-256. All four passed acceptance on the ten kit test runs and on copies seeded with hostile tenant text
+  (M10-T04): every answer passed the checks with no fixed-text fallback, no verdict was contradicted, every check that
+  is not met was shown in the rules' order, and no injected sentence passed. The first use downloads the chosen file once from its publisher's hub into the user cache
   (`AUDITEX_MODEL_DIR` moves it), with a size line and progress, resuming an interrupted download (a complete partial
   file is checked, not requested again); the file is checked before every load and the answer then runs offline.
   That download is the only network call; no telemetry.
+- **Speed.** The item prompt states each fixed sentence once and names only the ids an item may use, which cut the
+  processor-only time of a 24-check run (one model measured) by about 28% without changing any check. With Metal a 64-check run is answered
+  in under 3 minutes; processor-only it takes between about 4 and 12 minutes by model, so `auditex explain` prints one
+  line saying so before it starts on a runtime built without GPU support. The measured table is in
+  `docs/guides/local-answer.md`.
 - **Runtime.** The new optional extra `local-answer` installs `llama-cpp-python` 0.3.36, which pip builds from source
   (CMake and a C and C++ compiler; Metal on a Mac). Without it, `auditex explain` says what to install and every check
   shows the fixed text.
