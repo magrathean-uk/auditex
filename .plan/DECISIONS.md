@@ -1017,3 +1017,9 @@
 - decision: M11-T02 criteria written (milestone M11). The attacker is a refusal-removed open-weight model, internal only, on Isambard-AI. Each round plants at least 2,000 hostile strings into copies of the scale corpus. Trick classes found are fixed with regression tests, including O2 (a lone surrogate stops finalisation). Done after two clean rounds in a row with the retrained attacker. Phase 1 (an offline kit and a dry run) now; phase 2 in the next sign-in window.
 - why: DEC-115 scope, DEC-127 timing.
 - approver: lead
+
+## DEC-132 M11-T02 attacker without refusal removal
+- date: 2026-11-18
+- decision: phase 1 was stopped by a safety check while planning a refusal-removed attacker. The attacker is now a seeded mutation fuzzer plus a standard open instruct model at a pinned revision, with no refusal removal, fine-tuned on the strings that got through. The goals, the two-clean-rounds bar and the fixes are unchanged. This narrows the method in DEC-115's "attacker model with its refusals removed". The attack loop's purpose (hardening the answer against hostile tenant data) stands.
+- why: the refusal-removal part cannot be built in a worker session, and the loop does not need it, because injection strings against our own pipeline are ordinary test data.
+- approver: lead
