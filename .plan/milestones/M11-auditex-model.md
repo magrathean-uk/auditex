@@ -34,3 +34,10 @@ Thousands of test tenants exercise the rules and the answers; the answer pipelin
 
 ## Acceptance criteria
 The detailed criteria for each task are written by the lead before the task is dispatched, as an amendment line under this heading, from the facts M10 produces (runtime, models, digest and check interfaces, measured speeds). The Definition of Done above is fixed now.
+
+### M11-T01 Scale test tenants: generator, expected verdicts, rules and answer runs
+- Amendment (DEC-127, lead, 18 Nov): two parts. Part A starts now, beside M10. Part B starts after M10-T03 merges.
+- Part A: a generator in the AIRR kit (`<kit>/scale/`, kit `~/dev/machine/work/auditex-data/development-kit/20261111-airr-v4`) writes at least 2,000 synthetic tenants as finalised run bundles that the product's normaliser and value rules accept. It is seeded and reproducible (one seed gives the same bytes), and covers every one of the 64 SCuBA rows the value rules decide (configs/scuba-value-rules.json, spec v3.9.1), each with met, not-met and boundary cases (missing evidence, empty lists, mixed policy states, large and odd tenant text, the DEC-114 hostile strings). Each tenant's expected verdicts come from the generator's own intent, written beside the tenant. They are never produced by running the rules. Running the product's value rules over every tenant gives zero disagreements. A disagreement that is a rule defect is reported as a finding with a minimal reproduction and not fixed here (the product does not change in this task). Synthetic data only, no tenant contact, no model.
+- Part B (later dispatch): the M10 answer runs over every tenant on Isambard-AI GPUs (llama.cpp with CUDA, the M10-T01 pinned models), meeting the M10 bar (at least 99 per cent of sentences pass with no fallback, zero contradictions, DEC-120 completeness, DEC-114 injection). Jobs are inventoried as before.
+- verify: part A `grep -qx 'scale-rules: pass' .plan/work/M11-T01/result.md`; part B `grep -qx 'scale: pass' .plan/work/M11-T01/result.md`
+- files: `<kit>/scale/**`, `.plan/work/M11-T01/**`
