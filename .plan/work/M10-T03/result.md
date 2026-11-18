@@ -1,12 +1,20 @@
 ## RESULT M10-T03
-status: blocked
-summary: worker returned no RESULT block (exit 143)
-cause: infrastructure (worker exit 143)
-kept: task/M10-T03-local-answer is 10 commits ahead of main, 0 uncommitted paths; last commit cd9b225 wip(local-answer): M10-T03 repair round in progress (stopped
-next: finish with one short run on the same branch (--var REVIEW="continue from the branch state; do not restart"); a rerun after an infrastructure failure is not a review round
-progress: 4 lines from the worker's progress.md
-  Repair round 2 (continue-2.md) on top of WIP cd9b225.
-  Done: read review-1 items; WIP already holds run --explain manifest-identity detection, complete-partial promotion and 416 reset, sealed-answer test, conftest m
-  Left: run focused tests, fix failures, commit in pieces, verify command, contract-smoke, full suite, update result.md, RESULT block.
-  Next: focused pytest on tests/test_local_answer.py.
-details: .plan/work/M10-T03/output.md
+status: done
+summary: `auditex explain <run>` and `auditex run --explain` (`--model qwen|mistral|gemma|small`) answer from a local model: runtime in the `local-answer` extra (llama-cpp-python 0.3.36), models pinned by revision, size and SHA-256, downloaded once into the user cache with progress and checked before every load, offline afterwards.
+Every item appears in the rules' order whatever the model selects (DEC-120); failing selections show the fixed text and are counted. Written as `local_answer.json` (schema, contract validation), shown in the report and by the MCP tool `auditex_local_answer`, re-checked on every read.
+Repair round (review-1.md): REV item 1 fixed, REV item 2 fixed, CHK MU8 fixed, model-hub network block added. All criteria met.
+changes: src/auditex/local_answer.py, src/auditex/cli.py, src/auditex/reporting.py, src/auditex/mcp_server.py, src/auditex/mcp_registry.py, src/azure_tenant_audit/contracts.py, src/azure_tenant_audit/bundle_integrity.py, src/auditex/output_writers.py, schemas/local_answer.schema.json, pyproject.toml, docs/reference/output-contract.md, CHANGELOG.md, tests/conftest.py, tests/test_local_answer.py, tests/test_mcp_manifest_guard.py, tests/test_mcp_registry.py, .plan/work/M10-T03/result.md
+verification: `make lint && .venv/bin/python -m pytest -q tests/test_local_answer.py tests/test_answer_checks.py tests/test_answer_digest.py && make contract-smoke && grep -qx 'local-answer: ready' .plan/work/M10-T03/result.md` with PYTHONPATH=src (the shared .venv's editable install points at the main checkout), through hostload: pass on the final commit. Full suite `make test` through hostload: pass.
+Mutants re-run this round, each now failing the suite: sealed refusal removed (MU8) -> test_a_sealed_answer_is_never_overwritten; complete-partial promotion removed -> ModelError in test_a_complete_partial_download_is_checked_and_renamed_without_a_request; 416 reset removed -> two download tests; `--resume-from` ignored -> "could not tell which run folder" and test_run_explain_answers_the_folder_a_resumed_run_completed fails; runtime pin removed (MU12) -> "Failed: a test reached the model hub (get https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/...)", no byte fetched.
+Earlier rounds: opt-in `test_real_small_model` with the pinned small model and llama-cpp-python 0.3.36 passed; real `auditex explain` on the 102-check contract-smoke run with the small model on Metal passed (0 of 102 fixed text).
+risks: bundle_integrity.py and output_writers.py changes (commit 83f65b1) are the DEC-121 artefact and writer additions only.
+ARCHITECTURE.md Interfaces still says plan v4 adds no MCP tool; this criterion adds the read-only `auditex_local_answer` (run_dir confined); the line needs the lead's edit.
+The llama.cpp batch engine (LlamaBackend) is exercised only by the opt-in real-model test; CPU-only laptops stay slow (M10-T01), for M10-T04.
+questions_for_g: none
+### Findings
+local-answer: ready
+- REV item 1 (fixed): `run --explain` no longer rebuilds the folder name. It reads the arguments with the engine's own parser (last repeated option wins, `--resume-from` honoured) and answers the one folder whose `run-manifest.json` the engine wrote during the call (identity by device, inode, size, mtime and ctime); none or several gives the "could not tell" notice and no answer. The engine CLI is not on this files line and its offline path has no event listener, so the completed manifest is the engine's record used. Tests: repeated options on a real offline run, a resumed run named by a repeated `--resume-from`, a new live run beside it, no folder and two folders written.
+- REV item 2 (fixed): a `.part` holding every byte is hashed and promoted without a request (wrong bytes: deleted and fetched afresh); a 416 on a resume deletes the partial so the next run recovers. Recovery test covers both.
+- CHK MU8 (fixed): test_a_sealed_answer_is_never_overwritten covers write_answer and explain_run on a sealed answer.
+- Network block (fixed): tests/conftest.py fails any request to the model hub in every test; AUDITEX_MODEL_DIR points at a temp folder for the session; the opt-in real-model test reads a named model folder and downloads nothing. test_no_test_can_reach_the_model_hub proves the guard.
+- Context items from the first round (pinned runtime and models, own GBNF grammar, download rules, DEC-120 completeness, fake backend): unchanged; notes in .plan/work/M10-T03/notes.md (main checkout).
