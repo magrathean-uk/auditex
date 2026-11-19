@@ -16,8 +16,8 @@ The attacker is an internal red-team tool: an open-weight model with its refusal
 Thousands of test tenants exercise the rules and the answers; the answer pipeline resists hostile tenant data found by a retrained attacker; a compact Auditex model built on Qwen, Mistral and Gemma bases meets the M10 bar on 8 GB laptops and becomes the default only if it beats the off-the-shelf models.
 
 ## Definition of Done
-- [ ] Scale test tenants: at least 2,000 synthetic tenants with known expected verdicts, run through the rules with zero disagreements, and through the M10 answer with the M10 bar met: `grep -qx 'scale: pass' .plan/work/M11-T01/result.md`
-- [ ] Attack loop: after the last fix, two consecutive attacker rounds (attacker retrained on the tricks that worked) find zero tricks that change the order, soften a wrong finding or pass the checks: `grep -qx 'attack-loop: clean' .plan/work/M11-T02/result.md`
+- [x] Scale test tenants: at least 2,000 synthetic tenants with known expected verdicts, run through the rules with zero disagreements, and through the M10 answer with the M10 bar met: `grep -qx 'scale: pass' .plan/work/M11-T01/result.md`
+- [x] Attack loop: after the last fix, two consecutive attacker rounds (attacker retrained on the tricks that worked) find zero tricks that change the order, soften a wrong finding or pass the checks: `grep -qx 'attack-loop: clean' .plan/work/M11-T02/result.md`
 - [ ] Training data: only answers that pass every check, with the attacker's tricks and their correct handling, split by tenant with a sealed held-out set: `grep -q '^data-version: ' .plan/work/M11-T03/result.md`
 - [ ] Compact models: each base (Qwen, Mistral, Gemma) evaluated once on the sealed held-out tenants; a model ships only with at least 99 per cent of sentences passing the checks, zero contradictions and the injection acceptance, on an 8 GB laptop profile: `grep -qE '^model-bar: (pass|fail) ' .plan/work/M11-T04/result.md`
 - [ ] GPU use stays within 5,000 GPU-hours (DEC-115) across M11, recomputed from the scheduler exports: `grep -qE '^m11-gpu-hours: [0-9.]+$' .plan/work/M11-T04/result.md`
@@ -27,7 +27,7 @@ Thousands of test tenants exercise the rules and the answers; the answer pipelin
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M11-T01 | Scale test tenants: generator, expected verdicts, rules and answer runs | sol | L | hard | done |
-| M11-T02 | Attack loop: attacker, rounds, fixes, attacker retraining | sol | L | risk:high | todo |
+| M11-T02 | Attack loop: attacker, rounds, fixes, attacker retraining | sol | L | risk:high | done |
 | M11-T03 | Training data from checked answers and attack tricks | terra | M | hard | todo |
 | M11-T04 | Train, quantise and evaluate compact models on three bases | terra | L | hard | todo |
 | M11-T05 | Ship passing compact models in the product | sol | M | risk:high | todo |
@@ -56,3 +56,11 @@ The detailed criteria for each task are written by the lead before the task is d
 - files: `<kit>/attack/**`, product files as above for fixes, `tests/**`, `CHANGELOG.md`, `.plan/work/M11-T02/**`
 - Amendment (DEC-132, lead, 18 Nov): the attacker is no longer a refusal-removed model. It is two parts. (1) A seeded mutation fuzzer over a grammar of injection forms: instruction phrases, fake verdict and id words, quoting and delimiter breaks, Unicode tricks (homoglyphs, bidi controls, zero-width characters, lone surrogates), extreme lengths and nesting. (2) A standard open instruct model at a pinned revision (no refusal removal; EU base preferred) that writes varied tenant names, descriptions and policy text carrying those forms, for testing Auditex's own pipeline. "Retraining the attacker" means fine-tuning that standard model on the strings that got through, and weighting the fuzzer toward their forms. Everything else in the block stands.
 - Amendment (DEC-133, lead, 18 Nov): fix paths widen to `src/azure_tenant_audit/value_rules/**` and `configs/scuba-value-rules.json`, because phase 1 found a rule-level class: a lone surrogate or a control character in a value the rules read turns a verdict into not assessed and can hide a not-met finding. A rule fix keeps the v3.9.1 vectors passing and regenerates the rule packs with no drift. Phase 2 runs in two steps: round 1 on the system (collect the tricks, no product change), then the fixes on a branch, then the retrained rounds.
+
+### M11-T03 Training data from checked answers and attack tricks
+- Amendment (DEC-136, lead, 19 Nov): a seeded, reproducible dataset builder in the AIRR kit (`<kit>/train/`), run on Isambard-AI (CPU job or login node), with the data kept on the project store. Sources: (1) the M11-T01 part B answers (4 shipped models over the 2,048 scale tenants) and (2) the M11-T02 round answers on the planted copies (rounds 1 to 3) with their controls. An example is the M10 answer's input (the digest and tenant facts the answer pipeline sees) and an answer that passed every check: every sentence passes, zero contradictions, DEC-120 completeness and the DEC-114 injection checks. Any answer with one failing check is dropped and counted by check, never repaired by hand. Attack examples pair a planted copy with the checked answer the fixed product gives for it (rounds 2 and 3, product 9a0f301), so the model learns the correct handling; round-1 strings appear only with answers from the fixed product, never with a tricked answer.
+- Split by base tenant: every copy, control and model answer of one tenant falls in one split (train, validation, held-out), with at least 10 per cent of base tenants held out. The held-out rows are written only to a sealed folder on the project store with a SHA256 manifest; nobody reads them until M11-T04's single evaluation, and they never come to the workstation or the repository. The output format is the one the kit trainer's loader reads (`<kit>/trainer/model_training.py`).
+- result.md lists counts per split, per source model and per source (scale, attack), the drop counts by check, the seed, and `data-version: <sha256 of the manifest of every split>`. Only summaries come back to the workstation. No GPU training here.
+- verify: `grep -q '^data-version: ' .plan/work/M11-T03/result.md`
+- files: `<kit>/train/**`, `.plan/work/M11-T03/**`
+

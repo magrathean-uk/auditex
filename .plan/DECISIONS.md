@@ -1040,3 +1040,10 @@
 - date: 2026-11-19
 - approver: G (standing push and release grant, DEC-126; review amount relayed by the manager 18 Nov 21:00 GMT)
 - decision: 1.7.0 tagged at dbbf8d4 and published on GitHub (no PyPI) after release-check, make acceptance, dist, audit-deps, the reproducible build and the release smoke passed. Two stale v3.9.1 acceptance expectations from M08-T10 (empty DKIM reads not met; the shared D29 reason text) were recorded as documented classes in the tests; old scratch copies under .plan/work that tripped gitleaks dir were removed. No separate release review and no Astra check: one independent review only where AGENTS.md makes it mandatory, the next being the M11-T02 fixes (Codex, once).
+
+## DEC-136 Attack loop clean; M11-T03 criteria
+- date: 2026-11-19
+- decision: M11-T02 is done. The round-1 fixes (lone UTF-16 surrogates repaired to U+FFFD at ingress and counted; colliding keys kept; the count carried through checkpoints) merged as e5143c8 after one Codex review and one re-check; the re-check's last P2 (resume count) was fixed directly with a failing-first test, with no third round. Rounds 2 and 3 with the attacker retrained on round 1 found 0 tricks on 9a0f301 (`attack-loop: clean`, 34.78 attack GPU-hours). 19198e8 (key-masking vocabulary and a count default, from the batch's make test) does not touch the attacked pipeline, so the loop is not rerun. M11-T03 criteria written (dataset builder on Isambard, checked answers only, tenant split with a sealed held-out set).
+- why: DoD attack-loop line met; M11-T03 follows the first clean round.
+- approver: lead
+

@@ -21,3 +21,21 @@ questions_for_g: none
 - R3 [P2] key collisions: fixed; both insertion orders and a collision with an existing U+FFFD key are tested.
 - Suggestion: direct two-code-unit surrogate-pair test added.
 - fixes-1: done (pre-screen 0 stop, 0 intent, 0 controls failing; v3.9.1 replay passed). Written to .plan/work/M11-T02/result.md.
+
+## Attack loop (rounds 2 and 3, `.plan/work/M11-T02/result-r2.md`)
+Round 1 (base attacker, pre-fix 2ac9134): 260 tricks, one root (lone UTF-16 surrogate), fixed in e5143c8 plus the resume count. Rounds 2 and 3 (attacker retrained on round 1, product 9a0f301): 0 tricks each over 2,048 strings and 4 models; pre-screen 0 stop, 0 off intent. Later main commit 19198e8 changes only key-masking vocabulary and a count default, not the attacked pipeline.
+
+## Loop status
+
+`loop.md`:
+
+| round | attacker | product | complete | tricks | classes | gpu-hours |
+|---|---|---|---|---|---|---|
+| 1 | model base | 2ac913483df2 | True | 260 | intent:surrogate, stop:surrogate | 17.70 |
+| 2 | model adapter | 9a0f301374fe | True | 0 | none | 8.52 |
+| 3 | model adapter | 9a0f301374fe | True | 0 | none | 8.56 |
+
+gpu-hours: attack 34.7828
+attack-loop: clean
+
+round-3: done

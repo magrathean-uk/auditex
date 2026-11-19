@@ -8,8 +8,8 @@ last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 
 ## Next tasks
 - M11-T01 done: scale-rules pass, scale pass (4 models x 2,048 tenants, 37.27 GPU-hours).
-- M11-T02 round 1 done (result-r1.md: one root, lone UTF-16 surrogate; stop 204 and intent 56 tricks). Fixes worker on `task/M11-T02-attack-fixes-1` (brief fixes-1.md; claude-3 sol). Then one Codex review (evidence/finalise scope), merge, then retrained rounds 2 and 3 on Isambard. Kit `attack/SUBMIT.md`.
-- M11-T03 criteria to write after the first clean round; GPU training by 15 Jan 2027 (DEC-127).
+- M11-T02 done: attack-loop clean (rounds 2 and 3, 0 tricks, product 9a0f301; DEC-136).
+- M11-T03 dispatched (dataset builder on Isambard; criteria DEC-136). Then M11-T04 training, GPU by 15 Jan 2027 (DEC-127).
 - Each Isambard step needs a live sign-in window (G); check `ssh -O check` first.
 - M07-T17 lab rollback by 30 Nov (G approved, DEC-126), then G passes `~/Desktop/cancel-lab-trials.md` to Codex.
 
