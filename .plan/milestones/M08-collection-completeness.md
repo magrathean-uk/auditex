@@ -44,7 +44,7 @@ In one app-only certificate run the product collects and answers the 64 rows: 62
 |---|---|---|---|---|---|
 | M08-T01 | A1: certificate credentials for app-only tokens, Teams collection in app mode | sol | M | hard risk:high | done |
 | M08-T02 | A2: the reader app's certificate key credential (operator script) | sol | S | risk:high | done |
-| M08-T03 | B: Power BI and Power Platform enablement (operator scripts and product docs) | sol | M | risk:high | todo |
+| M08-T03 | B: Power BI and Power Platform enablement (operator scripts and product docs) | sol | M | risk:high | done |
 | M08-T04 | C: the Teams app-settings read and adapter | codex | M | risk:high | done |
 | M08-T05 | D: the compliance session, DLP and alert-policy reads and adapters | sol | L | hard risk:high | done |
 | M08-T06 | E: one app-only re-collection of the 64 rows and the kit's comparison (run by the tenant chat) | orchestrator | M | risk:high | todo |
