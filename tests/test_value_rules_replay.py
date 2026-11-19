@@ -64,6 +64,13 @@ D29_PRODUCT_TEXT = ("Data unavailable: a DNS answer (rdata) is empty and the exp
                     "instead); the policy was not assessed.")
 
 
+# M08-T10 (DEC-068, defect D4) reads an empty Get-DkimSigningConfig answer as an empty list, so the DKIM rule answers "no
+# signing configuration" (not met), where v3.9.1 answered not assessed (divergence D15). The product now agrees with
+# the gold (OPA replay). This is the one vector of that class; it is checked against the gold, not the v3.9.1 rule.
+D4_VECTOR = "constructed:MS.EXO.3.1v1:dkim_config_empty"
+D4_PRODUCT = ("not_met", "domain_noncompliant.no_signing_config", "domain_noncompliant",
+              "Requirement not met: at least one domain has no DKIM signing configuration.", ["dkim_config"])
+
 def _lines(path: Path):
     with (lzma.open(path, "rt") if path.suffix == ".xz" else path.open()) as handle:
         for line in handle:
@@ -105,6 +112,9 @@ def replay_one(vector: dict, entry: dict | None, tally: Counter, reached: set) -
         tally["reason_text_d29"] += 1
     want = (vector["rule_verdict"], vector["rule_cell"], vector["rule_reason_code"], want_text,
             vector["rule_cited_sections"] or list(row["sections"]))
+    if vid == D4_VECTOR:
+        assert vector["divergence_id"] == "D15" and vector["gold_verdict"] == "not_met", vid
+        want = D4_PRODUCT[:4] + (D4_PRODUCT[4] if record["cited_sections"] else list(row["sections"]),)
     assert got == want, vid
     assert detail["class"] == "value_rule" and detail["rule_id"] == row["rule_id"], vid
     assert (detail["cell"], detail["reason_code"], detail["reason_text"], detail["section"]) == (
@@ -124,6 +134,10 @@ def replay_one(vector: dict, entry: dict | None, tally: Counter, reached: set) -
         tally["a2_constructed"] += 1
         return
     assert disagreement is None or disagreement.startswith("expected:"), vid
+    if vid == D4_VECTOR:
+        assert got[0] == vector["gold_verdict"], vid
+        tally["d4_dkim_empty_equals_gold"] += 1
+        return
     assert (disagreement is None) is (got[0] == vector["gold_verdict"]), vid
     tally["rule_equals_gold" if disagreement is None else "expected_divergence:" + vector["divergence_id"]] += 1
     gold = override_gold(vector, entry)
@@ -341,6 +355,7 @@ def test_full_v391_replay_acceptance():
     assert reached == expected and len(reached) == 1084
     assert tally["vectors"] == 26898 + 3 and tally["a2_constructed"] == 3
     assert tally["rule_equals_gold"] == 19118
-    assert sum(n for k, n in tally.items() if k.startswith("expected_divergence:")) == 7780
+    assert sum(n for k, n in tally.items() if k.startswith("expected_divergence:")) == 7779
+    assert tally["d4_dkim_empty_equals_gold"] == 1
     assert tally["a2_override_applied"] == 190
     print("replay tally", json.dumps(dict(sorted(tally.items())), sort_keys=True))
