@@ -760,3 +760,7 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-18T18:20:14Z	M10-T04	terra	claude-3	claude-sonnet-5-5	xhigh	branch	5	12377		failed	task/M10-T04-acceptance	v4
 2026-11-18T18:20:15Z	M11-T01	terra	claude-5	claude-sonnet-5-5	high	branch	5	4280		failed	task/M11-T01-scale-b-run	v4
 2026-11-18T18:20:15Z	M11-T02	terra	claude-3	claude-sonnet-5-5	high	branch	5	1804		failed	task/M11-T02-attack-r1	v4
+2026-11-18T18:40:02Z	M11-T01	terra	claude-5	claude-sonnet-5-5	high	branch	0	82	0.3324	done	task/M11-T01-scale-b-collect	v4
+2026-11-18T19:20:59Z	M10-T04	terra	claude-3	claude-sonnet-5-5	xhigh	branch	0	2545	1.0060	done	task/M10-T04-acceptance	v4
+2026-11-18T19:48:18Z	M11-T02	terra	claude-1	claude-sonnet-5-5	high	branch	0	4179	1.2850	done	task/M11-T02-attack-r1b	v4
+2026-11-18T20:11:44Z	M11-T02	sol	claude-3	claude-opus-5-5	high	branch	1	1143	5.3425	partial	task/M11-T02-attack-fixes-1	v4

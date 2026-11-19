@@ -2,7 +2,7 @@
 id: M10
 name: local-answer
 weight: 7
-status: planned
+status: done
 ---
 # M10 local-answer
 Plan v4 amendment 12 (DEC-113). G's product shape: "CLI tool, user runs, ads principal details, it pulls data, digests, then runs a local model, it answers the user what is right and wrong ... model should really focus on getting the answer right". After a run, Auditex starts an off-the-shelf local model (no training; Qwen by default, a Mistral and a Gemma model as choices) that reads the run's digest and tells the user what is wrong first, worst first, then what is right. The value rules decide every verdict and the order; the model only words the answer, never decides or contradicts a verdict and never types a value: values are references Auditex fills from the run. Every sentence passes fail-closed checks against the run; an item whose check fails shows the fixed text. Ships in the release after 1.6.0 (manager ruling), on 16 GB laptops; one model of about 4 billion parameters for 8 GB laptops ships only if it meets the same bar.

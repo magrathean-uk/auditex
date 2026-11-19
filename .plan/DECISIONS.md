@@ -1035,3 +1035,8 @@
 - decision: G to the manager (about 17:30 GMT): "pause down all development safely." The M10-T04, M11-T01 part B and M11-T02 round 1 workers were stopped. M10-T04's two commits stay on its branch, with its worktree kept. The Isambard jobs already submitted may run to their end, and their results are not collected until the manager says. Nothing new starts. Where each task stopped: STATE Next tasks.
 - why: G's pause.
 - approver: G (through the manager)
+
+## DEC-135 1.7.0 released; reviews at the standing amount
+- date: 2026-11-19
+- approver: G (standing push and release grant, DEC-126; review amount relayed by the manager 18 Nov 21:00 GMT)
+- decision: 1.7.0 tagged at dbbf8d4 and published on GitHub (no PyPI) after release-check, make acceptance, dist, audit-deps, the reproducible build and the release smoke passed. Two stale v3.9.1 acceptance expectations from M08-T10 (empty DKIM reads not met; the shared D29 reason text) were recorded as documented classes in the tests; old scratch copies under .plan/work that tripped gitleaks dir were removed. No separate release review and no Astra check: one independent review only where AGENTS.md makes it mandatory, the next being the M11-T02 fixes (Codex, once).
