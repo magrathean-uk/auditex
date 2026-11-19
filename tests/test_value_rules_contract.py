@@ -269,6 +269,13 @@ def test_legacy_schema_and_model_non_rule_fixture_bytes(tmp_path, monkeypatch):
     # Captured at the required clean starting HEAD before this contract change.
     assert sha256(canonical(rows).encode()).hexdigest() == "efd8c647e7982248916068d1c40c0d798c2c47dec5aa958cc990faa0a3ce1882"
 
+D29_REASON_CODE = "data_unavailable_dns_answer_empty"
+D29_V391_TEXT = ("Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup "
+                 "succeeded or failed; the policy was not assessed.")
+D29_PRODUCT_TEXT = ("Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup "
+                    "succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record "
+                    "instead); the policy was not assessed.")
+
 
 def test_all_external_final_vectors_have_valid_contracts(tmp_path):
     vectors = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
@@ -283,7 +290,10 @@ def test_all_external_final_vectors_have_valid_contracts(tmp_path):
     dual_codes = Counter()
     for line in Path(vectors).open():
         v = json.loads(line)
-        record = _rec(v["policy"], v["rule_verdict"], v["rule_reason_code"], v["rule_reason_text"],
+        text = v["rule_reason_text"]
+        if v["rule_reason_code"] == D29_REASON_CODE and text == D29_V391_TEXT:
+            text = D29_PRODUCT_TEXT  # M08-T10's shared D29 reason text, as in test_value_rules_replay.py
+        record = _rec(v["policy"], v["rule_verdict"], v["rule_reason_code"], text,
                       v["rule_cell"], v["rule_cited_sections"])
         checked(record)
         counts[v["policy"] + ":" + v["rule_cell"]] += 1
