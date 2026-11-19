@@ -175,6 +175,9 @@ class AuditLogger:
 
 
 class AuditWriter:
+    # A class default as well, so a writer made without __init__ (a test double) can still count.
+    lone_surrogates_replaced = 0
+
     def __init__(
         self,
         base_dir: Path,
