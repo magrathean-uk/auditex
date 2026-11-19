@@ -1047,3 +1047,15 @@
 - why: DoD attack-loop line met; M11-T03 follows the first clean round.
 - approver: lead
 
+## DEC-137 M11-T03 route, scale answer text and row format
+- date: 2026-11-19
+- decision: the M11-T03 worker stopped on three questions. (1) It used another ssh config; the shared connection the brief names works, so only that one is used and no host key is accepted. (2) The M11-T01 part B answers kept counts only, so the scale answers are regenerated with the text kept (4 models over 2,048 tenants, about 37 GPU-hours, inside DEC-115's cap). (3) Training rows are prompt/completion with `expected` from the rule facts; the kit trainer gains a reader for that shape and keeps the existing case schema.
+- why: routine engineering choices inside the approved target and G's AIRR grant.
+- approver: lead
+
+## DEC-138 M11-T03 done; M11-T04 criteria
+- date: 2026-11-19
+- decision: M11-T03 done: 13,956 checked examples from the fixed product (11,240 train, 1,042 validation, 1,674 sealed held-out, 12 per cent of base tenants), 380 attack rows dropped by the leak check, `data-version: 101c02cd...`, 41.22 GPU-hours. M11-T04 criteria written: Qwen3.5-4B, a Ministral 3 base of 3B to 4B and Gemma 4 E4B, LoRA with the kit trainer, checkpoint by the M10 checks on validation, one sealed held-out evaluation each with the M10 qwen beside it, 8 GB profile at 6 GB peak memory.
+- why: the about-4B size is M10's 8 GB target; the three families are the DoD's.
+- approver: lead
+

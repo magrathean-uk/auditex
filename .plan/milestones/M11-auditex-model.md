@@ -18,7 +18,7 @@ Thousands of test tenants exercise the rules and the answers; the answer pipelin
 ## Definition of Done
 - [x] Scale test tenants: at least 2,000 synthetic tenants with known expected verdicts, run through the rules with zero disagreements, and through the M10 answer with the M10 bar met: `grep -qx 'scale: pass' .plan/work/M11-T01/result.md`
 - [x] Attack loop: after the last fix, two consecutive attacker rounds (attacker retrained on the tricks that worked) find zero tricks that change the order, soften a wrong finding or pass the checks: `grep -qx 'attack-loop: clean' .plan/work/M11-T02/result.md`
-- [ ] Training data: only answers that pass every check, with the attacker's tricks and their correct handling, split by tenant with a sealed held-out set: `grep -q '^data-version: ' .plan/work/M11-T03/result.md`
+- [x] Training data: only answers that pass every check, with the attacker's tricks and their correct handling, split by tenant with a sealed held-out set: `grep -q '^data-version: ' .plan/work/M11-T03/result.md`
 - [ ] Compact models: each base (Qwen, Mistral, Gemma) evaluated once on the sealed held-out tenants; a model ships only with at least 99 per cent of sentences passing the checks, zero contradictions and the injection acceptance, on an 8 GB laptop profile: `grep -qE '^model-bar: (pass|fail) ' .plan/work/M11-T04/result.md`
 - [ ] GPU use stays within 5,000 GPU-hours (DEC-115) across M11, recomputed from the scheduler exports: `grep -qE '^m11-gpu-hours: [0-9.]+$' .plan/work/M11-T04/result.md`
 - [ ] Shipping: passing models are offered as `--model` choices, and the default changes only if a compact model beats the best off-the-shelf model on the M10 bar and the held-out comparison: `grep -qx 'ship: done' .plan/work/M11-T05/result.md`
@@ -28,7 +28,7 @@ Thousands of test tenants exercise the rules and the answers; the answer pipelin
 |---|---|---|---|---|---|
 | M11-T01 | Scale test tenants: generator, expected verdicts, rules and answer runs | sol | L | hard | done |
 | M11-T02 | Attack loop: attacker, rounds, fixes, attacker retraining | sol | L | risk:high | done |
-| M11-T03 | Training data from checked answers and attack tricks | terra | M | hard | todo |
+| M11-T03 | Training data from checked answers and attack tricks | terra | M | hard | done |
 | M11-T04 | Train, quantise and evaluate compact models on three bases | terra | L | hard | todo |
 | M11-T05 | Ship passing compact models in the product | sol | M | risk:high | todo |
 
@@ -63,4 +63,11 @@ The detailed criteria for each task are written by the lead before the task is d
 - result.md lists counts per split, per source model and per source (scale, attack), the drop counts by check, the seed, and `data-version: <sha256 of the manifest of every split>`. Only summaries come back to the workstation. No GPU training here.
 - verify: `grep -q '^data-version: ' .plan/work/M11-T03/result.md`
 - files: `<kit>/train/**`, `.plan/work/M11-T03/**`
+
+### M11-T04 Train, quantise and evaluate compact models on three bases
+- Amendment (DEC-138, lead, 19 Nov): three bases of about 4 billion parameters for 8 GB laptops, one per family: Qwen (the Qwen3.5-4B instruct base behind M10's `small`), Mistral (a Ministral 3 instruct base of 3B to 4B; EU-first) and Gemma (the Gemma 4 E4B instruct base behind M10's `gemma`), each at a pinned revision with its licence recorded. Train each with the kit trainer (`<kit>/trainer`, LoRA, the `v10` preset unless a recorded reason changes it) on M11-T03 data version `101c02cd2c58...` train split. Normalise the completion's model-name header line before training. Pick the checkpoint on the validation split by the M10 checks on generated answers (sentence pass rate, contradictions, completeness, injection), never by eval loss. Merge and quantise to GGUF (Q4_K_M or the family's QAT q4) with a pinned llama.cpp.
+- Evaluate each base once on the sealed held-out split (1,674 rows), with the best off-the-shelf model (M10 `qwen`) answered over the same rows for the M11-T05 comparison. The held-out rows are read only by this single evaluation; no tuning after it. The bar per base: at least 99 per cent of sentences pass the checks with no fallback, zero contradictions, DEC-120 completeness and the DEC-114 injection acceptance, under an 8 GB laptop profile (the GGUF, the context the answer needs, and peak resident memory measured at no more than 6 GB).
+- result.md: per base the pin, the chosen checkpoint, the GGUF sha256, the held-out numbers and pass or fail; the off-the-shelf comparison; `model-bar: pass <bases>` (or `model-bar: fail`); and `m11-gpu-hours: <total>` recomputed from the scheduler exports of M11-T01 to T04 (cap 5,000, DEC-115). Weights and GGUFs stay on the project store; only hashes and summaries come back. Nothing is published.
+- verify: `grep -qE '^model-bar: (pass|fail) ' .plan/work/M11-T04/result.md && grep -qE '^m11-gpu-hours: [0-9.]+$' .plan/work/M11-T04/result.md`
+- files: `<kit>/train/**`, `<kit>/trainer/**`, `<kit>/runs/m11t04/**`, `.plan/work/M11-T04/**`
 
