@@ -311,6 +311,8 @@ def run_offline(
         LOG.error("Unable to load sample bundle.")
         return 2
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
+    # The replayed tenant text enters the run here: each lone UTF-16 surrogate becomes U+FFFD, counted for the summary.
+    sample = writer.valid_text(sample)
     try:
         sensitive_binding = writer.write_sensitive_users(sensitive_users)
         writer.write_partner_domains(partner_domains)
@@ -531,7 +533,9 @@ def _resume_carried_collectors(
         if status == "ok":
             payload = writer._safe_load_json(writer.raw_dir / f"{name}.json")
             if isinstance(payload, dict):
-                carried[name] = payload
+                # A carried payload re-enters the run here: a raw file an earlier version wrote can still hold a lone
+                # surrogate, which becomes U+FFFD and is counted (a payload this version wrote is already clean).
+                carried[name] = writer.valid_text(payload)
         elif status == "skipped" and not _is_preflight_skip(state):
             carried[name] = {}
     return carried

@@ -7,6 +7,19 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+### Fixed
+
+- **A lone UTF-16 surrogate in tenant text no longer stops or blinds a run (M11-T02).** A tenant value holding a lone
+  surrogate (a JSON `\ud800` escape) made finalisation refuse the whole run (`Refusing evidence index: unsafe input.`),
+  and in a value a rule reads (SPF, DLP and transport rule names, Teams policy names and app settings) it turned the
+  verdict into not assessed, which could hide a check that is not met. Tenant text is now made valid where it enters
+  the bundle (the offline sample, each collector's payload, coverage rows and errors, audit-log events, a resumed
+  run's carried payloads, the raw, chunk and export records): each lone surrogate becomes U+FFFD, a surrogate pair
+  stays the one character it encodes, and the rest of the value is unchanged. A key whose repaired name is already
+  taken gets a `~2`, `~3` suffix, so no evidence entry is overwritten. Every file write repairs and counts what
+  reached it without an entry point. The count is in `summary.json` (`lone_surrogates_replaced` and a
+  `data_quality_notes` line) and in `summary.md`. Every other evidence-index refusal is unchanged.
+
 ## [1.7.0] - 2026-11-18
 
 ### Local answer

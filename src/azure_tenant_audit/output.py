@@ -48,6 +48,8 @@ from .sensitive_users import (
     SensitiveUsersError,
 )
 from .tenant_identity import IDENTITY_FIELDS
+from .text_validity import lone_surrogate_note
+from .text_validity import valid_text as _valid_text
 
 LOG = logging.getLogger("azure_tenant_audit.output")
 RUN_MANIFEST_SCHEMA_VERSION = "2026-04-21"
@@ -130,11 +132,13 @@ class AuditLogger:
 
     _command_events = frozenset({"command.started", "command.completed", "command.failed"})
 
-    def __init__(self, run_dir: Path, listener: Any = None) -> None:
+    def __init__(self, run_dir: Path, listener: Any = None, on_replaced: Any = None) -> None:
         self.jsonl_path = run_dir / "audit-log.jsonl"
         self.command_log_path = run_dir / "audit-command-log.jsonl"
         self.debug_path = run_dir / "audit-debug.log"
         self.listener = listener
+        # Called with how many lone UTF-16 surrogates an event's text had replaced (the writer's run count).
+        self.on_replaced = on_replaced
         for path in (self.jsonl_path, self.command_log_path, self.debug_path):
             with _open_private(path, "a"):
                 pass
@@ -147,14 +151,21 @@ class AuditLogger:
             "message": message,
             "details": details or {},
         }
-        line = json.dumps(payload, default=str, ensure_ascii=False)
+        # Event text can carry tenant text (a Graph error message, an exception): a lone surrogate becomes U+FFFD so
+        # the UTF-8 log line can be written, and the count joins the run's data-quality note.
+        payload, replaced = _valid_text(payload)
+        # A detail that is not JSON (an exception object) is written as its str(), which can carry one too.
+        line, more = _valid_text(json.dumps(payload, default=str, ensure_ascii=False))
+        if replaced + more and self.on_replaced is not None:
+            self.on_replaced(replaced + more)
         with _open_private(self.jsonl_path, "a") as handle:
             handle.write(line + "\n")
         if event in self._command_events:
             with _open_private(self.command_log_path, "a") as handle:
                 handle.write(line + "\n")
         with _open_private(self.debug_path, "a") as handle:
-            handle.write(f"[{payload['ts_utc']}] {payload['event']}: {payload['message']} {payload['details']}\n")
+            debug = f"[{payload['ts_utc']}] {payload['event']}: {payload['message']} {payload['details']}\n"
+            handle.write(_valid_text(debug)[0])
         LOG.debug("%s: %s", payload["event"], payload["message"])
         if self.listener is not None:
             try:
@@ -220,8 +231,10 @@ class AuditWriter:
         self.coverage_index_path = self.index_dir / "coverage.jsonl"
         self.summary: dict[str, Any] = {"schema_version": SUMMARY_SCHEMA_VERSION, "tenant_name": tenant_name, "run_id": self.run_id, "collectors": []}
         self.coverage: list[dict[str, Any]] = []
+        # Lone UTF-16 surrogates replaced in tenant text this run (a resumed run carries the earlier sessions' count).
+        self.lone_surrogates_replaced = 0
         self._seed_existing_run_artifacts(existing_manifest)
-        self.audit = AuditLogger(self.run_dir, listener=event_listener)
+        self.audit = AuditLogger(self.run_dir, listener=event_listener, on_replaced=self._count_replaced)
         self._manifest = {
             "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
             "tenant_name": tenant_name,
@@ -292,12 +305,29 @@ class AuditWriter:
         except (OSError, json.JSONDecodeError, ValueError):
             return None
 
+    def valid_text(self, value: Any) -> Any:
+        """Tenant text entering the bundle, with each lone UTF-16 surrogate replaced by U+FFFD and counted.
+
+        The one point where collector payloads, the offline sample and the raw, chunk and export records become valid
+        text, so normalisation, the evidence index and the value rules never see a lone surrogate; the count is the
+        run's data-quality note in ``summary.json``.
+        """
+        value, replaced = _valid_text(value)
+        self._count_replaced(replaced)
+        return value
+
+    def _count_replaced(self, replaced: int) -> None:
+        self.lone_surrogates_replaced += replaced
+
     def _write_text_atomic(self, path: Path, content: str) -> None:
         self._mkdir_private(path.parent)
-        write_private_text(path, content)
+        # Backstop: text that reached a file write without passing an entry point (a coverage error, metadata, a
+        # report line) never writes a lone surrogate either, and its replacements are counted. Text an entry point
+        # already repaired holds no surrogate, so it is never counted twice.
+        write_private_text(path, self.valid_text(content))
 
     def _write_json_atomic(self, path: Path, payload: Any) -> None:
-        self._write_text_atomic(path, json.dumps(payload, indent=2))
+        self._write_text_atomic(path, json.dumps(self.valid_text(payload), indent=2))
 
     def _seed_existing_run_artifacts(self, existing_manifest: Any) -> None:
         existing_summary = self._safe_load_json(self.run_dir / "summary.json")
@@ -305,6 +335,9 @@ class AuditWriter:
             for key in ("schema_version", "tenant_name", "run_id", "overall_status", "duration_seconds"):
                 if existing_summary.get(key) is not None:
                     self.summary[key] = existing_summary[key]
+            replaced = existing_summary.get("lone_surrogates_replaced")
+            if type(replaced) is int and replaced > 0:
+                self.lone_surrogates_replaced = replaced
             existing_collectors = existing_summary.get("collectors")
             if isinstance(existing_collectors, list):
                 self.summary["collectors"] = [item for item in existing_collectors if isinstance(item, dict)]
@@ -314,11 +347,17 @@ class AuditWriter:
         # ``coverage.json`` is written when a run is finalized; the rows of a session that was interrupted are only in
         # the index, which every read appends to. The newest observation of an endpoint wins.
         rows.extend(self._indexed_coverage())
-        self.coverage = latest_coverage(rows)
+        # Rows an earlier version wrote can still hold a lone surrogate; this version's rows are already clean.
+        self.coverage = self.valid_text(latest_coverage(rows))
 
         existing_state = self._safe_load_json(self.checkpoint_state_path)
         if isinstance(existing_state, dict):
             self._checkpoint_state = self._normalize_checkpoint_payload(existing_state)
+            # Both counts are running totals for the whole run, so the larger is the latest; adding them would
+            # count the same text twice.
+            replaced = existing_state.get("lone_surrogates_replaced")
+            if type(replaced) is int and replaced > self.lone_surrogates_replaced:
+                self.lone_surrogates_replaced = replaced
 
     def _indexed_coverage(self) -> list[dict[str, Any]]:
         """Coverage rows from ``index/coverage.jsonl`` (one JSON object per line); an unreadable line is skipped."""
@@ -577,11 +616,7 @@ class AuditWriter:
             "collectors": collectors,
             "operations": operations,
         }
-        path = self.checkpoint_state_path
-        self._write_json_atomic(path, checkpoint_payload)
-        self._record_artifact(path)
-        self._manifest["checkpoint_state_path"] = str(path.relative_to(self.run_dir))
-        return path
+        return self._write_checkpoint_state(checkpoint_payload)
 
     def write_checkpoint(self, collector_name: str, payload: dict[str, Any]) -> Path:
         state = self.load_checkpoint_state()
@@ -605,8 +640,15 @@ class AuditWriter:
             "collectors": collectors,
             "operations": operations,
         }
+        return self._write_checkpoint_state(checkpoint_payload)
+
+    def _write_checkpoint_state(self, checkpoint_payload: dict[str, Any]) -> Path:
+        # The running replacement count goes with the checkpoint, so a session interrupted before summary.json
+        # still hands it to the next one. It is set after this payload's own text is repaired, so it includes it.
+        payload = self.valid_text(checkpoint_payload)
+        payload["lone_surrogates_replaced"] = self.lone_surrogates_replaced
         path = self.checkpoint_state_path
-        self._write_json_atomic(path, checkpoint_payload)
+        self._write_json_atomic(path, payload)
         self._record_artifact(path)
         self._manifest["checkpoint_state_path"] = str(path.relative_to(self.run_dir))
         return path
@@ -626,7 +668,7 @@ class AuditWriter:
     def write_raw(self, name: str, payload: dict[str, Any]) -> Path:
         target = self.raw_dir / f"{name}.json"
         self._mkdir_private(target.parent)
-        self._write_json_atomic(target, minimise_user_text(payload))
+        self._write_json_atomic(target, minimise_user_text(self.valid_text(payload)))
         self._record_artifact(target)
         return target
 
@@ -643,7 +685,7 @@ class AuditWriter:
         target = collector_dir / f"{name}-{page_number:05d}.jsonl"
         with _open_private(target, "w") as handle:
             for record in records:
-                handle.write(json.dumps(minimise_user_text(record), default=str) + "\n")
+                handle.write(json.dumps(minimise_user_text(self.valid_text(record)), default=str) + "\n")
         if metadata:
             meta_path = collector_dir / f"{name}-{page_number:05d}.meta.json"
             self._write_json_atomic(meta_path, metadata)
@@ -678,7 +720,7 @@ class AuditWriter:
         target = section_dir / f"part-{page_number:05d}.jsonl"
         with _open_private(target, "w") as handle:
             for record in records:
-                handle.write(json.dumps(minimise_user_text(record), default=str) + "\n")
+                handle.write(json.dumps(minimise_user_text(self.valid_text(record)), default=str) + "\n")
         if metadata:
             meta_path = section_dir / f"part-{page_number:05d}.meta.json"
             self._write_json_atomic(meta_path, metadata)
@@ -700,6 +742,7 @@ class AuditWriter:
         index_path = self.index_dir / filename
         with _open_private(index_path, "a") as handle:
             for record in records:
+                record = self.valid_text(record)
                 self.coverage.append(record)
                 handle.write(json.dumps(record, default=str) + "\n")
         self._record_artifact(index_path)
@@ -919,6 +962,12 @@ class AuditWriter:
         self.summary["provider_scorecard"] = provider_scorecard
         if self._manifest.get("autopilot_quality"):
             self.summary["autopilot_quality"] = self._manifest["autopilot_quality"]
+        # Text that reached the summary or manifest without an entry point is repaired and counted before the note.
+        self.summary = self.valid_text(self.summary)
+        self._manifest = self.valid_text(self._manifest)
+        if self.lone_surrogates_replaced:
+            self.summary["lone_surrogates_replaced"] = self.lone_surrogates_replaced
+            self.summary["data_quality_notes"] = [lone_surrogate_note(self.lone_surrogates_replaced)]
         summary_json_path = self.run_dir / "summary.json"
         summary_md_path = self.run_dir / "summary.md"
         self._write_json_atomic(summary_json_path, self.summary)
@@ -932,6 +981,7 @@ class AuditWriter:
         ]
         if self.summary.get("partial_workload_notice"):
             lines.append(f"- {self.summary['partial_workload_notice']}")
+        lines.extend(f"- Data quality: {note}" for note in self.summary.get("data_quality_notes") or [])
         lines.extend(["", "| Collector | Status | Items | Details |", "| --- | --- | --- | --- |"])
         for row in self.summary.get("collectors", []):
             lines.append(

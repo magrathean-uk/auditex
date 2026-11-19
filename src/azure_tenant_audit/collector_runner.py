@@ -142,6 +142,10 @@ class AuditWriterCollectorAdapter:
     def write_raw(self, name: str, payload: dict[str, Any]) -> Any:
         return self.writer.write_raw(name, payload)
 
+    def valid_text(self, value: Any) -> Any:
+        clean = getattr(self.writer, "valid_text", None)
+        return clean(value) if clean is not None else value
+
     def write_index_records(self, records: list[dict[str, Any]]) -> Any:
         return self.writer.write_index_records(records)
 
@@ -200,7 +204,9 @@ class CollectorRunner:
         except Exception as exc:  # noqa: BLE001
             from .secret_hygiene import redact_output
 
-            error = redact_output(exc)
+            # An exception message can quote tenant text: a lone surrogate becomes U+FFFD once, here, before the log,
+            # the result row, the checkpoint and the coverage row repeat it.
+            error = self._valid_text(redact_output(exc))
             self._log(
                 legacy_context,
                 "collector.failed",
@@ -249,6 +255,12 @@ class CollectorRunner:
                 crashed=True,
             )
 
+        # Tenant text enters the run here: a lone UTF-16 surrogate becomes U+FFFD before normalisation, the raw file,
+        # the coverage rows, the result row and the checkpoint.
+        result.payload = self._valid_text(result.payload)
+        result.coverage = self._valid_text(result.coverage)
+        result.message = self._valid_text(result.message)
+        result.error = self._valid_text(result.error)
         coverage_rows = list(result.coverage or [])
         if options.write_coverage and coverage_rows:
             self._write_coverage(coverage_rows)
@@ -295,6 +307,10 @@ class CollectorRunner:
             ))
             row["message"] = " ".join(reason for reason in reasons if reason) or collector_gap_reason(result.name, "unknown")
         return row
+
+    def _valid_text(self, value: Any) -> Any:
+        clean = getattr(self.writer, "valid_text", None)
+        return clean(value) if clean is not None else value
 
     def _log(
         self,
