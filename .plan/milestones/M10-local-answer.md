@@ -25,8 +25,8 @@ Plan v4 amendment 12 (DEC-113). G's product shape: "CLI tool, user runs, ads pri
 |---|---|---|---|---|---|
 | M10-T01 | Measure runtime and models on this Mac (about 8B for 16 GB; about 4B for 8 GB) | sol | M | hard | done |
 | M10-T02 | Run digest with value references, and the fail-closed answer checks in the product | sol | M | risk:high | done |
-| M10-T03 | Local model runner, auditex explain, run --explain, report section, MCP tool | sol | L | risk:high | todo |
-| M10-T04 | Acceptance on the test tenants, docs | terra | M | gate | todo |
+| M10-T03 | Local model runner, auditex explain, run --explain, report section, MCP tool | sol | L | risk:high | done |
+| M10-T04 | Acceptance on the test tenants, docs | terra | M | gate | done |
 
 ## Acceptance criteria
 ### M10-T01 Measure runtime and models on this Mac (about 8B for 16 GB; about 4B for 8 GB)

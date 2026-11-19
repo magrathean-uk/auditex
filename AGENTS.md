@@ -99,6 +99,17 @@ data handling and redaction profiles, `docs/provenance/provenance.md` for third-
 - Commits are signed and gitleaks-clean, one coherent change each, with plain subject lines.
 - Remove the worktree and branch after merge.
 
+## Cloud sessions
+
+Code-and-test work that needs no Mac, lab tenant, Isambard-AI or secret may run as a cloud session (G, 19 Nov 2026).
+- Run `make install` first, then the checks the table above names for the changed surface (`make lint`, focused
+  tests, `make contract-smoke`, the rule-pack drift check). `make acceptance` and anything needing the kit, the
+  replay vectors, a model file or a tenant stay on the Mac.
+- No Clean Development routing applies; build output stays in the git-ignored folders. No secrets, tokens or
+  tenant evidence, and no network calls beyond package installs.
+- Work only on the branch `wt/<task>` named in the brief and push only that branch. Never push `main`, tag or
+  release. The lead reviews the branch, integrates it, signs and pushes.
+
 ## Environment and storage
 
 Clean Development 0.6 routing is loaded by `~/dev/machine/env.zsh` in every shell; never wrap,

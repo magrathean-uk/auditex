@@ -26,7 +26,7 @@ Thousands of test tenants exercise the rules and the answers; the answer pipelin
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M11-T01 | Scale test tenants: generator, expected verdicts, rules and answer runs | sol | L | hard | todo |
+| M11-T01 | Scale test tenants: generator, expected verdicts, rules and answer runs | sol | L | hard | done |
 | M11-T02 | Attack loop: attacker, rounds, fixes, attacker retraining | sol | L | risk:high | todo |
 | M11-T03 | Training data from checked answers and attack tricks | terra | M | hard | todo |
 | M11-T04 | Train, quantise and evaluate compact models on three bases | terra | L | hard | todo |
