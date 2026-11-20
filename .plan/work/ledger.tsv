@@ -772,3 +772,24 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-19T16:58:05Z	M11-T03	terra	claude-4	claude-sonnet-5-5	high	branch	0	4500	2.8563	done	task/M11-T03-train-data	v4
 2026-11-20T02:59:32Z	M11-T04	terra	claude-4	claude-sonnet-5-5	high	branch	124	36001		timeout	task/M11-T04-train-eval	v4
 2026-11-20T03:14:57Z	M11-T04	terra	claude-4	claude-sonnet-5-5	high	branch	0	845	0.7060	done	task/M11-T04-train-eval	v4
+2026-11-20T05:38:34Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	5	8397		failed	task/M11-T06-second-round	v4
+2026-11-20T05:54:55Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	3	50	0.2759	malformed	task/M11-T06-second-round	v4
+2026-11-20T06:26:32Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	74	0.3470	partial	task/M11-T06-second-round	v4
+2026-11-20T06:57:35Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	59	0.3374	partial	task/M11-T06-second-round	v4
+2026-11-20T07:28:39Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	61	0.2618	partial	task/M11-T06-second-round	v4
+2026-11-20T07:59:44Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	60	0.2269	partial	task/M11-T06-second-round	v4
+2026-11-20T09:01:44Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	90	0.3632	partial	task/M11-T06-second-round	v4
+2026-11-20T09:32:46Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	60	0.2457	partial	task/M11-T06-second-round	v4
+2026-11-20T10:33:29Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	40	0.2565	partial	task/M11-T06-second-round	v4
+2026-11-20T10:44:50Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	79	0.3299	partial	task/M11-T06-second-round	v4
+2026-11-20T11:15:53Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	61	0.2982	partial	task/M11-T06-second-round	v4
+2026-11-20T11:40:07Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	73	0.3139	partial	task/M11-T06-second-round	v4
+2026-11-20T12:11:01Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	52	0.2312	partial	task/M11-T06-second-round	v4
+2026-11-20T12:22:00Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	58	0.2690	partial	task/M11-T06-second-round	v4
+2026-11-20T12:43:12Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	71	0.2936	partial	task/M11-T06-second-round	v4
+2026-11-20T13:16:02Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	168	0.6353	partial	task/M11-T06-second-round	v4
+2026-11-20T13:29:48Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	76	0.3534	partial	task/M11-T06-second-round	v4
+2026-11-20T13:40:49Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	60	0.3325	partial	task/M11-T06-second-round	v4
+2026-11-20T13:51:42Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	52	0.2318	partial	task/M11-T06-second-round	v4
+2026-11-20T14:13:22Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	98	0.3773	partial	task/M11-T06-second-round	v4
+2026-11-20T15:25:16Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	0	110	0.5084	done	task/M11-T06-second-round	v4

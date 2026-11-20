@@ -2,7 +2,7 @@
 id: M11
 name: auditex-model
 weight: 9
-status: planned
+status: done
 ---
 # M11 auditex-model
 Plan v4 amendment 13 (DEC-115, G: "Yes, go" to the combined plan). After M10's off-the-shelf path: an attack loop hardens the answer against hostile tenant data, a compact Auditex model is trained on checked answers and on the attacker's tricks, and scale testing runs the rules and the answers on thousands of test tenants. GPU use is capped at 5,000 GPU-hours on Isambard-AI unless the manager agrees more; every job is inventoried as before. G signs in to the system when the first GPU job is ready (the lead sends the manager the sign-in line).
@@ -21,7 +21,7 @@ Thousands of test tenants exercise the rules and the answers; the answer pipelin
 - [x] Training data: only answers that pass every check, with the attacker's tricks and their correct handling, split by tenant with a sealed held-out set: `grep -q '^data-version: ' .plan/work/M11-T03/result.md`
 - [x] Compact models: each base (Qwen, Mistral, Gemma) evaluated once on the sealed held-out tenants; a model ships only with at least 99 per cent of sentences passing the checks, zero contradictions and the injection acceptance, on an 8 GB laptop profile: `grep -qE '^model-bar: (pass|fail) ' .plan/work/M11-T04/result.md`
 - [x] GPU use stays within 5,000 GPU-hours (DEC-115) across M11, recomputed from the scheduler exports: `grep -qE '^m11-gpu-hours: [0-9.]+$' .plan/work/M11-T04/result.md`
-- [ ] Shipping: passing models are offered as `--model` choices, and the default changes only if a compact model beats the best off-the-shelf model on the M10 bar and the held-out comparison: `grep -qx 'ship: done' .plan/work/M11-T05/result.md`
+- [x] Shipping: passing models are offered as `--model` choices, and the default changes only if a compact model beats the best off-the-shelf model on the M10 bar and the held-out comparison: `grep -qx 'ship: done' .plan/work/M11-T05/result.md`
 
 ## Tasks
 | id | title | owner | size | tags | status |
@@ -30,8 +30,8 @@ Thousands of test tenants exercise the rules and the answers; the answer pipelin
 | M11-T02 | Attack loop: attacker, rounds, fixes, attacker retraining | sol | L | risk:high | done |
 | M11-T03 | Training data from checked answers and attack tricks | terra | M | hard | done |
 | M11-T04 | Train, quantise and evaluate compact models on three bases | terra | L | hard | done |
-| M11-T05 | Ship passing compact models in the product | sol | M | risk:high | todo |
-| M11-T06 | Second training round on a fresh sealed held-out set | terra | L | hard | todo |
+| M11-T05 | Ship passing compact models in the product | sol | M | risk:high | done |
+| M11-T06 | Second training round on a fresh sealed held-out set | terra | L | hard | done |
 
 ## Acceptance criteria
 The detailed criteria for each task are written by the lead before the task is dispatched, as an amendment line under this heading, from the facts M10 produces (runtime, models, digest and check interfaces, measured speeds). The Definition of Done above is fixed now.
@@ -80,3 +80,8 @@ The detailed criteria for each task are written by the lead before the task is d
 - result.md: per base the pin, the checkpoint, the GGUF sha256, the held-out numbers and pass or fail; the diagnosis findings; `model-bar: pass <bases>` (or `model-bar: fail`); `m11-gpu-hours: <total>` across M11-T01 to T06 (cap 5,000). Weights stay on the project store. Nothing is published. No heavy job on the Mac.
 - verify: `grep -qE '^model-bar: (pass|fail) ' .plan/work/M11-T06/result.md && grep -qE '^m11-gpu-hours: [0-9.]+$' .plan/work/M11-T06/result.md`
 - files: `<kit>/train/**`, `<kit>/trainer/**`, `<kit>/scale/**` (a new-seed held-out build only), `<kit>/runs/m11t06/**`, `.plan/work/M11-T06/**`
+
+### M11-T05 Ship passing compact models in the product
+- Amendment (DEC-140, lead, 20 Nov): no base passed in M11-T04 or M11-T06, so nothing ships: no `--model` choice is added, the default stays M10 `qwen`, and the CHANGELOG records the outcome.
+- verify: `grep -qx 'ship: done' .plan/work/M11-T05/result.md`
+- files: `CHANGELOG.md`, `.plan/work/M11-T05/**`
