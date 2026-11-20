@@ -1059,3 +1059,8 @@
 - why: the about-4B size is M10's 8 GB target; the three families are the DoD's.
 - approver: lead
 
+## DEC-139 M11-T04 done with model-bar fail; second round M11-T06
+- date: 2026-11-20
+- decision: M11-T04 is done: `model-bar: fail` and `m11-gpu-hours: 208.38`. All three bases are within the 6 GB peak (Qwen 4.74, Mistral 5.87, Gemma 5.70 GB). Plain Q4_K_M breaks long answers, so imatrix Q6_K is used. No base meets the bar. The failures look systematic: header lines, fallbacks, Gemma trained on a 4,000-row sample, and leak flags that also hit the off-the-shelf model on control rows. M11-T06 is added: diagnose these, retrain on the full split and evaluate once on a fresh sealed held-out set built with a new seed, because the first held-out set is spent. M11-T05 now follows M11-T06; the default model stays M10 `qwen` until a compact model passes.
+- why: the DoD goal is a compact model that passes. About 4,790 GPU-hours remain under the cap, and GPU training must finish by 15 Jan 2027. Re-using the spent held-out set would leak it into selection.
+- approver: lead

@@ -9,7 +9,8 @@ last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 ## Next tasks
 - M11-T01 done: scale-rules pass, scale pass (4 models x 2,048 tenants, 37.27 GPU-hours).
 - M11-T02 done: attack-loop clean (rounds 2 and 3, 0 tricks, product 9a0f301; DEC-136).
-- M11-T03 done (data-version 101c02cd, 13,956 rows; DEC-138). M11-T04 training dispatched (criteria DEC-138); then M11-T05 ship and 1.8.0.
+- M11-T03 done (data-version 101c02cd, 13,956 rows; DEC-138).
+- M11-T04 done: model-bar fail, 208.38 GPU-hours (DEC-139). M11-T06 second round dispatched, then M11-T05 ship and 1.8.0.
 - Each Isambard step needs a live sign-in window (G); check `ssh -O check` first.
 - M07-T17 lab rollback by 30 Nov (G approved, DEC-126), then G passes `~/Desktop/cancel-lab-trials.md` to Codex.
 

@@ -770,3 +770,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-19T15:37:08Z	M11-T02	terra	claude-4	claude-sonnet-5-5	high	branch	0	6641	0.7532	done	task/M11-T02-attack-r2	v4
 2026-11-19T15:41:33Z	M11-T03	terra	claude-4	claude-sonnet-5-5	high	branch	2	89	0.5970	blocked	task/M11-T03-train-data	v4
 2026-11-19T16:58:05Z	M11-T03	terra	claude-4	claude-sonnet-5-5	high	branch	0	4500	2.8563	done	task/M11-T03-train-data	v4
+2026-11-20T02:59:32Z	M11-T04	terra	claude-4	claude-sonnet-5-5	high	branch	124	36001		timeout	task/M11-T04-train-eval	v4
+2026-11-20T03:14:57Z	M11-T04	terra	claude-4	claude-sonnet-5-5	high	branch	0	845	0.7060	done	task/M11-T04-train-eval	v4
