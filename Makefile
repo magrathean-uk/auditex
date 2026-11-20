@@ -104,7 +104,7 @@ release-check:
 release-archive:
 	@set -eu; \
 		dir=$$(mktemp -d "$${TMPDIR:-/tmp}/auditex-archive.XXXXXX"); \
-		trap 'rm -rf "$$dir"' 0; \
+		trap 'rm -rf "$$dir" 2>/dev/null || echo "warning: could not remove $$dir" >&2' 0; \
 		trap 'exit 1' HUP INT TERM; \
 		git archive HEAD > "$$dir/source.tar"; \
 		tar -tf "$$dir/source.tar" > "$$dir/files"; \
@@ -120,7 +120,7 @@ release-archive:
 dist:
 	@set -eu; \
 		dir=$$(mktemp -d "$${TMPDIR:-/tmp}/auditex-dist.XXXXXX"); \
-		trap 'rm -rf "$$dir"' 0; \
+		trap 'rm -rf "$$dir" 2>/dev/null || echo "warning: could not remove $$dir" >&2' 0; \
 		trap 'exit 1' HUP INT TERM; \
 		git archive HEAD > "$$dir/source.tar"; \
 		mkdir "$$dir/source" "$$dir/artifacts"; \

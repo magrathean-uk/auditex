@@ -86,7 +86,7 @@ def main(argv: list[str]) -> int:
     if argv:
         print('usage: check-reproducible-build.py [--normalise-sdist PATH EPOCH]', file=sys.stderr)
         return 2
-    with tempfile.TemporaryDirectory(prefix='auditex-repro-', dir=os.environ.get('TMPDIR') or tempfile.gettempdir()) as tmp:
+    with tempfile.TemporaryDirectory(prefix='auditex-repro-', dir=os.environ.get('TMPDIR') or tempfile.gettempdir(), ignore_cleanup_errors=True) as tmp:
         first = Path(tmp) / 'first'
         second = Path(tmp) / 'second'
         first.mkdir()
