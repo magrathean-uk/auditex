@@ -7,6 +7,17 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-20
+
+### Testing
+
+- **Hostile tenant data and scale (M11).** The local answer was tested against a hostile-data attack loop: an internal
+  model, retrained on each round's successful tricks, wrote tenant strings that tried to change the order, soften a
+  wrong finding or slip past the answer checks. After the fix below, two rounds in a row found none. The value rules
+  and the answer were also run over 2,048 synthetic tenants with known expected verdicts, with zero disagreements.
+  Compact Auditex models were trained and tested, but none met the M10 bar on unseen tenants, so none ships and `qwen`
+  stays the default.
+
 ### Fixed
 
 - **A lone UTF-16 surrogate in tenant text no longer stops or blinds a run (M11-T02).** A tenant value holding a lone
