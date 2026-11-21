@@ -424,6 +424,9 @@ def run_demo(options: DemoOptions) -> int:
     from azure_tenant_audit.guarded_io import UnsafeRunFileError
     from azure_tenant_audit.private_io import make_private_dirs
     if out_dir.is_symlink() or (out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir()))):
+        if not out_dir.is_symlink() and out_dir.is_dir():
+            print("The demo folder (--out) is not empty: remove it, or pass another --out, to run the demo again.",
+                  file=sys.stderr)
         raise UnsafeRunFileError("out")
     make_private_dirs(out_dir)
 

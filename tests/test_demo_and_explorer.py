@@ -219,3 +219,16 @@ def test_demo_reads_a_relative_sample_from_the_cwd(tmp_path: Path, monkeypatch, 
 
     assert rc == 0, capsys.readouterr().out
     assert (work / "d" / "runs").is_dir()
+
+
+def test_demo_rerun_into_a_used_folder_says_how_to_proceed(tmp_path: Path, capsys) -> None:
+    # R143: the demo folder is not recreated; a second run is refused and must say why and what to do.
+    out = tmp_path / "d"
+    assert auditex_main(["demo", "--no-pause", "--no-html", "--sample", str(KNOWN_BAD), "--out", str(out)]) == 0
+    capsys.readouterr()
+
+    rc = auditex_main(["demo", "--no-pause", "--no-html", "--sample", str(KNOWN_BAD), "--out", str(out)])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "is not empty" in captured.err and "--out" in captured.err
