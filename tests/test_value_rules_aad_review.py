@@ -128,3 +128,71 @@ def test_r027_exempt_shared_exclusion_does_not_decide():
     two = ca(MFA, users={"ExcludeUsers": ["synthetic-break-glass"], "IncludeUsers": ["synthetic-b"]})
     config = {"Aad": {"MS.AAD.3.2v1": {"CapExclusions": {"Users": ["synthetic-break-glass"]}}}}
     assert cell("MS.AAD.3.2v2", ca_sections(one, two, config=config)) == ("not_assessed", "union_possible")
+
+
+# R028: an assigned custom app management policy replaces the tenant default for its apps (Graph: the default applies only to
+# apps with no custom policy), so a custom policy that omits the restriction leaves those apps without it.
+
+ALL_APPS = "0001-01-01T00:00:00Z"
+
+
+def entry(rtype, state="enabled", maxd=None, **extra):
+    e = {"RestrictionType": rtype, "State": state, "RestrictForAppsCreatedAfterDateTime": ALL_APPS,
+         "MaxLifetime": None if maxd is None else f"P{maxd}D"}
+    e.update(extra)
+    return e
+
+
+def default_policy(**extra):
+    pw = [entry("passwordAddition", **extra), entry("passwordLifetime", maxd=90, **extra)]
+    keys = [entry("asymmetricKeyLifetime", maxd=180, **extra)]
+    scope = {"PasswordCredentials": pw, "KeyCredentials": keys}
+    return {"Id": "synthetic-default", "IsEnabled": True,
+            "ApplicationRestrictions": deepcopy(scope), "ServicePrincipalRestrictions": deepcopy(scope)}
+
+
+def custom_policy(password=(), keys=(), targets=({"Id": "synthetic-app"},), enabled=True):
+    def tag(items):
+        return [{**e, "AppliesTo": [dict(t) for t in targets]} for e in items]
+    return {"Id": "synthetic-custom", "IsEnabled": enabled,
+            "Restrictions": {"PasswordCredentials": tag(password), "KeyCredentials": tag(keys)}}
+
+
+def app_sections(custom=(), default=None):
+    return {"default_app_management_policy": [default or default_policy()], "app_management_policies": list(custom)}
+
+
+def test_r028_baseline_is_met():
+    assert cell("MS.AAD.5.5v1", app_sections()) == ("met", "restrictions_compliant")
+    assert cell("MS.AAD.5.7v1", app_sections()) == ("met", "restrictions_compliant")
+
+
+@pytest.mark.xfail(strict=True, reason="R028 not fixed: pinned v3.9.1 vectors (s9 custom_other_type_exempt, custom_other_cred_exempt, D81 moot rows) "
+                                        "fix the per-restriction-type reading; whole-policy precedence needs a spec decision")
+@pytest.mark.parametrize("policy,custom", [
+    ("MS.AAD.5.5v1", custom_policy(password=[entry("passwordLifetime", maxd=90)])),
+    ("MS.AAD.5.5v1", custom_policy(keys=[entry("asymmetricKeyLifetime", maxd=180)])),
+    ("MS.AAD.5.7v1", custom_policy(password=[entry("passwordAddition")])),
+])
+def test_r028_custom_policy_without_the_restriction_is_not_met(policy, custom):
+    assert cell(policy, app_sections([custom])) == ("not_met", "restriction_not_met")
+
+
+def test_r028_disabled_or_untargeted_custom_policy_changes_nothing():
+    off = custom_policy(password=[entry("passwordLifetime", maxd=90)], enabled=False)
+    untargeted = custom_policy(password=[entry("passwordLifetime", maxd=90)], targets=())
+    assert cell("MS.AAD.5.5v1", app_sections([off])) == ("met", "restrictions_compliant")
+    assert cell("MS.AAD.5.5v1", app_sections([untargeted])) == ("met", "restrictions_compliant")
+
+
+@pytest.mark.xfail(strict=True, reason="R028 not fixed: pinned v3.9.1 vectors (s9 custom_other_type_exempt, custom_other_cred_exempt, D81 moot rows) "
+                                        "fix the per-restriction-type reading; whole-policy precedence needs a spec decision")
+def test_r028_unreadable_targets_are_unknown():
+    custom = custom_policy(password=[entry("passwordLifetime", maxd=90)])
+    custom["Restrictions"]["PasswordCredentials"][0]["AppliesTo"] = "synthetic"
+    assert cell("MS.AAD.5.5v1", app_sections([custom])) == ("not_assessed", "restriction_unusable")
+
+
+def test_r028_lifetime_is_moot_where_the_custom_policy_blocks_password_addition():
+    custom = custom_policy(password=[entry("passwordAddition")])
+    assert cell("MS.AAD.5.6v1", app_sections([custom])) == ("not_applicable", "moot_addition_blocked")
