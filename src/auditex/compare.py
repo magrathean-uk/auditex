@@ -26,6 +26,7 @@ from azure_tenant_audit.rule_parameters import (
 from azure_tenant_audit.run_files import read_run_file
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
+from .reporting import markdown_inline
 from .run_bundle import RunBundle
 
 
@@ -582,7 +583,8 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
 
 
 def _md(value: Any) -> str:
-    return str(value if value is not None else "").replace("|", "\\|").replace("\n", " ").strip()
+    # R134: the report's escaper (line breaks, raw HTML, link brackets, cell separators) for tenant-controlled names.
+    return markdown_inline(value)
 
 
 def _severity_counts(rows: list[dict[str, Any]]) -> str:
