@@ -977,3 +977,39 @@ def test_sp_admin_fields_replace_any_graph_spelling_of_them():
     merged = projection.spo_with_admin(raw, {"ODBSharingCapability": 3, "DefaultSharingLinkType": 1})
     assert merged == {"sharingCapability": "anyone", "ODBSharingCapability": 3, "DefaultSharingLinkType": 1}
     assert projection.spo_with_admin(raw, {}) == raw
+
+
+def app_default(exclude_actors="absent"):
+    def entry(rtype, maxd=None):
+        e = {"restrictionType": rtype, "state": "enabled", "restrictForAppsCreatedAfterDateTime": "0001-01-01T00:00:00Z",
+             "maxLifetime": maxd}
+        if exclude_actors != "absent":
+            e["excludeActors"] = deepcopy(exclude_actors)
+        return e
+    scope = {"passwordCredentials": [entry("passwordAddition"), entry("passwordLifetime", "P90D")],
+             "keyCredentials": [entry("asymmetricKeyLifetime", "P180D")]}
+    return {"id": "default", "isEnabled": True, "applicationRestrictions": deepcopy(scope),
+            "servicePrincipalRestrictions": deepcopy(scope)}
+
+
+def app_answer(run, policy, exclude_actors):
+    from azure_tenant_audit.value_rules import assess
+    operation(run, "consent_policy", "defaultAppManagementPolicy", app_default(exclude_actors), singleton=True)
+    sections = {"default_app_management_policy": projection.project_run(run).rule_sections["default_app_management_policy"],
+                "app_management_policies": []}
+    record = assess(policy, sections)
+    return record["verdict"], record["cell"]
+
+
+@pytest.mark.parametrize("blank", ["absent", None, {}, {"customSecurityAttributes": []}, {"customSecurityAttributes": None}])
+def test_app_default_blank_actor_exemption_keeps_the_answer(run, blank):
+    assert app_answer(run, "MS.AAD.5.5v1", blank) == ("met", "restrictions_compliant")
+    assert app_answer(run, "MS.AAD.5.6v1", blank) == ("not_applicable", "moot_addition_blocked")
+
+
+@pytest.mark.parametrize("policy", ["MS.AAD.5.5v1", "MS.AAD.5.6v1", "MS.AAD.5.7v1"])
+def test_app_default_actor_exemption_is_never_every_app(run, policy):
+    """Review R042: an excludeActors exemption lets the actors it names still add credentials, so the rule view may not
+    show the restriction as unqualified. ScubaGear's Rego does not read the field; the section is withheld (not assessed)."""
+    exempt = {"customSecurityAttributes": [{"id": "synthetic-attribute", "operator": "equals", "value": True}]}
+    assert app_answer(run, policy, exempt) == ("not_assessed", "section_not_collected")

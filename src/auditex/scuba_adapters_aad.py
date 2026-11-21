@@ -135,6 +135,10 @@ def _scope(value: Any, applies_to: list[dict[str, str]] | None = None) -> Any:
         result[key] = []
         for entry in entries:
             item = _select(entry, _ENTRY_KEYS)
+            # Review R042 (proposed D114): actors an excludeActors exemption names can still add or keep the credential, so
+            # the entry is not the unqualified restriction the rule reads. The pinned Rego never reads the field; a populated
+            # one withholds the section (not assessed) rather than reading as "enabled for every app".
+            _require(_blank(entry.get("excludeActors")), "ExcludeActors", "unexpected_field")
             if applies_to is not None:
                 item["AppliesTo"] = _pascal(applies_to)
             result[key].append(item)
