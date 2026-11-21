@@ -296,7 +296,7 @@ def build_m365_setup_guide(
 
     collector_rows: list[dict[str, Any]] = []
     graph_permissions: list[str] = list(aggregate["required_permissions"])
-    role_hints: list[str] = _dedupe([*profile.delegated_role_hints, *aggregate["minimum_role_hints"]])
+    role_hints: list[str] = reader_roles([*profile.delegated_role_hints, *aggregate["minimum_role_hints"]])
     optional_commands: list[str] = list(aggregate["optional_commands"])
     for name in selected:
         row = _mapping(catalog.get(name))
@@ -305,7 +305,7 @@ def build_m365_setup_guide(
                 "collector": name,
                 "description": row.get("description", ""),
                 "required_permissions": list(row.get("required_permissions") or []),
-                "minimum_role_hints": list(row.get("minimum_role_hints") or []),
+                "minimum_role_hints": reader_roles(row.get("minimum_role_hints") or []),
                 "tool_requirements": list(row.get("tool_requirements") or []),
                 "notes": str(row.get("notes") or ""),
             }
@@ -571,6 +571,15 @@ def _google_command(
     if extra:
         parts.extend(extra.split())
     return shlex.join(parts)
+
+
+def reader_roles(roles: Any) -> list[str]:
+    """``roles`` without any administrator role: the reader app holds Global Reader and no other role.
+
+    Every administrator role can write, and Privileged Role Administrator can grant Global Administrator, so a plan
+    or blocker never suggests one, even when a custom permission-hint file names it.
+    """
+    return [role for role in _dedupe(roles) if "administrator" not in role.lower()]
 
 
 def _load_permission_hints(path: str | Path) -> dict[str, Any]:
