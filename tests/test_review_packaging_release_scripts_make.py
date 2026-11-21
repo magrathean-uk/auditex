@@ -117,3 +117,27 @@ def test_release_builds_stop_clearly_without_the_pinned_setuptools(tmp_path: Pat
     assert run.returncode == 2, (run.returncode, run.stderr[-2000:])
     assert f"setuptools {_setuptools_pin()}" in run.stderr
     assert "Traceback" not in run.stderr
+
+
+# R139: release-check tests the working tree but packages HEAD, so it must refuse uncommitted changes first.
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-c", "commit.gpgsign=false", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                    *args], cwd=repo, check=True, capture_output=True, timeout=60)
+
+
+@needs_git_checkout
+def test_release_check_refuses_uncommitted_changes(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    for name in ("Makefile", "pyproject.toml", ".pre-commit-config.yaml", "scripts/select-python.sh"):
+        shutil.copy2(ROOT / name, repo / name)
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    with (repo / "pyproject.toml").open("a", encoding="utf-8") as handle:
+        handle.write("\n# local change\n")
+
+    run = _make("release-check", f"PYTHON={sys.executable}", cwd=repo, timeout=60)
+
+    assert run.returncode == 2, (run.returncode, run.stderr[-2000:])
+    assert "uncommitted" in run.stderr
