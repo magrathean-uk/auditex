@@ -128,7 +128,9 @@ dist:
 		trap 'exit 1' HUP INT TERM; \
 		git archive HEAD > "$$dir/source.tar"; \
 		mkdir "$$dir/source" "$$dir/artifacts"; \
+		umask 022; \
 		tar -xf "$$dir/source.tar" -C "$$dir/source"; \
+		chmod -R u=rwX,go=rX "$$dir/source"; \
 		: "$${SOURCE_DATE_EPOCH:=$$(git show -s --format=%ct HEAD)}"; export SOURCE_DATE_EPOCH; \
 		cd "$$dir/source"; \
 		$(abspath $(PYTHON)) -c 'import setuptools.build_meta as b, sys; b.build_sdist(sys.argv[1])' "$$dir/artifacts"; \

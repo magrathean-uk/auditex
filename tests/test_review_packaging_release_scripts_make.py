@@ -81,3 +81,16 @@ def test_release_smoke_refuses_a_wheel_of_another_version(tmp_path: Path) -> Non
                          env=_env(PYTHON="false"), capture_output=True, text=True, timeout=60)
     assert run.returncode == 2, (run.returncode, run.stderr)
     assert f"auditex-{VERSION}" in run.stderr
+
+
+# R136: the builder's umask must not change the wheel or sdist bytes.
+@needs_git_checkout
+def test_dist_bytes_do_not_depend_on_the_umask(tmp_path: Path) -> None:
+    built = {}
+    for umask in ("022", "077"):
+        dist = tmp_path / f"dist-{umask}"
+        run = _make("dist", f"DIST_DIR={dist}", f"PYTHON={sys.executable}", umask=umask)
+        assert run.returncode == 0, run.stderr[-3000:]
+        built[umask] = {p.name: _sha(p) for p in dist.iterdir()}
+    assert built["022"] == built["077"]
+
