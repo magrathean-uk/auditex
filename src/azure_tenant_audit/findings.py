@@ -573,7 +573,7 @@ def _earliest_state(
 
 
 def _first_long_validity_secret(credentials: list[Any]) -> dict[str, Any] | None:
-    """Detect a password credential whose total validity exceeds 2 years OR
+    """Detect an unexpired password credential whose total validity exceeds 2 years OR
     is open-ended (missing ``end_date_time``)."""
     for credential in credentials:
         if not isinstance(credential, dict):
@@ -583,6 +583,9 @@ def _first_long_validity_secret(credentials: list[Any]) -> dict[str, Any] | None
         if end is None:
             return {**credential, "validity_days": None, "open_ended": True}
         if start is None:
+            continue
+        if (end if end.tzinfo else end.replace(tzinfo=UTC)) <= _utc_now():
+            # An expired secret cannot be used; secret_expired reports it.
             continue
         validity_days = int((end - start).total_seconds() // 86400)
         if validity_days > _SECRET_LONG_VALIDITY_DAYS:
@@ -642,13 +645,15 @@ def _build_app_credential_findings(item: dict[str, Any]) -> list[dict[str, Any]]
         warning_days=_CERTIFICATE_EXPIRY_WARNING_DAYS,
     )
 
+    # An expired credential can no longer authenticate, so it is low (stale-credential hygiene). Expiring
+    # credentials are evaluated on their own: an old expired secret must not hide one about to break the app.
     if earliest_secret_expired is not None:
         findings.append(
             _finalize_finding(
                 {
                     "id": f"app_credentials:{object_id}:secret_expired",
                     "rule_id": "app_credentials.secret_expired",
-                    "severity": "critical",
+                    "severity": "low",
                     "category": "application",
                     "title": "Application secret is expired",
                     "status": "open",
@@ -661,7 +666,7 @@ def _build_app_credential_findings(item: dict[str, Any]) -> list[dict[str, Any]]
                 }
             )
         )
-    elif earliest_secret_expiring is not None:
+    if earliest_secret_expiring is not None:
         findings.append(
             _finalize_finding(
                 {
@@ -687,7 +692,7 @@ def _build_app_credential_findings(item: dict[str, Any]) -> list[dict[str, Any]]
                 {
                     "id": f"app_credentials:{object_id}:certificate_expired",
                     "rule_id": "app_credentials.certificate_expired",
-                    "severity": "high",
+                    "severity": "low",
                     "category": "application",
                     "title": "Application certificate is expired",
                     "status": "open",
@@ -700,7 +705,7 @@ def _build_app_credential_findings(item: dict[str, Any]) -> list[dict[str, Any]]
                 }
             )
         )
-    elif earliest_cert_expiring is not None:
+    if earliest_cert_expiring is not None:
         findings.append(
             _finalize_finding(
                 {
