@@ -36,7 +36,14 @@ def _repo_root() -> Path:
 
 
 def _looks_like_dev_root(root: Path) -> bool:
-    return (root / "pyproject.toml").exists() and any((root / directory).exists() for directory in shipped_directories())
+    """Only this package's own source checkout is a dev root: the engine must be imported from its src tree."""
+    try:
+        own_tree = (root / "src" / "azure_tenant_audit" / "resources.py").resolve() == Path(__file__).resolve()
+    except OSError:
+        return False
+    return own_tree and (root / "pyproject.toml").is_file() and any(
+        (root / directory).exists() for directory in shipped_directories()
+    )
 
 
 def _looks_like_installed_root(root: Path) -> bool:
@@ -61,9 +68,11 @@ def _resource_adapters() -> list[ResourceAdapter]:
     if configured:
         adapters.append(ResourceAdapter("env", Path(configured).expanduser()))
 
-    cwd = Path.cwd()
-    dev_candidates = _unique_paths([cwd, *cwd.parents, _repo_root()])
-    adapters.extend(ResourceAdapter("dev", root) for root in dev_candidates if _looks_like_dev_root(root))
+    # The working directory never supplies resources: a foreign or older checkout above it would
+    # silently replace shipped configs and rule catalogues. Overrides go through the env root.
+    repo_root = _repo_root()
+    if _looks_like_dev_root(repo_root):
+        adapters.append(ResourceAdapter("dev", repo_root))
 
     installed_candidates: list[Path] = []
     data_path = sysconfig.get_paths().get("data")
