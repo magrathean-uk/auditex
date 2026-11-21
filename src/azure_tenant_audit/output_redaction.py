@@ -35,6 +35,10 @@ from .secret_hygiene import (
     PRIVATE_KEY_PEM_RE,
 )
 
+_PEM_COMPLETE_RE = re.compile(
+    r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----", re.DOTALL
+)
+
 # The output boundary masks at least the credential words the diagnostic redactor masks (R150): one word list.
 INLINE_SECRET_RE = re.compile(
     rf"(?P<prefix>[\"']?(?:{INLINE_SECRET_WORDS})[\"']?\s*[=:]\s*)(?P<value>{INLINE_SECRET_VALUE})",
@@ -2000,7 +2004,9 @@ class _Redactor:
         # ``minimal``: rendered JSON, HTML, CSV and Markdown. ``key=value`` secrets were redacted in the structure
         # before rendering; the inline pattern cannot tell where a value ends in markup. Mapping keys use the full
         # pattern (a key such as ``password=value`` carries its credential in the key text).
-        value = PRIVATE_KEY_PEM_RE.sub("***redacted-private-key***", value)
+        # Rendered markup is a whole document: only a complete BEGIN..END block is masked there, so a lone marker in
+        # tenant text cannot erase everything after it. A string value is bounded, so a cut-off block is masked to its end.
+        value = (_PEM_COMPLETE_RE if minimal else PRIVATE_KEY_PEM_RE).sub("***redacted-private-key***", value)
         value = JWT_RE.sub("***redacted-jwt***", BEARER_RE.sub("Bearer ***redacted***", value))
         value = _redact_url_credentials(value)
         if minimal:

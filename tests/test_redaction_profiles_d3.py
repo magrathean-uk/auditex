@@ -512,3 +512,17 @@ def test_r150_secret_key_matching_keeps_audit_metadata(profile: str) -> None:
     assert result["lastPasswordChangeDateTime"] == "2026-01-01T00:00:00Z"
     assert result["AllowSimplePassword"] is True
     assert result["passwordExpirationDays"] == 90
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack"])
+def test_r150_markup_pass_does_not_truncate_document_at_lone_pem_marker(profile: str) -> None:
+    """A lone BEGIN marker in rendered text (no END) must not erase the rest of the document; a full block is masked."""
+    from azure_tenant_audit.output_redaction import redact_output
+
+    lone = f"| -----BEGIN {_PEM_LABEL}----- tail |\n\n## Next section\nrow"
+    assert "## Next section" in redact_output(lone, profile=profile, markup=True)
+    assert _PARITY_CANARY not in redact_output(f"before {_PEM} after", profile=profile, markup=True)
+    # A string value is bounded, so a cut-off block in structure is still masked to its end.
+    assert _PARITY_CANARY not in json.dumps(
+        redact_output({"error": f"-----BEGIN {_PEM_LABEL}-----\n{_PARITY_CANARY}"}, profile=profile)
+    )
