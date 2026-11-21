@@ -22,6 +22,7 @@ ACCEPTABLE_ACTIONS = ("movetojmf", "quarantine", "redirect")
 SAFETY_TIPS = ("EnableFirstContactSafetyTips", "EnableSimilarUsersSafetyTips", "EnableSimilarDomainsSafetyTips", "EnableUnusualCharactersSafetyTips",
                "EnableViaTag", "EnableUnauthenticatedSender")
 PHISH_RANK = {"Strict": 0, "Standard": 1, "Custom": 2, "Default": 3}
+_UNEXPORTED = {}        # stands in for a policy an enabled rule applies but the export does not hold (review R101)
 
 
 def _email_of(entry):
@@ -173,6 +174,51 @@ def _phish_core(policy_id, sp, sections, cfg, cfg_bad, binding=None):
         return coverage_by_policy[key]
 
     flags = {}
+
+    def preset_reach(tier):
+        """(reach of the preset tier's enabled rules, None) or (None, topology record)."""
+        rx = PRESET_RE[0] if tier == "Strict" else PRESET_RE[1]
+        other = PRESET_RE[1] if tier == "Strict" else PRESET_RE[0]
+        mine = [r for r in pres if rx.search(r["Identity"])]
+        if len(mine) > 1 or any(other.search(r["Identity"]) for r in mine):
+            return None, A("data_unusable_preset_topology", "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
+                           "preset_topology_unusable", [PP, POL])
+        if not mine or _state(mine[0]) == "Disabled":
+            reach = "n"
+        else:
+            t = {}
+            reach = _cover(mine[0], accepted, t, "narrows")
+            if (reach == "q" and t.get("via")) or (reach == "x" and t.get("excl")):
+                flags["preset_scope"] = True
+        if ATP:
+            minea = [r for r in atp if rx.search(r["Identity"])]
+            if len(minea) > 1 or any(other.search(r["Identity"]) for r in minea):
+                return None, A("data_unusable_preset_topology", "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
+                               "preset_topology_unusable", ["atp_policy_rules", POL])
+            if not minea or _state(minea[0]) == "Disabled":
+                r2 = "n"
+            else:
+                t2 = {}
+                r2 = _cover(minea[0], accepted, t2, "narrows")
+                if (r2 == "q" and t2.get("via")) or (r2 == "x" and t2.get("excl")):
+                    flags["preset_scope"] = True
+            both = "n" if "n" in (reach, r2) else "u" if "u" in (reach, r2) else "x" if "x" in (reach, r2) else "q"
+            if both != reach:
+                flags["atp_part"] = True           # D100: the Defender part of the preset differs from the EOP part, which the Rego reads alone
+            reach = both
+        return reach, None
+
+    def custom_reach(keys):
+        cl = set()
+        for key in keys:
+            classes, case = coverage(key)
+            cl.update(classes)
+            if case:
+                flags["case_or_space"] = True
+        if unreadable_link:
+            return "u"
+        return "q" if "q" in cl else ("u" if "u" in cl else ("x" if "x" in cl else "n"))
+
     info = []                                    # (tier, policy, reach, content)
     for p in pols:
         ident = p["Identity"]
@@ -182,49 +228,31 @@ def _phish_core(policy_id, sp, sections, cfg, cfg_bad, binding=None):
             continue                                   # 2.4: presets come from their rules alone (below), the Rego never reads the preset policy
         reach = "q" if tier == "Default" else None
         if tier in ("Strict", "Standard"):
-            rx = PRESET_RE[0] if tier == "Strict" else PRESET_RE[1]
-            other = PRESET_RE[1] if tier == "Strict" else PRESET_RE[0]
-            mine = [r for r in pres if rx.search(r["Identity"])]
-            if len(mine) > 1 or any(other.search(r["Identity"]) for r in mine):
-                return A("data_unusable_preset_topology", "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
-                         "preset_topology_unusable", [PP, POL])
-            if not mine or _state(mine[0]) == "Disabled":
-                reach = "n"
-            else:
-                t = {}
-                reach = _cover(mine[0], accepted, t, "narrows")
-                if (reach == "q" and t.get("via")) or (reach == "x" and t.get("excl")):
-                    flags["preset_scope"] = True
-            if ATP:
-                minea = [r for r in atp if rx.search(r["Identity"])]
-                if len(minea) > 1 or any(other.search(r["Identity"]) for r in minea):
-                    return A("data_unusable_preset_topology", "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
-                             "preset_topology_unusable", ["atp_policy_rules", POL])
-                if not minea or _state(minea[0]) == "Disabled":
-                    r2 = "n"
-                else:
-                    t2 = {}
-                    r2 = _cover(minea[0], accepted, t2, "narrows")
-                    if (r2 == "q" and t2.get("via")) or (r2 == "x" and t2.get("excl")):
-                        flags["preset_scope"] = True
-                both = "n" if "n" in (reach, r2) else "u" if "u" in (reach, r2) else "x" if "x" in (reach, r2) else "q"
-                if both != reach:
-                    flags["atp_part"] = True           # D100: the Defender part of the preset differs from the EOP part, which the Rego reads alone
-                reach = both
+            reach, err = preset_reach(tier)
+            if err:
+                return err
         elif tier == "Custom":
-            if unreadable_link:
-                reach = "u"
-            cl = set()
-            for key in {_join_key(p.get("Name")), _join_key(ident)}:
-                classes, case = coverage(key)
-                cl.update(classes)
-                if case:
-                    flags["case_or_space"] = True
-            if reach != "u":
-                reach = "q" if "q" in cl else ("u" if "u" in cl else ("x" if "x" in cl else "n"))
+            reach = custom_reach({_join_key(p.get("Name")), _join_key(ident)})
         if en is not True:
             reach = "u"
         info.append((tier, p, reach, _phish_content(sp["need"], p, cfg, binding)))
+    # Review R101: an enabled rule whose policy is not exported, and an enabled preset whose anti-phish policy is not
+    # exported, still apply that policy ahead of the Default: its unknown content ('u') shadows a lower qualifier. It
+    # never makes a policy that "could qualify" (M): unexported evidence stays not counted, as the v3.9.1 reference
+    # rules for a preset whose policy is missing (constructed vectors *preset_policy_missing_rule_covers).
+    known = {_join_key(p.get("Name")) for p in pols} | {_join_key(p["Identity"]) for p in pols}
+    for key in rules_by_policy:
+        if type(key) is str and key not in known:
+            info.append(("Custom", _UNEXPORTED, custom_reach({key}), "u"))
+    if sp["need"] != "safety_tips":
+        for tier, rx in (("Strict", PRESET_RE[0]), ("Standard", PRESET_RE[1])):
+            if any(rx.search(p["Identity"]) for p in pols):
+                continue
+            reach, err = preset_reach(tier)
+            if err:
+                return err
+            if reach != "n":
+                info.append((tier, _UNEXPORTED, reach, "u"))
     if sp["need"] == "safety_tips":
         # Rego (PresetRecipientsCovered): an enabled preset rule that covers all recipients is compliant, the preset policy is not inspected (or even required)
         for tier, rx, other in (("Strict", PRESET_RE[0], PRESET_RE[1]), ("Standard", PRESET_RE[1], PRESET_RE[0])):
@@ -239,12 +267,20 @@ def _phish_core(policy_id, sp, sections, cfg, cfg_bad, binding=None):
                     flags["preset_scope"] = True
                 info.append((tier, {}, reach, "t"))
     Q = [i for i in info if i[3] == "t" and i[2] == "q"]
-    M = [i for i in info if i[2] in ("q", "u") and i[3] in ("t", "u") and (i[2], i[3]) != ("q", "t")]
+    M = [i for i in info if i[2] in ("q", "u") and i[3] in ("t", "u") and (i[2], i[3]) != ("q", "t") and i[1] is not _UNEXPORTED]
     fl = {k: True for k in flags}
     if Q:
         best = min(PHISH_RANK[i[0]] for i in Q)
         shadow = [i for i in info if i[2] in ("q", "x", "u") and i[3] in ("f", "u") and
                   (PHISH_RANK[i[0]] < best or (best == PHISH_RANK["Custom"] and i[0] == "Custom"))]
+        # Review R103: a custom policy that covers every recipient and does not qualify, above a qualifying Default and
+        # with no other policy of its rank or above that might cover everyone, applies to all recipients: not_met, not
+        # withheld. Two custom policies stay undecided (Priority is not collected); a covering non-qualifying preset
+        # stays withheld as the v3.9.1 reference rules (constructed vectors *strict_covers_bad_*).
+        decisive = [i for i in shadow if i[0] == "Custom" and best == PHISH_RANK["Default"] and i[2] == "q" and i[3] == "f" and not any(
+            j is not i and PHISH_RANK[j[0]] <= PHISH_RANK[i[0]] and j[2] in ("q", "u") and j[3] in ("t", "u") for j in info)]
+        if decisive:
+            return _rec(policy_id, "not_met", "no_qualifying_policy", f"Requirement not met: {sp['bad']}.", "no_qualifying_policy", None, **fl)
         if shadow:
             return A("data_unusable_qualifier_shadowed", "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, "
                      "may apply to some or all recipients; the policy was not assessed.", "qualifier_shadowed", [POL, AR, PP], **fl)

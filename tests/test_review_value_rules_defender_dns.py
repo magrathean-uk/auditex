@@ -288,3 +288,80 @@ def test_r164_disclosure_names_the_resolver_in_use():
         "the public Cloudflare DNS-over-HTTPS resolver (https://cloudflare-dns.com/dns-query)")
     assert dns_lookup.doh_resolver_disclosure("https://dns.example.net/dns-query?token=abc") == (
         "the configured DNS-over-HTTPS resolver (https://dns.example.net/dns-query)")
+
+
+# ---- R101 / R103: anti-phish precedence with an orphan rule, a missing preset policy or a decisive custom policy ----
+
+PHISH_DEFAULT = {"Identity": "Office365 AntiPhish Default", "Name": "Office365 AntiPhish Default", "IsDefault": True,
+                 "Enabled": True, "EnableOrganizationDomainsProtection": True, "TargetedDomainProtectionAction": "Quarantine"}
+SCOPE_ALL = {**EVERYONE, "ExceptIfSentTo": [], "ExceptIfSentToMemberOf": [], "ExceptIfRecipientDomainIs": []}
+GROUP_ONLY = {**SCOPE_ALL, "SentToMemberOf": ["recipient"]}
+
+
+def _phish(policies, rules, presets=(), atp=()):
+    return {"accepted_domains": ACCEPTED, "anti_phish_policies": list(policies), "anti_phish_rules": list(rules),
+            "atp_policy_rules": list(atp), "defender_license": True, "protection_policy_rules": list(presets)}
+
+
+def _phish_rule(policy, scope):
+    return {"Identity": f"{policy} rule", "State": "Enabled", "AntiPhishPolicy": policy, **scope}
+
+
+def _custom(name, org_domains):
+    return {"Identity": name, "Name": name, "IsDefault": False, "Enabled": True,
+            "EnableOrganizationDomainsProtection": org_domains, "TargetedDomainProtectionAction": "Quarantine"}
+
+
+@pytest.mark.parametrize("scope", [SCOPE_ALL, GROUP_ONLY])
+def test_r101_rule_naming_an_unexported_policy_withholds_the_default(scope):
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT], [_phish_rule("Exec policy", scope)]))
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "qualifier_shadowed")
+
+
+@pytest.mark.parametrize("scope", [SCOPE_ALL, GROUP_ONLY])
+def test_r101_orphan_rule_without_a_qualifier_keeps_the_reference_not_met(scope):
+    # Unexported evidence only withholds a lower qualifier; it never counts as a policy that could qualify (the v3.9.1
+    # reference rules a preset whose policy is missing the same way).
+    default = {**PHISH_DEFAULT, "EnableOrganizationDomainsProtection": False}
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([default], [_phish_rule("Exec policy", scope)]))
+    assert (record["verdict"], record["cell"]) == ("not_met", "no_qualifying_policy")
+
+
+def test_r101_enabled_preset_rule_without_its_policy_withholds_the_default():
+    preset = "Standard Preset Security Policy1700000000000"
+    rule = {"Identity": preset, "State": "Enabled", **EVERYONE}
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT], [], presets=[rule], atp=[rule]))
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "qualifier_shadowed")
+
+
+def test_r101_exported_policy_is_not_an_orphan():
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT, _custom("Exec policy", True)],
+                                                     [_phish_rule("Exec policy", SCOPE_ALL)]))
+    assert (record["verdict"], record["cell"]) == ("met", "custom_qualifies")
+
+
+def test_r103_covering_noncompliant_custom_policy_outranks_the_qualifying_default():
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT, _custom("Exec policy", False)],
+                                                     [_phish_rule("Exec policy", SCOPE_ALL)]))
+    assert (record["verdict"], record["cell"]) == ("not_met", "no_qualifying_policy")
+
+
+def test_r103_same_tier_custom_order_stays_undecided():
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish(
+        [PHISH_DEFAULT, _custom("Bad", False), _custom("Unknown", None)],
+        [_phish_rule("Bad", SCOPE_ALL), _phish_rule("Unknown", SCOPE_ALL)]))
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "qualifier_shadowed")
+
+
+def test_r103_covering_noncompliant_preset_keeps_the_reference_withholding():
+    preset = "Strict Preset Security Policy1700000000000"
+    rule = {"Identity": preset, "State": "Enabled", **EVERYONE}
+    strict = {**_custom(preset, False), "Name": "Strict Preset Security Policy"}
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT, strict], [], presets=[rule], atp=[rule]))
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "qualifier_shadowed")
+
+
+def test_r103_partial_noncompliant_custom_policy_stays_undecided():
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT, _custom("Exec policy", False)],
+                                                     [_phish_rule("Exec policy", GROUP_ONLY)]))
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "qualifier_shadowed")
