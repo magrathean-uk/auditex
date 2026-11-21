@@ -5,12 +5,17 @@ from typing import Any
 
 from ..adapters import get_adapter
 from ..adapters.m365_cli import M365_CLI_NOT_USED
+from ..collection_gaps import fanout_gap_row
+from ._endpoint_reads import input_rows
 from .base import (
     Collector,
     CollectorResult,
     normalize_collection_limit,
     run_graph_endpoints,
 )
+
+# Cases whose searches and operations are read (two reads each); past it a fan-out gap row names the rest.
+CASE_FANOUT_LIMIT = 50
 
 
 class EDiscoveryCollector(Collector):
@@ -99,12 +104,33 @@ class EDiscoveryCollector(Collector):
         operator_limit = normalize_collection_limit(top, default=None)
         # Each case's searches and operations get half the operator's limit; no limit means none.
         case_top = None if operator_limit is None else max(1, operator_limit // 2)
-        cases = (base_payload.get("cases", {}) or {}).get("value", []) or []
-        if isinstance(cases, list):
-            for case in cases:
-                case_id = case.get("id")
-                if not isinstance(case_id, str):
-                    continue
+        # A streamed case list keeps only a 20-row inline sample; read every case from its chunk files.
+        cases, case_issues, _failed, _cut = input_rows(base_payload.get("cases"), context.get("run_dir"))
+        case_ids = [case["id"] for case in cases if isinstance(case.get("id"), str) and case["id"]]
+        if case_issues:
+            coverage.append(
+                {
+                    "collector": self.name,
+                    "type": "derived",
+                    "name": "casesFanout",
+                    "status": "partial",
+                    "item_count": 0,
+                    "error_class": "incomplete_evidence",
+                    "error": "eDiscovery cases: the case list could not be read back, so no case was expanded.",
+                    "input_issues": case_issues,
+                }
+            )
+            case_ids = []
+        elif len(case_ids) > CASE_FANOUT_LIMIT:
+            coverage.append(
+                fanout_gap_row(
+                    self.name, "casesFanout", total=len(case_ids), expanded=CASE_FANOUT_LIMIT,
+                    limit=CASE_FANOUT_LIMIT, scope="eDiscovery cases",
+                )
+            )
+            case_ids = case_ids[:CASE_FANOUT_LIMIT]
+        if case_ids:
+            for case_id in case_ids:
 
                 case_payload, case_coverage = run_graph_endpoints(
                     self.name,

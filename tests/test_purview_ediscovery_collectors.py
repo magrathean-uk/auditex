@@ -500,3 +500,89 @@ def test_r107_ediscovery_records_retired_cli_operations_as_named_skips() -> None
         assert rows[name]["error_class"] is None
     assert result.status == "ok"
 
+
+# ----- R108: the case fan-out reads every case of a chunked list and the Graph cases are normalised -----
+
+
+class _PagedGraphClient(_FakeGraphClient):
+    """Pages lists through ``iter_pages`` so the collector streams them to chunk files, as a live run does."""
+
+    def iter_pages(self, endpoint: str, params: dict[str, object] | None = None):
+        self.calls.append((endpoint, tuple(sorted((params or {}).items()))))
+        rows = list(self.responses.get(endpoint, []))
+        for start in range(0, max(len(rows), 1), 100):
+            yield {"value": rows[start:start + 100]}
+
+    def iter_items(self, endpoint: str, params: dict[str, object] | None = None, result_limit: int | None = None):
+        rows = list(self.responses.get(endpoint, []))
+        return iter(rows if result_limit is None else rows[:result_limit])
+
+    def get_json(self, path: str, params: object = None, full_url: bool = False) -> dict[str, object]:
+        return {"value": []}
+
+
+def _chunk_writer(root):
+    import json
+
+    def write(collector: str, name: str, page: int, rows: list[dict[str, object]], metadata: object = None) -> str:
+        relative = f"chunks/{collector}/{name}-{page:05d}.jsonl"
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        return relative
+
+    return write
+
+
+def _run_cases(tmp_path, count: int):
+    cases = [{"id": f"case-{index}", "displayName": f"Case {index}", "status": "active"} for index in range(count)]
+    client = _PagedGraphClient(responses={"/security/cases/ediscoveryCases": cases})
+    result = EDiscoveryCollector().run(
+        {
+            "client": client,
+            "top": None,
+            "page_size": 100,
+            "plane": "inventory",
+            "audit_logger": None,
+            "chunk_writer": _chunk_writer(tmp_path),
+            "run_dir": tmp_path,
+        }
+    )
+    return result
+
+
+def test_r108_case_fanout_reads_every_case_of_a_chunked_list(tmp_path) -> None:
+    result = _run_cases(tmp_path, 25)
+
+    assert result.payload["cases"]["item_count"] == 25
+    assert len(result.payload["cases"]["value"]) < 25  # only the inline sample is kept in the payload
+    assert len([name for name in result.payload if name.startswith("case_")]) == 25
+    assert not [row for row in result.coverage if row.get("collection_truncated")]
+
+
+def test_r108_case_fanout_past_its_limit_records_a_gap(tmp_path) -> None:
+    from azure_tenant_audit.collectors.ediscovery import CASE_FANOUT_LIMIT
+
+    result = _run_cases(tmp_path, CASE_FANOUT_LIMIT + 3)
+
+    assert len([name for name in result.payload if name.startswith("case_")]) == CASE_FANOUT_LIMIT
+    (gap,) = [row for row in result.coverage if row.get("collection_truncated")]
+    assert gap["type"] == "derived" and gap["fanout_total"] == CASE_FANOUT_LIMIT + 3
+
+
+def test_r108_graph_cases_and_searches_are_normalised() -> None:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payload = {
+        "cases": {"value": [{"id": "case-1", "displayName": "Board matter", "status": "active", "createdDateTime": "2026-11-01T00:00:00Z"}]},
+        "case_case-1": {
+            "searches": {"value": [{"id": "search-1", "displayName": "Mailboxes"}]},
+            "operations": {"value": []},
+        },
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": payload})
+
+    (case,) = snapshot["ediscovery_cases"]["records"]
+    assert case["id"] == "case-1" and case["display_name"] == "Board matter" and case["status"] == "active"
+    (search,) = snapshot["ediscovery_searches"]["records"]
+    assert search["id"] == "search-1" and search["case_id"] == "case-1"
