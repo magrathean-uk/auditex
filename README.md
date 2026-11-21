@@ -36,11 +36,15 @@ The package is Python 3.11 or newer. Its required runtime dependencies are `requ
 ## Install and check locally
 
 ```bash
+git clone https://github.com/magrathean-uk/auditex.git
+cd auditex
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[test]'
 auditex doctor --json
 ```
+
+Run every command in this README from inside the `auditex` folder. The activation line is for Linux and macOS.
 
 Optional dependencies:
 
@@ -90,6 +94,12 @@ Offline runs are safe for local checking:
 
 ```bash
 auditex run --offline --tenant-name demo --out outputs/offline
+```
+
+The run writes its own folder inside `--out`, named with the tenant and a timestamp (for example
+`outputs/offline/demo-run_20261121_225532`). That folder is the `<run-dir>` the commands below take.
+
+```bash
 auditex google run --offline --sample examples/google_workspace_sample.json \
   --domain example.com --tenant-name demo --out outputs/google
 ```
