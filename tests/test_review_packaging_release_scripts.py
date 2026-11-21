@@ -50,3 +50,31 @@ def test_own_checkout_is_still_a_dev_root(monkeypatch):
         pytest.skip("not running from a source checkout")
     dev_roots = [adapter.root.resolve() for adapter in resources._resource_adapters() if adapter.name == "dev"]
     assert dev_roots == [ROOT.resolve()]
+
+
+# R071: an editable install whose metadata is stale must still report the source tree's version.
+def _source_version() -> str:
+    import tomllib
+
+    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+
+
+def test_source_checkout_version_wins_over_stale_install_metadata(monkeypatch):
+    from azure_tenant_audit import versioning
+
+    if not (ROOT / "pyproject.toml").exists():
+        pytest.skip("not running from a source checkout")
+    monkeypatch.setattr(versioning, "version", lambda name: "0.0.1-stale", raising=False)
+    versioning.package_version.cache_clear()
+    try:
+        assert versioning.package_version() == _source_version()
+        assert versioning.package_user_agent() == f"auditex/{_source_version()}"
+    finally:
+        versioning.package_version.cache_clear()
+
+
+def test_explorer_generator_label_uses_the_shared_version(monkeypatch):
+    from auditex import explorer
+
+    monkeypatch.setattr("azure_tenant_audit.versioning.package_version", lambda: "7.7.7")
+    assert explorer._generator_label() == "Auditex 7.7.7"
