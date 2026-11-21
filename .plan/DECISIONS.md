@@ -1088,3 +1088,9 @@
 - decision: DEC142-KIT2 rebuilt `dt-live/kit-7t/dt-r7t-ro` (369 files, manifest 6f4b788cc5b7). Its rollback path is byte-identical to the final frozen 7s; the mock rollback passes (153 steps, 0 failed assertions) and the offline plan from the 16 phase D journals equals the 15 Nov dry run (116 planned, 3 MANUAL). Sitting.ps1's pin names the parked token variant, so the tenant chat runs 99-rollback.ps1 directly with normal sign-ins, per `dt-live/ROLLBACK-RUN-2026-11-21.md`. The manual stops are recorded as accepted under DEC-126. The final collection (DEC142-FINAL) was the last tenant need, so the rollback may run now.
 - why: the K7T freeze is lost; the rollback needs only the rollback path, which is proven equal.
 - approver: lead (G's approval of the rollback itself: DEC-126)
+
+## DEC-144 Rollback run: CA journal first, leftover settings accepted, removal read-backs proven by id
+- date: 2026-11-21
+- decision: (1) The full rollback stopped at its CA gate because phase D's later 05 runs made the 05 journals newer than the 10 journal; `99-rollback -Only 10-conditional-access` ran first (the kit's own option), then the full run again. (2) Four setting restores the services refuse (SharePoint DefaultLinkPermission and SharingDomainRestrictionMode, the default app management policy, the Microsoft Authenticator settings) leave stricter lab values and are accepted as manual stops that expire with the tenant, with row 2 and the Cloud PC grace period. (3) The Fabric and reader app removal scripts finished every step but their final filter read stops on Graph's 404 for a deleted principal; absence is proven by read-only id reads instead. (4) The three row 8 amendment consents (DEC-068) were deleted by id first, so the reader removal script's journal check passes.
+- why: G approved removing everything (DEC-126) and the tenant is cancelled next; nothing left changes access or cost.
+- approver: lead (under DEC-126)

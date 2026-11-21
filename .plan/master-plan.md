@@ -97,7 +97,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M04 | d5-keyed-pseudonyms | 10 | 100 | done |
 | M05 | scanners-and-hygiene | 6 | 100 | done |
 | M06 | release-1-5-0 | 8 | 100 | done |
-| M07 | dummy-tenant-kit | 9 | 89 | active |
+| M07 | dummy-tenant-kit | 9 | 100 | done |
 | M08 | collection-completeness | 11 | 100 | done |
 | M09 | certificate-only | 8 | 100 | done |
 | M10 | local-answer | 7 | 100 | done |
