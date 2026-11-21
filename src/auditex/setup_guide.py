@@ -77,7 +77,14 @@ M365_SOURCE_REFERENCES = [
     },
 ]
 
-M365_WRITE_CAPABLE_TOKENS = ("ReadWrite", "ManageAsApp", "Write.")
+M365_WRITE_CAPABLE_TOKENS = ("ReadWrite", "ManageAsApp", "Write.", "FullControl")
+# Blast radius of the SharePoint application permission the opt-in sharepoint_admin collector needs.
+SHAREPOINT_FULLCONTROL_BLAST_RADIUS = (
+    "Write-capable SharePoint application permission used read-only: blast radius full control of every site "
+    "collection and OneDrive. Microsoft offers no read-only permission for the SharePoint admin API; Auditex sends "
+    "only one body-free GET of /_api/SPO.Tenant with it, and the read guard refuses any other request. Remove it "
+    "after the engagement."
+)
 
 
 def build_setup_guide(
@@ -310,6 +317,7 @@ def build_m365_setup_guide(
     elif auditor_profile in {"auto", "global-reader"}:
         tool_requirements = [tool for tool in tool_requirements if tool not in {"pwsh", "ExchangeOnlineManagement"}]
     exchange_permissions = ["Exchange.ManageAsApp"] if "exchange_policy" in selected else []
+    sharepoint_permissions: list[str] = list(aggregate.get("sharepoint_permissions") or [])
     exchange_blast_radius = (
         "Write-capable Exchange application permission used read-only: read-only Get-* cmdlets only; "
         "no mutating cmdlet is issued; the Exchange.ManageAsApp role assignment gives Global Reader only. "
@@ -321,12 +329,14 @@ def build_m365_setup_guide(
             "risk": "write_capable",
             "note": "Permission name includes write/manage capability. Auditex remains audit-only and records observed calls.",
         }
-        for permission in [*graph_permissions, *exchange_permissions]
+        for permission in _dedupe([*graph_permissions, *exchange_permissions, *sharepoint_permissions])
         if any(token in permission for token in M365_WRITE_CAPABLE_TOKENS)
     ]
     for warning in broad_permissions:
         if warning["permission"] == "Exchange.ManageAsApp":
             warning["note"] = exchange_blast_radius
+        elif warning["permission"] in sharepoint_permissions and "FullControl" in warning["permission"]:
+            warning["note"] = SHAREPOINT_FULLCONTROL_BLAST_RADIUS
 
     collection_notices = collector_activity_notices(selected, "app")
     setup_steps = [
@@ -346,6 +356,11 @@ def build_m365_setup_guide(
         setup_steps.append(
             "For Exchange, grant admin consent to Exchange.ManageAsApp and assign Global Reader to the reader app; "
             "install pwsh and ExchangeOnlineManagement. " + exchange_blast_radius
+        )
+    if sharepoint_permissions:
+        setup_steps.append(
+            f"For sharepoint_admin, add the SharePoint (Office 365 SharePoint Online) application permission "
+            f"{', '.join(sharepoint_permissions)} and grant admin consent. " + SHAREPOINT_FULLCONTROL_BLAST_RADIUS
         )
     if "teams_policy" in selected:
         setup_steps.append(
@@ -400,6 +415,7 @@ def build_m365_setup_guide(
         "graph_permissions": graph_permissions,
         "graph_permissions_csv": ",".join(graph_permissions),
         "exchange_application_permissions": exchange_permissions,
+        "sharepoint_application_permissions": sharepoint_permissions,
         "minimum_role_hints": role_hints,
         "tool_requirements": tool_requirements,
         "optional_commands": optional_commands,
@@ -458,6 +474,10 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
             lines.extend(["", "## Exchange Application Permissions", ""])
             for permission in payload["exchange_application_permissions"]:
                 lines.append(f"- `{permission}` (Office 365 Exchange Online, not Microsoft Graph)")
+        if payload.get("sharepoint_application_permissions"):
+            lines.extend(["", "## SharePoint Application Permissions", ""])
+            for permission in payload["sharepoint_application_permissions"]:
+                lines.append(f"- `{permission}` (Office 365 SharePoint Online, not Microsoft Graph)")
         lines.extend(["", "## Role Hints", ""])
         for role in payload.get("minimum_role_hints") or []:
             lines.append(f"- {role}")

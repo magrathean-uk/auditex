@@ -405,3 +405,30 @@ def test_m365_commands_quote_every_value() -> None:
         assert not {"|", ";", "sh", "curl", "id"} & set(argv), name
         assert argv[argv.index("--tenant-name") + 1] == INJECTED
         assert argv[argv.index("--tenant-id") + 1] == "contoso.onmicrosoft.com; id"
+
+
+# R060: the SharePoint application permission sharepoint_admin needs is named in the plan with its blast radius.
+def test_sharepoint_admin_plan_names_sites_fullcontrol_with_its_blast_radius() -> None:
+    guide = build_setup_guide(provider="m365", collectors="sharepoint_admin,identity")
+
+    assert guide["sharepoint_application_permissions"] == ["Sites.FullControl.All"]
+    warnings = {row["permission"]: row for row in guide["scope_warnings"]}
+    assert warnings["Sites.FullControl.All"]["risk"] == "write_capable"
+    assert "full control of every site" in warnings["Sites.FullControl.All"]["note"]
+    assert guide["provider_assertions"]["broad_permissions_recorded_as_scope_risk"] is True
+    markdown = render_setup_guide_markdown(guide)
+    assert "## SharePoint Application Permissions" in markdown
+    assert "`Sites.FullControl.All` (Office 365 SharePoint Online, not Microsoft Graph)" in markdown
+    assert "- `Sites.FullControl.All`: " in markdown.split("## Scope Risk Notes", 1)[1]
+
+
+def test_a_plan_without_sharepoint_admin_names_no_sharepoint_application_permission() -> None:
+    guide = build_setup_guide(provider="m365", collectors="identity")
+    assert guide["sharepoint_application_permissions"] == []
+    assert "FullControl" not in json.dumps(guide)
+
+
+def test_fullcontrol_is_a_write_capable_token() -> None:
+    from auditex.setup_guide import M365_WRITE_CAPABLE_TOKENS
+
+    assert any(token in "Sites.FullControl.All" for token in M365_WRITE_CAPABLE_TOKENS)
