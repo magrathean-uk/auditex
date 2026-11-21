@@ -94,3 +94,26 @@ def test_dist_bytes_do_not_depend_on_the_umask(tmp_path: Path) -> None:
         built[umask] = {p.name: _sha(p) for p in dist.iterdir()}
     assert built["022"] == built["077"]
 
+
+# R137: the venv make install builds gets the setuptools that release-archive and dist need, at one pinned version.
+def _setuptools_pin() -> str:
+    pins = [dep for dep in PYPROJECT["project"]["optional-dependencies"]["test"] if dep.startswith("setuptools==")]
+    assert len(pins) == 1, PYPROJECT["project"]["optional-dependencies"]["test"]
+    return pins[0].split("==", 1)[1]
+
+
+def test_test_extra_pins_setuptools_within_the_build_requirement() -> None:
+    pin = _setuptools_pin()
+    floor = next(req for req in PYPROJECT["build-system"]["requires"] if req.startswith("setuptools"))
+    assert tuple(int(p) for p in pin.split(".")) >= tuple(int(p) for p in floor.split(">=", 1)[1].split("."))
+
+
+@needs_git_checkout
+@pytest.mark.parametrize("target", ["dist", "release-archive"])
+def test_release_builds_stop_clearly_without_the_pinned_setuptools(tmp_path: Path, target: str) -> None:
+    bare = tmp_path / "bare"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(bare)], check=True, timeout=120)
+    run = _make(target, f"PYTHON={bare / 'bin' / 'python'}", f"DIST_DIR={tmp_path / 'dist'}")
+    assert run.returncode == 2, (run.returncode, run.stderr[-2000:])
+    assert f"setuptools {_setuptools_pin()}" in run.stderr
+    assert "Traceback" not in run.stderr

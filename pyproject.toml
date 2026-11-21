@@ -25,10 +25,13 @@ mcp = [
     "mcp>=1.30.0,<2",
 ]
 # Test dependencies: pytest, and jsonschema to validate the SARIF and OSCAL exports against the
-# official schemas vendored under tests/schemas.
+# official schemas vendored under tests/schemas. setuptools is the one builder `make dist`,
+# `make release-archive` and the installed-wheel tests use (Python 3.12+ venvs ship without it);
+# the pin keeps third-party rebuilds byte-identical, and `make dist` checks it.
 test = [
     "pytest>=8",
     "jsonschema>=4.18,<5",
+    "setuptools==84.2.1",
 ]
 # The local answer (auditex explain, auditex run --explain), pinned to the measured runtime; the runner checks the
 # version. PyPI ships llama-cpp-python as source only, so installing this extra builds llama.cpp: it needs CMake and

@@ -100,9 +100,15 @@ release-check:
 	./scripts/oss-taint-scan.sh
 	gitleaks dir . --no-banner --redact
 
+# The setuptools pin in the `test` extra (installed by make install) is the only builder release-archive and dist use.
+SETUPTOOLS_VERSION = $(shell sed -n 's/^ *"setuptools==\([0-9.]*\)".*/\1/p' pyproject.toml)
+CHECK_SETUPTOOLS = found=$$($(PYTHON) -c 'import setuptools; print(setuptools.__version__)' 2>/dev/null) || found=; \
+	test -n "$(SETUPTOOLS_VERSION)" && test "$$found" = "$(SETUPTOOLS_VERSION)" || { echo "make $@: setuptools $(SETUPTOOLS_VERSION) is required in $(PYTHON), found '$${found:-none}'; run make install" >&2; exit 2; }
+
 .PHONY: release-archive
 release-archive:
 	@set -eu; \
+		$(CHECK_SETUPTOOLS); \
 		dir=$$(mktemp -d "$${TMPDIR:-/tmp}/auditex-archive.XXXXXX"); \
 		trap 'rm -rf "$$dir" 2>/dev/null || echo "warning: could not remove $$dir" >&2' 0; \
 		trap 'exit 1' HUP INT TERM; \
@@ -123,6 +129,7 @@ DIST_DIR ?= dist
 .PHONY: dist
 dist:
 	@set -eu; \
+		$(CHECK_SETUPTOOLS); \
 		dir=$$(mktemp -d "$${TMPDIR:-/tmp}/auditex-dist.XXXXXX"); \
 		trap 'rm -rf "$$dir" 2>/dev/null || echo "warning: could not remove $$dir" >&2' 0; \
 		trap 'exit 1' HUP INT TERM; \
