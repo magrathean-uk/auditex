@@ -895,7 +895,9 @@ def evaluate_effective_mfa(
         excluded_all, coverers, directory, known=admin_scope is not None and admin_scope.complete, sanctioned=sanctioned
     )
     gap = _unsanctioned(excluded)
-    single_gap = _unsanctioned(excluded_all)
+    # CIS 5.2.2.2 and MS.AAD.3.2v1 look for one policy that leaves nobody out: a policy's own exclusions decide it,
+    # not the principals every policy shares (two policies that each exclude a different user cover everyone combined).
+    single_clean = any(not _unsanctioned(policy["exclusions"]) for policy in qualifying)
     # The policies back a positive verdict only when they alone leave nobody out. Security defaults that are on beside
     # a policy with gaps establish the verdict, and that policy is not a basis for a Conditional Access benchmark
     # control, so it is not listed.
@@ -940,7 +942,7 @@ def evaluate_effective_mfa(
         "authentication_strength_collection": authentication_strengths.summary(),
         "single_policy_verdict": (
             VERDICT_ENFORCED
-            if defaults_enabled is True or (qualifying and not single_gap)
+            if defaults_enabled is True or single_clean
             else VERDICT_ENFORCED_WITH_EXCLUSIONS
             if qualifying
             else verdict

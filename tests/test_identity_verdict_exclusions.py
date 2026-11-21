@@ -707,3 +707,17 @@ def test_two_policies_each_excluding_a_different_unread_group_are_not_a_clean_pa
     # One policy excluding only an emergency-access group the operator listed still leaves everyone covered.
     assert _mfa(first, _policy("ca-2", users=_all_users(excludeGroups=[BREAK_GLASS_GROUP])),
                 sanctioned=frozenset({BREAK_GLASS_GROUP}))["verdict"] == "enforced"
+
+
+def test_single_policy_verdict_needs_one_policy_that_leaves_nobody_out() -> None:
+    """R036: split user exclusions cover everyone combined, but no single policy leaves nobody out."""
+    first = _policy("ca-1", users=_all_users(excludeUsers=["u-x"]))
+    second = _policy("ca-2", users=_all_users(excludeUsers=["u-y"]))
+
+    split = _mfa(first, second)
+    assert split["verdict"] == "enforced"
+    assert split["single_policy_verdict"] == "enforced_with_exclusions"
+
+    assert _mfa(first, _policy("ca-3"))["single_policy_verdict"] == "enforced"
+    sanctioned = _policy("ca-4", users=_all_users(excludeUsers=[BREAK_GLASS_USER]))
+    assert _mfa(first, sanctioned, sanctioned=frozenset({BREAK_GLASS_USER}))["single_policy_verdict"] == "enforced"
