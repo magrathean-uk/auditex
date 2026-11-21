@@ -418,3 +418,53 @@ def test_the_server_gets_past_the_root_check_with_a_project_directory(monkeypatc
 
     assert main([]) == 2
     assert "pip install" in capsys.readouterr().err
+
+
+# R023: an empty path is not "not given" for a run, pack or output directory; with a root that is not the working
+# directory it would read or write the server's working directory, outside the root.
+EMPTY_PATH_CALLS = (
+    ("auditex_run_offline_validation", {"tenant_name": "acme", "out_dir": ""}),
+    ("auditex_summarize_run", {"run_dir": ""}),
+    ("auditex_local_answer", {"run_dir": ""}),
+    ("auditex_proof_table", {"run_dir": ""}),
+    ("auditex_report_analyze", {"run_dir": ""}),
+    ("auditex_list_blockers", {"run_dir": ""}),
+    ("auditex_diff_runs", {"run_a": "", "run_b": "runs/b"}),
+    ("auditex_diff_runs", {"run_a": "runs/a", "run_b": ""}),
+    ("auditex_verify_customer_pack", {"pack_dir": ""}),
+    ("auditex_normalize_external_assessment", {"source": "scubagear", "input_path": ""}),
+    ("auditex_run_certificate_audit", {"tenant_name": "acme", "certificate_path": "k.pem", "certificate_thumbprint": "A" * 40, "out_dir": ""}),
+    ("auditex_google_probe", {"tenant_name": "acme", "out_dir": ""}),
+)
+
+
+@pytest.mark.parametrize(("tool_name", "arguments"), EMPTY_PATH_CALLS, ids=[f"{n}-{'-'.join(a)}" for n, a in EMPTY_PATH_CALLS])
+def test_an_empty_run_or_output_path_is_refused_when_the_root_is_not_the_working_directory(
+    root: Path, registered: _FakeFastMCP, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_name: str, arguments: dict[str, Any],
+) -> None:
+    elsewhere = tmp_path / "server-cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    tool, _ = registered.tools[tool_name]
+
+    with pytest.raises(McpPathError, match="must not be empty"):
+        tool(**arguments)
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_empty_optional_credential_paths_still_mean_not_given(root: Path) -> None:
+    seen: dict[str, Any] = {}
+
+    def auditex_google_doctor(service_account_key: str = "", oauth_client: str = "", token_cache: str = "") -> dict[str, Any]:
+        seen.update(service_account_key=service_account_key, oauth_client=oauth_client, token_cache=token_cache)
+        return {}
+
+    def auditex_compare_external_assessments(assessment_paths: list[str], run_dir: str | None = None) -> dict[str, Any]:
+        seen.update(run_dir=run_dir)
+        return {}
+
+    entries = {item.name: item for item in TOOL_REGISTRY}
+    confine_handler(entries["auditex_google_doctor"], auditex_google_doctor)(service_account_key="", oauth_client="", token_cache="")
+    confine_handler(entries["auditex_compare_external_assessments"], auditex_compare_external_assessments)(["a.json"], run_dir="")
+
+    assert seen == {"service_account_key": "", "oauth_client": "", "token_cache": "", "run_dir": ""}
