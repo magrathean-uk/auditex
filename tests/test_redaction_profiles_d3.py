@@ -449,3 +449,66 @@ def test_d3_refuses_change_between_payload_build_and_discovery(
     assert NAME not in capsys.readouterr().out
     assert not output.exists()
     assert not sent
+
+
+# R150 / R087: the shareable boundary masks at least what the diagnostic redactor (secret_hygiene) masks.
+_PARITY_CANARY = "PARITYCANARY726"
+_PEM_LABEL = "PRIVATE KEY"
+_PEM = f"-----BEGIN {_PEM_LABEL}-----\nconstructed-{_PARITY_CANARY}\n-----END {_PEM_LABEL}-----"
+_PARITY_TEXTS = (
+    f"error while loading key: {_PEM}",
+    f"client_assertion={_PARITY_CANARY}",
+    f"private_key: {_PARITY_CANARY}",
+    f"passphrase={_PARITY_CANARY}",
+    f"token={_PARITY_CANARY}",
+    f"Kiosk passphrase: {_PARITY_CANARY}",
+    f"pwd={_PARITY_CANARY}",
+    f"passwd={_PARITY_CANARY}",
+    f"certificate_password={_PARITY_CANARY}",
+    f'{{"password": "Pa\\"ss{_PARITY_CANARY}", "x": 1}}',
+)
+_PARITY_KEYS = (
+    "secret", "token", "credential", "authorization", "passphrase", "ApplicationSecret", "CertificatePassword",
+    "sharedSecret", "preSharedKey", "clientAssertion", "private_key", "privateKey", "Client-Secret",
+)
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack", "explainer"])
+@pytest.mark.parametrize("text", _PARITY_TEXTS)
+def test_r150_shareable_text_parity_with_diagnostic_redactor(profile: str, text: str) -> None:
+    from azure_tenant_audit.output_redaction import redact_output
+    from azure_tenant_audit.secret_hygiene import redact_text
+
+    assert _PARITY_CANARY not in redact_text(text), "the diagnostic redactor masks every shape"
+    assert _PARITY_CANARY not in json.dumps(redact_output({"error": text}, profile=profile))
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack", "explainer"])
+@pytest.mark.parametrize("key", _PARITY_KEYS)
+def test_r150_shareable_masks_camel_case_secret_keys(profile: str, key: str) -> None:
+    from azure_tenant_audit.output_redaction import redact_output
+
+    result = redact_output({"record": {key: _PARITY_CANARY}}, profile=profile)
+    assert _PARITY_CANARY not in json.dumps(result)
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack"])
+def test_r150_secret_key_matching_keeps_audit_metadata(profile: str) -> None:
+    """Keys that only mention a credential word keep their values (expiry metadata, settings, counts)."""
+    from azure_tenant_audit.output_redaction import redact_output
+
+    record = {
+        "passwordCredentials": [{"endDateTime": "2027-01-01T00:00:00Z", "keyId": "k1"}],
+        "passwordPolicies": "DisablePasswordExpiration",
+        "tokenLifetimePolicies": ["policy-a"],
+        "lastPasswordChangeDateTime": "2026-01-01T00:00:00Z",
+        "AllowSimplePassword": True,
+        "passwordExpirationDays": 90,
+    }
+    result = redact_output({"record": record}, profile=profile)["record"]
+    assert result["passwordCredentials"][0]["endDateTime"] == "2027-01-01T00:00:00Z"
+    assert result["passwordPolicies"] == "DisablePasswordExpiration"
+    assert result["tokenLifetimePolicies"] == ["policy-a"]
+    assert result["lastPasswordChangeDateTime"] == "2026-01-01T00:00:00Z"
+    assert result["AllowSimplePassword"] is True
+    assert result["passwordExpirationDays"] == 90

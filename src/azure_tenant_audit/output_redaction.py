@@ -27,12 +27,17 @@ from .guarded_io import (
 )
 from .secret_hygiene import _OUTPUT_EMAIL_RE as OUTPUT_EMAIL_RE
 from .secret_hygiene import _OUTPUT_GUID_RE as OUTPUT_GUID_RE
-from .secret_hygiene import BEARER_RE, JWT_RE
+from .secret_hygiene import (
+    BEARER_RE,
+    INLINE_SECRET_VALUE,
+    INLINE_SECRET_WORDS,
+    JWT_RE,
+    PRIVATE_KEY_PEM_RE,
+)
 
-# Keep the output-specific form local: diagnostic argv redaction is a separate boundary.
+# The output boundary masks at least the credential words the diagnostic redactor masks (R150): one word list.
 INLINE_SECRET_RE = re.compile(
-    r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key)"
-    r"[\"']?\s*[=:]\s*)(?P<value>\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,;]+)",
+    rf"(?P<prefix>[\"']?(?:{INLINE_SECRET_WORDS})[\"']?\s*[=:]\s*)(?P<value>{INLINE_SECRET_VALUE})",
     re.IGNORECASE,
 )
 
@@ -256,6 +261,22 @@ def _norm(key: Any) -> str:
 
 
 _SECRET_NORMS = frozenset(_norm(key) for key in _SECRET_KEYS)
+
+# A key whose last word (camelCase, snake_case or kebab-case) names a credential (``ApplicationSecret``,
+# ``CertificatePassword``, ``sharedSecret``, ``clientAssertion``, ``preSharedKey``) holds one: its scalar value is
+# replaced (R150). Only the last word counts, so metadata keys that merely mention a credential
+# (``passwordCredentials``, ``passwordPolicies``, ``tokenLifetimePolicies``, ``lastPasswordChangeDateTime``) keep
+# their values, and a boolean setting (``AllowSimplePassword``) is never a credential.
+_SECRET_LAST_WORDS = frozenset(
+    {"secret", "password", "passwd", "pwd", "passphrase", "token", "credential", "authorization", "assertion"}
+)
+_SECRET_LAST_PAIRS = frozenset({"privatekey", "sharedkey", "keymaterial"})
+_KEY_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+
+
+def _secret_key(key: Any) -> bool:
+    words = [word.lower() for word in _KEY_WORD_RE.findall(str(key))]
+    return bool(words) and (words[-1] in _SECRET_LAST_WORDS or "".join(words[-2:]) in _SECRET_LAST_PAIRS)
 
 
 @dataclass(frozen=True)
@@ -1979,6 +2000,7 @@ class _Redactor:
         # ``minimal``: rendered JSON, HTML, CSV and Markdown. ``key=value`` secrets were redacted in the structure
         # before rendering; the inline pattern cannot tell where a value ends in markup. Mapping keys use the full
         # pattern (a key such as ``password=value`` carries its credential in the key text).
+        value = PRIVATE_KEY_PEM_RE.sub("***redacted-private-key***", value)
         value = JWT_RE.sub("***redacted-jwt***", BEARER_RE.sub("Bearer ***redacted***", value))
         value = _redact_url_credentials(value)
         if minimal:
@@ -2067,6 +2089,8 @@ class _Redactor:
         for key, item in record.items():
             norm = _norm(key)
             if norm in _SECRET_NORMS and _non_empty(item):
+                item = SECRET_PLACEHOLDER
+            elif isinstance(item, (str, bytes, int, float)) and _non_empty(item) and _secret_key(key):
                 item = SECRET_PLACEHOLDER
             elif isinstance(item, str):
                 if not item:
