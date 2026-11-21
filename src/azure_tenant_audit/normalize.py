@@ -69,6 +69,18 @@ _DETECTION_SOURCE_COLLECTORS = (
     "exchange_policy",
 )
 
+# Cross-tenant partner settings that inherit the default policy when the partner leaves them null.
+_CROSS_TENANT_INHERITABLE_KEYS = (
+    "b2b_collaboration_outbound_access",
+    "b2b_collaboration_inbound_access",
+    "b2b_direct_connect_outbound_access",
+    "b2b_direct_connect_inbound_access",
+    "inbound_trust_mfa_accepted",
+    "inbound_trust_compliant_device_accepted",
+    "inbound_trust_hybrid_aad_joined_accepted",
+)
+
+
 def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     section = payload.get(key, {})
     values = section.get("value", []) if isinstance(section, dict) else []
@@ -2550,24 +2562,32 @@ def build_normalized_snapshot(
         )
         for item in _values(collector_payloads.get("cross_tenant_access", {}), "defaultPolicy")
     ]
-    cross_tenant_partner_objects = [
-        _record(
-            "cross_tenant_partner",
-            "cross_tenant_access.partnerConfigurations",
-            str(item.get("tenant_id") or item.get("id") or ""),
-            tenant_id=item.get("tenant_id"),
-            is_service_provider=bool(item.get("is_service_provider")),
-            b2b_collaboration_outbound_access=item.get("b2b_collaboration_outbound_access"),
-            b2b_collaboration_inbound_access=item.get("b2b_collaboration_inbound_access"),
-            b2b_direct_connect_outbound_access=item.get("b2b_direct_connect_outbound_access"),
-            b2b_direct_connect_inbound_access=item.get("b2b_direct_connect_inbound_access"),
-            inbound_trust_mfa_accepted=item.get("inbound_trust_mfa_accepted"),
-            inbound_trust_compliant_device_accepted=item.get("inbound_trust_compliant_device_accepted"),
-            inbound_trust_hybrid_aad_joined_accepted=item.get("inbound_trust_hybrid_aad_joined_accepted"),
+    # A partner setting left null inherits the default policy: resolve the effective value here, so the
+    # partner rule reads what Entra applies, and record which values came from the default.
+    cross_tenant_default = cross_tenant_default_objects[0] if cross_tenant_default_objects else {}
+    cross_tenant_partner_objects = []
+    for item in _values(collector_payloads.get("cross_tenant_access", {}), "partnerConfigurations"):
+        if not (item.get("tenant_id") or item.get("id")):
+            continue
+        effective: dict[str, Any] = {}
+        inherited: list[str] = []
+        for key in _CROSS_TENANT_INHERITABLE_KEYS:
+            value = item.get(key)
+            if value is None and cross_tenant_default.get(key) is not None:
+                value = cross_tenant_default.get(key)
+                inherited.append(key)
+            effective[key] = value
+        cross_tenant_partner_objects.append(
+            _record(
+                "cross_tenant_partner",
+                "cross_tenant_access.partnerConfigurations",
+                str(item.get("tenant_id") or item.get("id") or ""),
+                tenant_id=item.get("tenant_id"),
+                is_service_provider=bool(item.get("is_service_provider")),
+                inherited_from_default=inherited or None,
+                **effective,
+            )
         )
-        for item in _values(collector_payloads.get("cross_tenant_access", {}), "partnerConfigurations")
-        if item.get("tenant_id") or item.get("id")
-    ]
     inbox_rule_objects = [
         _record(
             "inbox_rule",

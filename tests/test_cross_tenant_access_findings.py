@@ -234,3 +234,41 @@ def test_collector_normalizes_automatic_user_consent_settings() -> None:
     normalized = _normalize_default_policy(raw)
     assert normalized["automatic_user_consent_inbound_allowed"] is True
     assert normalized["automatic_user_consent_outbound_allowed"] is False
+
+
+# ----- R034: partner settings left null inherit the default policy -----
+
+_PARTNER = "33333333-3333-3333-3333-333333333333"
+_PARTNER_NO_MFA_ID = f"cross_tenant_access:partner:{_PARTNER}:b2b_direct_connect_no_mfa"
+
+
+def _ids(snapshot: dict[str, object]) -> set[str]:
+    return {item["id"] for item in build_findings([], normalized_snapshot=snapshot)}
+
+
+def test_r034_partner_inheriting_a_default_that_trusts_mfa_raises_no_finding() -> None:
+    snapshot = _snapshot(
+        default={"b2b_direct_connect_inbound_access": "blocked", "inbound_trust_mfa_accepted": True},
+        partners=[{"tenant_id": _PARTNER, "b2b_direct_connect_inbound_access": "allowed", "inbound_trust_mfa_accepted": None}],
+    )
+    (partner,) = snapshot["cross_tenant_partner_objects"]["records"]
+    assert partner["inbound_trust_mfa_accepted"] is True
+    assert partner["inherited_from_default"] == ["inbound_trust_mfa_accepted"]
+    assert _PARTNER_NO_MFA_ID not in _ids(snapshot)
+
+
+def test_r034_partner_inheriting_direct_connect_is_evaluated_against_its_own_trust() -> None:
+    snapshot = _snapshot(
+        default={"b2b_direct_connect_inbound_access": "allowed", "inbound_trust_mfa_accepted": True},
+        partners=[{"tenant_id": _PARTNER, "b2b_direct_connect_inbound_access": None, "inbound_trust_mfa_accepted": False}],
+    )
+    (partner,) = snapshot["cross_tenant_partner_objects"]["records"]
+    assert partner["b2b_direct_connect_inbound_access"] == "allowed"
+    assert _PARTNER_NO_MFA_ID in _ids(snapshot)
+
+
+def test_r034_partner_trust_unknown_without_a_default_raises_no_finding() -> None:
+    snapshot = _snapshot(
+        partners=[{"tenant_id": _PARTNER, "b2b_direct_connect_inbound_access": "allowed", "inbound_trust_mfa_accepted": None}],
+    )
+    assert _PARTNER_NO_MFA_ID not in _ids(snapshot)

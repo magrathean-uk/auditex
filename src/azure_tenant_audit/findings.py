@@ -969,8 +969,12 @@ def _build_cross_tenant_partner_findings(item: dict[str, Any]) -> list[dict[str,
     findings: list[dict[str, Any]] = []
     evidence_refs = _normalized_evidence_refs("cross_tenant_partner_objects", item, "cross_tenant_access")
     direct_inbound_allowed = str(item.get("b2b_direct_connect_inbound_access") or "").lower() == "allowed"
+    # Normalisation resolves inherited values from the default policy. A trust flag still None was not read,
+    # and a partner inheriting both values only repeats the default policy, whose own rule reports it.
+    inherited = set(item.get("inherited_from_default") or [])
+    inherits_both = {"b2b_direct_connect_inbound_access", "inbound_trust_mfa_accepted"} <= inherited
 
-    if direct_inbound_allowed and not item.get("inbound_trust_mfa_accepted"):
+    if direct_inbound_allowed and item.get("inbound_trust_mfa_accepted") is False and not inherits_both:
         findings.append(
             _finalize_finding(
                 {

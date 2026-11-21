@@ -95,3 +95,25 @@ def test_collector_handles_missing_client() -> None:
 
     assert result.status == "partial"
     assert all(row["status"] == "failed" for row in (result.coverage or []))
+
+
+def test_r034_partner_null_inbound_trust_stays_inherited() -> None:
+    client = _FakeClient(
+        root={"displayName": "Cross Tenant Access"},
+        default_policy={"inboundTrust": {"isMfaAccepted": True}},
+        partners=[
+            {
+                "tenantId": "11111111-1111-1111-1111-111111111111",
+                "b2bDirectConnectInbound": {"applications": {"accessType": "allowed"}},
+                "inboundTrust": None,
+            }
+        ],
+    )
+
+    result = CrossTenantAccessCollector().run({"client": client, "top": 100})
+
+    (partner,) = result.payload["partnerConfigurations"]["value"]
+    # null means "inherit the default policy", never "not accepted".
+    assert partner["inbound_trust_mfa_accepted"] is None
+    assert partner["inbound_trust_compliant_device_accepted"] is None
+    assert partner["inbound_trust_hybrid_aad_joined_accepted"] is None

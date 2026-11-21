@@ -164,8 +164,15 @@ def _normalize_default_policy(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _inherited_flag(section: Any, key: str) -> bool | None:
+    """A partner trust flag; None when the partner leaves it (or the whole section) null to inherit the default."""
+    if not isinstance(section, dict) or section.get(key) is None:
+        return None
+    return bool(section.get(key))
+
+
 def _normalize_partner_configuration(payload: dict[str, Any]) -> dict[str, Any]:
-    inbound_trust = payload.get("inboundTrust") or {}
+    inbound_trust = payload.get("inboundTrust")
     return {
         "id": str(payload.get("tenantId") or ""),
         "tenant_id": payload.get("tenantId"),
@@ -174,7 +181,7 @@ def _normalize_partner_configuration(payload: dict[str, Any]) -> dict[str, Any]:
         "b2b_collaboration_inbound_access": _access_type(payload.get("b2bCollaborationInbound"), "applications"),
         "b2b_direct_connect_outbound_access": _access_type(payload.get("b2bDirectConnectOutbound"), "applications"),
         "b2b_direct_connect_inbound_access": _access_type(payload.get("b2bDirectConnectInbound"), "applications"),
-        "inbound_trust_mfa_accepted": bool(inbound_trust.get("isMfaAccepted")),
-        "inbound_trust_compliant_device_accepted": bool(inbound_trust.get("isCompliantDeviceAccepted")),
-        "inbound_trust_hybrid_aad_joined_accepted": bool(inbound_trust.get("isHybridAzureADJoinedDeviceAccepted")),
+        "inbound_trust_mfa_accepted": _inherited_flag(inbound_trust, "isMfaAccepted"),
+        "inbound_trust_compliant_device_accepted": _inherited_flag(inbound_trust, "isCompliantDeviceAccepted"),
+        "inbound_trust_hybrid_aad_joined_accepted": _inherited_flag(inbound_trust, "isHybridAzureADJoinedDeviceAccepted"),
     }
