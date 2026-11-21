@@ -498,9 +498,14 @@ def _summarize_spf(records: list[str]) -> dict[str, Any]:
 
 
 def _summarize_dmarc(records: list[str]) -> dict[str, Any]:
-    parsed = next((parse_dmarc(rec) for rec in records if parse_dmarc(rec)), None)
-    if parsed is None:
+    parsed_records = [parsed for rec in records if (parsed := parse_dmarc(rec)) is not None]
+    if not parsed_records:
         return _absent("dmarc")
+    if len(parsed_records) > 1:
+        # RFC 7489 section 6.6.3: with more than one DMARC record a receiver applies no DMARC policy at all, so the
+        # domain has no effective record (dmarc_missing fires); the first record's p= must not read as protection (R109).
+        return {**_absent("dmarc"), "multiple_records": True, "record_count": len(parsed_records)}
+    parsed = parsed_records[0]
     pct = parsed.get("pct")
     pct_partial = isinstance(pct, int) and 0 <= pct < 100
     return {
@@ -514,6 +519,7 @@ def _summarize_dmarc(records: list[str]) -> dict[str, Any]:
         "forensic_addresses": parsed.get("forensic_addresses"),
         "forensic_addresses_invalid": parsed.get("forensic_addresses_invalid") or [],
         "raw": parsed.get("raw"),
+        "multiple_records": False,
     }
 
 

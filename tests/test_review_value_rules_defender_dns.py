@@ -12,6 +12,8 @@ import pytest
 from auditex.scuba_projection import project_run
 from azure_tenant_audit import dns_lookup
 from azure_tenant_audit.collectors.exchange_defender_commands import DEFENDER_COMMANDS
+from azure_tenant_audit.findings import build_findings
+from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.value_rules import assess
 
 ACCEPTED = [{"DomainName": "contoso.example"}]
@@ -120,3 +122,25 @@ def test_r029_entry_without_a_log_keeps_the_scubagear_reading():
     entry = {"domain": "mail.contoso.example", "rdata": ["v=DMARC1; p=reject; sp=none"]}
     record = assess("MS.EXO.4.2v1", {"dmarc_records": [entry]})
     assert (record["verdict"], record["cell"]) == ("met", "all_compliant")
+
+
+# ---- R109: several DMARC records mean no DMARC policy applies (RFC 7489 6.6.3) ----
+
+def test_r109_several_dmarc_records_are_not_a_published_policy():
+    summary = dns_lookup._summarize_dmarc(["v=DMARC1; p=reject", "v=DMARC1; p=none"])
+    assert summary["present"] is False
+    assert summary["multiple_records"] is True and summary["record_count"] == 2
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads={"dns_posture": {
+        "domains": {"value": []},
+        "domainPosture": {"value": [{"domain": "contoso.example", "managed_by_microsoft": False,
+                                     "spf": {"present": True, "all_qualifier": "-"}, "dmarc": summary,
+                                     "dkim": {"selectors_present": ["selector1"], "selectors_missing": []},
+                                     "mta_sts": {"dns_present": True}, "bimi": {"present": False}}]}}})
+    ids = {finding["id"] for finding in build_findings([], normalized_snapshot=snapshot)}
+    assert "dns_posture:contoso.example:dmarc_missing" in ids
+
+
+def test_r109_one_dmarc_record_beside_other_txt_is_still_read():
+    summary = dns_lookup._summarize_dmarc(["unrelated", "v=DMARC1; p=reject"])
+    assert summary["present"] is True and summary["policy"] == "reject"
+    assert summary["multiple_records"] is False
