@@ -19,12 +19,12 @@ G has looked at the budget against the allocation balance before any M03 run; th
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M03-T01 | Compare the candidate bases on the explainer job | terra | M | debug | done |
-| M03-T02 | Train three seeds of the chosen base on data v2 | terra | M | debug | todo |
-| M03-T03 | Build, hash and judge the final explainer build | terra | S | - | todo |
-| M03-T04 | Write the recommendation and the product-integration options | sol | S | - | todo |
+| M03-T02 | Train three seeds of the chosen base on data v2 | terra | M | debug | dropped |
+| M03-T03 | Build, hash and judge the final explainer build | terra | S | - | dropped |
+| M03-T04 | Write the recommendation and the product-integration options | sol | S | - | dropped |
 | M03-T05 | Add the explainer score kind to the kit verifier | sol | S | hard | done |
 | M03-T06 | Teacher prompt v2 and the validation pilot | terra | M | hard | done |
-| M03-T07 | Regenerate, judge-filter and register data v2 | terra | M | - | todo |
+| M03-T07 | Regenerate, judge-filter and register data v2 | terra | M | - | dropped |
 | M03-T08 | Add the data-round checks to the kit verifier | sol | M | hard | done |
 | M03-T09 | Teacher prompt v3 seeded with real lab-run explanations, and the pilot-3 checks | codex | M | hard | done |
 | M03-T10 | Validation pilot 3 on the system (option 2, cap 20 GPU-hours) | terra | M | hard | done |
