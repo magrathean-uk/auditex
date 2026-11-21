@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -368,17 +369,19 @@ def build_m365_setup_guide(
     credential = (
         "--client-id <app-id> --certificate-path <private-key-file> --certificate-thumbprint <sha1-thumbprint>"
     )
-    preset_flag = f" --collector-preset {collector_preset}" if collector_preset else ""
+    # Every caller value is shell-quoted; the <...> placeholders in ``credential`` are the operator's to fill in.
+    q = shlex.quote
+    preset_flag = f" --collector-preset {q(collector_preset)}" if collector_preset else ""
     commands = {
         "probe": (
-            f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
-            f"--auditor-profile {auditor_profile} --mode app {credential} "
-            f"--surface {','.join(_dedupe([*selected, 'windows365']))}"
+            f"auditex probe live --tenant-name {q(tenant_name)} --tenant-id {q(tenant_id)} "
+            f"--auditor-profile {q(auditor_profile)} --mode app {credential} "
+            f"--surface {q(','.join(_dedupe([*selected, 'windows365'])))}"
         ),
         "run": (
-            f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
-            f"--auditor-profile {auditor_profile} --plane {plane} {credential} "
-            f"--probe-first --throttle-mode safe{preset_flag} --collectors {','.join(selected)}"
+            f"auditex run --tenant-name {q(tenant_name)} --tenant-id {q(tenant_id)} "
+            f"--auditor-profile {q(auditor_profile)} --plane {q(plane)} {credential} "
+            f"--probe-first --throttle-mode safe{preset_flag} --collectors {q(','.join(selected))}"
         ),
     }
 
@@ -547,7 +550,7 @@ def _google_command(
         parts.extend(["--tenant-name", tenant_name])
     if extra:
         parts.extend(extra.split())
-    return " ".join(parts)
+    return shlex.join(parts)
 
 
 def _load_permission_hints(path: str | Path) -> dict[str, Any]:

