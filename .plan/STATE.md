@@ -18,7 +18,7 @@ last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 
 ## Pending G decisions
 - Lead reports to the manager chat (DEC-073, DEC-103 manager session); product code on Claude seats, Codex reviews (DEC-077).
-- Rollback timing (G's word via manager); Isambard sign-in when M11 GPU work starts.
+- Rollback timing (G's word via manager). Isambard data kept, no deletion (DEC-141).
 
 ## Re-baselines
 - from 100% (plan v3 closed at 1.4.0) to 4% (plan v4 scope and weights, DEC-001, approved by G on 11 Nov 2026)

@@ -1070,3 +1070,9 @@
 - decision: M11-T06 is done with `model-bar: fail` and `m11-gpu-hours: 345.97`. Qwen step 1053 was evaluated on the fresh sealed held-out set (1,958 rows): 0.9994 sentence pass, but 124 fallbacks, 8 contradiction rows and 4 completeness rows. Mistral and Gemma were dropped on validation. The 6 leak rows are the same for the student and for M10 `qwen`, so they are a leak-judge false positive on product-written lines, not a leak. No third round: the remaining failures are model-side, and the off-the-shelf `qwen` is already better. M11-T05 ships nothing and the default stays `qwen`. The leak judge is not fixed, because nothing in the plan evaluates against it any more. Release 1.8.0 carries the M11-T02 lone-surrogate fix and its new `summary.json` count fields (additive output, hence a minor version), on G's standing yes for 1.8.0 on GitHub, with no PyPI upload.
 - why: two rounds ran on separate sealed sets and the failures are systematic. Further GPU time is unlikely to beat the shipped model.
 - approver: lead
+
+## DEC-141 Isambard training data is kept; no deletion
+- date: 2026-11-21
+- decision: nothing is deleted on Isambard: not the sealed and held-out rows (`delete-sealed.sh`) and not the rest of `airr-v4` (about 1.3 TB). This sets aside the kit runbook's step 8 on G's word. The item is closed and not raised again; no sign-in is needed for it.
+- why: G, about 08:03 GMT 21 Nov, relayed by the manager: "4 don't dllete it".
+- approver: G
