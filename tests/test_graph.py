@@ -249,3 +249,26 @@ def test_permission_stop_families_separate_security_endpoints() -> None:
     assert family(None, "https://graph.microsoft.com/v1.0/security/alerts_v2?$top=5") == "security/alerts_v2"
     assert family(None, "https://graph.microsoft.com/v1.0/security/secureScores") == "security/secureScores"
     assert family(None, "https://graph.microsoft.com/beta/reports/getX(period='D30')") == "reports/getX"
+
+
+def test_failed_redirect_hop_error_has_no_signed_query(monkeypatch) -> None:
+    """R158: a connect failure on the download hop must not carry the pre-authenticated query into evidence."""
+    import pytest
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+
+    client = fake_graph_client(throttle_mode="safe")
+    signed = "https://reports.office.com/data/download/abc123?sig=TOPSECRETSIGNATURE&se=2026"
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ANN001, ANN003
+        if url.startswith("https://graph.microsoft.com"):
+            return graph_response(302, {}, headers={"Location": signed})
+        raise RequestsConnectionError(f"HTTPSConnectionPool(host='reports.office.com', port=443): Max retries exceeded with url: {url}")
+
+    monkeypatch.setattr(client.session, "request", _request)
+    with pytest.raises(RequestsConnectionError) as caught:
+        client.get_json("/reports/getOffice365ActiveUserDetail(period='D7')")
+    message, classified = str(caught.value), _classify_graph_error(caught.value)
+    assert "TOPSECRETSIGNATURE" not in message and "sig=" not in message
+    assert "reports.office.com" in message
+    assert classified[0] == "client_error" and "TOPSECRETSIGNATURE" not in classified[1]
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__

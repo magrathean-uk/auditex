@@ -667,7 +667,12 @@ class GraphClient:
                     "Graph redirect hop raised exception",
                     {"method": "GET", "url": redacted_url(target), "error": type(exc).__name__, "hop": hops},
                 )
-                raise
+                # R158: the original text names the signed download URL (its query is a credential) and collectors
+                # store str(exc). Re-raise the same exception type, so retries and classification are unchanged,
+                # naming only the host and path.
+                raise type(exc)(
+                    f"Redirect hop to {event['host']}{event['path']} failed ({type(exc).__name__})"
+                ) from None
             current_url = target
         return response
 
