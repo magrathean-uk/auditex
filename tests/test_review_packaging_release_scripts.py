@@ -78,3 +78,17 @@ def test_explorer_generator_label_uses_the_shared_version(monkeypatch):
 
     monkeypatch.setattr("azure_tenant_audit.versioning.package_version", lambda: "7.7.7")
     assert explorer._generator_label() == "Auditex 7.7.7"
+
+
+# R095: the certificate loader uses cryptography 42+ APIs, so the package must declare that floor.
+def test_cryptography_floor_is_declared_and_its_apis_exist():
+    import re
+    import tomllib
+
+    from cryptography import x509
+
+    dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    floors = [re.search(r">=\s*(\d+)", dep) for dep in dependencies if re.match(r"cryptography\b", dep)]
+    assert floors and floors[0] and int(floors[0].group(1)) >= 42, dependencies
+    assert hasattr(x509.Certificate, "not_valid_before_utc") and hasattr(x509.Certificate, "not_valid_after_utc")
+    assert callable(x509.load_pem_x509_certificates)

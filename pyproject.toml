@@ -13,6 +13,8 @@ license-files = ["LICENSE"]
 dependencies = [
     "requests>=2.34.2,<3",
     "msal>=1.39.0,<2",
+    # The certificate loader uses Certificate.not_valid_before_utc, added in cryptography 42.
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
