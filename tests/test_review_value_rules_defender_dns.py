@@ -188,3 +188,68 @@ def test_r113_invalid_mta_sts_policy_is_reported_invalid(body, reasons):
 def test_r113_valid_mta_sts_policy_stays_ok(body):
     policy = exposure_lookup.fetch_mta_sts_policy("contoso.example", _PolicyFetcher(body))
     assert policy["fetch_status"] == "ok" and "invalid_reasons" not in policy
+
+
+# ---- R163: a host that trickles its MTA-STS policy cannot hold the run past one wall-clock deadline ----
+
+class _Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class _TrickleRaw:
+    """Each read waits just under the per-read socket timeout and yields one byte per four seconds."""
+
+    def __init__(self, clock):
+        self.clock, self.calls = clock, 0
+
+    def _bytes(self, amount):
+        self.calls += 1
+        self.clock.now += 4.0 * amount
+        return b"x" * amount
+
+    def read(self, amount, decode_content=False):
+        return self._bytes(amount)
+
+    def read1(self, amount=None, decode_content=None):
+        return self._bytes(1)
+
+
+class _TrickleSession:
+    def __init__(self, clock):
+        self.response = type("Response", (), {"status_code": 200, "closed": False})()
+        self.response.raw = _TrickleRaw(clock)
+        self.response.close = lambda: setattr(self.response, "closed", True)
+
+    def get(self, url, **kwargs):
+        return self.response
+
+
+def test_r163_policy_fetch_stops_at_the_wall_clock_deadline():
+    clock = _Clock()
+    session = _TrickleSession(clock)
+    fetcher = exposure_lookup.RequestsHttpsFetcher(session=session, clock=clock)
+    start = clock.now
+    policy = exposure_lookup.fetch_mta_sts_policy("contoso.example", fetcher)
+    assert policy["fetch_status"] == "unreachable" and policy["error"] == "fetch_deadline_exceeded"
+    assert clock.now - start <= exposure_lookup.DEFAULT_FETCH_DEADLINE_SECONDS + 4.0
+    assert session.response.closed is True
+
+
+def test_r163_prompt_policy_is_read_whole():
+    body = b"version: STSv1\nmode: enforce\nmx: mail.contoso.example\nmax_age: 604800\n"
+
+    class Raw:
+        def __init__(self):
+            self.left = body
+
+        def read1(self, amount=None, decode_content=None):
+            chunk, self.left = self.left[:16], self.left[16:]
+            return chunk
+
+    session = type("S", (), {"get": lambda self, url, **kw: type("R", (), {"status_code": 200, "raw": Raw()})()})()
+    status, text, error = exposure_lookup.RequestsHttpsFetcher(session=session).get_text(MTA_STS_URL)
+    assert (status, text, error) == (200, body.decode(), None)

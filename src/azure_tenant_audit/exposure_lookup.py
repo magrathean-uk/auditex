@@ -21,12 +21,18 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import requests
 
 DEFAULT_TIMEOUT_SECONDS = 5.0
+# The requests timeout bounds each socket read, not the response: a host that sends a byte every few seconds could
+# hold one fetch for days. One fetch therefore stops at this wall-clock deadline (review R163).
+DEFAULT_FETCH_DEADLINE_SECONDS = 15.0
+_READ_CHUNK_BYTES = 8192
 MAX_POLICY_BYTES = 64 * 1024
 MAX_POLICY_AGE_SECONDS = 31557600  # RFC 8461 section 3.2: the largest max_age a sender accepts
 OIDC_AUTHORITY = "https://login.microsoftonline.com"
@@ -46,19 +52,48 @@ class RequestsHttpsFetcher:
 
     session: Any = field(default_factory=requests.Session)
     timeout: float = DEFAULT_TIMEOUT_SECONDS
+    deadline: float = DEFAULT_FETCH_DEADLINE_SECONDS
+    clock: Callable[[], float] = time.monotonic
 
     def get_text(self, url: str) -> tuple[int | None, str, str | None]:
         if not url.lower().startswith("https://"):
             return None, "", "refused_non_https_url"
+        start = self.clock()
         try:
             response = self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True)
-            raw = response.raw.read(MAX_POLICY_BYTES + 1, decode_content=True) if response.raw is not None else b""
-            if isinstance(raw, str):
-                raw = raw.encode("utf-8")
+            raw = self._read_body(response, start)
+            if raw is None:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+                return None, "", "fetch_deadline_exceeded"
             body = raw[:MAX_POLICY_BYTES].decode("utf-8", errors="replace")
             return int(response.status_code), body, None
         except Exception as exc:  # noqa: BLE001
             return None, "", f"{type(exc).__name__}: {exc}"[:300]
+
+    def _read_body(self, response: Any, start: float) -> bytes | None:
+        """At most MAX_POLICY_BYTES + 1 bytes, or None once the deadline passes. ``read1`` returns what one socket read
+        delivers, so the deadline is overrun by at most one per-read timeout."""
+        stream = response.raw
+        if stream is None:
+            return b""
+        read = getattr(stream, "read1", None) or stream.read
+        chunks: list[bytes] = []
+        size = 0
+        while size <= MAX_POLICY_BYTES:
+            if self.clock() - start > self.deadline:
+                return None
+            chunk = read(min(_READ_CHUNK_BYTES, MAX_POLICY_BYTES + 1 - size), decode_content=True)
+            if isinstance(chunk, str):
+                chunk = chunk.encode("utf-8")
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        if self.clock() - start > self.deadline:
+            return None
+        return b"".join(chunks)
 
 
 def is_safe_domain_name(domain: str) -> bool:
