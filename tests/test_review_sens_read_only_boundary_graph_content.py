@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from azure_tenant_audit.adapters.read_guard import CommandRefused, check_command, classify_command, words_are_read
+from azure_tenant_audit.adapters.read_guard import (
+    CommandRefused,
+    check_command,
+    classify_command,
+    words_are_read,
+)
 from azure_tenant_audit.api_inventory import _CONTENT_PATHS, _content_reason
 
 # One Graph PowerShell cmdlet per content path rule the API inventory applies to REST reads (``_CONTENT_PATHS``).
