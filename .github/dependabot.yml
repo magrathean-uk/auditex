@@ -21,9 +21,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     # mcp stays below 2 until a real FastMCP annotation test exists (see pyproject.toml).
+    # Ruff is pinned in the dev extra and as the pre-commit hook rev, and make lint needs both equal; a pip-only
+    # bump would break lint, so the pre-commit Ruff PR carries the matching pyproject.toml edit instead.
     ignore:
       - dependency-name: "mcp"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "ruff"
     groups:
       minor-and-patch:
         patterns:

@@ -190,3 +190,14 @@ def test_audit_full_uses_the_selected_python(tmp_path: Path) -> None:
     assert run.returncode == 0, run.stderr[-2000:]
     (line,) = log.read_text(encoding="utf-8").splitlines()
     assert line.startswith("selected-python -m azure_tenant_audit --tenant-name CONTOSO"), line
+
+
+# R141: Ruff is pinned twice (dev extra and pre-commit hook) and make lint needs both equal, so Dependabot must not
+# bump the pip pin alone; the pre-commit Ruff PR carries the matching pyproject.toml edit.
+def test_dependabot_leaves_the_ruff_pin_to_the_pre_commit_update() -> None:
+    text = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+    blocks = {}
+    for block in text.split("- package-ecosystem:")[1:]:
+        blocks[block.split("\n", 1)[0].strip().strip('"')] = block
+    assert 'dependency-name: "ruff"' in blocks["pip"]
+    assert 'dependency-name: "ruff"' not in blocks["pre-commit"]
