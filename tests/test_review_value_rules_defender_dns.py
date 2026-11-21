@@ -5,6 +5,7 @@ Each test names the review finding it pins. Synthetic, offline data only.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,8 @@ from azure_tenant_audit.collectors.exchange_defender_commands import DEFENDER_CO
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.value_rules import assess
+from azure_tenant_audit.value_rules.catalogue import catalogue
+from azure_tenant_audit.value_rules.defender_resolution import safelinks_resolution
 
 ACCEPTED = [{"DomainName": "contoso.example"}]
 EVERYONE = {key: None for key in (
@@ -365,3 +368,89 @@ def test_r103_partial_noncompliant_custom_policy_stays_undecided():
     record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT, _custom("Exec policy", False)],
                                                      [_phish_rule("Exec policy", GROUP_ONLY)]))
     assert (record["verdict"], record["cell"]) == ("not_assessed", "qualifier_shadowed")
+
+
+# ---- R003 / R099: Safe Links reads the Built-In Protection rule's exclusions once the 7.x rows list that section ----
+# The shipped rows do not list built_in_protection_rules yet (a catalogue change outside this lane), so these tests call
+# the kind with a row that does; the shipped rows keep their current answers until the catalogue lists the section.
+
+SL_FLAGS = {"EnableSafeLinksForEmail": True, "EnableSafeLinksForTeams": True, "EnableSafeLinksForOffice": True,
+            "EnableForInternalSenders": True, "ScanUrls": True, "DeliverMessageAfterScan": True, "TrackClicks": True}
+SL_BUILTIN = {"Identity": "Built-In Protection Policy", **SL_FLAGS}
+
+
+def _safelinks(rules, policies, built_in=None):
+    sections = {"atp_policy_rules": [], "defender_license": True, "protection_policy_rules": [],
+                "safe_links_policies": list(policies), "safe_links_rules": list(rules), "accepted_domains": ACCEPTED}
+    if built_in is not None:
+        sections["built_in_protection_rules"] = built_in
+    return sections
+
+
+def _sl_rule(policy, scope, priority=0, state="Enabled"):
+    return {"Identity": f"{policy} rule", "State": state, "Priority": priority, "SafeLinksPolicy": policy, **scope}
+
+
+SL_POLICY = "MS.SECURITYSUITE.7.2v1"
+BI_ALL = [{"Identity": "ATP Built-In Protection Rule", "ExceptIfSentTo": None, "ExceptIfSentToMemberOf": None,
+           "ExceptIfRecipientDomainIs": None}]
+BI_EXCLUDES = [{**BI_ALL[0], "ExceptIfSentTo": ["recipient"]}]
+BI_UNREADABLE = [{"Identity": "ATP Built-In Protection Rule"}]
+SL_SCOPE_ALL = SCOPE_ALL
+
+
+def _bi_row():
+    row = deepcopy(catalogue()["policies"][SL_POLICY])
+    row["sections"] = sorted([*row["sections"], "built_in_protection_rules"])
+    return row
+
+
+def _kind(sections):
+    return safelinks_resolution(SL_POLICY, _bi_row(), sections)
+
+
+def test_r003_built_in_exclusions_without_a_covering_rule_are_not_met():
+    partial_compliant = [_sl_rule("x", GROUP_ONLY)]
+    shipped = assess(SL_POLICY, _safelinks(partial_compliant, [SL_BUILTIN, {"Identity": "x", **SL_FLAGS}], BI_EXCLUDES))
+    assert (shipped["verdict"], shipped["cell"]) == ("met", "policy_flags_ok")          # the finding, on the shipped row
+    record = _kind(_safelinks([], [SL_BUILTIN], BI_EXCLUDES))
+    assert (record["verdict"], record["cell"], record["reason_code"]) == (
+        "not_met", "no_policy_covers_all", "no_policy_covers_all_recipients")
+    may_cover = _kind(_safelinks(partial_compliant, [SL_BUILTIN, {"Identity": "x", **SL_FLAGS}], BI_EXCLUDES))
+    assert (may_cover["verdict"], may_cover["cell"]) == ("not_assessed", "partial_tier_may_cover")
+
+
+def test_r003_partly_scoped_preset_may_cover_the_excluded_recipients():
+    preset = {"Identity": "Standard Preset Security Policy1700000000000", "State": "Enabled", **GROUP_ONLY}
+    sections = _safelinks([], [SL_BUILTIN], BI_EXCLUDES)
+    sections["protection_policy_rules"] = sections["atp_policy_rules"] = [preset]
+    record = _kind(sections)
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "partial_tier_may_cover")
+
+
+def test_r003_unreadable_built_in_rule_is_not_assessed():
+    for built_in in (BI_UNREADABLE, []):
+        record = _kind(_safelinks([], [SL_BUILTIN], built_in))
+        assert (record["verdict"], record["cell"], record["cited_sections"]) == (
+            "not_assessed", "builtin_rule_unusable", ["built_in_protection_rules"])
+    record = _kind(_safelinks([], [SL_BUILTIN], {"bad": 1}))
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "section_not_a_list")
+
+
+def test_r003_covering_rule_or_preset_needs_no_built_in_reading():
+    rules = [_sl_rule("cover", SL_SCOPE_ALL)]
+    record = _kind(_safelinks(rules, [{"Identity": "cover", **SL_FLAGS}], BI_UNREADABLE))
+    assert (record["verdict"], record["cell"]) == ("met", "policy_flags_ok")
+
+
+def test_r099_empty_rule_lists_follow_the_built_in_policy():
+    shipped = assess(SL_POLICY, _safelinks([], [SL_BUILTIN]))
+    disabled = assess(SL_POLICY, _safelinks([_sl_rule("x", GROUP_ONLY, state="Disabled")], [SL_BUILTIN]))
+    assert (shipped["verdict"], disabled["verdict"]) == ("not_met", "met")             # the finding, on the shipped row
+    for rules in ([], [_sl_rule("x", GROUP_ONLY, state="Disabled")]):
+        record = _kind(_safelinks(rules, [SL_BUILTIN], BI_ALL))
+        assert (record["verdict"], record["cell"]) == ("met", "policy_flags_ok")
+        record = _kind(_safelinks(rules, [], BI_ALL))
+        assert (record["verdict"], record["cell"]) == ("not_assessed", "policy_not_in_export")
+        record = _kind(_safelinks(rules, [{**SL_BUILTIN, "ScanUrls": False}], BI_ALL))
+        assert (record["verdict"], record["cell"]) == ("not_met", "policy_flag_off")
