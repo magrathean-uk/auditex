@@ -3,15 +3,14 @@
 overall: 84% (was 87%)
 milestone: M07-dummy-tenant-kit 89%
 plan_version: v4
-release_scope: 1.7.0 RELEASED 19 Nov (M10 local answer: qwen default, mistral, gemma, small; DEC-113, DEC-119, DEC-120). Next release 1.8.0: M11 fixes and compact model. M11 Auditex model, attack loop and scale testing planned (DEC-115, cap 5,000 GPU-hours).
+release_scope: 1.8.0 RELEASED 20 Nov (GitHub, lone-surrogate fix and summary count fields; DEC-140). M11 closed: no compact model shipped, qwen stays default. No release in progress.
 last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 
 ## Next tasks
 - M11-T01 done: scale-rules pass, scale pass (4 models x 2,048 tenants, 37.27 GPU-hours).
 - M11-T02 done: attack-loop clean (rounds 2 and 3, 0 tricks, product 9a0f301; DEC-136).
 - M11-T03 done (data-version 101c02cd, 13,956 rows; DEC-138).
-- M11 done (DEC-140): no compact model passed (two rounds, 345.97 GPU-hours), default stays qwen. Release 1.8.0 (lone-surrogate fix) in progress.
-- Each Isambard step needs a live sign-in window (G); check `ssh -O check` first.
+- M11 done (DEC-140): no compact model passed (two rounds, 345.97 GPU-hours), default stays qwen. 1.8.0 released 20 Nov.
 - M07-T17 lab rollback by 30 Nov (G approved, DEC-126), then G passes `~/Desktop/cancel-lab-trials.md` to Codex.
 
 ## Blockers
