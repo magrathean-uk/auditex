@@ -18,8 +18,10 @@ Allowed:
   on anything but a script block, subexpressions inside double-quoted strings, and method calls
   other than a few string helpers are refused, because each can hide or run another command.
   ``CONTENT_CMDLET_DENY`` then refuses the ``Get-*`` cmdlets that return message, chat, event,
-  attachment or file content (Microsoft Graph, Exchange, PnP and the local file system), with two
-  documented Graph pattern rules: any ``Get-Mg*Attachment*`` and any ``Get-Mg*Content``.
+  attachment or file content (Microsoft Graph, Exchange, PnP and the local file system), with Graph
+  pattern rules: any ``Get-Mg*Attachment*``, any ``Get-Mg*Content`` and one noun rule per REST content path
+  (messages, events, OneNote, group threads and posts, list items, site pages, To Do tasks). A Graph cmdlet's
+  ``-ExpandProperty`` or ``-Property`` may not name a content property (``GRAPH_CONTENT_PROPERTIES``).
 * Microsoft365DSC: the PowerShell rules plus ``Export-M365DSCConfiguration``, the one export
   cmdlet that reads the tenant (it writes only local files).
 * SharePoint admin REST (``sharepoint_admin_request_violation``): the opt-in ``sharepoint_admin``
@@ -165,6 +167,33 @@ CONTENT_CMDLET_DENY = frozenset(
 )
 _GRAPH_PREFIX = "get-mg"
 _GRAPH_BETA_PREFIX = "get-mgbeta"
+# Graph pattern rules, one per content path rule the API inventory applies to REST reads (``_CONTENT_PATHS`` in
+# api_inventory.py), matched against the cmdlet name after ``get-mg``: mail, chat and channel messages, calendar events
+# and views, OneNote, group threads, conversations and posts, SharePoint list items and pages, and To Do tasks.
+_GRAPH_CONTENT_NOUN = re.compile(
+    r"^(?:"
+    r"user(?:mailfolder(?:childfolder)?)?message(?!rule)"
+    r"|.*(?:chat|channel|channelall|pinned)message"
+    r"|(?:user|group)(?:calendar\w*?)?(?:event|calendarview)"
+    r"|.*onenote"
+    r"|group(?:thread|conversation)"
+    r"|.*inreplyto"
+    r"|.*listitem"
+    r"|.*sitepage"
+    r"|.*todolisttask"
+    r")"
+)
+# Navigation properties and fields that carry content when a Graph cmdlet inlines them with -ExpandProperty (alias
+# -Expand) or selects them with -Property (alias -Select); the REST equivalents are _CONTENT_EXPAND_FIELDS and
+# _CONTENT_SELECT_FIELDS in api_inventory.py, plus the chat preview, list item fields and To Do tasks.
+GRAPH_CONTENT_PROPERTIES = frozenset(
+    {
+        "body", "bodypreview", "uniquebody", "content", "messages", "message", "lastmessagepreview", "attachments",
+        "events", "posts", "threads", "conversations", "items", "fields", "pages", "tasks", "replies",
+        "hostedcontents", "pinnedmessages", "calendarview", "onenote",
+    }
+)
+_GRAPH_PROPERTY_PARAMETERS = ("expandproperty", "property", "select")
 POWERSHELL_READ_METHODS = frozenset(
     {"tostring", "tolower", "toupper", "trim", "contains", "startswith", "endswith"}
 )
@@ -379,8 +408,39 @@ def _is_content_cmdlet(word: str) -> bool:
         cmdlet = _GRAPH_PREFIX + cmdlet[len(_GRAPH_BETA_PREFIX) :]
     if cmdlet in CONTENT_CMDLET_DENY:
         return True
-    # Graph pattern rules: every attachment cmdlet, and every ``/content`` download (``*Content``).
-    return cmdlet.startswith(_GRAPH_PREFIX) and ("attachment" in cmdlet or cmdlet.endswith("content"))
+    if not cmdlet.startswith(_GRAPH_PREFIX):
+        return False
+    # Graph pattern rules: every attachment cmdlet, every ``/content`` download (``*Content``) and the content nouns.
+    noun = cmdlet[len(_GRAPH_PREFIX) :]
+    return "attachment" in cmdlet or cmdlet.endswith("content") or _GRAPH_CONTENT_NOUN.match(noun) is not None
+
+
+def _graph_property_parameter(word: str) -> bool:
+    """Whether ``word`` is -ExpandProperty, -Property or an alias or unambiguous-prefix spelling of either."""
+    if not word.startswith("-") or len(word) < 2:
+        return False
+    name = word[1:].lower().split(":", 1)[0]
+    return any(parameter.startswith(name) for parameter in _GRAPH_PROPERTY_PARAMETERS)
+
+
+def _graph_property_values(tokens: list[_Token], index: int) -> list[str]:
+    """Property names given to the parameter at ``tokens[index]`` (``-P a,b``, ``-P:a``, ``-P 'a'``, ``-P @('a')``)."""
+    values: list[str] = []
+    _, colon, inline = tokens[index].text.partition(":")
+    if colon:
+        values.append(inline)
+    else:
+        for token in tokens[index + 1 :]:
+            if token.kind == "word" and token.text.startswith("-"):
+                break
+            if token.kind == "op" and token.text not in {",", "@(", "(", ")"}:
+                break
+            if token.kind in {"word", "string"}:
+                values.append(token.text)
+    names: list[str] = []
+    for value in values:
+        names.extend(part.strip().strip("'\"").lower() for part in value.split(","))
+    return [name for name in names if name]
 
 
 def _allowed_word(word: str, extra: frozenset[str]) -> bool:
@@ -418,6 +478,11 @@ def _command_words(script: str, adapter: str, extra: frozenset[str]) -> list[str
             continue
         at_command = previous is None or (previous.kind == "op" and previous.text in _SEPARATORS)
         if not at_command:
+            current = commands[-1].lower().rsplit("\\", 1)[-1] if commands else ""
+            if current.startswith(_GRAPH_PREFIX) and _graph_property_parameter(token.text):
+                content = sorted(set(_graph_property_values(tokens, index)) & GRAPH_CONTENT_PROPERTIES)
+                if content:
+                    raise CommandRefused(f"{token.text} {content[0]} inlines content", adapter=adapter)
             continue
         in_hashtable = bool(brackets) and brackets[-1] == "@{"
         if in_hashtable and following is not None and following.kind == "op" and following.text == "=":
