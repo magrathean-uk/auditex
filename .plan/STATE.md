@@ -18,7 +18,7 @@ last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 
 ## Pending G decisions
 - Lead reports to the manager chat (DEC-073, DEC-103 manager session); product code on Claude seats, Codex reviews (DEC-077).
-- Isambard data kept, no deletion (DEC-141). Trial cancellation: G via Codex.
+- Isambard data kept, no deletion (DEC-141). Lab trials cancelled 21 Nov (28 trials and the Azure subscription, records TRIALS-CANCELLED-2026-11-21.md); a card stays on file for G.
 
 ## Re-baselines
 - from 100% (plan v3 closed at 1.4.0) to 4% (plan v4 scope and weights, DEC-001, approved by G on 11 Nov 2026)
