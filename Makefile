@@ -41,7 +41,7 @@ sample:
 # The reader app with its certificate (docs/guides/reader-app-permissions.md); no sign-in window opens.
 .PHONY: audit-full
 audit-full:
-	@./scripts/tenant-audit-full --tenant-id "$(TENANT_ID)" --tenant-name "$(TENANT_NAME)" --client-id "$(CLIENT_ID)" \
+	@AUDITEX_PYTHON="$(PYTHON)" ./scripts/tenant-audit-full --tenant-id "$(TENANT_ID)" --tenant-name "$(TENANT_NAME)" --client-id "$(CLIENT_ID)" \
 		--certificate-path "$(CERTIFICATE_PATH)" --certificate-thumbprint "$(CERTIFICATE_THUMBPRINT)"
 
 .PHONY: install

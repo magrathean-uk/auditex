@@ -172,3 +172,21 @@ def test_audit_deps_resolves_every_declared_extra(tmp_path: Path) -> None:
             words = line.split()
             resolved.add(words[words.index("--extra") + 1] if "--extra" in words else "base")
     assert resolved == {"base", *PYPROJECT["project"]["optional-dependencies"]}
+
+
+# R138: make audit-full runs the engine with the selected interpreter, not whatever python3 is on PATH.
+def test_audit_full_uses_the_selected_python(tmp_path: Path) -> None:
+    log = tmp_path / "python.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in ("python3", "selected-python"):
+        (fake_bin / name).write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' \"{name} $*\" >> {log}\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+    env = _env(PATH=f"{fake_bin}:{os.environ['PATH']}")
+    run = _make("audit-full", f"PYTHON={fake_bin / 'selected-python'}", "TENANT_ID=contoso.onmicrosoft.com",
+                "TENANT_NAME=CONTOSO", "CLIENT_ID=app-id", "CERTIFICATE_PATH=reader.key.pem",
+                "CERTIFICATE_THUMBPRINT=0123456789ABCDEF0123456789ABCDEF01234567", env=env, timeout=60)
+
+    assert run.returncode == 0, run.stderr[-2000:]
+    (line,) = log.read_text(encoding="utf-8").splitlines()
+    assert line.startswith("selected-python -m azure_tenant_audit --tenant-name CONTOSO"), line
