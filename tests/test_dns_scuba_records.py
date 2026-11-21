@@ -93,7 +93,7 @@ def bundle(root, payload, coverage=()):
     (['v=spf1 redirect=example.invalid'], True, 'SPF record found.'),
     (['v=spf1 +all'], False, 'SPF record found, but it does not fail unapproved senders or redirect to one that does.'),
     (['v=spf1 ?all'], False, 'SPF record found, but it does not fail unapproved senders or redirect to one that does.'),
-    (['v=spf1 -ALL'], False, 'SPF record found, but it does not fail unapproved senders or redirect to one that does.'),
+    (['v=spf1 -ALL'], True, 'SPF record found.'),  # R102: mechanism names are case-insensitive (RFC 7208)
     (['V=SPF1 -all'], False, 'Domain name exists but no SPF records returned.'),
     (['v=spf1'], False, 'Domain name exists but no SPF records returned.'),
     (['unrelated'], False, 'Domain name exists but no SPF records returned.'),
@@ -101,7 +101,7 @@ def bundle(root, payload, coverage=()):
     ([], False, 'Domain name exists but no answers returned.'),
 ])
 def test_spf(answers, compliant, message):
-    # SG-P:520-560: exact messages, prefix and substring case sensitivity.
+    # SG-P:520-560: exact messages and prefix case sensitivity; the all qualifier is tokenised (R102).
     result = dns.scuba_spf_record('example.invalid', Resolver({'example.invalid': answers}))
     assert result == {'domain': 'example.invalid', 'compliant': compliant, 'message': message,
                       'rdata': answers, 'log': [{

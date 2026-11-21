@@ -7,7 +7,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from auditex.scuba_projection import project_run
+from azure_tenant_audit import dns_lookup
 from azure_tenant_audit.collectors.exchange_defender_commands import DEFENDER_COMMANDS
 from azure_tenant_audit.value_rules import assess
 
@@ -55,3 +58,34 @@ def test_r002_collector_shaped_standard_preset_answers_spam_rows(tmp_path):
     for policy in ("MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1"):
         record = assess(policy, sections)
         assert (record["verdict"], record["cell"]) == ("met", "standard_covers_compliant"), policy
+
+
+# ---- R102: SPF compliance reads the terminal all mechanism's qualifier, not substrings ----
+
+class _TxtResolver:
+    def __init__(self, answers):
+        self.answers = answers
+
+    def query(self, name, record_type):
+        return list(self.answers.get(name, []))
+
+
+@pytest.mark.parametrize("record,compliant", [
+    ("v=spf1 include:spf.star-alliance.example ?all", False),
+    ("v=spf1 +all redirect=_spf.contoso.example", False),       # RFC 7208 6.1: redirect is ignored beside all
+    ("v=spf1 include:redirector.example.net +all", False),
+    ("v=spf1 include:_spf-all.example ?all", False),
+    ("v=spf1 ip4:192.0.2.0/24 -all", True),
+    ("v=spf1 ip4:192.0.2.0/24 ~all", True),
+    ("v=spf1 -ALL", True),                                       # mechanism names are case-insensitive
+    ("v=spf1 REDIRECT=_spf.contoso.example", True),
+    ("v=spf1 redirect=_spf.contoso.example", True),
+    ("v=spf1 -all +all", True),                                  # evaluation stops at the first all
+    ("v=spf1 all", False),
+    ("v=spf1 include:spf.contoso.example", False),
+])
+def test_r102_spf_compliance_tokenises_the_record(record, compliant):
+    entry = dns_lookup.scuba_spf_record("contoso.example", _TxtResolver({"contoso.example": [record]}))
+    assert entry["compliant"] is compliant
+    record = assess("MS.EXO.2.2v3", {"spf_records": [entry]})
+    assert record["verdict"] == ("met" if compliant else "not_met")

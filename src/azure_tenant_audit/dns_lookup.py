@@ -167,11 +167,25 @@ def _dmarc_log(name: str, answer: DnsAnswer) -> dict[str, Any]:
     return {**_dns_log(name, answer), "outcome": answer.outcome}
 
 
+def spf_fails_unapproved_senders(record: str) -> bool:
+    """RFC 7208 terms of one ``v=spf1`` record: the first ``all`` mechanism decides (``-all`` or ``~all``), and only a
+    record without one is judged by its ``redirect=`` modifier (section 6.1: redirect is ignored beside ``all``).
+
+    Divergence from SG-P:520-545, which tests raw substrings, so ``?all`` or ``+all`` beside a ``redirect`` or an
+    ``include:`` name holding "redirect" or "-all" passed (review R102). Names are case-insensitive (section 4.6.1).
+    """
+    for term in record.split()[1:]:
+        lowered = term.lower()
+        if lowered.lstrip("+-~?") == "all":
+            return lowered[0] in "-~"
+    return any(term.lower().startswith("redirect=") for term in record.split()[1:])
+
+
 def scuba_spf_record(domain: str, resolver: DnsResolver) -> dict[str, Any]:
     answer = _record_ask(resolver, domain)
-    # SG-P:520-545: case-sensitive prefix and substring checks, all TXT answers retained.
+    # SG-P:520-545: case-sensitive prefix check, all TXT answers retained; compliance is tokenised (R102).
     spf = [r for r in answer.records if r.startswith("v=spf1 ")]
-    compliant = any(any(tag in r for tag in ("-all", "~all", "redirect")) for r in spf)
+    compliant = any(spf_fails_unapproved_senders(r) for r in spf)
     if compliant:
         message = "SPF record found."
     elif spf:
