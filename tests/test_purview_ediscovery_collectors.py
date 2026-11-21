@@ -468,3 +468,35 @@ def test_ediscovery_collector_marks_partial_when_export_job_fails(monkeypatch) -
     failed_rows = [row for row in (result.coverage or []) if row["name"] == "exportJobs"]
     assert failed_rows and failed_rows[0]["status"] == "failed"
     assert failed_rows[0]["error_class"] == "insufficient_permissions"
+
+
+# ----- R107: the retired CLI operations are named skips, not command_not_found failures -----
+
+
+def _skips(result) -> dict[str, dict[str, object]]:
+    return {row["name"]: row for row in result.coverage if row.get("type") == "command"}
+
+
+def test_r107_purview_records_retired_cli_operations_as_named_skips() -> None:
+    result = PurviewCollector().run({"plane": "inventory", "audit_logger": None})
+
+    rows = _skips(result)
+    for name in ("retentionLabels", "retentionPolicies", "dlpPolicies"):
+        assert rows[name]["status"] == "skipped", name
+        assert rows[name]["reason"] == "m365_cli_not_used"
+        assert rows[name]["error_class"] is None
+    assert result.status == "ok"
+
+
+def test_r107_ediscovery_records_retired_cli_operations_as_named_skips() -> None:
+    result = EDiscoveryCollector().run(
+        {"client": _FakeGraphClient(responses={}), "top": None, "page_size": None, "plane": "inventory", "audit_logger": None}
+    )
+
+    rows = _skips(result)
+    for name in ("caseOverview", "searchList", "holdList"):
+        assert rows[name]["status"] == "skipped", name
+        assert rows[name]["reason"] == "m365_cli_not_used"
+        assert rows[name]["error_class"] is None
+    assert result.status == "ok"
+

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..adapters import get_adapter
+from ..adapters.m365_cli import M365_CLI_NOT_USED
 from .base import (
     Collector,
     CollectorResult,
@@ -172,6 +173,10 @@ class EDiscoveryCollector(Collector):
 
             if command_plane == "export":
                 response = self._run_command_variants(list(command["commands"]), command["name"], log_event)
+                if response.get("error") == M365_CLI_NOT_USED:
+                    payload[operation_name] = _retired_cli_skip(response, operation=operation_name)
+                    coverage.append(_retired_cli_coverage(self.name, command, response, plane))
+                    continue
                 payload[operation_name] = response
                 count = self._item_count(response)
                 total += count
@@ -240,6 +245,12 @@ class EDiscoveryCollector(Collector):
                 continue
 
             response = self._run_command_variants(list(command["commands"]), command["name"], log_event)
+            if response.get("error") == M365_CLI_NOT_USED:
+                # The CLI for Microsoft 365 is no longer run (DEC-108 D2): a named skip, as exchange records, not a
+                # command_not_found failure that reads as a missing local tool and makes the collector partial.
+                payload[operation_name] = _retired_cli_skip(response, operation=operation_name)
+                coverage.append(_retired_cli_coverage(self.name, command, response, plane))
+                continue
             payload[command["name"]] = response
             count = self._item_count(response)
             total += count
@@ -263,7 +274,7 @@ class EDiscoveryCollector(Collector):
                 }
             )
 
-        partial = any(row.get("status") != "ok" for row in coverage)
+        partial = any(row.get("status") not in {"ok", "skipped"} for row in coverage)
         return CollectorResult(
             name=self.name,
             status="partial" if partial else "ok",
@@ -327,3 +338,35 @@ class EDiscoveryCollector(Collector):
         response = adapter.run(command, log_event=log_event)
         response.setdefault("command", command)
         return response
+
+
+def _retired_cli_skip(response: dict[str, Any], *, operation: str) -> dict[str, Any]:
+    """The payload of an operation the retired CLI for Microsoft 365 would have run: a named skip, no error."""
+    return {
+        "value": [],
+        "status": "skipped",
+        "reason": M365_CLI_NOT_USED,
+        "operation": operation,
+        "command": response.get("command"),
+        "command_variants": response.get("command_variants"),
+        "source": response.get("source", "command"),
+    }
+
+
+def _retired_cli_coverage(collector: str, command: dict[str, Any], response: dict[str, Any], plane: str) -> dict[str, Any]:
+    return {
+        "collector": collector,
+        "type": "command",
+        "category": command.get("category", "inventory"),
+        "name": str(command["name"]),
+        "source": response.get("source", "command"),
+        "command": response.get("command"),
+        "command_variants": list(command["commands"]),
+        "status": "skipped",
+        "reason": M365_CLI_NOT_USED,
+        "item_count": 0,
+        "duration_ms": response.get("duration_ms", 0.0),
+        "error_class": None,
+        "error": None,
+        "plane": plane,
+    }
