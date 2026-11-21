@@ -2019,7 +2019,13 @@ def build_normalized_snapshot(
             scope=item.get("scope"),
             consent_type=item.get("consentType"),
             principal_id=item.get("principalId"),
-            owner_count=len(app_owners_by_sp_id.get(str(item.get("clientId")), [])),
+            # None when the client's owners were never read (fan-out limit or a failed read), so an unread
+            # owner list is never reported as an app with no owners.
+            owner_count=(
+                len(app_owners_by_sp_id[str(item.get("clientId"))] or [])
+                if str(item.get("clientId")) in app_owners_by_sp_id
+                else None
+            ),
             source_name="oauth2PermissionGrants",
         )
         for item in _values(app_consent_payload, "oauth2PermissionGrants")

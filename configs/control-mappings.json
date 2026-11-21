@@ -661,12 +661,6 @@
     ]
   },
   "app_consent.high_privilege": {
-    "cis_m365_v7": [
-      "5.1.5.1"
-    ],
-    "cisa_scuba": [
-      "MS.AAD.5.2v1"
-    ],
     "ms_secure_score": [
       "IntegratedApps"
     ],

@@ -473,7 +473,6 @@
       "framework": "cis_m365_v7",
       "title": "Rules mapped to cis_m365_v7",
       "rules": [
-        "app_consent.high_privilege",
         "app_credentials.secret_long_validity",
         "ca.admin_mfa_not_enforced",
         "ca.admin_mfa_role_set_incomplete",
@@ -515,7 +514,6 @@
       "framework": "cisa_scuba",
       "title": "Rules mapped to cisa_scuba",
       "rules": [
-        "app_consent.high_privilege",
         "ca.admin_mfa_not_enforced",
         "ca.admin_mfa_role_set_incomplete",
         "ca.admin_phishing_resistant_mfa_not_enforced",

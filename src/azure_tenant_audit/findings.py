@@ -3479,7 +3479,9 @@ def _normalized_findings(
             continue
         scope_tokens = {str(token) for token in str(item.get("scope") or "").split() if token}
         high_risk = sorted(scope_tokens & risky_scopes)
-        if not high_risk and int(item.get("owner_count") or 0) > 0:
+        owner_count = item.get("owner_count")
+        # owner_count None means the owners were never read: only a read, empty owner list is weak ownership.
+        if not high_risk and (owner_count is None or int(owner_count) > 0):
             continue
         findings.append(
             _finalize_finding(

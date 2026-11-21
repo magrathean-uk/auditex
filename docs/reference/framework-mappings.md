@@ -100,7 +100,7 @@ Corrections compared with the old `cis_m365_v3` values:
 | `collector.issue.*`, `coverage.gap`, `service_health.active_service_issue` | `1.1.1` | none (diagnostic) |
 | `sharepoint.broad_link` | `7.2.5`, `7.2.7` | `7.2.3`, `7.2.7` |
 | `sharepoint.external_principal` | `7.2.5`, `7.2.7` | `7.2.3`, `7.2.6` |
-| `app_consent.high_privilege` | `5.1.6`, `5.2.5` | `5.1.5.1` |
+| `app_consent.high_privilege` | `5.1.6`, `5.2.5` | none (a per-grant finding; user consent is read by `consent_policy.user_consent_*`) |
 | `consent_policy.admin_consent_workflow_disabled` | `5.1.5`, `5.2.5` | `5.1.5.2` |
 | `external_identity.broad_guest_invite_policy` | `1.1.5` | `5.1.6.3` |
 | `mailbox_forwarding.external_inbox_rule` | `1.2.2`, `6.2.1` | `6.2.1` |
