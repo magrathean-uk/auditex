@@ -116,6 +116,10 @@ release-archive:
 		$(PYTHON) -m pip wheel --no-deps --no-build-isolation --no-index --wheel-dir "$$dir/wheel" "$$dir/source"; \
 		$(PYTHON) scripts/check-archive-wheel.py "$$dir/source/src" "$$dir"/wheel/*.whl
 
+# The artefacts land in $(DIST_DIR); earlier auditex wheels and sdists there are removed first, so the
+# folder holds only this build (release smoke and the gh release command take every file in it).
+DIST_DIR ?= dist
+
 .PHONY: dist
 dist:
 	@set -eu; \
@@ -132,8 +136,9 @@ dist:
 		$(abspath $(PYTHON)) -c 'import setuptools.build_meta as b, sys; b.build_wheel(sys.argv[1])' "$$dir/artifacts"; \
 		set -- "$$dir"/artifacts/*.whl; test -f "$$1"; \
 		set -- "$$dir"/artifacts/*.tar.gz; test -f "$$1"; \
-		mkdir -p "$(CURDIR)/dist"; \
-		cp "$$dir"/artifacts/*.whl "$$dir"/artifacts/*.tar.gz "$(CURDIR)/dist/"
+		mkdir -p "$(abspath $(DIST_DIR))"; \
+		rm -f "$(abspath $(DIST_DIR))"/auditex-*.whl "$(abspath $(DIST_DIR))"/auditex-*.tar.gz; \
+		cp "$$dir"/artifacts/*.whl "$$dir"/artifacts/*.tar.gz "$(abspath $(DIST_DIR))/"
 
 # contract-smoke only: each sample run's collection made a private 32-byte pseudonym key; this asserts it and
 # replaces it with a fixed seed derived from the run folder name, through the file the product reads, so pseudonyms in

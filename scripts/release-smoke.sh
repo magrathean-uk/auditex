@@ -7,15 +7,21 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DIST_DIR="${1:-${REPO_ROOT}/dist}"
 SMOKE_PARENT="${2:-${TMPDIR:?TMPDIR must be set}/auditex-release-smoke}"
 
-WHEEL_PATH="$(printf '%s\n' "${DIST_DIR}"/*.whl | head -n 1)"
-if [[ ! -f "${WHEEL_PATH}" ]]; then
-  echo "wheel not found under ${DIST_DIR}" >&2
+# Exactly one wheel and one sdist, both of the version in pyproject.toml: a stale or newer build left in
+# the folder must never stand in for the one being released.
+VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "${REPO_ROOT}/pyproject.toml" | head -n 1)"
+shopt -s nullglob
+wheels=("${DIST_DIR}"/*.whl)
+sdists=("${DIST_DIR}"/*.tar.gz)
+shopt -u nullglob
+if [[ ${#wheels[@]} -ne 1 || ${#sdists[@]} -ne 1 ]]; then
+  echo "expected exactly one wheel and one sdist under ${DIST_DIR}, found ${#wheels[@]} and ${#sdists[@]}; run make dist" >&2
   exit 2
 fi
-
-SDIST_PATH="$(printf '%s\n' "${DIST_DIR}"/*.tar.gz | head -n 1)"
-if [[ ! -f "${SDIST_PATH}" ]]; then
-  echo "sdist not found under ${DIST_DIR}" >&2
+WHEEL_PATH="${DIST_DIR}/auditex-${VERSION}-py3-none-any.whl"
+SDIST_PATH="${DIST_DIR}/auditex-${VERSION}.tar.gz"
+if [[ -z "${VERSION}" || "${wheels[0]}" != "${WHEEL_PATH}" || "${sdists[0]}" != "${SDIST_PATH}" ]]; then
+  echo "the artefacts under ${DIST_DIR} are not auditex-${VERSION} (the pyproject.toml version); run make dist" >&2
   exit 2
 fi
 if [[ -n "${PYTHON:-}" ]]; then
