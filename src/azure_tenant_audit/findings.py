@@ -1696,7 +1696,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
         metadata["description"] = (
             "Everyone is required to use MFA, but only by combining policies: the all-users policy excludes "
             f"{_exclusion_text(rows, len(covered))}, and a separate policy for the administrator roles requires MFA of "
-            "them. CIS 5.2.2.2 and ScubaGear MS.AAD.3.2v1 look for one all-users policy that excludes nobody but "
+            "them. CIS 5.2.2.2 and ScubaGear MS.AAD.3.2v2 look for one all-users policy that excludes nobody but "
             "documented emergency access accounts, so they are not met. Cyber Essentials reads the combined result."
         )
         findings.append(

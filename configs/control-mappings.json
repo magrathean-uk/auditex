@@ -685,7 +685,7 @@
       "2.1.8"
     ],
     "cisa_scuba": [
-      "MS.EXO.2.2v2"
+      "MS.EXO.2.2v3"
     ],
     "ms_secure_score": [
       "exo_SPF_records_for_all_domains"
@@ -718,7 +718,7 @@
       "2.1.8"
     ],
     "cisa_scuba": [
-      "MS.EXO.2.2v2"
+      "MS.EXO.2.2v3"
     ],
     "ms_secure_score": [
       "exo_SPF_records_for_all_domains"
@@ -837,7 +837,7 @@
       "2.1.8"
     ],
     "cisa_scuba": [
-      "MS.EXO.2.2v2"
+      "MS.EXO.2.2v3"
     ],
     "ms_secure_score": [
       "exo_SPF_records_for_all_domains"
@@ -2128,7 +2128,7 @@
       "5.2.2.2"
     ],
     "cisa_scuba": [
-      "MS.AAD.3.2v1"
+      "MS.AAD.3.2v2"
     ],
     "ms_secure_score": [
       "MFARegistrationV2"
@@ -2170,7 +2170,7 @@
       "5.2.2.2"
     ],
     "cisa_scuba": [
-      "MS.AAD.3.2v1"
+      "MS.AAD.3.2v2"
     ],
     "ms_zero_trust": [
       "identities"
@@ -3467,7 +3467,7 @@
           "5.2.2.2"
         ],
         "cisa_scuba": [
-          "MS.AAD.3.2v1"
+          "MS.AAD.3.2v2"
         ]
       }
     },

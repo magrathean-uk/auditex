@@ -262,7 +262,7 @@ verdict, caused by a blocked, truncated or missing policy read, raises the match
 (`ca.enforcement_unverified`, `consent_policy.user_consent_unverified`) instead. Those two rules
 claim no benchmark control, so an unreadable policy list is neither a pass nor a failure.
 
-- `ca.mfa_not_enforced` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v1` (MFA for all users).
+- `ca.mfa_not_enforced` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v2` (MFA for all users).
   ScubaGear requires every user, group and guest exclusion to be on an allow-list and no role to be
   excluded; the shipped rule reads the operator's break-glass list as that allow-list, so a policy that
   excludes the Global Administrator role, an all-staff group or all guests does not pass either control.
@@ -284,7 +284,7 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   own yet and is not mapped. It is also raised when the phishing-resistant policies do not cover ScubaGear's
   eight privileged roles (or exclude one), whoever holds them today, as ScubaGear requires; an all-users
   phishing-resistant policy still passes, which ScubaGear does not accept.
-- `ca.mfa_split_across_policies` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v1` (and the MCSB, Zero Trust, NIST, ISO,
+- `ca.mfa_split_across_policies` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v2` (and the MCSB, Zero Trust, NIST, ISO,
   SOC 2, NIS2, DORA and ATT&CK anchors of `ca.mfa_not_enforced`), not to Secure Score or Cyber Essentials. The
   `effective_mfa` verdict, which Cyber Essentials reads, counts an administrator role that an all-users policy excludes
   as covered when a role-targeted MFA policy includes it. The two benchmark controls look for a single policy that
@@ -301,7 +301,7 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
 - Security defaults and the benchmark controls: security defaults keep the three verdicts `enforced` or `blocked`
   with `basis: [security_defaults]`, and Cyber Essentials, Zero Trust and Secure Score read that as enforcement
   (Secure Score is Microsoft's own scoring, and the reconciliation compares Auditex with it as it stands). CIS `5.2.2.1` to
-  `5.2.2.3` and SCuBA `MS.AAD.3.2v1` and `MS.AAD.1.1v1` audit a Conditional Access policy (ScubaGear and Prowler
+  `5.2.2.3` and SCuBA `MS.AAD.3.2v2` and `MS.AAD.1.1v1` audit a Conditional Access policy (ScubaGear and Prowler
   evaluate policies only), so baseline alignment reads those controls `not_assessed` with
   `conditional_access_policy_required:basis_security_defaults` while no qualifying policy backs the verdict (security
   defaults beside a Conditional Access policy that has gaps list only `security_defaults` in `basis`). The table is

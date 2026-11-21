@@ -59,7 +59,7 @@
       "controls": {
         "MS.AAD.1.1v1": "Legacy authentication blocked",
         "MS.AAD.3.1v1": "Phishing-resistant MFA for all users",
-        "MS.AAD.3.2v1": "Alternative MFA when phishing-resistant MFA is not enforced",
+        "MS.AAD.3.2v2": "MFA enforced for all users",
         "MS.AAD.3.6v1": "Phishing-resistant MFA for highly privileged roles",
         "MS.AAD.5.2v1": "Only administrators consent to applications",
         "MS.AAD.5.3v1": "Admin consent workflow configured",
@@ -67,7 +67,7 @@
         "MS.AAD.7.2v1": "Finer-grained roles instead of Global Administrator",
         "MS.AAD.8.2v1": "Only Guest Inviter role can invite guests",
         "MS.EXO.1.1v2": "Automatic forwarding to external domains disabled",
-        "MS.EXO.2.2v2": "SPF policy fails non-approved senders",
+        "MS.EXO.2.2v3": "SPF policy fails non-approved senders",
         "MS.EXO.3.1v1": "DKIM enabled for all domains",
         "MS.EXO.4.1v1": "DMARC published for second-level domains",
         "MS.EXO.4.2v1": "DMARC policy is reject",
