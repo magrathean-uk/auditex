@@ -126,3 +126,22 @@ def test_secure_write_json_sets_posix_private_file_mode(tmp_path) -> None:
     # Windows and some mounted filesystems can ignore chmod; POSIX CI should be strict.
     if mode is not None:
         assert mode & 0o077 == 0
+
+
+def test_redact_text_masks_quoted_secret_with_escaped_quote() -> None:
+    """R093: a quoted secret holding an escaped quote is masked whole, not up to the escape."""
+    from azure_tenant_audit.secret_hygiene import redact_text
+
+    double = redact_text('{"password": "Pa\\"ss-Secret99", "x": 1}')
+    single = redact_text("password='Pa\\'ss-Secret99'")
+    assert "Secret99" not in double
+    assert double.endswith(', "x": 1}')
+    assert "Secret99" not in single
+
+
+def test_redact_argv_masks_single_token_flag_and_value() -> None:
+    """R093: a malformed single argv token '--client-secret value' is masked like parse_guarded treats it."""
+    from azure_tenant_audit.secret_hygiene import redact_argv
+
+    assert redact_argv(["tool", "--client-secret abc123"]) == ["tool", "--client-secret ***redacted***"]
+    assert redact_argv(["tool", "--tenant-id contoso"]) == ["tool", "--tenant-id contoso"]
