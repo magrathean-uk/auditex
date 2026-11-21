@@ -1818,6 +1818,16 @@ def _local_path_label(value: Any) -> Any:
     return value
 
 
+def _local_path_argument(value: Any) -> Any:
+    """One command-line item: a bare absolute path, or the value of ``--flag=/abs/path``, as ``<local-path>/<name>``."""
+    if isinstance(value, str) and value.startswith("--") and "=" in value:
+        flag, _, path = value.partition("=")
+        if _LOCAL_ABSOLUTE_PATH.match(path):
+            return f"{flag}={_local_path_label(path)}"
+        return value
+    return _local_path_label(value)
+
+
 def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> dict[str, Any]:
     """``run-manifest.json`` for a customer: no absolute path of the machine that ran the audit.
 
@@ -1830,7 +1840,7 @@ def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> d
     if isinstance(safe.get("waiver_path"), str):
         safe["waiver_path"] = _local_path_label(safe["waiver_path"])
     if isinstance(safe.get("command_line"), list):
-        safe["command_line"] = [_local_path_label(item) for item in safe["command_line"]]
+        safe["command_line"] = [_local_path_argument(item) for item in safe["command_line"]]
     return safe
 
 

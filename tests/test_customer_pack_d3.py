@@ -93,3 +93,40 @@ def test_handoff_routes_refuse_normalised_fifo_before_validation(planted_run: Pa
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
+
+
+def test_customer_pack_run_manifest_relabels_flag_equals_paths(tmp_path: Path) -> None:
+    """R021: '--out=/abs/path' style command-line items lose the operator's absolute path in the pack."""
+    from auditex.reporting import write_enterprise_handoff_pack
+
+    run = offline_run(tmp_path, "r021")
+    manifest_path = run / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    operator = tmp_path / "operator-home" / "Clients" / "Acme"
+    windows = "C:\\Users\\operator\\Clients\\Acme\\sample.json"
+    manifest["command_line"] = [
+        "azure-tenant-audit",
+        f"--out={operator / 'audits'}",
+        f"--waiver-file={operator / 'waivers.json'}",
+        f"--sample={windows}",
+        "--tenant-name=r021",
+        "--resume-from",
+        str(operator / "previous"),
+    ]
+    manifest_path.write_text(json.dumps(manifest))
+    rehash(run)
+
+    target = tmp_path / "pack"
+    write_enterprise_handoff_pack(run, target)
+    copied = json.loads((target / "source-artifacts" / "run-manifest.json").read_text())
+    assert copied["command_line"] == [
+        "azure-tenant-audit",
+        "--out=<local-path>/audits",
+        "--waiver-file=<local-path>/waivers.json",
+        "--sample=<local-path>/sample.json",
+        "--tenant-name=r021",
+        "--resume-from",
+        "<local-path>/previous",
+    ]
+    text = json.dumps(copied)
+    assert "operator-home" not in text and "C:\\\\Users" not in text
