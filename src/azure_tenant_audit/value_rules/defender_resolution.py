@@ -6,7 +6,15 @@ accepted_domains is optional and only informs domain-scope comparisons.
 """
 from __future__ import annotations
 
-from .helpers import BUILTIN, EXCEPT_KEYS, PRESET_RE, _accepted, _cover, _empty3, _licence_cell
+from .helpers import (
+    BUILTIN,
+    EXCEPT_KEYS,
+    PRESET_RE,
+    _accepted,
+    _cover,
+    _empty3,
+    _licence_cell,
+)
 from .record import _A, BAD_SECTION_LIST, ITEM_VALUE, _rec
 
 
