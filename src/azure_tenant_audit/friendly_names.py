@@ -77,6 +77,14 @@ def _catalog_entry(section: str, record: Mapping[str, Any]) -> tuple[dict[str, A
 
 
 def _iter_source_records(value: Any) -> list[Mapping[str, Any]]:
+    """Every record in a collector section, each once (the inline 'value' rows are also reached by the walk)."""
+    unique: dict[int, Mapping[str, Any]] = {}
+    for record in _walk_source_records(value):
+        unique.setdefault(id(record), record)
+    return list(unique.values())
+
+
+def _walk_source_records(value: Any) -> list[Mapping[str, Any]]:
     records: list[Mapping[str, Any]] = []
     if isinstance(value, Mapping):
         if any(key in value for key in _ID_KEYS):
@@ -86,11 +94,11 @@ def _iter_source_records(value: Any) -> list[Mapping[str, Any]]:
             records.extend(item for item in nested_value if isinstance(item, Mapping))
         for nested in value.values():
             if isinstance(nested, (dict, list)):
-                records.extend(_iter_source_records(nested))
+                records.extend(_walk_source_records(nested))
     elif isinstance(value, list):
         for item in value:
             if isinstance(item, (dict, list)):
-                records.extend(_iter_source_records(item))
+                records.extend(_walk_source_records(item))
     return records
 
 

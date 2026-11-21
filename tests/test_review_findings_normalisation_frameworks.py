@@ -189,3 +189,15 @@ def test_r049_remediated_dismissed_or_safe_signins_raise_no_finding() -> None:
     assert len(records) == 4
     ids = [item["id"] for item in _rule_findings(snapshot, "security.risky_signin")]
     assert ids == ["security_signin:s-4:risky"]
+
+
+# ---- R105: each inline record counts once for missing labels -------------------------------------------------------
+
+
+def test_r105_inline_records_are_counted_once() -> None:
+    from azure_tenant_audit.friendly_names import _iter_source_records, build_friendly_name_catalog
+
+    view = {"value": [{"id": "a"}, {"id": "b", "displayName": "B"}]}
+    assert len(_iter_source_records(view)) == 2
+    _entries, missing = build_friendly_name_catalog({}, collector_payloads={"identity": {"users": view}})
+    assert missing == 1
