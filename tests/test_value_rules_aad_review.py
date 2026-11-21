@@ -88,3 +88,43 @@ def test_r001_block_beside_terms_of_use_stays_decided_by_block():
            users={"IncludeUsers": ["All"]})
     p["Conditions"]["ClientAppTypes"] = ["exchangeActiveSync", "other"]
     assert cell("MS.AAD.1.1v1", ca_sections(p)) == ("met", "met_policy_clean")
+
+
+# R027: a gap every control-carrying policy shares cannot be closed by their union.
+
+MFA = {"BuiltInControls": ["mfa"], "Operator": "OR"}
+
+
+@pytest.mark.xfail(strict=True, reason="pinned v3.9.1 vectors two_partial_no_role_excl (D57) require union_possible; needs a spec and vector change")
+def test_r027_shared_excluded_role_is_not_met_not_union_possible():
+    one = ca(MFA, users={"ExcludeRoles": ["synthetic-role"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one)) == ("not_met", "no_policy_meets")
+    assert cell("MS.AAD.3.2v2", ca_sections(one, deepcopy(one))) == ("not_met", "no_policy_meets")
+
+
+@pytest.mark.parametrize("field", ["ExcludeUsers", "ExcludeGroups"])
+def test_r027_shared_non_exempt_exclusion_is_not_met_not_union_possible(field):
+    one = ca(MFA, users={field: ["synthetic-principal"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one)) == ("not_met", "near_miss_exclusions")
+    assert cell("MS.AAD.3.2v2", ca_sections(one, deepcopy(one))) == ("not_met", "near_miss_exclusions")
+
+
+def test_r027_shared_non_exempt_application_is_not_met():
+    one = ca(MFA, apps={"ExcludeApplications": ["synthetic-app"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, deepcopy(one))) == ("not_met", "near_miss_exclusions")
+
+
+def test_r027_different_gaps_can_still_close_in_union():
+    one = ca(MFA, users={"ExcludeRoles": ["synthetic-role-a"]})
+    two = ca(MFA, users={"ExcludeRoles": ["synthetic-role-b"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, two)) == ("not_assessed", "union_possible")
+    one = ca(MFA, users={"ExcludeUsers": ["synthetic-a"]})
+    two = ca(MFA, users={"ExcludeUsers": ["synthetic-b"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, two)) == ("not_assessed", "union_possible")
+
+
+def test_r027_exempt_shared_exclusion_does_not_decide():
+    one = ca(MFA, users={"ExcludeUsers": ["synthetic-break-glass"], "IncludeUsers": ["synthetic-a"]})
+    two = ca(MFA, users={"ExcludeUsers": ["synthetic-break-glass"], "IncludeUsers": ["synthetic-b"]})
+    config = {"Aad": {"MS.AAD.3.2v1": {"CapExclusions": {"Users": ["synthetic-break-glass"]}}}}
+    assert cell("MS.AAD.3.2v2", ca_sections(one, two, config=config)) == ("not_assessed", "union_possible")

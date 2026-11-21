@@ -559,6 +559,10 @@ def _ca_exists(policy_id, sp, sections):
         return _A(policy_id, ITEM_VALUE, "Data unusable: the exemption entry is written under MS.AAD.3.2v2, which ScubaGear ignores (it reads MS.AAD.3.2v1); the policy was not assessed.",
                   "exemption_key_ambiguous", ["scuba_config"])
     ctl = [r for r in res if r[1]]
+    if len(ctl) >= 2 and not restricted_pass:
+        if _shared_gap(c, [p for p, r in zip(objs, res, strict=True) if r[1]], sections, allowed_sets):
+            return _rec(policy_id, "not_met", "exclusions_not_configured", "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list.",
+                        "near_miss_exclusions", None)
     if len(ctl) >= 2:
         return _A(policy_id, "data_unusable_policy_set", "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed.",
                   "union_possible", [CA_ID])
@@ -569,6 +573,32 @@ def _ca_exists(policy_id, sp, sections):
         return _rec(policy_id, "not_met", "exclusions_not_configured", "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list.",
                     "near_miss_exclusions", None)
     return _rec(policy_id, "not_met", "no_policy_meets_requirement", f"Requirement not met: no Conditional Access policy meets every condition ({sp['what']}).", "no_policy_meets", None)
+
+
+_EXCLUDED = {"users": (("Conditions", "Users", "ExcludeUsers"), "Users"), "groups": (("Conditions", "Users", "ExcludeGroups"), "Groups"),
+             "apps": (("Conditions", "Applications", "ExcludeApplications"), "Applications")}
+
+
+def _shared_gap(c, ctl_objs, sections, allowed_sets):
+    """Review R027: True when every control-carrying object excludes the same user, group or application and it is not on the configured exemption list, so no
+    union of them can cover it (the near miss of each object is then a near miss of the set). False where a list or the exemption list cannot be read (the union
+    stays possible). Guest exclusions are not read here: they also name tenants, so the same guest type may be excluded for different tenants. A role excluded by
+    every object stays union_possible: the pinned v3.9.1 vectors (two_partial_no_role_excl, D57) fix that answer until the spec changes."""
+    def common(path):
+        lists = [_lst(p, *path) for p in ctl_objs]
+        if any(v is None for v in lists):
+            return set()
+        return set.intersection(*(set(v) for v in lists))
+    for kind in c["ex"]:
+        if kind not in _EXCLUDED:
+            continue
+        path, cfgkey = _EXCLUDED[kind]
+        if kind not in allowed_sets:
+            allowed_sets[kind] = _allowed_exemptions(sections, c["key"], cfgkey)
+        allowed = allowed_sets[kind]
+        if allowed is not None and common(path) - allowed:
+            return True
+    return False
 
 
 def _v2_key(sections):
