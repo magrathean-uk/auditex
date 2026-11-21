@@ -7,8 +7,10 @@ remove all of it afterwards. Nothing outside this guide is needed, and nothing i
 full audit unless it says so.
 
 The reader app never uses a client secret, never uses a delegated permission and never opens a sign-in
-window. Auditex only reads: it never changes a setting, never reads a message, file or chat, and never
-writes to your tenant.
+window. Auditex only makes read requests: it does not change a setting, does not open a message, file or chat, and
+does not write to your tenant. Some of the permissions below allow more than Auditex does with them, because
+Microsoft offers nothing narrower; [If the private key is stolen](#if-the-private-key-is-stolen) says what they
+would allow in the wrong hands, so that you can decide with the full picture.
 
 Who does what:
 

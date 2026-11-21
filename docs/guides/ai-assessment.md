@@ -1,7 +1,8 @@
 # AI assessment
 
-`auditex assess <run-dir>` writes an optional rule-only CISA SCuBA assessment from a finished
-Microsoft 365 run's local evidence. It writes private `model_assessment.json` (the file name is kept for
+`auditex assess <run-dir>` writes an optional rule-only assessment against the CISA SCuBA baselines from a finished
+Microsoft 365 run's local evidence. Despite the page name, no AI model takes part. It is Auditex's own reading of
+the published baselines: it is not a CISA or ScubaGear result and CISA has not reviewed or endorsed it. It writes private `model_assessment.json` (the file name is kept for
 compatibility) without changing findings, scores, reports, exports or customer packs. Nothing is sent anywhere:
 the assessment is computed locally from the run bundle.
 

@@ -2,7 +2,7 @@
 
 See [default Exchange and public DNS collection](setup-guide.md#default-exchange-and-public-dns-collection) for default collector selection, external requests, deselection and failure semantics.
 
-Auditex is an audit-only evidence collection and reporting toolkit for Microsoft 365 and Google Workspace. It gathers read-only posture evidence, records exactly what was attempted, normalizes the evidence into a stable bundle, and produces a customer review pack with finding-to-evidence references and recorded coverage gaps.
+Auditex is an audit-only evidence collection and reporting toolkit for Microsoft 365 and Google Workspace. It gathers read-only posture evidence, records what was attempted, normalizes the evidence into a stable bundle, and produces a customer review pack with finding-to-evidence references and recorded coverage gaps.
 
 ## What Auditex Does
 
@@ -21,6 +21,7 @@ Auditex is an audit-only evidence collection and reporting toolkit for Microsoft
 - It does not read Gmail bodies, Drive file content, Exchange mailbox bodies, SharePoint file content, or OneDrive file content.
 - It does not place tenant credentials, service-account keys, OAuth caches, or bearer material into repo defaults or customer packs.
 - It does not hide missing permissions, missing licenses, or blocked APIs.
+- It does not certify anything. A report is evidence for a reviewer, not a certificate, an assurance opinion or legal advice, and a mapping to CIS, CISA SCuBA, Cyber Essentials or another framework is not an assessment against it.
 
 ## Install
 
@@ -485,7 +486,7 @@ The deterministic rule pre-checks are described in [AI assessment](ai-assessment
 After a run, `auditex explain <run-dir>` (or `auditex run ... --explain`) answers in plain sentences what is wrong in
 the tenant, the most severe first, and what is right. The value rules decide every verdict and the order. A local model
 only chooses which prepared sentences and values to show for each check, and Auditex checks and renders every word, so
-the model cannot change a verdict, drop a check that is not met or follow instructions hidden in tenant text. A choice
+the model cannot change a verdict or drop a check that is not met, and text from the tenant cannot add words to the answer. A choice
 that does not pass the checks shows that check's fixed text, and the answer says how many checks did.
 
 - The answer is written into the run as `local_answer.json`, shown as a `local_answer` section by `auditex report

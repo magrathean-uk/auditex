@@ -72,7 +72,7 @@ SensitiveUsers. Neither input enters projected views or prompts.
 Use `--partner-domains FILE` on `auditex run`, `azure-tenant-audit` or
 `auditex guided-run`, or set `AUDITEX_PARTNER_DOMAINS_FILE`; the flag wins.
 Offline replay accepts it too. This local input needs no additional tenant
-permission. Domains are not personal data but are customer-confidential.
+permission. Domains are customer-confidential, and a domain that names a person (a sole trader's, for example) is also personal data.
 
 Supply a regular UTF-8 file (optional initial BOM), one bare domain per line or
 a JSON array of strings, at most 256 KiB and 10,000 entries. Blank text lines

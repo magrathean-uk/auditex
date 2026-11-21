@@ -44,4 +44,4 @@ Agent-specific rules are in [AGENTS.md](../AGENTS.md). The [output contract](../
 
 ## Pull requests and licensing
 
-Explain the change, its validation, and any remaining limitation. Preserve unrelated work and existing attribution. Keep contributions compatible with the project's [Apache 2.0 license](../LICENSE) and record third-party origins in [third-party notices](../docs/legal/third-party-notices.md) and the [provenance notes](../docs/provenance/provenance.md) where relevant. Do not copy code or data whose license you cannot establish.
+Explain the change, its validation, and any remaining limitation. Preserve unrelated work and existing attribution. Keep contributions compatible with the project's [Apache 2.0 license](../LICENSE) and record third-party origins in [third-party notices](../docs/legal/third-party-notices.md) and the [provenance notes](../docs/provenance/provenance.md) where relevant. Do not copy code or data whose license you cannot establish. By contributing you license your contribution under the Apache License 2.0 and confirm you have the right to do so; sign off each commit (`git commit -s`).

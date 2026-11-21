@@ -1,6 +1,6 @@
 # Auditex documentation
 
-This index separates operator guidance, product assurance, and provenance material. Start
+This index separates operator guidance, the security model and contracts, and provenance material. Start
 with the [repository README](../README.md) for a short overview and the
 [runbook](development/runbook.md) for commands and local checks.
 
@@ -18,7 +18,7 @@ questions and issue reports, see [SUPPORT.md](../.github/SUPPORT.md).
 - [Model Development (retired)](guides/model-development.md): retirement note for the removed model layer and the `auditex assess` replacement.
 - [Troubleshooting Guide](guides/troubleshooting.md): local runtime, authentication, provider scope, report, and pack failures.
 
-## Assurance and contracts
+## Security model and contracts
 
 - [Security and Privacy Model](reference/security-privacy.md): authorization boundary, read-only rules, no-content-read policy, local evidence, auth material, and telemetry.
 - [Output Contract](reference/output-contract.md): finalized bundle artifacts, validation, evidence references, and MCP contract surfaces; [template explainer](reference/output-contract.md#explainer-additive-field-schema-2026-11-05).

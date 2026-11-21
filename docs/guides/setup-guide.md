@@ -38,10 +38,10 @@ collector and run **ok** when other reads succeed; the gate passes with a named
 limitation. The gap remains in coverage, collection gaps, the handoff, explorer and
 AI context.
 
-The run sends the tenant's domain names to the **DNS-over-HTTPS resolver**: the public
+The run sends the tenant's domain names to the **DNS-over-HTTPS resolver**, a third party: the public
 Cloudflare resolver, `https://cloudflare-dns.com/dns-query`, unless `--doh-endpoint URL`
 or `AUDITEX_DOH_ENDPOINT` names another plain `https://` resolver. Only domain names,
-no user data, are sent to that resolver. SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange
+no user data, are sent to that resolver; tell the tenant owner if that matters to them. SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange
 accepted domains (coexistence excluded) when the same run collected them, else
 Graph verified domains with the Email service. Posture checks and MTA-STS and
 public Entra OpenID discovery HTTPS reads stay on Graph-verified domains. No

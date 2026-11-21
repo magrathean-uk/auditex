@@ -10,6 +10,28 @@ given explicit written authorization. The operator remains responsible for the
 applicable Microsoft, Google, legal, regulatory, and data-protection
 requirements.
 
+## Who is responsible for the data
+
+Auditex is software you run yourself. MAGRATHEAN UK LTD does not receive, store or
+see the evidence, the reports or the credentials, so it is neither a controller nor
+a processor of that data.
+
+A run folder holds personal data about the tenant's users. Under UK GDPR and
+similar laws:
+
+- If you audit your own organisation's tenant, your organisation is the controller
+  of that data, as it already is for the tenant.
+- If you audit a customer's tenant, you normally act for the customer as their
+  processor. Agree the audit in writing first, including what you may collect, who
+  may see the result, how long you keep it and when you delete it. If you are not
+  already covered by a data processing agreement with the customer, put one in
+  place.
+- Keep run folders and packs on encrypted storage, share them only with the people
+  the tenant owner has agreed, and delete them when the agreed period ends. Deleting
+  the output directory removes the evidence; Auditex keeps no other copy.
+
+This is a description of how the tool works, not legal advice on your duties.
+
 The audit plane must not write to production tenants. This covers Microsoft
 365 and Google Workspace audit runs, probes, reports, exports, MCP audit tools,
 customer-pack creation, and customer-pack verification. Lab-only response
@@ -23,7 +45,9 @@ The Teams policy reader adds `api.interfaces.records.teams.microsoft.com` for fi
 Audit collectors must not read Gmail or Exchange message bodies, or Drive,
 SharePoint, or OneDrive file content. Metadata and settings can still contain
 personal data, including user names, email addresses, group membership, device
-metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
+metadata, OAuth grant metadata, sharing metadata (file and folder names, owners and
+the addresses a file is shared with), and audit-event metadata such as sign-in and
+activity records with their IP addresses, locations and device details.
 Treat every bundle as confidential.
 With the optional `Mail.ReadBasic.All` permission, `mailbox_forwarding` reads mailbox folder metadata
 (folder IDs and display names) for users whose inbox rules move mail, never a message or header. The
@@ -42,7 +66,7 @@ serialised into prompts, assessment files, sidecars or logs. This includes
 Defender ATP preset-rule recipient and exclusion lists (`SentTo`,
 `SentToMemberOf`, `RecipientDomainIs` and their `ExceptIf*` counterparts),
 DNS resolver `log` entries and the Security Suite unsuccessful-command ledger.
-The model layer is removed: assessment makes no network request and no model endpoint is a permitted outbound destination. `auditex assess` rejects the removed model, endpoint, dry-run and
+The model layer is removed: assessment makes no network request and no model endpoint is a permitted outbound destination. (The optional local answer, `auditex explain`, is separate: it downloads a model file once and then runs on the same computer; see [External lookups](#external-lookups).) `auditex assess` rejects the removed model, endpoint, dry-run and
 redaction options (exit 2) and reads no `AUDITEX_MODEL_*` or `AUDITEX_DISABLE_VALUE_RULES` setting;
 redaction is always on. Each view uses its own per-policy `scuba_config` synthesis outcome: an unprojected
 view receives the not-collected marker. The private rule view can retain recognised
@@ -307,7 +331,11 @@ key before any send, and the run folder is checked unchanged before anything is 
 
 ## External lookups
 
-Live Microsoft 365 runs with the `dns_posture` collector make unauthenticated,
+Besides the audited tenant's own Microsoft or Google services, Auditex contacts
+only the destinations in this section. None of them receives evidence, findings
+or credentials.
+
+Live Microsoft 365 runs with the `dns_posture` collector (in the default set) make unauthenticated,
 read-only requests about the audited tenant's domains:
 
 - DNS-over-HTTPS queries for SPF, DMARC and DKIM TXT records cover the tenant's Exchange accepted domains,
@@ -352,6 +380,21 @@ makes no HTTPS read of the domains. A Google run reads the resolver only from
 collector with `--exclude google_dns_posture`; the `identity` and
 `collaboration` presets omit it. The run prints the notice on stderr before
 collection and writes it to `data-handling.json` and the report.
+
+The optional local answer (`auditex explain`, `--explain`) downloads one model file
+from Hugging Face (`huggingface.co` and its download servers) the first time a
+model is used. The request shows Hugging Face the IP address of the computer; it
+carries nothing about the run or the tenant. After the download the answer runs on
+the same computer with no network use. See the [local answer guide](../guides/local-answer.md).
+
+Notifications are off unless you configure a sink. When you do, a redacted title
+and summary of a finding go to the sink you chose: a Microsoft Teams or Slack
+webhook, an SMTP server, Jira or GitHub.
+
+The local MCP server sends nothing by itself, but whatever an AI tool reads through
+it goes wherever that tool sends it. If the tool uses a hosted model, the text it
+reads from a run, which can include personal data, leaves the computer under that
+provider's terms. Connect only a tool the tenant owner has agreed to.
 
 The opt-in `identity_protection` collector stores only aggregate risky-user
 counts, never user names or UPNs. The `exchange_policy` mailbox audit bypass
@@ -519,7 +562,9 @@ selected artifacts and include checksums. Selected artifacts can still contain
 customer-sensitive metadata. Create each pack in a fresh review directory,
 inspect its contents and intended recipients before transfer, then store it
 under the customer's retention rules and delete stale bundles when that period
-ends.
+ends. Where the customer has set no period, agree one before the audit; keeping
+evidence only for the engagement and a short review period afterwards is a
+sensible default.
 
 Before handoff, verify the pack:
 
@@ -961,7 +1006,7 @@ the explainer profile again, including for local reports, so modified
 assessment text does not bypass that boundary. If the context or assessment is
 unusable, explanations are omitted. The support address in the fixed fault
 step currently has its local part masked by this profile.
-It has no inference dependency, endpoint or model fallback. Reintroducing any model use would need
+The explainer has no inference dependency, endpoint or model fallback. Reintroducing any model use in it would need
 explicit authorisation, the same input and output boundary and no redaction opt-out.
 
 Explainer test material follows the public-repository fixture rule: stored fixtures hold only constructed rows and

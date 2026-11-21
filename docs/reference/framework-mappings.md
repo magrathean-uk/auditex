@@ -4,6 +4,13 @@ Auditex maps each finding rule to controls in the security frameworks below. The
 appear in each finding's `framework_mappings` object, in the SARIF, OSCAL, and CSV exports, and
 in the `baseline_alignment` section of `reports/report-pack.json`.
 
+**What a mapping is.** A mapping says which control a finding relates to, in Auditex's own reading of the
+published framework. It is not an assessment, audit or certificate against any framework below, and a `pass`
+here means only that the mapped Auditex rules ran and raised no finding. The framework owners (the Center for
+Internet Security, CISA, Microsoft, the NCSC and IASME) have not reviewed, approved or endorsed the mappings.
+Their names and control numbers are used only to identify the controls; read the source documents for the
+authoritative wording.
+
 The mapping data lives in three files:
 
 - `configs/control-mappings.json` maps each rule id to its framework controls.
@@ -15,8 +22,8 @@ The mapping data lives in three files:
 ## Benchmark sources
 
 Sources were checked on 2026-10-02; the Cyber Essentials entry was checked on 2026-10-20. CIS `1.1.4`
-was added on 2026-10-22 from the Tenable v7.0.0 L1 E3 audit list ("Ensure administrative accounts use
-licenses with a reduced application footprint"), and the SCuBA `MS.AAD.7.1v1` and `MS.AAD.7.2v1`
+was added on 2026-10-22 from the Tenable v7.0.0 L1 E3 audit list (the recommendation on the licences
+administrative accounts hold), and the SCuBA `MS.AAD.7.1v1` and `MS.AAD.7.2v1`
 wording was re-read in the ScubaGear v1.8.0 `aad.md` baseline on the same date.
 Auditex stores control ids and short paraphrased titles only. Read the source benchmarks for the
 authoritative wording.

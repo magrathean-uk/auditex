@@ -5,17 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "auditex"
 version = "1.8.0"
-description = "Portable AI-first Microsoft 365 and Google Workspace audit toolkit for evidence collection"
+description = "Read-only Microsoft 365 and Google Workspace tenant-audit toolkit for evidence collection"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "MAGRATHEAN UK LTD", email = "contact+auditex@magrathean.uk" }]
 dependencies = [
     "requests>=2.34.2,<3",
     "msal>=1.39.0,<2",
     # The certificate loader uses Certificate.not_valid_before_utc, added in cryptography 42.
     "cryptography>=42",
 ]
+
+[project.urls]
+Homepage = "https://magrathean.uk/solutions/auditex/"
+Repository = "https://github.com/magrathean-uk/auditex"
+Issues = "https://github.com/magrathean-uk/auditex/issues"
 
 [project.optional-dependencies]
 # Capped below 2: the server is tested against a fake FastMCP only, so a 2.x API change
