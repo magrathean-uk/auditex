@@ -145,18 +145,25 @@ def test_app_owner_path_to_role_management_permission() -> None:
 
 
 def test_nested_group_into_role_assignable_group_reaches_global_admin() -> None:
-    analysis = analyze_attack_graph(_snapshot())
-    path = _path_from(analysis, "nested@contoso.example")
+    payloads = _payloads()
+    payloads["identity"]["users"]["value"].append(_user("u-opsowner", "opsowner@contoso.example"))
+    payloads["identity"]["roleAssignableGroupOwners"] = {
+        "value": [{"groupId": "g-outer", "owners": [{"@odata.type": "#microsoft.graph.user", "id": "u-opsowner"}]}]
+    }
+    analysis = analyze_attack_graph(_snapshot(payloads))
+    path = _path_from(analysis, "opsowner@contoso.example")
 
     assert path is not None
     assert path["target"] == "Global Administrator"
     assert [(hop["from"], hop["to"], hop["edge"]) for hop in path["hops"]] == [
-        ("nested@contoso.example", "Ops Leads", "member_of"),
+        ("opsowner@contoso.example", "Ops Leads", "owns_group"),
         ("Ops Leads", "Tier0 Admins", "member_of"),
         ("Tier0 Admins", "Global Administrator", "has_role"),
     ]
     assert len(path["breakpoints"]) == 3
     assert analysis["summary"]["tier0_principals"] >= 2  # u-admin and the role-assignable group
+    # The nested member holds the role through the group: an administrator, not a foothold.
+    assert _path_from(analysis, "nested@contoso.example") is None
 
 
 def test_pim_eligible_assignment_is_marked_and_no_mfa_entry_hop_is_added() -> None:
@@ -184,9 +191,9 @@ def test_pim_eligible_assignment_is_marked_and_no_mfa_entry_hop_is_added() -> No
 
 def test_mfa_registration_gap_does_not_increase_score_as_if_sign_in_protection_were_absent() -> None:
     payloads = _payloads()
-    absent = _path_from(analyze_attack_graph(_snapshot(payloads)), "eligible@contoso.example")
-    payloads["auth_methods"]["userRegistrationDetails"]["value"][1]["isMfaRegistered"] = True
-    registered = _path_from(analyze_attack_graph(_snapshot(payloads)), "eligible@contoso.example")
+    registered = _path_from(analyze_attack_graph(_snapshot(payloads)), "owner@contoso.example")
+    payloads["auth_methods"]["userRegistrationDetails"]["value"][0]["isMfaRegistered"] = False
+    absent = _path_from(analyze_attack_graph(_snapshot(payloads)), "owner@contoso.example")
 
     assert absent is not None and registered is not None
     assert absent["risk_score"] == registered["risk_score"]
@@ -218,10 +225,12 @@ def test_depth_bound() -> None:
     for parent, child in zip(chain, chain[1:], strict=False):
         members.append({"groupId": parent, "members": [{"@odata.type": "#microsoft.graph.group", "id": child}]})
     payloads["identity"]["users"]["value"].append(_user("u-deep", "deep@contoso.example"))
-    members.append({"groupId": chain[-1], "members": [{"@odata.type": "#microsoft.graph.user", "id": "u-deep"}]})
+    payloads["identity"]["roleAssignableGroupOwners"] = {
+        "value": [{"groupId": chain[-1], "owners": [{"@odata.type": "#microsoft.graph.user", "id": "u-deep"}]}]
+    }
     snapshot = _snapshot(payloads)
 
-    # deep -> g-5 -> ... -> g-0 -> g-ra -> GA is 8 hops.
+    # deep owns g-5 -> ... -> g-0 -> g-ra -> GA is 8 hops.
     assert _path_from(analyze_attack_graph(snapshot), "deep@contoso.example") is None
     deep = _path_from(analyze_attack_graph(snapshot, max_depth=8), "deep@contoso.example")
     assert deep is not None and deep["hop_count"] == 8
@@ -510,3 +519,48 @@ def test_app_consent_fanout_includes_microsoft_graph_beyond_first_ten() -> None:
     AppConsentCollector().run({"client": client, "top": 100, "audit_logger": None})
     assert "/servicePrincipals/sp-graph/appRoleAssignedTo" in client.paths
     assert "/servicePrincipals/sp-11/appRoleAssignedTo" not in client.paths
+
+
+HELPDESK = "729827e3-9c14-49f7-bb1b-9608f156bbb8"
+
+
+def _admin_routes_payloads() -> dict[str, Any]:
+    payloads = _payloads()
+    identity = payloads["identity"]
+    identity["users"]["value"].extend([
+        _user("u-alice", "alice@contoso.example"),
+        _user("u-bob", "bob@contoso.example"),
+        _user("u-grpowner", "grpowner@contoso.example"),
+    ])
+    identity["roleAssignableGroupMembers"]["value"].append(
+        {"groupId": "g-ra", "members": [{"@odata.type": "#microsoft.graph.user", "id": "u-alice"}]}
+    )
+    identity["roleAssignableGroupOwners"] = {
+        "value": [{"groupId": "g-ra", "owners": [{"@odata.type": "#microsoft.graph.user", "id": "u-grpowner"}]}]
+    }
+    payloads["identity_governance"]["roleEligibilitySchedules"]["value"].append(
+        {"id": "elig-ga", "principalId": "u-bob", "roleDefinitionId": GA, "memberType": "Direct"}
+    )
+    return payloads
+
+
+def test_group_member_and_eligible_admins_are_not_ordinary_user_footholds() -> None:
+    """R007: an intended administrator (through a role-assignable group or PIM) is not an escalation route."""
+    snapshot = _snapshot(_admin_routes_payloads())
+    analysis = analyze_attack_graph(snapshot)
+
+    assert _path_from(analysis, "alice@contoso.example") is None
+    assert _path_from(analysis, "bob@contoso.example") is None
+    assert _path_from(analysis, "nested@contoso.example") is None
+    # A genuine non-admin foothold that controls the privileged group is still a route.
+    owner_path = _path_from(analysis, "grpowner@contoso.example")
+    assert owner_path is not None
+    assert [hop["edge"] for hop in owner_path["hops"]] == ["owns_group", "has_role"]
+    # An administrator with an independent entry edge (no MFA registration) stays a route.
+    assert _path_from(analysis, "eligible@contoso.example") is not None
+
+    findings = build_findings([], normalized_snapshot=snapshot)
+    texts = [str(item.get("description") or "") + str(item.get("title") or "") for item in findings
+             if str(item.get("rule_id")).startswith("attack_path.")]
+    assert not [text for text in texts if "alice@contoso.example" in text or "bob@contoso.example" in text]
+

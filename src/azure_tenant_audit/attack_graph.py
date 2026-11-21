@@ -632,6 +632,37 @@ def build_attack_graph(snapshot: dict[str, Any], *, now: datetime | None = None)
     return graph
 
 
+def _transitive_members(graph: AttackGraph, groups: set[str]) -> set[str]:
+    """Principals that are members, directly or through nested groups, of any of ``groups``."""
+    members_of: dict[str, list[str]] = {}
+    for edge in graph.edges:
+        if edge.edge == "member_of":
+            members_of.setdefault(edge.target, []).append(edge.source)
+    seen: set[str] = set()
+    queue = deque(sorted(groups))
+    while queue:
+        group = queue.popleft()
+        for member in members_of.get(group, []):
+            if member not in seen:
+                seen.add(member)
+                queue.append(member)
+    return seen
+
+
+def _role_holders(graph: AttackGraph) -> set[str]:
+    """Principals that hold a tier-0 role, actively or as PIM-eligible, directly or through group membership.
+
+    These are the tenant's intended administrators: the route is how the role
+    was granted, not an escalation, so they are never ``ordinary_user`` footholds.
+    """
+    holders = {
+        edge.source
+        for edge in graph.edges
+        if edge.edge in {"has_role", "guest_with_role", "has_app_role"} and graph.nodes.get(edge.target, {}).get("tier0")
+    }
+    return holders | _transitive_members(graph, holders)
+
+
 def _tier0_principals(graph: AttackGraph) -> set[str]:
     """Principals that hold a tier-0 role or Graph permission directly and actively."""
     tier0: set[str] = set()
@@ -648,6 +679,7 @@ def _footholds(graph: AttackGraph, tier0: set[str]) -> dict[str, list[str]]:
     for edge in graph.edges:
         if edge.edge in ENTRY_EDGES:
             entry_targets.setdefault(edge.target, set()).add(edge.edge)
+    administrators = _role_holders(graph)
     for node_id, node in graph.nodes.items():
         kinds: list[str] = []
         if node.get("enabled") is False:
@@ -657,6 +689,11 @@ def _footholds(graph: AttackGraph, tier0: set[str]) -> dict[str, list[str]]:
                 continue
             if "no_mfa" in entry_targets.get(node_id, set()):
                 kinds.append("no_mfa")
+            if node_id in administrators:
+                # Group or PIM-eligible administrator: only an independent entry edge makes it a foothold.
+                if kinds:
+                    reasons[node_id] = kinds
+                continue
             if node.get("guest"):
                 kinds.append("guest")
             kinds.append("ordinary_user")
