@@ -6,6 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DIST_DIR="${1:-${REPO_ROOT}/dist}"
 SMOKE_PARENT="${2:-${TMPDIR:?TMPDIR must be set}/auditex-release-smoke}"
+if [[ ! -d "${DIST_DIR}" ]]; then
+  echo "dist folder not found: ${DIST_DIR}" >&2
+  exit 2
+fi
+DIST_DIR="$(cd "${DIST_DIR}" && pwd)"
 
 # Exactly one wheel and one sdist, both of the version in pyproject.toml: a stale or newer build left in
 # the folder must never stand in for the one being released.
@@ -32,7 +37,12 @@ else
   BASE_PYTHON="python3"
 fi
 mkdir -p "${SMOKE_PARENT}"
-SMOKE_ROOT="$(mktemp -d "${SMOKE_PARENT}/run.XXXXXX")"
+SMOKE_ROOT="$(cd "$(mktemp -d "${SMOKE_PARENT}/run.XXXXXX")" && pwd)"
+# Every installed command runs from an empty folder, never the checkout, so a shipped file missing from the
+# wheel or sdist cannot be supplied by the source tree.
+SMOKE_CWD="${SMOKE_ROOT}/cwd"
+mkdir "${SMOKE_CWD}"
+cd "${SMOKE_CWD}"
 
 create_venv() {
   local name="$1"
@@ -58,6 +68,20 @@ auditex run --offline \
   --tenant-name ci \
   --run-name release-smoke \
   --out "${SMOKE_ROOT}/${kind}-base-output" >/dev/null
+"${VPY}" - <<'PY'
+from azure_tenant_audit import resources
+from auditex import bootstrap
+
+adapters = resources._resource_adapters()
+assert adapters and {a.name for a in adapters} == {"installed"}, adapters
+readiness = bootstrap.build_doctor_report()["readiness"]
+assert readiness["core_ready"], readiness
+PY
+auditex setup >/dev/null
+demo_dir="${SMOKE_ROOT}/${kind}-demo"
+mkdir "${demo_dir}"
+(cd "${demo_dir}" && auditex demo --no-pause --no-html >/dev/null)
+test -d "${demo_dir}/outputs/demo/runs"
 deactivate_venv
 
 create_venv "${kind}-google"
