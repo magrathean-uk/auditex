@@ -5,15 +5,49 @@ Used by the dns_posture collector to evaluate SPF, DKIM, DMARC, MTA-STS, TLS-RPT
 """
 from __future__ import annotations
 
+import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple, Protocol
+from urllib.parse import urlsplit
 
 import requests
 
 DEFAULT_DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query"
 DEFAULT_TIMEOUT_SECONDS = 5.0
+# Review R164: a customer that cannot send domain names to Cloudflare names its own DoH (JSON API) resolver.
+DOH_ENDPOINT_ENV = "AUDITEX_DOH_ENDPOINT"
+
+
+def resolve_doh_endpoint(value: str | None = None, environ: Mapping[str, str] | None = None) -> str:
+    """The DoH resolver for this run: an explicit option, else ``AUDITEX_DOH_ENDPOINT``, else Cloudflare.
+
+    Only a plain ``https://host/path`` URL is accepted: no other scheme, no user name or password and no fragment.
+    The error never repeats the value, which may carry a token.
+    """
+    chosen = value if value is not None else (os.environ if environ is None else environ).get(DOH_ENDPOINT_ENV)
+    if chosen is None:
+        return DEFAULT_DOH_ENDPOINT
+    text = chosen.strip()
+    try:
+        parts = urlsplit(text)
+        host = parts.hostname
+    except ValueError:
+        parts, host = None, None
+    if (parts is None or parts.scheme.lower() != "https" or not host or parts.username is not None
+            or parts.password is not None or parts.fragment or "@" in parts.netloc):
+        raise ValueError("The DNS-over-HTTPS endpoint must be a plain https:// URL with a host "
+                         f"(option or {DOH_ENDPOINT_ENV}); no other scheme, credentials or fragment.")
+    return text
+
+
+def doh_resolver_disclosure(endpoint: str) -> str:
+    """Notice wording for the resolver that receives the tenant's domain names; a query string is never shown."""
+    if endpoint == DEFAULT_DOH_ENDPOINT:
+        return f"the public Cloudflare DNS-over-HTTPS resolver ({DEFAULT_DOH_ENDPOINT})"
+    parts = urlsplit(endpoint)
+    return f"the configured DNS-over-HTTPS resolver ({parts.scheme}://{parts.netloc}{parts.path})"
 
 
 # DNS response codes. NOERROR with no answer and NXDOMAIN are definite statements that the record is absent; every
@@ -43,7 +77,7 @@ class DohClient:
     """Minimal DNS-over-HTTPS client returning record data strings."""
 
     session: Any = field(default_factory=requests.Session)
-    endpoint: str = DEFAULT_DOH_ENDPOINT
+    endpoint: str = field(default_factory=resolve_doh_endpoint)
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
     def query(self, name: str, record_type: str) -> list[str]:

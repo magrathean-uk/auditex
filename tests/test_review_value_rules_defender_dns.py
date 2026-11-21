@@ -253,3 +253,38 @@ def test_r163_prompt_policy_is_read_whole():
     session = type("S", (), {"get": lambda self, url, **kw: type("R", (), {"status_code": 200, "raw": Raw()})()})()
     status, text, error = exposure_lookup.RequestsHttpsFetcher(session=session).get_text(MTA_STS_URL)
     assert (status, text, error) == (200, body.decode(), None)
+
+
+# ---- R164: the DoH resolver is configurable (option or AUDITEX_DOH_ENDPOINT), Cloudflare stays the default ----
+
+def test_r164_doh_endpoint_defaults_to_cloudflare(monkeypatch):
+    monkeypatch.delenv(dns_lookup.DOH_ENDPOINT_ENV, raising=False)
+    assert dns_lookup.resolve_doh_endpoint() == dns_lookup.DEFAULT_DOH_ENDPOINT == "https://cloudflare-dns.com/dns-query"
+    assert dns_lookup.DohClient().endpoint == dns_lookup.DEFAULT_DOH_ENDPOINT
+
+
+def test_r164_environment_and_option_choose_the_resolver(monkeypatch):
+    monkeypatch.setenv(dns_lookup.DOH_ENDPOINT_ENV, "https://dns.example.net/dns-query")
+    assert dns_lookup.resolve_doh_endpoint() == "https://dns.example.net/dns-query"
+    assert dns_lookup.DohClient().endpoint == "https://dns.example.net/dns-query"
+    assert dns_lookup.resolve_doh_endpoint("https://doh.example.org/q") == "https://doh.example.org/q"
+
+
+@pytest.mark.parametrize("endpoint", [
+    "http://dns.example.net/dns-query", "dns.example.net", "https://", "https://user:pw@dns.example.net/q",
+    "https://dns.example.net/q#frag", " ",
+])
+def test_r164_only_plain_https_endpoints_are_accepted(endpoint, monkeypatch):
+    with pytest.raises(ValueError) as caught:
+        dns_lookup.resolve_doh_endpoint(endpoint)
+    assert "pw" not in str(caught.value)
+    monkeypatch.setenv(dns_lookup.DOH_ENDPOINT_ENV, endpoint)
+    with pytest.raises(ValueError):
+        dns_lookup.resolve_doh_endpoint()
+
+
+def test_r164_disclosure_names_the_resolver_in_use():
+    assert dns_lookup.doh_resolver_disclosure(dns_lookup.DEFAULT_DOH_ENDPOINT) == (
+        "the public Cloudflare DNS-over-HTTPS resolver (https://cloudflare-dns.com/dns-query)")
+    assert dns_lookup.doh_resolver_disclosure("https://dns.example.net/dns-query?token=abc") == (
+        "the configured DNS-over-HTTPS resolver (https://dns.example.net/dns-query)")
