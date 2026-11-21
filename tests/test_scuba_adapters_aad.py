@@ -34,7 +34,7 @@ PACK_ONLY_DROPPED = {
     "default_app_management_policy": "IsOverridden and other policy metadata; scope fields except PasswordCredentials/KeyCredentials; entry fields except RestrictionType/State/RestrictForAppsCreatedAfterDateTime/MaxLifetime",
     "app_management_policies": "Description and other policy metadata; entry metadata; AppliesTo fields except Id",
     "risky_delegated_permission_classifications": "all fields except ObjectId/AppId/DisplayName/RiskyPermClassifications; classification metadata and non-risky or non-low entries",
-    "conditional_access_policies": "policy Id and metadata; Users.IncludeGroups/IncludeGuestsOrExternalUsers; SessionControls; GrantControls.CustomAuthenticationFactors/TermsOfUse; nested id/displayName; unrecognised fields",
+    "conditional_access_policies": "policy Id and metadata; Users.IncludeGroups/IncludeGuestsOrExternalUsers; SessionControls; GrantControls.CustomAuthenticationFactors/TermsOfUse outside the rule view; nested id/displayName; unrecognised fields",
     "SPO_tenant": "all fields outside the ten validated settings; absent and invalid settings are omitted",
 }
 
@@ -182,7 +182,7 @@ def expected(section, value):
 
 CA_LISTS = {"IncludeApplications", "ExcludeApplications", "IncludeUserActions", "ClientAppTypes", "SignInRiskLevels",
             "UserRiskLevels", "IncludeAgentIdServicePrincipals", "IncludeUsers", "ExcludeUsers", "IncludeRoles", "ExcludeRoles",
-            "ExcludeGroups", "BuiltInControls", "IncludeAuthenticationContextClassReferences", "IncludeLocations", "ExcludeLocations",
+            "ExcludeGroups", "BuiltInControls", "TermsOfUse", "CustomAuthenticationFactors", "IncludeAuthenticationContextClassReferences", "IncludeLocations", "ExcludeLocations",
             "IncludePlatforms", "ExcludePlatforms", "ServicePrincipalRiskLevels", "InsiderRiskLevels"}
 CA_FIELDS = {"DisplayName": None, "State": None,
              "Conditions": {"Applications": {k: None for k in ("IncludeApplications", "ExcludeApplications", "IncludeUserActions", "ApplicationFilter", "IncludeAuthenticationContextClassReferences")},
@@ -192,7 +192,8 @@ CA_FIELDS = {"DisplayName": None, "State": None,
                             **{k: None for k in ("ClientAppTypes", "SignInRiskLevels", "UserRiskLevels", "AgentIdRiskLevels", "Devices", "DeviceStates", "ServicePrincipalRiskLevels", "InsiderRiskLevels")},
                             "Locations": {"IncludeLocations": None, "ExcludeLocations": None},
                             "Platforms": {"IncludePlatforms": None, "ExcludePlatforms": None}},
-             "GrantControls": {"BuiltInControls": None, "Operator": None, "AuthenticationStrength": {"AllowedCombinations": None}}}
+             "GrantControls": {"BuiltInControls": None, "Operator": None, "AuthenticationStrength": {"AllowedCombinations": None},
+                               "TermsOfUse": None, "CustomAuthenticationFactors": None}}
 
 
 def expected_ca(value):
@@ -642,8 +643,46 @@ def test_ca_drops_unread_fields_and_annotations(run):
     row["grantControls"].update(customAuthenticationFactors=["mock-factor"], termsOfUse=["mock-terms"], id="discarded", displayName="discarded")
     operation(run, "conditional_access", "conditionalAccessPolicies", [row])
     b = bundle(run)
-    assert aad._ca_rule(b) == expected_ca([aad._pascal(row)])
+    value = aad._ca_rule(b)
+    # Review R001: terms of use and custom controls are grant alternatives the rule must see, so they are kept.
+    assert value[0]["GrantControls"]["TermsOfUse"] == ["mock-terms"]
+    assert value[0]["GrantControls"]["CustomAuthenticationFactors"] == ["mock-factor"]
+    assert value == expected_ca([aad._pascal(row)])
     assert not b.dropped_conditions and not b.null_lists and not b.ignored_fields
+
+
+def ca_rule_answer(run, grant_extra, policy="MS.AAD.3.2v2"):
+    from azure_tenant_audit.value_rules import assess
+    manifest = json.loads((run / "run-manifest.json").read_text())
+    write(run, "run-manifest.json", {**manifest, "rule_parameters": {"break_glass_accounts": []}})
+    row = deepcopy(CA)
+    row["conditions"]["users"].update(excludeRoles=[], excludeGuestsOrExternalUsers=None)
+    row["grantControls"] = {"builtInControls": ["mfa"], "operator": "OR", "authenticationStrength": None, **grant_extra}
+    operation(run, "conditional_access", "conditionalAccessPolicies", [row])
+    record = assess(policy, projection.project_run(run).rule_sections)
+    return record["verdict"], record["cell"]
+
+
+@pytest.mark.parametrize("extra", ["termsOfUse", "customAuthenticationFactors"])
+def test_ca_extra_grant_control_reaches_the_rule(run, extra):
+    """Review R001: an all-users MFA policy that also offers terms of use (or a custom control) under OR lets a user in
+    without MFA. The rule view must carry that control, so the answer is not met rather than a clean pass."""
+    assert ca_rule_answer(run, {}) == ("met", "met_policy_clean")
+    assert ca_rule_answer(run, {extra: ["mock-extra"]}) == ("not_met", "no_policy_meets")
+
+
+def test_ca_unknown_grant_control_reaches_the_rule_as_unknown(run):
+    assert ca_rule_answer(run, {"futureControl": ["mock-extra"]}) == ("not_assessed", "policy_field_unusable")
+
+
+@pytest.mark.parametrize("path", ["conditions", "applications"])
+def test_ca_unknown_populated_condition_withholds_the_rule_view(run, path):
+    """Review R001: a populated condition the rule cannot read may narrow the policy; it is never silently dropped."""
+    row = deepcopy(CA)
+    target = row["conditions"] if path == "conditions" else row["conditions"]["applications"]
+    target["futureCondition"] = ["mock-condition"]
+    operation(run, "conditional_access", "conditionalAccessPolicies", [row])
+    assert projection.project_run(run).rule_sections["conditional_access_policies"] == NOT_COLLECTED
 
 
 @pytest.mark.parametrize("key", ["locations", "platforms"])

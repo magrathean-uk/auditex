@@ -231,6 +231,8 @@ def _ca_rule(bundle: Bundle) -> Any:
                         "ServicePrincipalRiskLevels": _strings, "InsiderRiskLevels": _strings},
         "conditions.applications.": {"ApplicationFilter": _pascal,
                                     "IncludeAuthenticationContextClassReferences": _strings},
+        # Review R001: further ways to satisfy the grant; the rule reads each populated one as an alternative that never qualifies alone.
+        "grantControls.": {"TermsOfUse": _strings, "CustomAuthenticationFactors": _strings},
     }
     restriction_names = {"locations", "devices", "platforms", "sessionControls", "includeGroups",
                          "includeGuestsOrExternalUsers", "authenticationContextClassReferences",
@@ -265,10 +267,16 @@ def _ca_rule(bundle: Bundle) -> Any:
                 check = extensions.get(path, {}).get(target)
                 if path == "conditions.clientApplications." and key not in {"id", "displayName"}:
                     check = _pascal
+                if check is None and path == "grantControls." and key not in {"id", "displayName"} and not _blank(value):
+                    # Review R001: an unknown populated grant control reaches the rule, which reads it as unknown.
+                    check = _pascal
                 if check is None:
                     # _restricted also reads unknown keys inside these two
                     # containers. Dropping a populated one could broaden a pass.
-                    if path in {"conditions.locations.", "conditions.platforms."} and key not in {"id", "displayName"}:
+                    # Review R001: so could an unknown populated condition the rule
+                    # cannot read at all, so it withholds the rule view as well.
+                    if path in {"conditions.locations.", "conditions.platforms.", "conditions.",
+                                "conditions.applications."} and key not in {"id", "displayName"}:
                         _require(_blank(value), kind="unexpected_field")
                     continue
             else:

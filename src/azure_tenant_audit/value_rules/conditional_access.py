@@ -82,6 +82,27 @@ def _dup_controls(p):
 
 
 DEVICE_CONTROLS = ("compliantDevice", "domainJoinedDevice")
+GRANT_READ = ("BuiltInControls", "Operator", "AuthenticationStrength")
+EXTRA_CONTROLS = ("TermsOfUse", "CustomAuthenticationFactors")
+
+
+def _extras(p):
+    """Review R001: the number of populated grant controls beside the built-in controls and the strength (terms of use, custom
+    controls). Each is one more way to satisfy the grant that never qualifies on its own: under OR it lets a user in without the
+    required control (D92), under AND the required control still applies. None when such a field is not a list of strings, or
+    when any other grant field the rule does not know carries a value (unknown, never dropped)."""
+    gc = p.get("GrantControls")
+    if not isinstance(gc, dict):
+        return 0
+    n = 0
+    for k, v in gc.items():
+        if k in GRANT_READ:
+            continue
+        if k in EXTRA_CONTROLS and (v is None or isinstance(v, list) and all(type(x) is str for x in v)):
+            n += bool(v)
+        elif k in EXTRA_CONTROLS or _present(v):
+            return None
+    return n
 
 
 def _grant_managed(p):
@@ -100,6 +121,16 @@ def _grant_managed(p):
     op = gc.get("Operator") if isinstance(gc, dict) else None
     s = _combos(p)
     has_dev = any(x in b for x in DEVICE_CONTROLS)
+    x = _extras(p)
+    if has_dev and x is None:
+        return "u", None              # review R001: an unreadable or unknown grant control beside a device control may be a way in without a device
+    if has_dev and x:
+        # review R001: terms of use or a custom control is one more control, read as a non-empty strength is: OR is not met (D92), AND still requires the device (D87)
+        if op == "AND":
+            return "t", "D87"
+        if op == "OR":
+            return "f", "D92"
+        return "u", "D109"
     if s is None and b and all(x in DEVICE_CONTROLS for x in b):
         # v3.9.1 (F1, D112): the strength is absent, not an object or without a readable AllowedCombinations list: unknown, not "no strength". Beside controls that are all device controls
         # it may be a second way in that needs no device, so OR does not meet the baseline; AND still requires the device control (D87); with no usable operator OR and AND differ (D109).
@@ -143,13 +174,16 @@ def _paths(p, sat_b, sat_s, strength):
         return "u", ("D111" if _dup_controls(p) else None)
     if s is None and strength == "u":
         return "u", None
-    alts = [bool(sat_b(x)) for x in b] + ([bool(sat_s(s))] if s else [])
+    extras = _extras(p)
+    alts = [bool(sat_b(x)) for x in b] + ([bool(sat_s(s))] if s else []) + [False] * (extras or 0)      # review R001: terms of use and custom controls never qualify alone
     if "block" in b:
         return ("t" if any(alts) else "f"), None      # block is a deny and cannot be combined with other controls: nothing else is an alternative way in (the pack's fixtures attach a strength to every policy); as v3.6 (Q44 stands)
     if s is None and strength == "u_if_none" and not any(alts):
         return "u", None
     if not any(alts):
         return "f", None
+    if extras is None:
+        return "u", None      # review R001: an unreadable or unknown grant control beside a qualifying one may be a way in that does not qualify
     gc = p.get("GrantControls")
     op = gc.get("Operator") if isinstance(gc, dict) else None
     if s is None and strength in ("ignore", "u_if_none") and all(alts):
