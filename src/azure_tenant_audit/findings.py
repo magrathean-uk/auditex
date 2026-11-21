@@ -2289,11 +2289,15 @@ def _build_reports_concealed_names_findings(normalized_snapshot: dict[str, Any])
 
 def _build_risky_signin_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     risky_states = {"atrisk", "confirmedcompromised"}
-    ignored_states = {"", "none", "dismissed", "remediated", "confirmedsafe"}
+    # Graph keeps the risk level after an analyst handles a sign-in, so a handled state ends the finding at any level.
+    handled_states = {"dismissed", "remediated", "confirmedsafe"}
+    ignored_states = {"", "none", *handled_states}
     findings: list[dict[str, Any]] = []
     for item in ((normalized_snapshot.get("security_signin_events") or {}).get("records") or []):
         risk_level = str(item.get("risk_level_aggregated") or item.get("risk_level_during_signin") or "").strip().lower()
         risk_state = str(item.get("risk_state") or "").strip().lower()
+        if risk_state in handled_states:
+            continue
         if risk_level not in {"high", "medium", "low"} and (risk_state in ignored_states or risk_state not in risky_states):
             continue
         severity = "high" if risk_level == "high" or risk_state in risky_states else "medium"

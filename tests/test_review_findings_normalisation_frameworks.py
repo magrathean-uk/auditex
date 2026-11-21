@@ -156,3 +156,36 @@ def test_r048_severity_follows_whether_the_role_is_tier0() -> None:
     severities = {item["id"].split(":")[1]: item["severity"] for item in _rule_findings(snapshot, "security.privilege_change_event")}
     assert severities == {"r-1": "high", "r-2": "medium"}
 
+
+# ---- R049: handled risky sign-ins are not open findings -----------------------------------------------------------
+
+
+def _signin(signin_id: str, level: str, state: str) -> dict:
+    return {
+        "id": signin_id,
+        "createdDateTime": "2026-11-20T08:00:00Z",
+        "userPrincipalName": "user@example.com",
+        "riskLevelAggregated": level,
+        "riskState": state,
+    }
+
+
+def test_r049_remediated_dismissed_or_safe_signins_raise_no_finding() -> None:
+    snapshot = _snapshot(
+        {
+            "security": {
+                "signIns": {
+                    "value": [
+                        _signin("s-1", "high", "remediated"),
+                        _signin("s-2", "medium", "confirmedSafe"),
+                        _signin("s-3", "high", "dismissed"),
+                        _signin("s-4", "high", "atRisk"),
+                    ]
+                }
+            }
+        }
+    )
+    records = snapshot["security_signin_events"]["records"]
+    assert len(records) == 4
+    ids = [item["id"] for item in _rule_findings(snapshot, "security.risky_signin")]
+    assert ids == ["security_signin:s-4:risky"]
