@@ -793,3 +793,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-20T13:51:42Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	52	0.2318	partial	task/M11-T06-second-round	v4
 2026-11-20T14:13:22Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	1	98	0.3773	partial	task/M11-T06-second-round	v4
 2026-11-20T15:25:16Z	M11-T06	terra	claude-4	claude-sonnet-5-5	high	branch	0	110	0.5084	done	task/M11-T06-second-round	v4
+2026-11-20T16:44:32Z	REL-180-T01	terra	claude-4	claude-sonnet-5-5	medium	branch	0	605	0.2156	done	task/REL-180-T01-cleanup	v4
