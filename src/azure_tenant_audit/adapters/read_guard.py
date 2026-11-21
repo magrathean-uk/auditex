@@ -153,6 +153,14 @@ CONTENT_CMDLET_DENY = frozenset(
         "get-childitem",
         "get-itemproperty",
         "get-itempropertyvalue",
+        # Local session state and secrets: variables (env: among them), drives, clipboard, history, secret stores
+        # and cached tokens
+        "get-variable",
+        "get-psdrive",
+        "get-clipboard",
+        "get-history",
+        "get-secret",
+        "get-azaccesstoken",
     }
 )
 _GRAPH_PREFIX = "get-mg"
@@ -234,9 +242,11 @@ class _Token:
     end: int
 
 
-_VAR = re.compile(
-    r"\$(?:\{[^}\n]*\}|(?:env|global|script|local|using):[A-Za-z_]\w*|[A-Za-z_]\w*|[?$^])"
-)
+# Plain variables only (``$name``, ``$_``, ``$null``, ``$true`` and the ``$?``, ``$$``, ``$^`` automatics). A braced
+# variable (``${env:X}``, ``${function:Name}``) and a scope or drive qualifier (``$env:``, ``$global:``, ``$using:``,
+# ``$function:``) are refused: they read the auditor's own environment, where credentials live, or run a function.
+_VAR = re.compile(r"\$(?:[A-Za-z_]\w*|[?$^])")
+_QUALIFIED_VAR = re.compile(r"\$(?:\{|[A-Za-z_]\w*:)")
 _SPLAT = re.compile(r"@[A-Za-z_]\w*")
 _WORD = re.compile(r"[^\s|;{}()\[\],=&<>'\"$@`#]+")
 _NOUN = re.compile(r"[a-z][a-z0-9]*")
@@ -285,6 +295,8 @@ def _tokenize(script: str, adapter: str) -> list[_Token]:
             body = script[i + 1 : end]
             if ch == '"' and ("$(" in body or "`" in body):
                 refuse("subexpressions and escapes inside double-quoted strings are not allowed")
+            if ch == '"' and _QUALIFIED_VAR.search(body):
+                refuse("braced, scoped and drive variables are not allowed")
             add("string", script[i : end + 1], i, end + 1)
             i = end + 1
         elif ch == "@":
@@ -305,6 +317,8 @@ def _tokenize(script: str, adapter: str) -> list[_Token]:
                 add("op", "$(", i, i + 2)
                 i += 2
                 continue
+            if _QUALIFIED_VAR.match(script, i):
+                refuse("braced, scoped and drive variables are not allowed")
             match = _VAR.match(script, i)
             if match is None:
                 refuse("unsupported variable syntax")
@@ -423,7 +437,11 @@ def check_powershell_command(script: str, *, adapter: str = "powershell_graph") 
     if not script.strip():
         raise CommandRefused("command is empty", adapter=adapter)
     extra = DSC_READ_COMMANDS if adapter == "m365dsc" else frozenset()
-    return tuple(_command_words(script, adapter, extra))
+    words = tuple(_command_words(script, adapter, extra))
+    if not words:
+        # A bare expression reads nothing from the tenant; it can only print local state.
+        raise CommandRefused("the command runs no read cmdlet", adapter=adapter)
+    return words
 
 
 def _m365_argv(command: str | list[str], adapter: str) -> list[str]:

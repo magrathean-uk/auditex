@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..secret_hygiene import redact_command_string, redact_output
@@ -24,6 +24,24 @@ COMPLIANCE_AUDIENCES = frozenset({"https://ps.compliance.protection.outlook.com"
 # Error class, and the fixed text the compliance prelude throws, when Connect-IPPSSession fails: the original error
 # (which can name the tenant, the app or the token) is dropped inside PowerShell and never reaches stderr.
 IPPS_SESSION_NOT_OPENED = "ipps_session_not_opened"
+# The child pwsh never gets the auditor's credentials: any variable whose name marks a secret (client secrets,
+# passwords, tokens, keys, connection strings) is dropped, including a stale session token from the
+# parent; the connect prelude adds the one fresh token the session needs. The read guard already refuses every way a
+# checked script could read the environment ($env:, ${env:...}, Get-ChildItem env:, Get-Variable); this keeps the
+# secrets out of the child as well.
+_SECRET_ENV_NAME = re.compile(
+    r"SECRET|PASSWORD|PASSWD|PASSPHRASE|TOKEN|APIKEY|API_KEY|ACCESS_KEY|PRIVATE|CREDENTIAL|"
+    r"CONNECTION_STRING|CONNECTIONSTRING|SAS_|_SAS|_KEY$|^KEY_|_KEY_|AUTH",
+    re.IGNORECASE,
+)
+
+
+def child_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """``source`` (default ``os.environ``) without any credential-named variable, for a pwsh child."""
+    items = (os.environ if source is None else source).items()
+    return {name: value for name, value in items if not _SECRET_ENV_NAME.search(name)}
+
+
 # Bounded reads for a sensitive command: stdout chunk size and the stderr kept for failure classification only.
 READ_CHUNK = 64 * 1024
 STDERR_KEEP = 1024 * 1024
@@ -297,7 +315,7 @@ class PowerShellGraphAdapter(Adapter):
                 )
             return {"error": "command_not_found:pwsh", "error_class": "command_not_found", "command": safe_command}
 
-        env = dict(os.environ)
+        env = child_environment()
         prelude = self._session_prelude(session, env)
         compliance = _session_kind(session) == "security_compliance"
         if compliance and not prelude:

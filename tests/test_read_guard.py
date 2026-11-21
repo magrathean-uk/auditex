@@ -580,3 +580,91 @@ def test_hashtable_keys_and_calculated_properties_stay_allowed() -> None:
         "Select-Object @{n='a';e={ $_.Name }}, @{ Name = 'b'; Expression = { $_.Alias } }"
     )
     assert check_command("powershell_graph", script) == ("Get-Mailbox", "Select-Object")
+
+
+# R079/R084: the guard never reads the auditor's own environment, variables or provider drives, and a script with
+# no command word (a bare expression such as a variable) is refused.
+@pytest.mark.parametrize("adapter", ["powershell_graph", "m365dsc"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "$env:AZURE_CLIENT_SECRET",
+        "$env:AUDITEX_CERT_PASSWORD -replace '(.)', '$1 '",
+        "$env:AUDITEX_EXO_ACCESS_TOKEN -replace '[.]', ' '",
+        ",@($env:AUDITEX_EXO_ACCESS_TOKEN)",
+        "Get-OrganizationConfig | Select-Object Name, @{n='t';e={ $env:AUDITEX_EXO_ACCESS_TOKEN }}",
+        "${env:AUDITEX_EXO_ACCESS_TOKEN}",
+        'Get-AcceptedDomain | Where-Object { $_.Name -eq "x $env:AZURE_CLIENT_SECRET" }',
+        'Get-AcceptedDomain -Identity "${env:AZURE_CLIENT_SECRET}"',
+        "Get-AcceptedDomain | Where-Object -FilterScript ${function:Enable-OrganizationCustomization}",
+        "Get-AcceptedDomain | Where-Object { ${function:Enable-OrganizationCustomization} }",
+        "$global:token",
+        "Get-AcceptedDomain | Select-Object @{n='x';e={ $script:secret }}",
+        "$using:secret",
+        "Get-Variable -ValueOnly",
+        "Get-Variable",
+        "Get-PSDrive",
+        "Get-Clipboard",
+        "Get-History",
+        "Get-Secret -Name x",
+        "Get-AzAccessToken",
+        "'just a string'",
+        "$x",
+    ],
+)
+def test_environment_variable_and_drive_reads_are_refused(adapter: str, command: str) -> None:
+    with pytest.raises(CommandRefused):
+        check_command(adapter, command)
+
+
+def test_plain_and_automatic_variables_stay_allowed() -> None:
+    script = "$r = Get-AcceptedDomain; $r | Where-Object { $_.Default -eq $true -and $null -ne $_.Name } | Select-Object Name"
+    assert check_command("powershell_graph", script) == ("Get-AcceptedDomain", "Where-Object", "Select-Object")
+
+
+def test_powershell_child_gets_no_credential_from_the_environment(monkeypatch) -> None:
+    import subprocess
+
+    envs: list[dict[str, str]] = []
+
+    def _run(cmd, **kwargs):  # noqa: ANN001
+        envs.append(dict(kwargs["env"]))
+        return subprocess.CompletedProcess(cmd, 0, stdout='[{"Name": "r1"}]', stderr="")
+
+    monkeypatch.setattr("subprocess.run", _run)
+    monkeypatch.setattr("shutil.which", lambda name, *a, **k: f"/usr/bin/{name}")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("HOME", "/home/auditor")
+    monkeypatch.setenv("PSModulePath", "/opt/modules")
+    monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/ca.pem")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    secrets = {
+        "AZURE_CLIENT_SECRET": "client-secret-value",
+        "AUDITEX_SMTP_PASSWORD": "smtp-password-value",
+        "AUDITEX_CERT_PASSWORD": "cert-password-value",
+        "GITHUB_TOKEN": "gh-token-value",
+        "OPENAI_API_KEY": "api-key-value",
+        "AWS_SECRET_ACCESS_KEY": "aws-value",
+        "STORAGE_CONNECTION_STRING": "conn-value",
+        "AUDITEX_EXO_ACCESS_TOKEN": "stale-token-from-the-parent",
+        "AUDITEX_IPPS_ACCESS_TOKEN": "stale-ipps-token",
+    }
+    for name, value in secrets.items():
+        monkeypatch.setenv(name, value)
+
+    PowerShellGraphAdapter().run(
+        "Get-AcceptedDomain",
+        session={"kind": "exchange_online", "access_token": "fresh-token", "organization": "contoso.onmicrosoft.com"},
+    )
+    PowerShellGraphAdapter().run("Get-AcceptedDomain")
+
+    with_session, without_session = envs
+    for env in envs:
+        assert env["PATH"] == "/usr/bin:/bin"
+        assert env["HOME"] == "/home/auditor"
+        assert env["PSModulePath"] == "/opt/modules"
+        assert env["SSL_CERT_FILE"] == "/etc/ssl/ca.pem"
+        assert env["HTTPS_PROXY"] == "http://proxy.example:8080"
+        assert not set(secrets.values()) & set(env.values())
+    assert with_session["AUDITEX_EXO_ACCESS_TOKEN"] == "fresh-token"
+    assert "AUDITEX_EXO_ACCESS_TOKEN" not in without_session
