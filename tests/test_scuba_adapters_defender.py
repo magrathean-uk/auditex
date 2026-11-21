@@ -29,7 +29,8 @@ SCOPE = (
     "ExceptIfSentTo", "ExceptIfSentToMemberOf", "ExceptIfRecipientDomainIs",
 )
 CONTRACT = {
-    "protection_policy_rules": ("eopProtectionPolicyRules", ("Identity", "State", *SCOPE)),
+    "protection_policy_rules": ("eopProtectionPolicyRules", (
+        "Identity", "State", "HostedContentFilterPolicy", "AntiPhishPolicy", "MalwareFilterPolicy", *SCOPE)),
     "atp_policy_rules": ("atpProtectionPolicyRules", ("Identity", "State", *SCOPE)),
     "built_in_protection_rules": ("atpBuiltInProtectionRules", (
         "Identity", "ExceptIfSentTo", "ExceptIfSentToMemberOf", "ExceptIfRecipientDomainIs")),

@@ -7,6 +7,9 @@ RULE_SCOPE = (
     "SentTo", "SentToMemberOf", "RecipientDomainIs",
     "ExceptIfSentTo", "ExceptIfSentToMemberOf", "ExceptIfRecipientDomainIs",
 )
+# The policies an EOP preset rule applies: the SS 6.x spam cascade ties an enabled preset rule to its anti-spam policy
+# through HostedContentFilterPolicy; without it a Standard or Strict preset is never assessed (review R002).
+PRESET_POLICY_LINKS = ("HostedContentFilterPolicy", "AntiPhishPolicy", "MalwareFilterPolicy")
 
 
 def _listing(cmdlet: str, props: tuple[str, ...], *, allow_empty: bool = True) -> str:
@@ -27,7 +30,9 @@ ANTI_PHISH_POLICY_FIELDS = (
 )
 
 DEFENDER_COMMANDS: list[tuple[str, str]] = [
-    ("eopProtectionPolicyRules", _listing("Get-EOPProtectionPolicyRule", ("Identity", "State", *RULE_SCOPE))),
+    ("eopProtectionPolicyRules", _listing("Get-EOPProtectionPolicyRule", (
+        "Identity", "State", *PRESET_POLICY_LINKS, *RULE_SCOPE,
+    ))),
     ("atpProtectionPolicyRules", _listing("Get-ATPProtectionPolicyRule", ("Identity", "State", *RULE_SCOPE))),
     ("atpBuiltInProtectionRules", _listing("Get-ATPBuiltInProtectionRule", (
         "Identity", "ExceptIfSentTo", "ExceptIfSentToMemberOf", "ExceptIfRecipientDomainIs",
