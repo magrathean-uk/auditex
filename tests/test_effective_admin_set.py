@@ -1347,3 +1347,20 @@ def test_an_administrator_excluded_through_a_non_privileged_role_they_also_hold_
     assert set(_rows(plain)) == {"u1"}
     assert _admin_mfa_verdict(plain)["verdict"] == "enforced"
 
+
+def test_guest_exclusion_is_not_proven_harmless_while_an_administrator_is_unresolved() -> None:
+    """R038: an administrator the users list did not resolve may be a guest."""
+    guests = {"guestOrExternalUserTypes": "b2bCollaborationGuest"}
+    snapshot = _snapshot(
+        _identity(["u1"], [_assignment("u1"), _assignment("ghost")], members=[]),
+        conditional_access=_all_users_mfa(excludeGuestsOrExternalUsers=guests),
+    )
+
+    assert _rows(snapshot)["ghost"]["principal_type"] == "unresolved"
+    assert _summary(snapshot)["state"] == "complete" and _summary(snapshot)["guest_admin_count"] == 0
+    assert _admin_mfa_verdict(snapshot)["verdict"] == "enforced_with_exclusions"
+    resolved = _snapshot(
+        _identity(["u1", "u2"], [_assignment("u1"), _assignment("u2")]),
+        conditional_access=_all_users_mfa(excludeGuestsOrExternalUsers=guests),
+    )
+    assert _admin_mfa_verdict(resolved)["verdict"] == "enforced"

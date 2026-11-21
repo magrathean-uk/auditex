@@ -197,6 +197,9 @@ class AdminScope:
     # Group id -> ids of the members the run read (role-assignable groups, nested groups included as members).
     group_members: Mapping[str, frozenset[str]] = field(default_factory=dict)
     guest_principal_ids: frozenset[str] = frozenset()
+    # Administrators whose guest status the set cannot tell (an assignment to a principal the users list did not
+    # resolve, or a user without a user type): a guest-type exclusion may reach them.
+    guest_unknown_principal_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -570,6 +573,7 @@ class _Directory:
         self._direct: dict[str, frozenset[str]] = dict(scope.group_members) if scope is not None else {}
         self._closure: dict[str, frozenset[str]] = {}
         self.guests: frozenset[str] = scope.guest_principal_ids if scope is not None else frozenset()
+        self._guest_unknown: frozenset[str] = scope.guest_unknown_principal_ids if scope is not None else frozenset()
         # Whether the set says what each administrator holds and whether they are a guest, or only the flat sets.
         self._itemised = bool(scope is not None and scope.principal_roles)
 
@@ -583,6 +587,8 @@ class _Directory:
     def is_guest(self, principal: str) -> bool | None:
         if principal in self.guests:
             return True
+        if principal in self._guest_unknown:
+            return None
         return False if self._itemised and principal in self._roles else None
 
     def holders(self, role_id: str) -> set[str]:

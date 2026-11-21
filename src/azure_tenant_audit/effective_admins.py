@@ -233,6 +233,12 @@ def admin_scope(
         if row.get("kind") == ROW_KIND and row.get("counted") and row.get("enabled") is not False
     ]
     guests = summary.get("guest_admin_count")
+    guest_unknown = frozenset(
+        _key(row.get("principal_id")) for row in rows if row.get("principal_id") and not isinstance(row.get("is_guest"), bool)
+    )
+    if guest_unknown:
+        # The count only covers the administrators whose user type was read: it is a lower bound, not proof.
+        guests = None
     admin_roles = {
         _key(row.get("principal_id")): frozenset(
             _key(role.get("role_definition_id")) for role in row.get("roles") or [] if role.get("role_definition_id")
@@ -263,6 +269,7 @@ def admin_scope(
         guest_principal_ids=frozenset(
             _key(row.get("principal_id")) for row in rows if row.get("principal_id") and row.get("is_guest") is True
         ),
+        guest_unknown_principal_ids=guest_unknown,
     )
 
 
