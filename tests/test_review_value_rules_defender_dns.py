@@ -89,3 +89,34 @@ def test_r102_spf_compliance_tokenises_the_record(record, compliant):
     assert entry["compliant"] is compliant
     record = assess("MS.EXO.2.2v3", {"spf_records": [entry]})
     assert record["verdict"] == ("met" if compliant else "not_met")
+
+
+# ---- R029: an accepted subdomain that inherits its parent's DMARC record is judged on sp= ----
+
+@pytest.mark.parametrize("parent,verdict,cell", [
+    ("v=DMARC1; p=reject; sp=none; rua=mailto:d@contoso.example", "not_met", "domain_noncompliant.p_not_reject"),
+    ("v=DMARC1; p=reject; sp=quarantine", "not_met", "domain_noncompliant.p_not_reject"),
+    ("v=DMARC1; p=reject; sp=bogus", "not_met", "domain_noncompliant.p_not_reject"),   # RFC 7489 6.6.3: invalid sp acts as none
+    ("v=DMARC1; p=reject; sp=none; sp=reject", "not_assessed", "domain_unusable.tag_duplicated"),
+    ("v=DMARC1; p=none; sp=reject", "met", "all_compliant"),
+    ("v=DMARC1; p=reject", "met", "all_compliant"),                                     # no sp: p applies to subdomains
+    ("v=DMARC1; p=reject; sp=reject", "met", "all_compliant"),
+])
+def test_r029_inherited_dmarc_record_reads_sp(parent, verdict, cell):
+    entry = dns_lookup.scuba_dmarc_record("mail.contoso.example", _TxtResolver({"_dmarc.contoso.example": [parent]}))
+    assert entry["rdata"] == [parent]
+    record = assess("MS.EXO.4.2v1", {"dmarc_records": [entry]})
+    assert (record["verdict"], record["cell"]) == (verdict, cell)
+
+
+def test_r029_author_record_still_reads_p_only():
+    own = "v=DMARC1; p=reject; sp=none"
+    entry = dns_lookup.scuba_dmarc_record("contoso.example", _TxtResolver({"_dmarc.contoso.example": [own]}))
+    record = assess("MS.EXO.4.2v1", {"dmarc_records": [entry]})
+    assert (record["verdict"], record["cell"]) == ("met", "all_compliant")
+
+
+def test_r029_entry_without_a_log_keeps_the_scubagear_reading():
+    entry = {"domain": "mail.contoso.example", "rdata": ["v=DMARC1; p=reject; sp=none"]}
+    record = assess("MS.EXO.4.2v1", {"dmarc_records": [entry]})
+    assert (record["verdict"], record["cell"]) == ("met", "all_compliant")
