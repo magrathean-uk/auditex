@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import endpoint_posture, exchange_protection, external_sharing, os_lifecycle
-from .attack_graph import analyze_attack_graph
+from .attack_graph import TIER0_GRAPH_PERMISSIONS, TIER0_ROLE_TEMPLATES, analyze_attack_graph
 from .autopilot import build_board_report_sections
 from .baselines import (
     SECURE_SCORE_LOW_THRESHOLD_PERCENT,
@@ -2335,6 +2335,48 @@ def _actor_from_directory_audit(item: dict[str, Any]) -> str:
     )
 
 
+_ROLE_NAME_PROPERTIES = {"role.displayname", "roledefinition.displayname", "role.templateid"}
+_TIER0_ROLE_NAMES_LOWER = {name.lower() for name, _weight in TIER0_ROLE_TEMPLATES.values()} | set(TIER0_ROLE_TEMPLATES)
+_TIER0_APP_PERMISSIONS = set(TIER0_GRAPH_PERMISSIONS)
+
+
+def _audit_target_values(target_resources: Any, properties: set[str]) -> list[str]:
+    """New values of the named modified properties across an audit event's target resources."""
+    values: list[str] = []
+    for target in target_resources if isinstance(target_resources, list) else []:
+        if not isinstance(target, dict):
+            continue
+        if properties is _ROLE_NAME_PROPERTIES and str(target.get("type") or "").lower() == "role" and target.get("displayName"):
+            values.append(str(target["displayName"]))
+        for prop in target.get("modifiedProperties") or []:
+            if isinstance(prop, dict) and str(prop.get("displayName") or "").lower() in properties:
+                value = str(prop.get("newValue") or "").strip().strip('"').strip()
+                if value:
+                    values.append(value)
+    return values
+
+
+def _privilege_event_severity(category: str, activity: str, target_resources: Any) -> str | None:
+    """The privilege-change severity of a directory audit event, or None when it is not a privilege change.
+
+    A directory role assignment or PIM activation (category RoleManagement) is high for a tier-0 role or a role
+    the event does not name, and medium for another named role. Outside RoleManagement only an application
+    permission grant of a tier-0 Graph permission counts; routine enterprise-app user assignments do not.
+    """
+    if category == "rolemanagement":
+        if "role" not in activity or not any(word in activity for word in ("add", "assign", "activate")):
+            return None
+        roles = [value.lower() for value in _audit_target_values(target_resources, _ROLE_NAME_PROPERTIES)]
+        if not roles or any(role in _TIER0_ROLE_NAMES_LOWER for role in roles):
+            return "high"
+        return "medium"
+    if activity == "add app role assignment to service principal":
+        permissions = _audit_target_values(target_resources, {"approle.value"})
+        if any(permission in _TIER0_APP_PERMISSIONS for permission in permissions):
+            return "high"
+    return None
+
+
 def _build_privilege_event_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for item in ((normalized_snapshot.get("security_directory_audit_events") or {}).get("records") or []):
@@ -2343,9 +2385,8 @@ def _build_privilege_event_findings(normalized_snapshot: dict[str, Any]) -> list
         result = str(item.get("result") or "").strip().lower()
         if result and result not in {"success", "succeeded"}:
             continue
-        if category != "rolemanagement" and "role" not in activity:
-            continue
-        if not (("add" in activity or "assign" in activity or "activate" in activity) and "role" in activity):
+        severity = _privilege_event_severity(category, activity, item.get("target_resources"))
+        if severity is None:
             continue
         actor = _actor_from_directory_audit(item)
         findings.append(
@@ -2353,7 +2394,7 @@ def _build_privilege_event_findings(normalized_snapshot: dict[str, Any]) -> list
                 {
                     "id": f"security_directory_audit:{item.get('id')}:privilege_change",
                     "rule_id": "security.privilege_change_event",
-                    "severity": "high",
+                    "severity": severity,
                     "category": "identity",
                     "title": "Privileged role change observed",
                     "status": "open",

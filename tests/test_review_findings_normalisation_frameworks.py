@@ -102,3 +102,57 @@ def test_r010_a_guest_on_one_site_does_not_fail_the_sharing_setting_controls() -
             for row in alignment["frameworks"][framework]["controls"]:
                 if row["control_id"] in controls:
                     assert not {"f-ext", "f-link", "f-fwd"} & set(row["finding_ids"]), (framework, row["control_id"])
+
+
+# ---- R048: only directory-role changes and tier-0 app permission grants are privilege changes --------------------
+
+
+def _audit_snapshot(*events: dict) -> dict:
+    return _snapshot({"security": {"directoryAudits": {"value": list(events)}}})
+
+
+def _audit(event_id: str, category: str, activity: str, targets: list[dict] | None = None) -> dict:
+    return {
+        "id": event_id,
+        "activityDateTime": "2026-11-20T08:00:00Z",
+        "category": category,
+        "activityDisplayName": activity,
+        "result": "success",
+        "initiatedBy": {"user": {"userPrincipalName": "admin@example.com"}},
+        "targetResources": targets or [],
+    }
+
+
+def _role_target(name: str) -> dict:
+    return {"type": "User", "displayName": "Someone", "modifiedProperties": [{"displayName": "Role.DisplayName", "newValue": f'"{name}"'}]}
+
+
+def _app_role_target(value: str) -> dict:
+    return {"type": "ServicePrincipal", "displayName": "App", "modifiedProperties": [{"displayName": "AppRole.Value", "newValue": f'"{value}"'}]}
+
+
+def test_r048_routine_enterprise_app_assignments_are_not_privilege_changes() -> None:
+    snapshot = _audit_snapshot(
+        _audit("a-1", "ApplicationManagement", "Add app role assignment grant to user", [{"type": "User"}]),
+        _audit("a-2", "ApplicationManagement", "Add app role assignment to service principal", [_app_role_target("User.Read.All")]),
+    )
+    assert _rule_findings(snapshot, "security.privilege_change_event") == []
+
+
+def test_r048_tier0_app_permission_grant_is_still_a_privilege_change() -> None:
+    snapshot = _audit_snapshot(
+        _audit("a-3", "ApplicationManagement", "Add app role assignment to service principal",
+               [_app_role_target("RoleManagement.ReadWrite.Directory")]),
+    )
+    (finding,) = _rule_findings(snapshot, "security.privilege_change_event")
+    assert finding["severity"] == "high"
+
+
+def test_r048_severity_follows_whether_the_role_is_tier0() -> None:
+    snapshot = _audit_snapshot(
+        _audit("r-1", "RoleManagement", "Add member to role", [_role_target("Global Administrator")]),
+        _audit("r-2", "RoleManagement", "Add eligible member to role", [_role_target("Reports Reader")]),
+    )
+    severities = {item["id"].split(":")[1]: item["severity"] for item in _rule_findings(snapshot, "security.privilege_change_event")}
+    assert severities == {"r-1": "high", "r-2": "medium"}
+
