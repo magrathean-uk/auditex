@@ -564,3 +564,20 @@ def test_group_member_and_eligible_admins_are_not_ordinary_user_footholds() -> N
              if str(item.get("rule_id")).startswith("attack_path.")]
     assert not [text for text in texts if "alice@contoso.example" in text or "bob@contoso.example" in text]
 
+
+def test_reset_roles_do_not_reach_members_of_role_assignable_groups() -> None:
+    """R008: Entra blocks Helpdesk-style resets of role-assignable group members."""
+    payloads = _admin_routes_payloads()
+    identity = payloads["identity"]
+    identity["users"]["value"].append(_user("u-helpdesk", "helpdesk@contoso.example"))
+    identity["roleDefinitions"]["value"].append({"id": HELPDESK, "displayName": "Helpdesk Administrator"})
+    identity["roleAssignments"]["value"].append({"id": "ra-hd", "principalId": "u-helpdesk", "roleDefinitionId": HELPDESK})
+    graph = build_attack_graph(_snapshot(payloads))
+
+    reset_targets = {edge.target for edge in graph.edges if edge.edge == "can_reset"}
+    assert "user:u-plain" in reset_targets
+    assert "user:u-alice" not in reset_targets
+    assert "user:u-nested" not in reset_targets
+    analysis = analyze_attack_graph(_snapshot(payloads))
+    reset_hops = [hop for path in analysis["paths"] for hop in path["hops"] if hop["edge"] == "can_reset"]
+    assert not [hop for hop in reset_hops if hop["to_id"] in {"user:u-alice", "user:u-nested"}]

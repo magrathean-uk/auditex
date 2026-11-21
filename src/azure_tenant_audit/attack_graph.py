@@ -541,8 +541,14 @@ def build_attack_graph(snapshot: dict[str, Any], *, now: datetime | None = None)
                     granted_for=consent.get("principal_id"),
                 )
 
-    # Password / authentication-method reset over non-administrators.
-    users_with_roles = set(roles_held)
+    # Password / authentication-method reset over non-administrators. Entra
+    # protects role holders and every (transitive) member of a role-assignable
+    # group, or of a group that holds a role, from these reset roles.
+    protected_groups = {
+        node_id for node_id, node in graph.nodes.items()
+        if node["type"] in {"group", "principal"} and (node.get("role_assignable") or node_id in roles_held)
+    }
+    users_with_roles = set(roles_held) | _transitive_members(graph, protected_groups)
     reset_roles = [
         node_id
         for node_id in graph.nodes
