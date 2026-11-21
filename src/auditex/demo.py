@@ -112,7 +112,10 @@ def _load_json(path: Path) -> Any:
 
 def _demo_sample(options: DemoOptions) -> Path:
     if options.sample is not None:
-        return resolve_resource_path(options.sample)
+        own = options.sample.expanduser()
+        if not own.is_absolute() and own.exists():
+            return Path(os.path.abspath(own))
+        return resolve_resource_path(own)
     for candidate in (DEMO_SAMPLE, FALLBACK_SAMPLE):
         resolved = resolve_resource_path(candidate)
         if resolved.exists():
@@ -416,7 +419,8 @@ def run_demo(options: DemoOptions) -> int:
     provenance = display_sample.get("_fixture_provenance") or {}
     if not isinstance(provenance, dict):
         provenance = {}
-    out_dir = options.out_dir
+    # Anchor the run folder to the cwd now: later reads resolve relative paths against resource roots, not the cwd.
+    out_dir = Path(os.path.abspath(options.out_dir.expanduser()))
     from azure_tenant_audit.guarded_io import UnsafeRunFileError
     from azure_tenant_audit.private_io import make_private_dirs
     if out_dir.is_symlink() or (out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir()))):

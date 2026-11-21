@@ -193,3 +193,29 @@ def test_demo_shows_detection_baselines_and_graph_attack_path(tmp_path: Path) ->
     assert "Break it: remove tom.fielding@halcyonfreight.example as owner of Payroll Export" in output
     page = (tmp_path / "demo" / "explorer.html").read_text(encoding="utf-8")
     assert 'data-view="detection"' in page and 'data-view="baselines"' in page
+
+
+def test_demo_runs_from_a_non_repo_cwd_with_relative_out(tmp_path: Path, monkeypatch, capsys) -> None:
+    # R077: the default --out is relative; it must land under the cwd, not be read back from the package tree.
+    work = tmp_path / "elsewhere"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    monkeypatch.delenv("AUDITEX_RESOURCE_ROOT", raising=False)
+
+    rc = auditex_main(["demo", "--no-pause", "--no-html"])
+
+    assert rc == 0, capsys.readouterr().out
+    assert (work / "outputs" / "demo" / "runs").is_dir()
+    assert "Read the risk summary" in capsys.readouterr().out
+
+
+def test_demo_reads_a_relative_sample_from_the_cwd(tmp_path: Path, monkeypatch, capsys) -> None:
+    work = tmp_path / "elsewhere"
+    work.mkdir()
+    (work / "mine.json").write_bytes(KNOWN_BAD.read_bytes())
+    monkeypatch.chdir(work)
+
+    rc = auditex_main(["demo", "--no-pause", "--no-html", "--sample", "mine.json", "--out", "d"])
+
+    assert rc == 0, capsys.readouterr().out
+    assert (work / "d" / "runs").is_dir()
