@@ -28,6 +28,7 @@ import requests
 
 DEFAULT_TIMEOUT_SECONDS = 5.0
 MAX_POLICY_BYTES = 64 * 1024
+MAX_POLICY_AGE_SECONDS = 31557600  # RFC 8461 section 3.2: the largest max_age a sender accepts
 OIDC_AUTHORITY = "https://login.microsoftonline.com"
 _GUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 _DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.IGNORECASE)
@@ -109,7 +110,24 @@ def fetch_mta_sts_policy(domain: str, fetcher: HttpsFetcher) -> dict[str, Any]:
     parsed = parse_mta_sts_policy(body)
     if parsed is None:
         return {"url": url, "fetch_status": "invalid_policy", "http_status": status}
+    reasons = mta_sts_policy_problems(parsed)
+    if reasons:
+        return {"url": url, "fetch_status": "invalid_policy", "http_status": status, **parsed, "invalid_reasons": reasons}
     return {"url": url, "fetch_status": "ok", "http_status": status, **parsed}
+
+
+def mta_sts_policy_problems(parsed: dict[str, Any]) -> list[str]:
+    """Why RFC 8461 section 3.2 senders would treat a parsed STSv1 policy as invalid (review R113): an unknown mode,
+    a missing or out-of-range max_age, or no mx line in enforce or testing mode. Empty when the policy is valid."""
+    reasons = []
+    if not parsed.get("mode_valid"):
+        reasons.append("mode_invalid")
+    max_age = parsed.get("max_age")
+    if not isinstance(max_age, int) or not 0 <= max_age <= MAX_POLICY_AGE_SECONDS:
+        reasons.append("max_age_invalid")
+    if parsed.get("mode") in {"enforce", "testing"} and not parsed.get("mx"):
+        reasons.append("mx_missing")
+    return reasons
 
 
 def parse_openid_configuration(payload: Any) -> dict[str, Any] | None:

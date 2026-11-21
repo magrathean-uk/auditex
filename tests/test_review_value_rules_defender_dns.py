@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from auditex.scuba_projection import project_run
-from azure_tenant_audit import dns_lookup
+from azure_tenant_audit import dns_lookup, exposure_lookup
 from azure_tenant_audit.collectors.exchange_defender_commands import DEFENDER_COMMANDS
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
@@ -144,3 +144,47 @@ def test_r109_one_dmarc_record_beside_other_txt_is_still_read():
     summary = dns_lookup._summarize_dmarc(["unrelated", "v=DMARC1; p=reject"])
     assert summary["present"] is True and summary["policy"] == "reject"
     assert summary["multiple_records"] is False
+
+
+# ---- R113: an MTA-STS policy that RFC 8461 senders reject is invalid, not enforcing ----
+
+MTA_STS_URL = "https://mta-sts.contoso.example/.well-known/mta-sts.txt"
+
+
+class _PolicyFetcher:
+    def __init__(self, body):
+        self.body = body
+
+    def get_text(self, url):
+        return 200, self.body, None
+
+
+@pytest.mark.parametrize("body,reasons", [
+    ("version: STSv1\nmode: enforcing\nmx: mail.contoso.example\nmax_age: 604800\n", ["mode_invalid"]),
+    ("version: STSv1\nmode: enforce\nmx: mail.contoso.example\n", ["max_age_invalid"]),
+    ("version: STSv1\nmode: enforce\nmx: mail.contoso.example\nmax_age: 31557601\n", ["max_age_invalid"]),
+    ("version: STSv1\nmode: enforce\nmax_age: 604800\n", ["mx_missing"]),
+    ("version: STSv1\nmode: testing\nmax_age: 86400\n", ["mx_missing"]),
+])
+def test_r113_invalid_mta_sts_policy_is_reported_invalid(body, reasons):
+    policy = exposure_lookup.fetch_mta_sts_policy("contoso.example", _PolicyFetcher(body))
+    assert policy["fetch_status"] == "invalid_policy" and policy["invalid_reasons"] == reasons
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="r", collector_payloads={"dns_posture": {
+        "domains": {"value": []},
+        "domainPosture": {"value": [{"domain": "contoso.example", "managed_by_microsoft": False,
+                                     "spf": {"present": True, "all_qualifier": "-"},
+                                     "dmarc": {"present": True, "policy": "reject"},
+                                     "dkim": {"selectors_present": ["selector1"], "selectors_missing": []},
+                                     "mta_sts": {"dns_present": True, "policy": policy},
+                                     "tls_rpt": {"present": True}, "bimi": {"present": False}}]}}})
+    ids = {finding["id"] for finding in build_findings([], normalized_snapshot=snapshot)}
+    assert "dns_posture:contoso.example:mta_sts_policy_invalid" in ids
+
+
+@pytest.mark.parametrize("body", [
+    "version: STSv1\nmode: enforce\nmx: mail.contoso.example\nmax_age: 604800\n",
+    "version: STSv1\nmode: none\nmax_age: 86400\n",                     # mode none needs no mx
+])
+def test_r113_valid_mta_sts_policy_stays_ok(body):
+    policy = exposure_lookup.fetch_mta_sts_policy("contoso.example", _PolicyFetcher(body))
+    assert policy["fetch_status"] == "ok" and "invalid_reasons" not in policy
