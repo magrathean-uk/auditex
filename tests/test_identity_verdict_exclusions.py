@@ -721,3 +721,33 @@ def test_single_policy_verdict_needs_one_policy_that_leaves_nobody_out() -> None
     assert _mfa(first, _policy("ca-3"))["single_policy_verdict"] == "enforced"
     sanctioned = _policy("ca-4", users=_all_users(excludeUsers=[BREAK_GLASS_USER]))
     assert _mfa(first, sanctioned, sanctioned=frozenset({BREAK_GLASS_USER}))["single_policy_verdict"] == "enforced"
+
+
+GLOBAL_READER = "f2ef992c-3afb-46b9-b7cf-a126ee74c451"
+
+
+def test_a_role_policy_for_administrators_does_not_rescue_a_non_privileged_role_exclusion() -> None:
+    """Impact on R037: an administrator who also holds Global Reader is not every Global Reader."""
+    scope = AdminScope(
+        complete=True,
+        privileged_role_ids=frozenset({GLOBAL_ADMIN, EXCHANGE_ADMIN}),
+        held_role_ids=frozenset({GLOBAL_ADMIN}),
+        admin_principal_ids=frozenset({ADMIN}),
+        guest_admin_count=0,
+        principal_roles={ADMIN: frozenset({GLOBAL_ADMIN, GLOBAL_READER})},
+    )
+    all_users = _policy("ca-all", users=_all_users(excludeRoles=[GLOBAL_READER]))
+    for_admins = _policy("ca-ga", users={"includeRoles": [GLOBAL_ADMIN]})
+
+    verdict = evaluate_effective_mfa(
+        policies=_collected(all_users, for_admins),
+        security_defaults=_defaults(False),
+        authentication_strengths=_collected(),
+        lookups=LOOKUPS,
+        admin_scope=scope,
+    )
+    assert verdict["verdict"] == "enforced_with_exclusions"
+    row = next(item for item in verdict["excluded_principals"] if item["id"] == GLOBAL_READER)
+    assert not row.get("covered_by_policy_ids")
+    # The administrator verdict reads administrators only: the role policy covers the one who holds both.
+    assert _admin(all_users, for_admins, scope=scope)["verdict"] == "enforced"

@@ -574,6 +574,9 @@ class _Directory:
         self._closure: dict[str, frozenset[str]] = {}
         self.guests: frozenset[str] = scope.guest_principal_ids if scope is not None else frozenset()
         self._guest_unknown: frozenset[str] = scope.guest_unknown_principal_ids if scope is not None else frozenset()
+        # Holders are listed in full only for the privileged roles: a non-privileged role is known only for the
+        # administrators who also hold it.
+        self._privileged: frozenset[str] = scope.privileged_role_ids if scope is not None else frozenset()
         # Whether the set says what each administrator holds and whether they are a guest, or only the flat sets.
         self._itemised = bool(scope is not None and scope.principal_roles)
 
@@ -593,6 +596,10 @@ class _Directory:
 
     def holders(self, role_id: str) -> set[str]:
         return set(self._holders.get(role_id, ()))
+
+    def knows_every_holder(self, role_id: str) -> bool:
+        """Whether ``holders`` lists everyone who holds the role, not only the administrators who also do."""
+        return not self._privileged or role_id in self._privileged
 
     def knows_group(self, group_id: str) -> bool:
         return group_id in self._direct
@@ -1255,6 +1262,7 @@ def _exclusion_coverage(
     *,
     known: bool,
     sanctioned: Collection[str],
+    administrators_only: bool = True,
 ) -> list[tuple[str, list[_Coverer], list[str]]] | None:
     """Whether other policies require MFA of the administrators an excluded role or user row leaves out.
 
@@ -1267,7 +1275,9 @@ def _exclusion_coverage(
     if row["type"] == "role":
         holders = sorted(directory.holders(row_id))
         outcomes = [_coverage(coverers, principal, directory, sanctioned) for principal in holders]
-        if not known or not holders:
+        if not known or not holders or not (administrators_only or directory.knows_every_holder(row_id)):
+            # For an all-users verdict a non-privileged role (Global Reader) is held by people the set does not
+            # list, so the role is judged as a whole, not only through the administrators who also hold it.
             outcomes.append(_role_coverage(row_id, coverers, sanctioned))
         return outcomes
     if row["type"] == "user" and directory.knows_principal(row_id):
@@ -1294,7 +1304,7 @@ def _rescue_exclusions(
     relied: list[_Coverer] = []
     for row in rows:
         outcomes = None if row.get("sanctioned") or row.get("possible") else _exclusion_coverage(
-            row, coverers, directory, known=known, sanctioned=sanctioned_ids
+            row, coverers, directory, known=known, sanctioned=sanctioned_ids, administrators_only=False
         )
         if outcomes and all(state == "yes" for state, _, _ in outcomes):
             used = [coverer for _, items, _ in outcomes for coverer in items]
