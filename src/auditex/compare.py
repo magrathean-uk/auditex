@@ -654,10 +654,11 @@ def render_compare_markdown(result: dict[str, Any]) -> str:
     delta = build_finding_delta(before, after)
     risk_before, risk_after = delta["risk_before"], delta["risk_after"]
     grade_before, grade_after = risk_before.get("grade") or "unknown", risk_after.get("grade") or "unknown"
-    risk_change = "unchanged" if grade_before == grade_after else f"{grade_before} -> {grade_after}"
+    # The arrow is Auditex's own text: escape only the grades, so the terminal shows '->' and not '-&gt;'.
+    risk_change = "unchanged" if grade_before == grade_after else f"{_md(grade_before)} -> {_md(grade_after)}"
     summary = baseline.get("summary") if isinstance(baseline.get("summary"), dict) else {}
     lines += [
-        f"- Risk grade: {_md(grade_before)} -> {_md(grade_after)} ({_md(risk_change)}; score {_md(risk_before.get('score'))} -> {_md(risk_after.get('score'))})",
+        f"- Risk grade: {_md(grade_before)} -> {_md(grade_after)} ({risk_change}; score {_md(risk_before.get('score'))} -> {_md(risk_after.get('score'))})",
         f"- New findings: {len(delta['new'])} ({_severity_counts(delta['new'])})",
         f"- Resolved findings: {len(delta['resolved'])} ({_severity_counts(delta['resolved'])})",
         f"- Not reassessed findings: {len(delta['not_reassessed'])} ({_severity_counts(delta['not_reassessed'])})",

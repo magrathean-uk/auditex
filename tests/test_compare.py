@@ -402,3 +402,17 @@ def test_compare_markdown_renders_tenant_controlled_names_literally() -> None:
     assert "\r" not in text and "<img" not in text
     assert "[Review](" not in text
     assert not any(line.startswith("## Resolved") for line in text.splitlines())
+
+
+def test_compare_markdown_keeps_its_own_risk_arrow_readable(tmp_path: Path, capsys) -> None:
+    """R134 follow-up: escaping tenant text must not entity-escape Auditex's own '->' in the risk-grade line."""
+    from test_signin_licence_and_compare import _run_with_findings
+
+    from auditex import cli as auditex_cli
+
+    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [], "high")
+    after = _run_with_findings(tmp_path, "run-b", "2026-09-02T00:00:00Z", [], "critical")
+    assert auditex_cli.main(["compare", "--run-dir", str(before), "--run-dir", str(after), "--format", "md"]) == 0
+    output = capsys.readouterr().out
+    assert "(high -> critical; score" in output
+    assert "&gt;" not in output
