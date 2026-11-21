@@ -1298,3 +1298,52 @@ def test_the_administrator_scope_is_incomplete_when_the_set_is_unknown_and_absen
 
     assert scope is not None and scope.complete is False
     assert admin_scope([], []) is None
+
+
+# --- deep review 2026-11-21: identity posture --------------------------------------------------------
+
+
+def _admin_mfa_verdict(snapshot: dict[str, Any]) -> dict[str, Any]:
+    from azure_tenant_audit.normalize import IDENTITY_CONTROL_SECTION
+
+    return next(row for row in snapshot[IDENTITY_CONTROL_SECTION]["records"] if row.get("control") == "administrator_mfa")
+
+
+def _all_users_mfa(**exclusions: list[str] | dict[str, Any]) -> dict[str, Any]:
+    return {
+        "conditionalAccessPolicies": {
+            "value": [{
+                "id": "ca-mfa",
+                "displayName": "MFA everyone",
+                "state": "enabled",
+                "conditions": {
+                    "users": {"includeUsers": ["All"], **exclusions},
+                    "applications": {"includeApplications": ["All"]},
+                    "clientAppTypes": ["all"],
+                },
+                "grantControls": {"operator": "OR", "builtInControls": ["mfa"]},
+            }]
+        },
+        "identitySecurityDefaultsEnforcementPolicy": {"value": [{"id": "sd", "isEnabled": False}]},
+        "authenticationStrengthPolicies": {"value": []},
+    }
+
+
+def test_an_administrator_excluded_through_a_non_privileged_role_they_also_hold_is_not_enforced() -> None:
+    """R037: excluding Global Reader exempts a Global Administrator who also holds it."""
+    identity = _identity(["u1"], [_assignment("u1"), _assignment("u1", "reader-role")])
+    snapshot = _snapshot(identity, conditional_access=_all_users_mfa(excludeRoles=["reader-role"]))
+
+    assert _summary(snapshot)["state"] == "complete"
+    assert _rows(snapshot)["u1"]["role_names"] == ["Global Administrator"]
+    verdict = _admin_mfa_verdict(snapshot)
+    assert verdict["verdict"] == "not_enforced"
+    assert [row["id"] for row in verdict["administrator_exclusions"]] == ["reader-role"]
+    # A reader-only user is still not an administrator, and an exclusion of a role no administrator holds is fine.
+    plain = _snapshot(
+        _identity(["u1", "u2"], [_assignment("u1"), _assignment("u2", "reader-role")]),
+        conditional_access=_all_users_mfa(excludeRoles=["reader-role"]),
+    )
+    assert set(_rows(plain)) == {"u1"}
+    assert _admin_mfa_verdict(plain)["verdict"] == "enforced"
+

@@ -233,10 +233,18 @@ def admin_scope(
         if row.get("kind") == ROW_KIND and row.get("counted") and row.get("enabled") is not False
     ]
     guests = summary.get("guest_admin_count")
-    principal_roles = {
+    admin_roles = {
         _key(row.get("principal_id")): frozenset(
             _key(role.get("role_definition_id")) for role in row.get("roles") or [] if role.get("role_definition_id")
         )
+        for row in rows
+        if row.get("principal_id")
+    }
+    # Exclusion matching reads every role an administrator holds; who counts as one, and which administrator roles
+    # are held, reads the privileged roles alone.
+    principal_roles = {
+        _key(row.get("principal_id")): admin_roles[_key(row.get("principal_id"))]
+        | frozenset(_key(role) for role in row.get("other_role_ids") or [] if role)
         for row in rows
         if row.get("principal_id")
     }
@@ -247,7 +255,7 @@ def admin_scope(
     return AdminScope(
         complete=summary.get("state") == STATE_COMPLETE,
         privileged_role_ids=frozenset(_privileged_roles(role_definitions)),
-        held_role_ids=frozenset(role for roles in principal_roles.values() for role in roles),
+        held_role_ids=frozenset(role for roles in admin_roles.values() for role in roles),
         admin_principal_ids=frozenset(principal_roles),
         guest_admin_count=guests if isinstance(guests, int) and not isinstance(guests, bool) else None,
         principal_roles=principal_roles,
@@ -424,6 +432,26 @@ def build_effective_admin_set(
         if entry:
             add_entry(str(row["principal_id"]), entry)
 
+    # Roles outside the privileged list that a principal also holds, by any route. They never make a principal an
+    # administrator, but a policy that excludes one (Global Reader, say) leaves the administrators holding it out.
+    other_roles: dict[str, set[str]] = defaultdict(set)
+    for row in [*role_assignments, *(
+        item for item in governance_objects if item.get("kind") in {SCHEDULE_KIND_ACTIVE, SCHEDULE_KIND_ELIGIBLE}
+    )]:
+        role_id = _text(row.get("role_definition_id"))
+        if row.get("principal_id") and role_id and _key(role_id) not in privileged:
+            other_roles[_key(row.get("principal_id"))].add(_key(role_id))
+    for holder, roles in list(other_roles.items()):
+        seen_members = {holder}
+        pending = deque([holder])
+        while pending:
+            for edge in children.get(pending.popleft(), []):
+                member = _key(edge.get("member_id"))
+                if member and member not in seen_members:
+                    seen_members.add(member)
+                    other_roles[member] |= roles
+                    pending.append(member)
+
     def principal_type(principal: str) -> str:
         if principal in users_by_id:
             return TYPE_USER
@@ -526,6 +554,7 @@ def build_effective_admin_set(
             "scope": scope,
             "global_administrator": any(entry["global_administrator"] for entry in entries),
             "expanded_member_count": expanded_member_count.get(principal) if kind == TYPE_GROUP else None,
+            "other_role_ids": sorted(other_roles.get(principal, ())) or None,
             "state": state,
         }
         if counted:

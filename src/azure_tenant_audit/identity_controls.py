@@ -190,7 +190,8 @@ class AdminScope:
     held_role_ids: frozenset[str] = frozenset()
     admin_principal_ids: frozenset[str] = frozenset()
     guest_admin_count: int | None = None
-    # Principal id -> the administrator roles that principal holds, by any route the set read. Empty for a scope
+    # Principal id -> every directory role that administrator holds, by any route the set read (privileged or not:
+    # an exclusion of Global Reader leaves out the administrators who hold it). Empty for a scope
     # that was built by hand with only the flat sets above: the verdicts then assume the worst split of roles.
     principal_roles: Mapping[str, frozenset[str]] = field(default_factory=dict)
     # Group id -> ids of the members the run read (role-assignable groups, nested groups included as members).
@@ -1331,7 +1332,11 @@ def _administrator_outcome(
         if all(state == "yes" for state, _, _ in outcomes):
             return VERDICT_ENFORCED, [], used, []
         return VERDICT_UNKNOWN, [], [], sorted({reason for _, _, items in outcomes for reason in items})
-    relevant_roles = (scope.held_role_ids if known else scope.privileged_role_ids) if scope is not None else frozenset()
+    relevant_roles = (
+        (scope.held_role_ids | {role for roles in scope.principal_roles.values() for role in roles})
+        if known
+        else scope.privileged_role_ids
+    ) if scope is not None else frozenset()
     definite: list[dict[str, Any]] = []
     possible: list[dict[str, Any]] = []
     undecided: list[str] = []
