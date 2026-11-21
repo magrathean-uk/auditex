@@ -39,6 +39,35 @@ in every page that `auditex report explorer` writes.
 - Notice: the licence is copied at `src/auditex/explorer_assets/fonts/OFL.txt`. The font
   files are unmodified and keep their reserved name.
 
+## Third-party text and data in `configs/`
+
+These ship in the wheel and the source package.
+
+### CISA SCuBA baselines and ScubaGear
+
+- Location: `configs/scuba-policy-sections.json` (baseline excerpts for 102 policies), `configs/explainer-baselines.json` and `configs/explainer-template.json` (requirements, criticalities and instructions), `configs/risky-delegated-permissions.json` (permission ids and risk levels)
+- Upstream: `cisagov/ScubaGear`, commit `2446ad723b7f55031cc02c8aca244d731d468cba`
+- License: CC0 1.0 Universal. Portions of the baseline text were adapted by CISA from Microsoft documentation under Creative Commons Attribution 4.0 International; credit Microsoft and CISA and keep this notice when you redistribute those files.
+- Changes: extraction and reformatting, listed in [explainer baselines](../provenance/explainer-baselines.md).
+- CISA provides the baselines "as is" and does not endorse any commercial product or service, including Auditex.
+
+### Framework identifiers
+
+- Location: `configs/framework-catalog.json`, `configs/control-mappings.json`, `configs/finding-templates.json`
+- Content: control and recommendation numbers with titles written by Auditex, for CIS Microsoft 365 Foundations Benchmark v7.0.0, the CISA SCuBA baselines, Microsoft Secure Score, the Microsoft cloud security benchmark and Zero Trust; and headings of the NCSC Cyber Essentials: Requirements for IT Infrastructure v3.3 (Crown copyright; contains public sector information licensed under the [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)).
+- No benchmark or standard text is copied. The mappings are Auditex's own and have not been authorised, sponsored or otherwise approved by CIS or by any other framework owner. CIS Benchmarks are published by the Center for Internet Security under its own terms; get the Benchmark itself from CIS.
+
+## Models downloaded on request (not distributed)
+
+Auditex contains no language model and does not redistribute one. `auditex explain` downloads the file the user chooses from Hugging Face, at a pinned revision, under that model's own licence.
+
+| `--model` | Repository | Model by | Licence (read 21 November 2026) |
+| --- | --- | --- | --- |
+| `qwen` | `unsloth/Qwen3.5-9B-GGUF` (conversion by Unsloth of `Qwen/Qwen3.5-9B`) | Alibaba Cloud | Apache-2.0 |
+| `mistral` | `mistralai/Ministral-3-8B-Instruct-2512-GGUF` | Mistral AI | Apache-2.0 |
+| `gemma` | `google/gemma-4-E4B-it-qat-q4_0-gguf` | Google | Apache-2.0 |
+| `small` | `unsloth/Qwen3.5-4B-GGUF` (conversion by Unsloth of `Qwen/Qwen3.5-4B`) | Alibaba Cloud | Apache-2.0 |
+
 ## Vendored test fixtures
 
 These are used only by the test suite and live under `tests/schemas/`. They are in the public
@@ -72,6 +101,7 @@ These dependencies are declared in `pyproject.toml`. They are not vendored in th
 | `google-auth` | Optional `google` group: Google Workspace authentication | Apache-2.0 | Keep license notice when redistributing the optional dependency or bundled wheels. |
 | `google-auth-oauthlib` | Optional `google` group: OAuth flow for Google Workspace | Apache-2.0 | Keep license notice when redistributing the optional dependency or bundled wheels. |
 | `google-api-python-client` | Optional `google` group: Google Workspace API client | Apache-2.0 | Keep license notice when redistributing the optional dependency or bundled wheels. |
+| `llama-cpp-python` | Optional `local-answer` group: runs the downloaded model on the same computer; builds llama.cpp from source at install | MIT (llama.cpp: MIT) | Keep copyright and MIT notice when redistributing the optional dependency or bundled wheels. |
 | `jsonschema` | Optional `test` group: validates the SARIF and OSCAL exports against the official schemas in tests | MIT | Development and test use only; not needed to run Auditex. |
 
 The licences recorded are those stated in PyPI metadata for the minimum declared

@@ -17,8 +17,30 @@ src/auditex/explorer_assets/ (run explorer) bundles:
 - Barlow and Barlow Condensed fonts — SIL Open Font License 1.1 — Copyright 2017
   The Barlow Project Authors. Licence text: src/auditex/explorer_assets/fonts/OFL.txt.
 
+configs/scuba-policy-sections.json, configs/explainer-baselines.json,
+configs/explainer-template.json and configs/risky-delegated-permissions.json contain
+text and data from the CISA SCuBA baselines and ScubaGear (cisagov/ScubaGear, commit
+2446ad723b7f55031cc02c8aca244d731d468cba), dedicated to the public domain under
+CC0 1.0 Universal. Portions of that baseline text were adapted by CISA from
+Microsoft documentation, (c) Microsoft Corporation, licensed under the Creative
+Commons Attribution 4.0 International licence
+(https://creativecommons.org/licenses/by/4.0/). Auditex extracted and reformatted
+the text; the changes are listed in docs/provenance/explainer-baselines.md.
+
+configs/framework-catalog.json cites headings of the NCSC Cyber Essentials:
+Requirements for IT Infrastructure v3.3. Contains public sector information licensed
+under the Open Government Licence v3.0
+(https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).
+
+Auditex contains no language model. The optional local answer downloads a model file
+from its publisher at the user's request, under that model's own licence; see
+docs/guides/local-answer.md.
+
 See docs/legal/third-party-notices.md for the full inventory, including the declared
 Python dependencies.
 
 Auditex is independent. It is not affiliated with, endorsed by or supported by Microsoft
-Corporation or Google LLC.
+Corporation, Google LLC, the Cybersecurity and Infrastructure Security Agency (CISA),
+the National Cyber Security Centre (NCSC), IASME or the Center for Internet Security
+(CIS). The framework mappings have not been authorised, sponsored or otherwise approved
+by CIS or by any of them.

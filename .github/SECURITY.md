@@ -47,6 +47,8 @@ Magrathean will not pursue a good-faith researcher for security disclosures that
 - Report promptly and permit reasonable time for remediation;
 - Do not condition non-disclosure on financial compensation.
 
+We recognise good-faith security research only against your own installation of Auditex and a tenant you own or are authorised to test. Testing anyone else's tenant, account or data, or a Microsoft or Google service itself, is not authorised by this policy and is not covered by it.
+
 ## Excluded Conduct
 
 No safe harbour covers phishing, credential stuffing, accessing private production infrastructure, large-scale scanning, denial of service, or unlawful conduct.
