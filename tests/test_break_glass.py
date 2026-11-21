@@ -506,3 +506,30 @@ def test_an_operator_account_excluded_through_a_role_it_holds_counts_as_excluded
     other = _role_snapshot([policy], held={BG1: [HELPDESK_ROLE]}, accounts=["bg1@example.com"])
     assert _finding(other) is not None
 
+
+def test_an_exclusion_through_a_group_whose_members_were_not_read_is_unverified_not_missing() -> None:
+    """R040: the run cannot tell whether a plain security group contains the listed account."""
+    groups = [{"id": "g-ca-ex", "displayName": "CA Exclusions", "isAssignableToRole": False}]
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeGroups": ["g-ca-ex"]})
+
+    snapshot = _snapshot([policy], accounts=["bg1@example.com"], groups=groups)
+
+    finding = _finding(snapshot)
+    assert finding is None or finding["severity"] != "high"
+    assert snapshot["break_glass_assessment"]["records"][0]["policies_missing_exclusion"] == 0
+    accounts = break_glass.resolve_accounts(
+        ["bg1@example.com"],
+        users=[{"id": BG1, "userPrincipalName": "bg1@example.com"}],
+        groups=groups,
+        role_assignments=[],
+        role_definitions=[],
+    )
+    assessment = break_glass.assess_policy(
+        {"include_users": ["All"], "exclude_groups": ["g-ca-ex"], "include_applications": ["All"],
+         "grant": {"built_in_controls": ["mfa"]}},
+        "enabled",
+        accounts,
+    )
+    assert assessment["missing"] is False
+    assert assessment["exclusion_unverified"] is True
+    assert assessment["unverified_exclusion_groups"] == ["CA Exclusions"]
