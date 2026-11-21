@@ -670,6 +670,9 @@ def _common_exclusions(
         for principal in set().union(*per_policy)
         if all(principal in routes or groups for routes, groups in zip(per_policy, unread_groups, strict=False))
     } - shared
+    unseen = _unseen_member_row(policies, unread_groups, result, policy_ids, lookups)
+    if unseen is not None:
+        result.append(unseen)
     if not shared and not possible:
         return result
     implied: set[str] = set()
@@ -703,6 +706,45 @@ def _common_exclusions(
             row["display_name"] = names[principal]
         result.append(row)
     return result
+
+
+def _unseen_member_row(
+    policies: list[dict[str, Any]],
+    unread_groups: list[list[str]],
+    common_rows: list[dict[str, Any]],
+    policy_ids: list[str],
+    lookups: Mapping[str, Mapping[str, str]] | None,
+) -> dict[str, Any] | None:
+    """A ``possible`` group row when every policy excludes a group whose members the run did not read.
+
+    A principal the run never saw can be a member of one such group from each policy and so be outside all of
+    them, though no exclusion is common to the policies and no visible route reaches anyone. ``None`` when some
+    policy has no such group, or an unread group common to every policy already stands for that principal.
+    """
+    if not all(unread_groups):
+        return None
+    common_unread = {str(group).lower() for group in unread_groups[0]}.intersection(
+        *({str(group).lower() for group in groups} for groups in unread_groups[1:])
+    )
+    if any(row["type"] == "group" and str(row["id"]).lower() in common_unread for row in common_rows):
+        return None
+    group_names = {key.lower(): value for key, value in ((lookups or {}).get("group") or {}).items()}
+    via = [
+        {"policy_id": policy["id"], "type": "group", "id": groups[0], "members_read": False}
+        for policy, groups in zip(policies, unread_groups, strict=False)
+    ]
+    first_seen = list(dict.fromkeys(item["id"] for item in via))
+    names = [group_names.get(str(group).lower(), str(group)) for group in first_seen]
+    return {
+        "type": "group",
+        "id": "+".join(first_seen),
+        "display_name": "a member of " + " and of ".join(names) + " (members not read)",
+        "resolved": False,
+        "sanctioned": False,
+        "possible": True,
+        "via": via,
+        "policy_ids": policy_ids,
+    }
 
 
 def _common_values(policies: list[dict[str, Any]], key: str) -> list[str]:

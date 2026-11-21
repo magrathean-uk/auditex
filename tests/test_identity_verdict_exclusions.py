@@ -676,3 +676,34 @@ def test_findings_for_exclusions_and_administrator_mfa_cite_records_that_exist()
     refs = [(ref["artifact_path"], ref["record_key"]) for ref in findings["ca.mfa_not_enforced"]["evidence_refs"]]
     assert len(refs) == len(set(refs)), "no reference is listed twice"
     assert "conditional_access_policy:ca-mfa" in {record_key for _path, record_key in refs}
+
+
+# --- deep review 2026-11-21: identity posture --------------------------------------------------------
+
+CONTRACTORS = "g-contractors"
+
+
+def test_two_policies_each_excluding_a_different_unread_group_are_not_a_clean_pass() -> None:
+    """R035: someone in both unread groups is outside both policies, so no verdict may read as a clean pass."""
+    first = _policy("ca-1", users=_all_users(excludeGroups=[ALL_STAFF]))
+    second = _policy("ca-2", users=_all_users(excludeGroups=[CONTRACTORS]))
+
+    mfa = _mfa(first, second)
+    assert mfa["verdict"] == "enforced_with_exclusions"
+    assert mfa["single_policy_verdict"] == "enforced_with_exclusions"
+    row = mfa["unsanctioned_exclusions"][0]
+    assert row["possible"] is True and row["type"] == "group"
+    assert {item["id"] for item in row["via"]} == {ALL_STAFF, CONTRACTORS}
+
+    admin = _admin(first, second)
+    assert admin["verdict"] == "enforced_with_exclusions"
+
+    legacy = _legacy(
+        _block("ca-b1", users=_all_users(excludeGroups=[ALL_STAFF])),
+        _block("ca-b2", users=_all_users(excludeGroups=[CONTRACTORS])),
+    )
+    assert legacy["verdict"] == "blocked_with_exclusions"
+
+    # One policy excluding only an emergency-access group the operator listed still leaves everyone covered.
+    assert _mfa(first, _policy("ca-2", users=_all_users(excludeGroups=[BREAK_GLASS_GROUP])),
+                sanctioned=frozenset({BREAK_GLASS_GROUP}))["verdict"] == "enforced"
