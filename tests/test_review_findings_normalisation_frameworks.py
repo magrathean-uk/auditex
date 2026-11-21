@@ -67,3 +67,38 @@ def test_r009_per_grant_rule_claims_no_user_consent_setting_control() -> None:
     for framework, control in (("cis_m365_v7", "5.1.5.1"), ("cisa_scuba", "MS.AAD.5.2v1")):
         rows = [row for row in alignment["frameworks"][framework]["controls"] if row["control_id"] == control]
         assert all("f-1" not in row["finding_ids"] for row in rows), (framework, control)
+
+
+# ---- R010: per-item findings never decide tenant-setting controls ----------------------------------------------
+
+_SETTING_CONTROLS = {
+    "sharepoint.broad_link": {"cis_m365_v7": {"7.2.3", "7.2.7"}, "cisa_scuba": {"MS.SHAREPOINT.1.1v1", "MS.SHAREPOINT.2.1v1"}},
+    "sharepoint.external_principal": {
+        "cis_m365_v7": {"7.2.3", "7.2.6"},
+        "cisa_scuba": {"MS.SHAREPOINT.1.1v1", "MS.SHAREPOINT.1.3v1"},
+    },
+    "mailbox_forwarding.external_inbox_rule": {"cis_m365_v7": {"6.2.1"}, "cisa_scuba": {"MS.EXO.1.1v2"}},
+}
+
+
+def test_r010_per_item_rules_claim_no_tenant_setting_controls() -> None:
+    for rule_id, frameworks in _SETTING_CONTROLS.items():
+        mapping = _MAPPINGS[rule_id]
+        for framework, controls in frameworks.items():
+            assert not controls & set(mapping.get(framework) or []), (rule_id, framework)
+        # The per-item evidence keeps its NIST, ISO and ATT&CK anchors.
+        assert mapping.get("nist_800_53") and mapping.get("iso_27001") and mapping.get("mitre_attack"), rule_id
+
+
+def test_r010_a_guest_on_one_site_does_not_fail_the_sharing_setting_controls() -> None:
+    findings = [
+        {"id": "f-ext", "rule_id": "sharepoint.external_principal", "status": "open", "severity": "medium"},
+        {"id": "f-link", "rule_id": "sharepoint.broad_link", "status": "open", "severity": "medium"},
+        {"id": "f-fwd", "rule_id": "mailbox_forwarding.external_inbox_rule", "status": "open", "severity": "high"},
+    ]
+    alignment = build_baseline_alignment(findings)
+    for frameworks in _SETTING_CONTROLS.values():
+        for framework, controls in frameworks.items():
+            for row in alignment["frameworks"][framework]["controls"]:
+                if row["control_id"] in controls:
+                    assert not {"f-ext", "f-link", "f-fwd"} & set(row["finding_ids"]), (framework, row["control_id"])

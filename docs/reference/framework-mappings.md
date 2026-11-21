@@ -98,12 +98,12 @@ Corrections compared with the old `cis_m365_v3` values:
 | `dns_posture.dmarc_*` | `4.6` | `2.1.10` |
 | `dns_posture.bimi_logo_insecure` | `4.5` | none (BIMI has no CIS control) |
 | `collector.issue.*`, `coverage.gap`, `service_health.active_service_issue` | `1.1.1` | none (diagnostic) |
-| `sharepoint.broad_link` | `7.2.5`, `7.2.7` | `7.2.3`, `7.2.7` |
-| `sharepoint.external_principal` | `7.2.5`, `7.2.7` | `7.2.3`, `7.2.6` |
+| `sharepoint.broad_link` | `7.2.5`, `7.2.7` | none (a per-link finding; the sharing settings are read by the setting rules) |
+| `sharepoint.external_principal` | `7.2.5`, `7.2.7` | none (a per-site finding; the sharing settings are read by the setting rules) |
 | `app_consent.high_privilege` | `5.1.6`, `5.2.5` | none (a per-grant finding; user consent is read by `consent_policy.user_consent_*`) |
 | `consent_policy.admin_consent_workflow_disabled` | `5.1.5`, `5.2.5` | `5.1.5.2` |
 | `external_identity.broad_guest_invite_policy` | `1.1.5` | `5.1.6.3` |
-| `mailbox_forwarding.external_inbox_rule` | `1.2.2`, `6.2.1` | `6.2.1` |
+| `mailbox_forwarding.external_inbox_rule` | `1.2.2`, `6.2.1` | none (a per-mailbox finding; forwarding settings are read by the setting rules) |
 | `mailbox_forwarding.hide_from_user` | `1.2.2`, `6.2.1` | none |
 | `identity.global_admin_singleton`, `identity.global_admin_sprawl` | `1.1.2`, `1.1.3` | `1.1.3` |
 | `identity.admin_holds_productivity_licence` | none | `1.1.4` |
@@ -424,6 +424,13 @@ SCuBA conditions follow the ScubaGear v1.8.0 `SharepointConfig.rego`:
 So new and existing guests are a low finding that fails `MS.SHAREPOINT.1.1v1` and leaves CIS `7.2.3`
 passing; a block list is a low finding that fails `MS.SHAREPOINT.1.3v1` and leaves CIS `7.2.6` passing; a
 default link of `None`, organisation-wide or anyone fails both `7.2.7` and `MS.SHAREPOINT.2.1v1`.
+
+The per-item rules `sharepoint.broad_link` (one broad sharing link), `sharepoint.external_principal` (one
+external grantee on a site) and `mailbox_forwarding.external_inbox_rule` (one forwarding inbox rule) claim
+no CIS or SCuBA control. One link or one allow-listed guest does not show how the tenant setting is
+configured, so those controls are left to the setting rules above and to
+`exchange.remote_domain_auto_forward_enabled`; the per-item rules keep their Secure Score, Zero Trust,
+NIST, ISO, SOC 2, NIS2, DORA and ATT&CK mappings.
 
 `onedrive.external_sharing_enabled` and `teams.external_federation_open` keep their Zero Trust, NIST,
 ISO, SOC 2, NIS2 and DORA mappings and claim no CIS or SCuBA control. All three SharePoint rules use the

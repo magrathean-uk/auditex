@@ -381,14 +381,6 @@
     ]
   },
   "sharepoint.broad_link": {
-    "cis_m365_v7": [
-      "7.2.3",
-      "7.2.7"
-    ],
-    "cisa_scuba": [
-      "MS.SHAREPOINT.1.1v1",
-      "MS.SHAREPOINT.2.1v1"
-    ],
     "ms_secure_score": [
       "spo_external_sharing_managed"
     ],
@@ -418,14 +410,6 @@
     ]
   },
   "sharepoint.external_principal": {
-    "cis_m365_v7": [
-      "7.2.3",
-      "7.2.6"
-    ],
-    "cisa_scuba": [
-      "MS.SHAREPOINT.1.1v1",
-      "MS.SHAREPOINT.1.3v1"
-    ],
     "ms_secure_score": [
       "spo_external_sharing_managed"
     ],
@@ -961,12 +945,6 @@
     ]
   },
   "mailbox_forwarding.external_inbox_rule": {
-    "cis_m365_v7": [
-      "6.2.1"
-    ],
-    "cisa_scuba": [
-      "MS.EXO.1.1v2"
-    ],
     "ms_secure_score": [
       "mdo_autoforwardingmode",
       "mdo_blockmailforward"

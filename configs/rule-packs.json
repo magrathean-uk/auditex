@@ -500,10 +500,7 @@
         "identity.global_admin_sprawl",
         "identity.privileged_mfa_not_registered",
         "identity.user_mfa_not_registered",
-        "mailbox_forwarding.external_inbox_rule",
-        "sharepoint.broad_link",
         "sharepoint.default_link_type_broad",
-        "sharepoint.external_principal",
         "sharepoint.external_sharing_broad",
         "sharepoint.sharing_domains_unrestricted"
       ]
@@ -537,10 +534,7 @@
         "external_identity.broad_guest_invite_policy",
         "identity.global_admin_singleton",
         "identity.global_admin_sprawl",
-        "mailbox_forwarding.external_inbox_rule",
-        "sharepoint.broad_link",
         "sharepoint.default_link_type_broad",
-        "sharepoint.external_principal",
         "sharepoint.external_sharing_broad",
         "sharepoint.sharing_domains_unrestricted"
       ]
