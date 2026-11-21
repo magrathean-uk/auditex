@@ -141,3 +141,34 @@ def test_release_check_refuses_uncommitted_changes(tmp_path: Path) -> None:
 
     assert run.returncode == 2, (run.returncode, run.stderr[-2000:])
     assert "uncommitted" in run.stderr
+
+
+# R073: audit-deps resolves the base install and every extra pyproject.toml declares.
+def test_audit_deps_resolves_every_declared_extra(tmp_path: Path) -> None:
+    log = tmp_path / "uv.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "uv").write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$*\" >> {log}\n"
+        "if [[ \"$1 $2\" == 'pip compile' ]]; then\n"
+        "  while [[ $# -gt 0 ]]; do if [[ \"$1\" == -o ]]; then : > \"$2\"; fi; shift; done\n"
+        "elif [[ \"$1\" == venv ]]; then\n"
+        "  dir=\"${@: -1}\"; mkdir -p \"$dir/bin\"\n"
+        "  printf '#!/bin/sh\\nexit 0\\n' > \"$dir/bin/python\"; printf '#!/bin/sh\\nexit 0\\n' > \"$dir/bin/pip-audit\"\n"
+        "  chmod +x \"$dir/bin/python\" \"$dir/bin/pip-audit\"\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "uv").chmod(0o755)
+    env = _env(PATH=f"{fake_bin}:{os.environ['PATH']}")
+    run = _make("audit-deps", f"PYTHON={sys.executable}", f"AUDIT_DEPS_DIR={tmp_path / 'out'}",
+                f"AUDIT_DEPS_IGNORE={tmp_path / 'none.json'}", env=env, timeout=60)
+
+    assert run.returncode == 0, run.stderr[-2000:]
+    resolved = set()
+    for line in log.read_text(encoding="utf-8").splitlines():
+        if line.startswith("pip compile"):
+            words = line.split()
+            resolved.add(words[words.index("--extra") + 1] if "--extra" in words else "base")
+    assert resolved == {"base", *PYPROJECT["project"]["optional-dependencies"]}
