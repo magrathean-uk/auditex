@@ -15,10 +15,10 @@ Plan v4 amendment 12 (DEC-113). G's product shape: "CLI tool, user runs, ads pri
 
 ## Definition of Done
 - [x] The runtime and models are chosen by measurement on this Mac: `grep -qx 'models: chosen' .plan/work/M10-T01/result.md`
-- [ ] The digest and the fail-closed answer checks are in the product: `grep -qx 'answer-checks: ready' .plan/work/M10-T02/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M10-T02/result.md`
-- [ ] The local answer runs from `auditex run --explain` and `auditex explain`, in the report and through MCP: `grep -qx 'local-answer: ready' .plan/work/M10-T03/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M10-T03/result.md`
-- [ ] Hostile tenant data never changes the order, softens, drops or hides a wrong finding or passes the checks, and every not-met item always appears (DEC-120), for every shipped model: `grep -qx 'injection: pass' .plan/work/M10-T04/result.md`
-- [ ] Acceptance on the test tenants for every shipped model: at least 99 per cent of model sentences pass the checks with no fallback, zero verdict contradictions, a full run answered in about 3 minutes on a 16 GB laptop: `grep -qx 'acceptance: pass' .plan/work/M10-T04/result.md`
+- [x] The digest and the fail-closed answer checks are in the product: `grep -qx 'answer-checks: ready' .plan/work/M10-T02/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M10-T02/result.md`
+- [x] The local answer runs from `auditex run --explain` and `auditex explain`, in the report and through MCP: `grep -qx 'local-answer: ready' .plan/work/M10-T03/result.md && grep -qE '^[[:space:]]*(summary: )?verdict: approve' .plan/work/REV-M10-T03/result.md`
+- [x] Hostile tenant data never changes the order, softens, drops or hides a wrong finding or passes the checks, and every not-met item always appears (DEC-120), for every shipped model: `grep -qx 'injection: pass' .plan/work/M10-T04/result.md`
+- [x] Acceptance on the test tenants for every shipped model: at least 99 per cent of model sentences pass the checks with no fallback, zero verdict contradictions, a full run answered in about 3 minutes on a 16 GB laptop: `grep -qx 'acceptance: pass' .plan/work/M10-T04/result.md`
 
 ## Tasks
 | id | title | owner | size | tags | status |

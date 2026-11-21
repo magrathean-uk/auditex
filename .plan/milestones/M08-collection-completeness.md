@@ -47,7 +47,7 @@ In one app-only certificate run the product collects and answers the 64 rows: 62
 | M08-T03 | B: Power BI and Power Platform enablement (operator scripts and product docs) | sol | M | risk:high | done |
 | M08-T04 | C: the Teams app-settings read and adapter | codex | M | risk:high | done |
 | M08-T05 | D: the compliance session, DLP and alert-policy reads and adapters | sol | L | hard risk:high | done |
-| M08-T06 | E: one app-only re-collection of the 64 rows and the kit's comparison (run by the tenant chat) | orchestrator | M | risk:high | todo |
+| M08-T06 | E: one app-only re-collection of the 64 rows and the kit's comparison (run by the tenant chat) | orchestrator | M | risk:high | done |
 | M08-T07 | One sign-in guard (DEC-065), Exchange kept in the guided delegated path (DEC-068) | codex | M | risk:high | done |
 | M08-T08 | D1, D3, D7: auth-methods read and adapter, the withheld classifications section, site-permission reads | codex | M | - | done |
 | M08-T09 | D2: per-item batch 429 retry with pacing | sol | M | risk:high | done |

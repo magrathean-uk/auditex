@@ -1076,3 +1076,9 @@
 - decision: nothing is deleted on Isambard: not the sealed and held-out rows (`delete-sealed.sh`) and not the rest of `airr-v4` (about 1.3 TB). This sets aside the kit runbook's step 8 on G's word. The item is closed and not raised again; no sign-in is needed for it.
 - why: G, about 08:03 GMT 21 Nov, relayed by the manager: "4 don't dllete it".
 - approver: G
+
+## DEC-142 Before the tenant goes: rebuild the rollback kit and run one last read-only collection
+- date: 2026-11-21
+- decision: G asked whether the lab tenant can go now ("It's a one off we can do"). A read-only check (four sweeps and a critic) found nothing in the plan needing the tenant except the rollback itself; M07-T16, M08-T06 and M10 were done and only their records were stale (fixed in this commit). Two things come first. (1) The frozen 7t kit copy the rollback runs from (dt-r7t-ro, c3285015a186) went to the 4TB Trash in the 20 Nov tidy and that Trash was emptied on 21 Nov 08:01; only kit-7q, 7r and 7s remain, and the driver pins the 7t `_common.ps1`. A worker rebuilds 7t from 7s plus the recorded 7t fixes (or proves the 7s rollback path equivalent), and the tenant chat reruns the read-only dry run against the 15 Nov one (116 planned, 0 failed, 3 manual). (2) One final app-only certificate collection with current `main` (no sign-in; certificate valid to 10 Dec), because the M09 certificate-only path and the AAD 7.5 fix (M08-T14) shipped in 1.8.0 have never run on a real tenant. Then the rollback on G's sign-ins, then G passes the cancel brief to Codex. The rollback may run before 30 Nov.
+- why: the tenant is a one-off; once cancelled, neither the rollback nor a live check can be done again.
+- approver: lead

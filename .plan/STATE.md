@@ -1,6 +1,6 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 84% (was 87%)
+overall: 99% (was 84%; M10 and M11 rows were stale)
 milestone: M07-dummy-tenant-kit 89%
 plan_version: v4
 release_scope: 1.8.0 RELEASED 20 Nov (GitHub, lone-surrogate fix and summary count fields; DEC-140). M11 closed: no compact model shipped, qwen stays default. No release in progress.
@@ -11,7 +11,7 @@ last_checkpoint: 7d6b8d7 2026-11-16T06:54:48Z
 - M11-T02 done: attack-loop clean (rounds 2 and 3, 0 tricks, product 9a0f301; DEC-136).
 - M11-T03 done (data-version 101c02cd, 13,956 rows; DEC-138).
 - M11 done (DEC-140): no compact model passed (two rounds, 345.97 GPU-hours), default stays qwen. 1.8.0 released 20 Nov.
-- M07-T17 lab rollback by 30 Nov (G approved, DEC-126), then G passes `~/Desktop/cancel-lab-trials.md` to Codex.
+- DEC-142: rebuild the lost 7t rollback kit and dry-run it; one final app-only collection on `main`; then M07-T17 rollback on G's sign-ins (may run before 30 Nov), then G passes `~/Desktop/cancel-lab-trials.md` to Codex.
 
 ## Blockers
 - Host: hostload slots are contended by other projects; heavy runs wait or run directly only with lead authorisation.
