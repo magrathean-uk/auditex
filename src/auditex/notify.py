@@ -679,19 +679,21 @@ def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[
     base = envelope
     if dry_run:
         return {"status": "planned", "dry_run": True, **base}
-    if sink in WEBHOOK_ENV:
-        result = _send_webhook(sink, payload)
-        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
-    if sink == "smtp":
-        result = _send_smtp(payload)
-        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
-    if sink == "jira":
-        result = _send_jira(payload)
-        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
-    if sink == "github":
-        result = _send_github(payload)
-        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
-    return {"status": "blocked", "dry_run": False, "reason": "unsupported sink", **base}
+    senders = {"smtp": _send_smtp, "jira": _send_jira, "github": _send_github}
+    if sink not in WEBHOOK_ENV and sink not in senders:
+        return {"status": "blocked", "dry_run": False, "reason": "unsupported sink", **base}
+    try:
+        result = _send_webhook(sink, payload) if sink in WEBHOOK_ENV else senders[sink](payload)
+    except (requests.RequestException, OSError, smtplib.SMTPException) as exc:
+        # R065: a transport error's text can carry the webhook URL (the Slack /services/ path or the Teams sig=
+        # query), which is a credential. Report only the exception class; never str(exc).
+        result = {
+            "status": "failed",
+            "sink": sink,
+            "error_class": type(exc).__name__,
+            "reason": f"{sink} transport error ({type(exc).__name__})",
+        }
+    return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
 
 
 def _redact_envelope(envelope: dict[str, Any], run_dir: str) -> dict[str, Any]:
