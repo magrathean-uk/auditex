@@ -488,3 +488,21 @@ def test_an_excluded_group_whose_members_the_run_read_covers_the_accounts_in_it(
 
     assert _finding(covered) is None
     assert _finding(not_covered) is not None
+
+
+# ---- deep review 2026-11-21: identity posture -----------------------------------------------------------
+
+
+def test_an_operator_account_excluded_through_a_role_it_holds_counts_as_excluded() -> None:
+    """R039: Entra excludes a listed Global Administrator from a policy that excludes the Global Administrator role."""
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeRoles": [GLOBAL_ADMIN_ROLE]})
+
+    snapshot = _role_snapshot([policy], held={BG1: [GLOBAL_ADMIN_ROLE]}, accounts=["bg1@example.com"])
+
+    assert _finding(snapshot) is None
+    record = snapshot["break_glass_assessment"]["records"][0]
+    assert record["policies_in_scope"] == 1 and record["policies_missing_exclusion"] == 0
+    # A listed account that does not hold the excluded role is still missing.
+    other = _role_snapshot([policy], held={BG1: [HELPDESK_ROLE]}, accounts=["bg1@example.com"])
+    assert _finding(other) is not None
+

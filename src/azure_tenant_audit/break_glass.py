@@ -14,7 +14,8 @@ The check here is narrow on purpose:
   not judged. When the roles of the accounts cannot be established (the operator listed a group, or an
   object ID the run did not collect) a role-targeted policy is judged, but never graded high.
 * An account counts as excluded when the policy excludes it, a group it belongs to (as far as the run read
-  the group's members: role-assignable groups), or, for inferred accounts, the Global Administrator role.
+  the group's members: role-assignable groups), or a directory role it holds (for inferred accounts, the
+  Global Administrator role).
 * The accounts come from the operator when they supply them (``--break-glass-accounts`` or
   ``AUDITEX_BREAK_GLASS_ACCOUNTS``: object IDs, user principal names, mail addresses, display names, or the
   group the policies exclude). Without a list the accounts are inferred, and an inference is weaker evidence:
@@ -165,18 +166,22 @@ class BreakGlassAccounts:
         return {role for roles in self.roles_held.values() for role in roles}
 
     def covers(self, targeting: Mapping[str, Any]) -> list[str]:
-        """Labels of the accounts a policy excludes: by user or group, by a group the run read the members of, or (inferred accounts) by role."""
+        """Labels of the accounts a policy excludes: by user or group, by a group the run read the members of, or by a
+        role the account holds (inferred accounts: the Global Administrator role they were inferred from)."""
         excluded_groups = set(_lower(targeting.get("exclude_groups", [])))
         excluded = set(_lower(targeting.get("exclude_users", []))) | excluded_groups
+        excluded_roles = set(_lower(targeting.get("exclude_roles", [])))
         member_of_excluded = {
             member for group in excluded_groups for member in self.group_members.get(group, ())
         }
         hits = [
             self.label_of[identifier]
             for identifier in sorted(self.label_of)
-            if identifier in excluded or identifier in member_of_excluded
+            if identifier in excluded
+            or identifier in member_of_excluded
+            or self.roles_held.get(identifier, set()) & excluded_roles
         ]
-        if self.role_ids & set(_lower(targeting.get("exclude_roles", []))):
+        if self.role_ids & excluded_roles:
             hits.append("a role the policy excludes")
         return hits
 
