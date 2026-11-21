@@ -82,8 +82,8 @@ M365_WRITE_CAPABLE_TOKENS = ("ReadWrite", "ManageAsApp", "Write.", "FullControl"
 SHAREPOINT_FULLCONTROL_BLAST_RADIUS = (
     "Write-capable SharePoint application permission used read-only: blast radius full control of every site "
     "collection and OneDrive. Microsoft offers no read-only permission for the SharePoint admin API; Auditex sends "
-    "only one body-free GET of /_api/SPO.Tenant with it, and the read guard refuses any other request. Remove it "
-    "after the engagement."
+    "only one body-free GET of the tenant sharing settings with it, and the read guard refuses any other request. "
+    "Remove it after the engagement."
 )
 
 
