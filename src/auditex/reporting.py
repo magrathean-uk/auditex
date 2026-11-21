@@ -2862,8 +2862,34 @@ def _offline_live_readiness(*sources: Mapping[str, Any]) -> str | None:
     return None
 
 
+# Every C0 and C1 control (CR, LF, tab included) and the Unicode line and paragraph separators: a line break inside a
+# value would let tenant text start a new Markdown line (a forged heading, list item or table row).
+_MARKDOWN_BREAKS = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+# The fixed placeholders the redaction writes, kept verbatim so readers and checks still recognise them.
+_MARKDOWN_PLACEHOLDER = re.compile(r"(<(?:redacted-[a-z0-9-]+|run-dir|local-path)>)")
+# A backslash that would escape the next punctuation character (it could cancel the pipe escape), link brackets and
+# the table cell separator.
+_MARKDOWN_INLINE_SPECIAL = re.compile(r"\\(?=[!-/:-@\[-`{-~])|[\[\]|]")
+
+
+def markdown_inline(value: Any) -> str:
+    """Untrusted text as one line of Markdown that renders literally (R064, R134).
+
+    Line breaks become spaces, ``<`` and ``>`` become entities (no raw HTML or autolink), link brackets and the table
+    cell separator are backslash-escaped. Identifiers (``MS.AAD.1.1v1``, ``identity:global_admin``) stay readable.
+    Shared by the report, customer-pack and compare Markdown renderers.
+    """
+    text = _MARKDOWN_BREAKS.sub(" ", "" if value is None else str(value)).strip()
+    parts = _MARKDOWN_PLACEHOLDER.split(text)
+    return "".join(
+        part if index % 2 else
+        _MARKDOWN_INLINE_SPECIAL.sub(lambda match: "\\" + match[0], part).replace("<", "&lt;").replace(">", "&gt;")
+        for index, part in enumerate(parts)
+    )
+
+
 def _markdown_cell(value: Any) -> str:
-    return _text(value, "").replace("|", "\\|").replace("\n", " ").strip()
+    return markdown_inline(_text(value, ""))
 
 
 def _markdown_value(value: Any) -> str:
@@ -3131,22 +3157,25 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     lines = [
         "# Auditex Report",
         "",
-        f"- Tenant: {_text(summary.get('tenant_name'), 'unknown')}",
-        f"- Status: {_text(summary.get('overall_status'), 'unknown')}",
-        f"- Findings: {_text(summary.get('finding_count'), str(len(findings)))}",
-        f"- Open: {_text(summary.get('open_count'), '0')}",
-        f"- Risk: {_text(risk.get('grade'), 'unknown')} / {_text(risk.get('score'), '0')}",
-        f"- Assurance: {_text(assurance.get('grade'), 'unknown')} / {_text(assurance.get('score'), '0')}",
-        f"- Scorecard: {_text(provider_scorecard.get('grade'), 'unknown')} / {_text(provider_scorecard.get('score'), '0')}",
+        f"- Tenant: {_markdown_cell(_text(summary.get('tenant_name'), 'unknown'))}",
+        f"- Status: {_markdown_cell(_text(summary.get('overall_status'), 'unknown'))}",
+        f"- Findings: {_markdown_cell(_text(summary.get('finding_count'), str(len(findings))))}",
+        f"- Open: {_markdown_cell(_text(summary.get('open_count'), '0'))}",
+        f"- Risk: {_markdown_cell(_text(risk.get('grade'), 'unknown'))} / {_markdown_cell(_text(risk.get('score'), '0'))}",
+        f"- Assurance: {_markdown_cell(_text(assurance.get('grade'), 'unknown'))} / {_markdown_cell(_text(assurance.get('score'), '0'))}",
+        f"- Scorecard: {_markdown_cell(_text(provider_scorecard.get('grade'), 'unknown'))} / {_markdown_cell(_text(provider_scorecard.get('score'), '0'))}",
     ]
     if live_readiness:
-        lines.append(f"- Live readiness: {_text(live_readiness.get('trust_level'), 'unknown')}")
+        lines.append(f"- Live readiness: {_markdown_cell(_text(live_readiness.get('trust_level'), 'unknown'))}")
         cannot_trust = live_readiness.get("cannot_trust") or []
         if cannot_trust:
-            lines.append("- Cannot trust: " + ", ".join(_text(item) for item in cannot_trust[:5]))
+            lines.append("- Cannot trust: " + ", ".join(_markdown_cell(item) for item in cannot_trust[:5]))
     lines.append("")
     if surface_coverage:
-        lines.append("- Coverage: " + ", ".join(f"{_text(row.get('surface'))}: {_text(row.get('status'))}" for row in surface_coverage))
+        lines.append(
+            "- Coverage: "
+            + ", ".join(f"{_markdown_cell(row.get('surface'))}: {_markdown_cell(row.get('status'))}" for row in surface_coverage)
+        )
         lines.append("")
     _append_local_answer_markdown(lines, _mapping(selected_sections.get("local_answer")))
     _append_mapping_markdown(lines, "Executive Summary", _mapping(selected_sections.get("executive_summary")))
@@ -3185,7 +3214,7 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
         detection = _mapping(selected_sections.get("detection_coverage"))
         _append_rows_markdown(
             lines,
-            f"Detection Coverage (score {_text(detection.get('score'), 'n/a')})",
+            f"Detection Coverage (score {_markdown_cell(_text(detection.get('score'), 'n/a'))})",
             _dict_rows(detection.get("signals")),
             (("Signal", "title"), ("Status", "status"), ("Reason", "reason"), ("Why it matters", "why_it_matters")),
         )
@@ -3200,7 +3229,7 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     if coverage_gaps:
         lines.extend(["## Coverage Gaps", ""])
         for gap in coverage_gaps:
-            error_classes = ", ".join(_text(item) for item in gap.get("error_classes") or [])
+            error_classes = ", ".join(_text(item) for item in gap.get("error_classes") or [])  # escaped below
             detail = f" ({error_classes})" if error_classes else ""
             lines.append(f"- {_markdown_cell(gap.get('severity'))}: {_markdown_cell(gap.get('message'))}{_markdown_cell(detail)}")
         lines.append("")
