@@ -243,6 +243,8 @@ _NOUN = re.compile(r"[a-z][a-z0-9]*")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 _M365_WORD = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
 _DYNAMIC_MEMBER_FOLLOWERS = frozenset("'\"$([{@")
+_OPENERS = frozenset({"@{", "{", "(", "$(", "@(", "["})
+_CLOSERS = frozenset({"}", ")", "]"})
 _SEPARATORS = frozenset({"|", ";", "\n", "{", "}", "(", "$(", "@(", "&&", "||", "&", "="})
 
 
@@ -383,9 +385,15 @@ def _command_words(script: str, adapter: str, extra: frozenset[str]) -> list[str
     """Words at a command position; raises CommandRefused for the first one that is not a read."""
     tokens = _tokenize(script, adapter)
     commands: list[str] = []
+    # Open brackets, innermost last: a word before '=' is a key only directly inside an @{ } hashtable literal.
+    brackets: list[str] = []
     for index, token in enumerate(tokens):
         previous = tokens[index - 1] if index else None
         following = tokens[index + 1] if index + 1 < len(tokens) else None
+        if token.kind == "op" and token.text in _OPENERS:
+            brackets.append(token.text)
+        elif token.kind == "op" and token.text in _CLOSERS and brackets:
+            brackets.pop()
         if token.kind == "op" and token.text == "(" and previous is not None:
             # A method call is a word containing "." glued to "("; only a few string helpers are reads.
             if previous.kind == "word" and "." in previous.text and previous.end == token.start:
@@ -397,8 +405,11 @@ def _command_words(script: str, adapter: str, extra: frozenset[str]) -> list[str
         at_command = previous is None or (previous.kind == "op" and previous.text in _SEPARATORS)
         if not at_command:
             continue
-        if following is not None and following.kind == "op" and following.text == "=":
-            continue  # a hashtable key or an assignment target, not a command
+        in_hashtable = bool(brackets) and brackets[-1] == "@{"
+        if in_hashtable and following is not None and following.kind == "op" and following.text == "=":
+            continue  # a hashtable key, not a command
+        # Anywhere else a bare word before '=' is a command: pwsh passes '=' to it as an argument. An assignment
+        # target is always a $variable, never a word.
         if not _allowed_word(token.text, extra):
             raise CommandRefused(f"{token.text} is not on the read allowlist", adapter=adapter)
         if token.text.lower() not in POWERSHELL_LANGUAGE_WORDS:

