@@ -54,7 +54,11 @@ def test_an_exchange_session_the_adapter_cannot_connect_is_refused_before_any_co
     tmp_path, monkeypatch, organization
 ) -> None:
     """R086 (round 2): a session without a usable organisation would run the cmdlet unconnected, so nothing runs."""
-    from test_review_collectors_transport_repair import _lab_token, _response_blockers, _response_config
+    from test_review_collectors_transport_repair import (
+        _lab_token,
+        _response_blockers,
+        _response_config,
+    )
 
     from azure_tenant_audit.response import run_response
 
@@ -70,7 +74,10 @@ def test_an_exchange_session_the_adapter_cannot_connect_is_refused_before_any_co
 
 def test_an_adapter_override_that_cannot_carry_the_exchange_session_is_refused(tmp_path, monkeypatch) -> None:
     """R086 (round 2): an allowed m365dsc override would run an Exchange action without the checked session."""
-    from test_review_collectors_transport_repair import _response_blockers, _response_config
+    from test_review_collectors_transport_repair import (
+        _response_blockers,
+        _response_config,
+    )
 
     from azure_tenant_audit.response import run_response
 
@@ -117,7 +124,9 @@ def test_the_declared_folder_scope_is_the_grant_documented_for_the_routes_the_co
     from pathlib import Path
     from urllib.parse import urlparse
 
-    from azure_tenant_audit.collectors.mailbox_forwarding import MailboxForwardingCollector
+    from azure_tenant_audit.collectors.mailbox_forwarding import (
+        MailboxForwardingCollector,
+    )
 
     client = fake_graph_client(throttle_mode="safe")
     client.sleep = lambda _seconds: None
