@@ -228,7 +228,8 @@ def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[s
 
 
 def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], sections: list[str], *,
-                      named_limitations: bool = True, legacy: bool | None = None) -> dict[str, Any]:
+                      named_limitations: bool = True, legacy: bool | None = None,
+                      verdict: str | None = None) -> dict[str, Any]:
     """Render the pack verdict; serving also names each unavailable input.
 
     An empty required list is the oracle's not-met shape: confirmed false citing
@@ -261,7 +262,8 @@ def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], secti
         if shared and not is_shared_reason(detail["reason_code"]):
             raise ValueError("A value-rule answer without a cell must carry a shared reason")
         row = row_for(policy_item["policy_id"])
-        verdict = "not_assessed" if shared else row["cells"][detail["cell"]]["verdict"]
+        # ``verdict``: the reader's already validated cell verdict (a retired cell is no longer in the catalogue, R099).
+        verdict = verdict or ("not_assessed" if shared else row["cells"][detail["cell"]]["verdict"])
         record = {"verdict": verdict, "cell": detail["cell"], "reason_code": detail["reason_code"],
                   "cited_sections": detail["section"] if verdict == "not_assessed" else None}
         # The unnamed form is offline pack scoring; retain its original vocabulary.

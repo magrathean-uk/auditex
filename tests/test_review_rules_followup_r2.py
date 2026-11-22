@@ -4,6 +4,8 @@ Each test names the review finding it pins. Synthetic, offline data only.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 from test_review_value_rules_defender_dns import (
     BI_ALL,
@@ -134,3 +136,68 @@ def test_r003_shipped_explainer_template_carries_the_built_in_cells(policy_id):
     assert {"builtin_rule_unusable", "no_policy_covers_all", "partial_tier_may_cover"} <= cells
     assert "no_rules_configured" not in cells
     assert template["policies"][policy_id]["sections"] == row_for(policy_id)["sections"]
+
+
+# ---- R099: SS 7.x answers written before the rows read the Built-In rule still validate ----
+
+LEGACY_SECTIONS = ["atp_policy_rules", "defender_license", "protection_policy_rules", "safe_links_policies", "safe_links_rules"]
+EVERYONE = {k: None for k in ("SentTo", "SentToMemberOf", "RecipientDomainIs", "ExceptIfSentTo", "ExceptIfSentToMemberOf",
+                              "ExceptIfRecipientDomainIs")}
+
+
+def _assessment(tmp_path, rules):
+    import json
+
+    import auditex.rule_assessment as rule_assessment
+    ops = {"eopProtectionPolicyRules": [], "atpProtectionPolicyRules": [], "atpPolicyForO365": [{"Identity": "Default"}],
+           "atpBuiltInProtectionRules": [{"Identity": "ATP Built-In Protection Rule", **EVERYONE}],
+           "safeLinksPolicies": [{"Name": "Built-In Protection Policy", **SL_BUILTIN}], "safeLinksRules": rules}
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "run-manifest.json").write_text(json.dumps({"run_id": "synthetic-r099", "platform": "m365"}) + "\n")
+    (tmp_path / "raw/exchange_policy.json").write_text(json.dumps({n: {"value": r, "status": "ok"} for n, r in ops.items()}) + "\n")
+    rule_assessment.assess_run(tmp_path, policies=SL_POLICIES)
+    payload = json.loads((tmp_path / "model_assessment.json").read_text())
+    for detail in payload["projection"]["sections"].values():
+        detail.pop("rule_view", None)          # the pre-lane writer had no rule_view (R106)
+    return payload
+
+
+def _legacy_rows(payload):
+    rows = [row for row in payload["policies"] if row["policy_id"] in SL_POLICIES]
+    assert len(rows) == 3
+    return rows
+
+
+def test_r099_pre_lane_no_rules_configured_answer_still_validates(tmp_path):
+    from azure_tenant_audit.scuba_assessment import validate_assessment
+    payload = _assessment(tmp_path, [])
+    for row in _legacy_rows(payload):
+        # Exactly what the pre-lane writer emitted for empty rule lists.
+        what = row_for(row["policy_id"])["params"]["what"]
+        row["rule_precheck"].update(section=list(LEGACY_SECTIONS), cell="no_rules_configured", reason_code="no_rules_configured",
+                                    reason_text="Requirement not met: no preset security policy rule and no Safe Links rule exists, so no "
+                                                f"Standard, Strict or custom Safe Links policy applies ({what}).")
+        row["claims"][0]["value"] = False
+        row["recommendations"] = ["review_policy_against_baseline_text"]
+        row["comparison"]["model_status"] = "fail"
+        row.pop("explainer", None)
+    validate_assessment(payload)
+    tampered = json.loads(json.dumps(payload))
+    _legacy_rows(tampered)[0]["rule_precheck"]["section"] = row_for(SL_POLICIES[0])["sections"]
+    with pytest.raises(ValueError):
+        validate_assessment(tampered)                # the retired cell is accepted only as the pre-lane writer cited it
+
+
+def test_r099_pre_lane_policy_flags_ok_answer_still_validates(tmp_path):
+    from azure_tenant_audit.scuba_assessment import validate_assessment
+    payload = _assessment(tmp_path, [{"Identity": "x rule", "Name": "x rule", "State": "Disabled", "Priority": 0,
+                                      "SafeLinksPolicy": "x", **EVERYONE, "SentToMemberOf": ["g"]}])
+    for row in _legacy_rows(payload):
+        assert row["rule_precheck"]["cell"] == "policy_flags_ok"
+        row["rule_precheck"]["section"] = list(LEGACY_SECTIONS)
+        row.pop("explainer", None)
+    validate_assessment(payload)
+    tampered = json.loads(json.dumps(payload))
+    _legacy_rows(tampered)[0]["rule_precheck"]["section"] = LEGACY_SECTIONS[:-1]
+    with pytest.raises(ValueError):
+        validate_assessment(tampered)

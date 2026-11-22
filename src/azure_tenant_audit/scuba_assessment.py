@@ -257,6 +257,29 @@ def validate_explainer(row: dict[str, Any], result: Any) -> None:
     _validate_explainer({**row, "explainer": result}, requirement)
 
 
+# Review R099 (repair): SS 7.1 to 7.3 read built_in_protection_rules since lane rules-followup. Answers the earlier writer
+# emitted cite the five sections it read, and empty rule lists answered the since-retired no_rules_configured cell; both
+# still validate, but only with that exact earlier citation.
+_SAFELINKS_LEGACY_POLICIES = frozenset({"MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1"})
+_SAFELINKS_LEGACY_SECTIONS = ["atp_policy_rules", "defender_license", "protection_policy_rules", "safe_links_policies",
+                              "safe_links_rules"]
+
+
+def _legacy_safelinks_cell(policy_id: str, detail: dict[str, Any], value_row: dict[str, Any] | None,
+                           cell: dict[str, Any] | None) -> dict[str, Any] | None:
+    if (policy_id not in _SAFELINKS_LEGACY_POLICIES or value_row is None
+            or detail.get("section") != _SAFELINKS_LEGACY_SECTIONS):
+        return cell
+    if cell is None and detail["cell"] == "no_rules_configured":
+        what = value_row["params"]["what"]
+        return {"verdict": "not_met", "reason_code": "no_rules_configured", "cited": list(_SAFELINKS_LEGACY_SECTIONS),
+                "reason_texts": ["Requirement not met: no preset security policy rule and no Safe Links rule exists, so no "
+                                 f"Standard, Strict or custom Safe Links policy applies ({what})."]}
+    if cell is not None and "cited_variants" not in cell and cell.get("cited") == list(value_row["sections"]):
+        return {**cell, "cited": list(_SAFELINKS_LEGACY_SECTIONS)}
+    return cell
+
+
 def validate_assessment(payload: Any) -> None:
     version = payload.get("schema_version") if isinstance(payload, dict) else None
     if not isinstance(version, str) or version not in ASSESSMENT_SCHEMAS:
@@ -465,6 +488,7 @@ def validate_assessment(payload: Any) -> None:
                             "reason_texts": [shared["reason_text"]], "cited": list(value_row["sections"])}
                 else:
                     cell = cell_entry(row["policy_id"], detail["cell"], value_row) if value_row else None
+                    cell = _legacy_safelinks_cell(row["policy_id"], detail, value_row, cell)
                 if (value_row is None or cell is None or detail["rule_id"] != value_row["rule_id"]
                         or not reason_matches(cell, detail["reason_code"], detail["reason_text"])
                         or detail["field"] is not None or detail["value"] is not None):
@@ -530,11 +554,12 @@ def validate_assessment(payload: Any) -> None:
                         raise ValueError("Invalid closed-gate value")
                 elif detail["value"] is not None:
                     raise ValueError("Absent gate input must have null value")
-            expected = precheck_response(detail, policy["policy_item"], sections)
+            verdict = cell["verdict"] if detail["class"] == "value_rule" else None
+            expected = precheck_response(detail, policy["policy_item"], sections, verdict=verdict)
             if any(row[key] != expected[key] for key in expected):
                 # A1 is additive within unreleased 2026-11-05. Previously written
                 # value-rule rows used the missing-evidence vocabulary for all abstentions.
-                previous = precheck_response(detail, policy["policy_item"], sections, legacy=True)
+                previous = precheck_response(detail, policy["policy_item"], sections, legacy=True, verdict=verdict)
                 if detail["class"] != "value_rule" or any(row[key] != previous[key] for key in previous):
                     raise ValueError("Invalid rule pre-check answer")
             if "explainer" in row:
