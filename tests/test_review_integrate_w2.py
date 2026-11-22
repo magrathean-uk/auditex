@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 
 def _timeout_run(command, **kwargs):  # noqa: ANN001
@@ -29,3 +30,45 @@ def test_r162_default_json_command_times_out_to_blocked(monkeypatch) -> None:  #
     result = auth_runtime._default_run_json_command(["pwsh", "--version"])
 
     assert result["status"] == "blocked" and result["error"] == "command_timeout"
+
+
+# R123 sibling (impact of the setup-guided-cli lane): an engine run with a mistyped --permission-hints stops, as
+# setup-guide does, instead of losing every permission hint without a word.
+def test_r123_engine_missing_explicit_permission_hints_is_an_error(tmp_path) -> None:  # noqa: ANN001
+    import pytest
+
+    from azure_tenant_audit.diagnostics import load_permission_hints
+
+    assert load_permission_hints(Path("configs/collector-permissions.json"))
+    with pytest.raises(FileNotFoundError, match="--permission-hints file was not found"):
+        load_permission_hints(tmp_path / "collector-permision.json")
+
+
+def test_r123_engine_run_with_a_missing_permission_hints_file_exits_2(monkeypatch, tmp_path, caplog) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    from azure_tenant_audit import cli
+
+    use_fake_certificate(monkeypatch)
+    ran: list[str] = []
+
+    class _Collector:
+        name = "identity"
+
+        def run(self, context):  # noqa: ANN001
+            ran.append("identity")
+            raise AssertionError("no collector may run without the permission hints the operator named")
+
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": _Collector()})
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+        *FAKE_CERTIFICATE_ARGS, "--collectors", "identity", "--no-probe-first", "--out", str(tmp_path / "out"),
+        "--permission-hints", str(tmp_path / "collector-permision.json"),
+    ])
+
+    with caplog.at_level("ERROR"):
+        rc = cli.run_live(args)
+
+    assert rc == 2
+    assert ran == []
+    assert "--permission-hints file was not found" in caplog.text
