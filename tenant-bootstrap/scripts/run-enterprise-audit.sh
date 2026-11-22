@@ -337,7 +337,11 @@ fi
 
 if [[ "$INSPECT" -eq 1 ]]; then
   echo
-  ./scripts/inspect-bootstrap-log.sh "$RUN_NAME"
+  if [[ "$SKIP_BOOTSTRAP" -eq 1 ]]; then
+    echo "Bootstrap inspection skipped: --skip-bootstrap was given."
+  else
+    ./scripts/inspect-bootstrap-log.sh "$RUN_NAME"
+  fi
   if [[ "$SKIP_AUDIT" -eq 0 && "$DRY_RUN" -eq 1 ]]; then
     echo "Audit inspection skipped in dry-run: a dry run writes no audit evidence."
   elif [[ "$SKIP_AUDIT" -eq 0 ]]; then
@@ -352,7 +356,9 @@ fi
 
 if [[ "$SKIP_BOOTSTRAP" -eq 0 || "$SKIP_AUDIT" -eq 0 ]]; then
   echo "Run complete."
-  echo "bootstrap run dir: ${SCRIPT_DIR}/runs/${RUN_NAME}"
+  if [[ "$SKIP_BOOTSTRAP" -eq 0 ]]; then
+    echo "bootstrap run dir: ${SCRIPT_DIR}/runs/${RUN_NAME}"
+  fi
   if [[ "$SKIP_AUDIT" -eq 0 ]]; then
     echo "audit run dir: ${OUT:-${SCRIPT_DIR}/audit-output/${RUN_NAME}-evidence}"
   fi

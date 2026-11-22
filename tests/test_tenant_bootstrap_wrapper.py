@@ -332,3 +332,15 @@ def test_both_certificate_password_sources_are_refused_before_seeding(kit, scrip
 def test_enterprise_dry_run_inspect_on_a_fresh_run_exits_zero(kit):
     proc = kit.run("scripts/run-enterprise-audit.sh", "--dry-run", "--inspect", "--run-name", "ent-inspect")
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_enterprise_audit_only_dry_run_inspect_skips_the_bootstrap_inspection(kit):
+    proc = kit.run(
+        "scripts/run-enterprise-audit.sh", "--dry-run", "--skip-bootstrap", "--inspect", "--run-name", "ent-audit-inspect",
+        "--audit-client-id", "22222222-2222-2222-2222-222222222222",
+        "--audit-certificate-path", CERT_PATH,
+        "--audit-certificate-thumbprint", THUMBPRINT,
+    )
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 0, output
+    assert "Run directory not found" not in output
