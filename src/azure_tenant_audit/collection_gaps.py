@@ -83,15 +83,19 @@ _DNS_RESOLVER_REASON = (
     "Not assessed: {resolver} could not answer or was unreachable; "
     "DNS records are unknown, not absent. Check resolver connectivity and rerun {collector}."
 )
-# DohClient's own wording names the resolver as "at https://host[:port]"; only that origin is taken from the error,
-# never its free text (review R164).
-_RESOLVER_ORIGIN = re.compile(r"\bat (https?://[A-Za-z0-9.-]+(?::\d{1,5})?)(?=[\s(:]|$)")
+# DohClient's own wording names the resolver as "at https://host[:port]". The URL after "at" (in an older or replayed
+# diagnostic it may still carry user info, a path or a query) is reduced to its safe display form; nothing else of the
+# error's free text is kept (review R164).
+_RESOLVER_URL = re.compile(r"\bat (https?://[^\s()'\"<>]+)")
 
 
 def _dns_resolver_reason(collector: str, error: Any) -> str:
     """The resolver gap reason, naming the resolver that failed when the error states it."""
-    match = _RESOLVER_ORIGIN.search(str(error or ""))
-    resolver = f"the DNS-over-HTTPS resolver at {match.group(1)}" if match else _UNNAMED_RESOLVER
+    from .dns_lookup import doh_resolver_display
+
+    match = _RESOLVER_URL.search(str(error or ""))
+    origin = doh_resolver_display(match.group(1).rstrip(":.,;")) if match else None
+    resolver = f"the DNS-over-HTTPS resolver at {origin}" if origin else _UNNAMED_RESOLVER
     return _DNS_RESOLVER_REASON.format(resolver=resolver, collector=collector)
 
 

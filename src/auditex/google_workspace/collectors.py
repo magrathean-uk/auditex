@@ -19,6 +19,7 @@ from azure_tenant_audit.dns_lookup import (
     DohClient,
     DohError,
     collect_domain_posture,
+    doh_resolver_display,
     resolve_doh_endpoint,
     unknown_posture,
 )
@@ -716,8 +717,9 @@ _BARE_URL_PATH = re.compile(r"\b(url:\s*)/[^\s'\"<>]*", re.IGNORECASE)
 
 
 def _host_only(text: str) -> str:
-    """``text`` with every URL cut to its scheme and host: a configured resolver's path can hold a private profile id."""
-    text = _URL.sub(lambda match: f"{match.group(1)}://{match.group(2)}", text)
+    """``text`` with every URL cut to its safe display form (scheme, host and a port that is not the default): a
+    configured resolver's user info, path or query can hold a private profile id."""
+    text = _URL.sub(lambda match: doh_resolver_display(match.group(0)) or "a URL that is not shown", text)
     return _BARE_URL_PATH.sub(lambda match: f"{match.group(1)}/", text)
 
 
@@ -738,9 +740,9 @@ def _resolver_error(text: str, resolver: Any) -> str:
         return _host_only(text)
     status = _HTTP_STATUS.match(match.group(2))
     detail = f"HTTP {status.group(1)}" if status else "request failed"
-    endpoint = str(getattr(resolver, "endpoint", "") or "")
-    url = _URL.search(endpoint) or _URL.search(match.group(2))
-    host = f"{url.group(1)}://{url.group(2)}" if url else "the DNS-over-HTTPS resolver"
+    url = _URL.search(match.group(2))
+    host = (doh_resolver_display(getattr(resolver, "endpoint", None))
+            or (doh_resolver_display(url.group(0)) if url else None) or "the DNS-over-HTTPS resolver")
     return f"{match.group(1)} at {host} ({detail})"
 
 

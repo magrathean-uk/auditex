@@ -326,3 +326,257 @@ def test_output_contract_matches_the_code_on_compare_time_omissions_and_timeouts
     runner = inspect.getsource(command_runner.run_cli_command)
     assert "len(new_folders) == 1" in runner and "if partial is not None:" in runner
     assert "`partial_run_dir` is absent" in text
+
+
+# Repair round 2 of the R164 follow-up: one safe display form for a configured resolver (scheme and host, IPv6
+# bracketed, a port only when not the default; never user info, path, query or fragment), used wherever the resolver
+# is shown or stored, and no transport log line carrying the request target while a DoH request runs.
+
+_SECRET_PARTS = ("synthetic-user-zz9", "synthetic-pass-zz9", "path-tok-zz9", "query-tok-zz9", "frag-tok-zz9")
+
+
+@pytest.mark.parametrize(("endpoint", "display"), [
+    ("https://dns.corp.example/path-tok-zz9", "https://dns.corp.example"),
+    ("HTTPS://DNS.Corp.Example:443/path-tok-zz9", "https://dns.corp.example"),
+    ("https://dns.corp.example:8443/path-tok-zz9", "https://dns.corp.example:8443"),
+    ("https://[2001:db8::53]:8443/dns-query", "https://[2001:db8::53]:8443"),
+    ("https://[2001:db8::53]/dns-query", "https://[2001:db8::53]"),
+    ("https://192.0.2.53/dns-query", "https://192.0.2.53"),
+    ("http://dns.corp.example:80/x", "http://dns.corp.example"),
+    ("https://synthetic-user-zz9:synthetic-pass-zz9@dns.corp.example/path-tok-zz9?k=query-tok-zz9#frag-tok-zz9",
+     "https://dns.corp.example"),
+    ("https://dns.corp.example\\path-tok-zz9/dns-query", None),
+    ("https://dns.corp.example%2Fpath-tok-zz9/q", None),
+    ("https://2001:db8::53:8443/dns-query", None),
+    ("ftp://dns.corp.example/path-tok-zz9", None),
+    ("not a url path-tok-zz9", None),
+])
+def test_r164_resolver_display_form(endpoint: str, display: str | None) -> None:
+    from azure_tenant_audit.dns_lookup import (
+        doh_resolver_disclosure,
+        doh_resolver_display,
+    )
+
+    assert doh_resolver_display(endpoint) == display
+    text = doh_resolver_disclosure(endpoint)
+    assert not any(part in text for part in _SECRET_PARTS)
+    if display is not None:
+        assert display.split("://", 1)[1] in text
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://dns.corp.example\\path-tok-zz9/dns-query",
+    "https://dns.corp.example/path tok-zz9",
+    "https://dns.corp.example\t/path-tok-zz9",
+    "https://dns.corp.éxample/path-tok-zz9",
+    "https://dns.corp.example%2Fpath-tok-zz9/q",
+    "https://synthetic-user-zz9@dns.corp.example/path-tok-zz9",
+    "https://dns.corp.example/path-tok-zz9?k=query-tok-zz9",
+])
+def test_r164_resolve_refuses_an_endpoint_it_cannot_display_safely(endpoint: str) -> None:
+    from azure_tenant_audit.data_handling import dns_resolver_host
+    from azure_tenant_audit.dns_lookup import resolve_doh_endpoint
+
+    with pytest.raises(ValueError) as exc:
+        resolve_doh_endpoint(endpoint)
+    assert not any(part in str(exc.value) for part in _SECRET_PARTS)
+    assert dns_resolver_host(["dns_posture"], endpoint) is None
+
+
+def test_r164_ipv6_resolver_is_named_with_brackets_and_port() -> None:
+    from azure_tenant_audit.data_handling import dns_resolver_host
+    from azure_tenant_audit.dns_lookup import doh_resolver_disclosure
+
+    endpoint = "https://[2001:db8::53]:8443/dns-query"
+    assert "[2001:db8::53]:8443" in doh_resolver_disclosure(endpoint)
+    assert dns_resolver_host(["dns_posture"], endpoint) == "[2001:db8::53]"
+
+
+@pytest.mark.parametrize("provider", ["m365", "google"])
+def test_r164_ipv6_servfail_gap_reason_keeps_the_whole_origin(provider: str) -> None:
+    from azure_tenant_audit.collection_gaps import collector_gap_reason
+    from azure_tenant_audit.dns_lookup import DohClient
+
+    resolver = DohClient(session=_ServfailSession(), endpoint="https://[2001:db8::53]:8443/path-tok-zz9")
+    if provider == "m365":
+        from azure_tenant_audit.collectors.dns_posture import DnsPostureCollector
+
+        class _Domains:
+            def get_all(self, _path: str, params: Any = None) -> list[dict[str, Any]]:
+                return [{"id": "contoso.example", "isVerified": True}]
+
+        collector = "dns_posture"
+        result = DnsPostureCollector().run({"client": _Domains(), "dns_resolver": resolver, "public_lookups": False})
+    else:
+        from auditex.google_workspace.collectors import GoogleDnsPostureCollector
+
+        collector = "google_dns_posture"
+        result = GoogleDnsPostureCollector().run({"domain": "example.com", "dns_resolver": resolver})
+    rows = [row for row in result.coverage if row.get("error_class") == "dns_resolver_error"]
+    assert rows
+    for row in rows:
+        assert "path-tok-zz9" not in json.dumps(row)
+        reason = collector_gap_reason(collector, row["error_class"], row.get("error"))
+        assert reason is not None and "https://[2001:db8::53]:8443 " in reason
+
+
+@pytest.mark.parametrize("collector", ["dns_posture", "google_dns_posture"])
+@pytest.mark.parametrize("diagnostic", [
+    "DoH query failed for TXT example.com at https://synthetic-user-zz9:synthetic-pass-zz9@dns.corp.example/"
+    "path-tok-zz9?k=query-tok-zz9 (HTTP 503)",
+    "DoH resolver at https://synthetic-user-zz9@dns.corp.example could not answer TXT example.com: SERVFAIL",
+])
+def test_r164_replayed_diagnostic_never_puts_user_info_or_path_in_the_gap_reason(collector: str, diagnostic: str) -> None:
+    from azure_tenant_audit.collection_gaps import collector_gap_reason
+
+    reason = collector_gap_reason(collector, "dns_resolver_error", diagnostic)
+    assert reason is not None and "https://dns.corp.example " in reason
+    assert not any(part in reason for part in _SECRET_PARTS)
+
+
+def test_r164_replayed_truncated_ipv6_origin_is_not_named() -> None:
+    from azure_tenant_audit.collection_gaps import collector_gap_reason
+
+    reason = collector_gap_reason("dns_posture", "dns_resolver_error",
+                                  "DoH resolver at https://2001:db8::53:8443 could not answer TXT x: SERVFAIL")
+    assert reason is not None and "https://2001 " not in reason and "--doh-endpoint" in reason
+
+
+def test_r164_google_resolver_error_text_never_keeps_user_info() -> None:
+    from auditex.google_workspace.collectors import _resolver_error
+
+    class _Resolver:
+        endpoint = "https://synthetic-user-zz9:synthetic-pass-zz9@dns.corp.example/path-tok-zz9"
+
+    for text in ("DoH query failed for TXT example.com: 503 Server Error for url: "
+                 "https://synthetic-user-zz9:synthetic-pass-zz9@dns.corp.example/path-tok-zz9?name=x",
+                 "DoH resolver at https://synthetic-user-zz9:synthetic-pass-zz9@dns.corp.example could not answer"):
+        error = _resolver_error(text, _Resolver())
+        assert "dns.corp.example" in error and not any(part in error for part in _SECRET_PARTS)
+
+
+class _FakeHttps:
+    """Real Requests and urllib3 down to the connection: no socket is opened, and every request gets a canned answer
+    (an empty NOERROR DoH answer from the resolver host, 404 from anything else)."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import io
+
+        import urllib3.connection
+        import urllib3.connectionpool
+        from urllib3.response import HTTPResponse
+
+        self.targets: list[str] = []
+        fake = self
+
+        def _request(conn: Any, method: str, url: str, **_kwargs: Any) -> None:
+            conn._auditex_fake = (conn.host, url)
+            fake.targets.append(f"{conn.host}{url}")
+
+        def _getresponse(conn: Any) -> HTTPResponse:
+            host, _url = getattr(conn, "_auditex_fake", ("", ""))
+            doh = host == "dns.corp.example"
+            body = json.dumps({"Status": 0, "Answer": []}).encode() if doh else b"not found"
+            return HTTPResponse(body=io.BytesIO(body), status=200 if doh else 404, version=11,
+                                version_string="HTTP/1.1", preload_content=False, request_method="GET",
+                                headers={"content-type": "application/dns-json" if doh else "text/plain"})
+
+        monkeypatch.setattr(urllib3.connectionpool.HTTPSConnectionPool, "_validate_conn", lambda _self, _conn: None)
+        monkeypatch.setattr(urllib3.connection.HTTPConnection, "connect", lambda _self: None)
+        monkeypatch.setattr(urllib3.connection.HTTPConnection, "request", _request)
+        monkeypatch.setattr(urllib3.connection.HTTPConnection, "getresponse", _getresponse)
+
+
+def _assert_nothing_shows(parts: tuple[str, ...], tmp_path: Path, console: str, caplog: pytest.LogCaptureFixture) -> None:
+    logged = "\n".join(f"{record.name} {record.getMessage()}" for record in caplog.records)
+    for part in parts:
+        assert part not in console, part
+        assert part not in logged, part
+        for path in tmp_path.rglob("*"):
+            if path.is_file():
+                assert part.encode() not in path.read_bytes(), (part, path.name)
+
+
+_SWEEP_ENDPOINTS = [
+    # Refused before any read: user info, a path token and a query.
+    "https://synthetic-user-zz9:synthetic-pass-zz9@dns.corp.example/path-tok-zz9?key=query-tok-zz9",
+    # Refused: Requests would send it to dns.corp.example with the token in the path.
+    "https://dns.corp.example\\path-tok-zz9/dns-query",
+    # Accepted: the token is in the path of every DoH request.
+    "https://dns.corp.example/path-tok-zz9",
+]
+
+
+@pytest.mark.parametrize("endpoint", _SWEEP_ENDPOINTS)
+def test_r164_m365_sweep_never_shows_the_resolver_secret(
+    endpoint: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.collectors.dns_posture import DnsPostureCollector
+
+    transport = _FakeHttps(monkeypatch)
+    args = _m365_dns_run(monkeypatch, tmp_path, "--doh-endpoint", endpoint)
+
+    class _Client:
+        def __init__(self, auth: Any, **_: Any) -> None:
+            self.auth = auth
+
+        def token_claims(self) -> dict[str, Any]:
+            return {}
+
+        def get_all(self, _path: str, params: Any = None) -> list[dict[str, Any]]:
+            return [{"id": "contoso.example", "isVerified": True, "supportedServices": ["Email"]}]
+
+    monkeypatch.setattr(cli, "GraphClient", _Client)
+    monkeypatch.setattr(cli, "REGISTRY", {"dns_posture": DnsPostureCollector()})
+    caplog.set_level(logging.DEBUG)
+    cli.run_live(args)
+
+    captured = capsys.readouterr()
+    if endpoint.endswith("/path-tok-zz9"):
+        assert any("path-tok-zz9" in target for target in transport.targets)   # the requests did go out
+        assert (next(tmp_path.glob("acme-*/data-handling.json"))).is_file()
+    else:
+        assert transport.targets == []
+    _assert_nothing_shows(_SECRET_PARTS, tmp_path, captured.out + captured.err, caplog)
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "?name=" not in logged and "type=TXT" not in logged
+
+
+@pytest.mark.parametrize("endpoint", _SWEEP_ENDPOINTS)
+def test_r164_google_sweep_never_shows_the_resolver_secret(
+    endpoint: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from auditex import cli as product_cli
+    from auditex.google_workspace import run as google_run
+    from auditex.google_workspace.collectors import GoogleDnsPostureCollector
+
+    transport = _FakeHttps(monkeypatch)
+    _fake_google_dns_run(monkeypatch)
+
+    class _Client:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def list_directory(self, resource: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            return [{"domainName": "example.com", "verified": True, "isPrimary": True}]
+
+    monkeypatch.setattr(google_run, "GoogleWorkspaceClient", _Client)
+    monkeypatch.setattr(google_run, "REGISTRY", {"google_dns_posture": GoogleDnsPostureCollector()})
+    caplog.set_level(logging.DEBUG)
+    product_cli.main([
+        "google", "run", "--tenant-name", "Example", "--out", str(tmp_path), "--run-name", "dns",
+        "--collectors", "google_dns_posture", "--doh-endpoint", endpoint,
+    ])
+
+    captured = capsys.readouterr()
+    if endpoint.endswith("/path-tok-zz9"):
+        assert any("path-tok-zz9" in target for target in transport.targets)
+        assert (tmp_path / "Example-dns" / "data-handling.json").is_file()
+    else:
+        assert transport.targets == []
+    _assert_nothing_shows(_SECRET_PARTS, tmp_path, captured.out + captured.err, caplog)
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "?name=" not in logged and "type=TXT" not in logged
