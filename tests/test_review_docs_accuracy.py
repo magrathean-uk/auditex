@@ -63,3 +63,19 @@ def test_docs_index_anchors_resolve_and_explainer_is_not_planned():
     assert not broken, f"docs/index.md links to missing anchors: {broken}"
     # The explainer ships and is wired into reports; the index must not call it planned.
     assert "planned explainer" not in _doc("docs/index.md").lower()
+
+
+# R144 ------------------------------------------------------------------------------------------------------------
+
+
+def test_security_policy_supports_the_released_minor():
+    version = tomllib.loads(_doc("pyproject.toml"))["project"]["version"]
+    minor = ".".join(version.split(".")[:2]) + ".x"
+    policy = _doc(".github/SECURITY.md")
+    rows = dict(re.findall(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*$", policy, re.MULTILINE))
+    assert rows.get(minor) == "Yes", f"SECURITY.md must list {minor} as supported; rows: {rows}"
+    supported = [name for name, answer in rows.items() if answer == "Yes"]
+    assert supported == [minor], f"only the latest minor is supported, got {supported}"
+    # Every upgrade hint names the supported minor, never an older one.
+    hints = re.findall(r"upgrade to the latest ([0-9.]+x)", policy)
+    assert hints and set(hints) == {minor}, hints
