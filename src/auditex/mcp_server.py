@@ -543,6 +543,8 @@ def _cap_summary(result: dict[str, Any], budget: int = SUMMARY_RESPONSE_BUDGET_B
     return _cap_kept_sections(capped, omitted, budget)
 
 
+# Field names a capped section lists as left out; the rest are only counted.
+_OMITTED_FIELDS_LISTED = 20
 # Keys the capped summary never drops: what the client needs to know the answer was cut and where to read the rest.
 _SUMMARY_CORE_KEYS = frozenset({"omitted_sections", "summary_truncated", "citations", "citation_summary", "evidence_missing"})
 
@@ -568,14 +570,18 @@ def _cap_kept_sections(capped: dict[str, Any], omitted: dict[str, Any], budget: 
         if _json_size(capped) <= budget:
             return capped
         if name is None:
-            value = capped.pop(key)
-            label = key
+            omitted[key] = _omitted_entry(capped, key, capped.pop(key), size)
+            continue
+        section = dict(capped[key])
+        section.pop(name)
+        capped[key] = section
+        # One entry per section, so the record of what was left out stays small however many fields it lost.
+        entry = omitted.setdefault(f"{key}.fields", _omitted_entry(capped, key, None, 0) | {"fields": [], "more_fields": 0})
+        entry["bytes"] += size
+        if len(entry["fields"]) < _OMITTED_FIELDS_LISTED:
+            entry["fields"].append(name)
         else:
-            section = dict(capped[key])
-            value = section.pop(name)
-            capped[key] = section
-            label = f"{key}.{name}"
-        omitted[label] = _omitted_entry(capped, key, value, size)
+            entry["more_fields"] += 1
     for key in sorted(
         (key for key in capped if key not in _SUMMARY_CORE_KEYS), key=lambda item: _json_size(capped[item]), reverse=True
     ):

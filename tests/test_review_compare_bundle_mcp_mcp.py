@@ -108,6 +108,26 @@ def test_mcp_summary_fits_the_cap_when_kept_sections_alone_are_too_large(tmp_pat
         assert result["omitted_sections"]
 
 
+def test_mcp_summary_fits_the_cap_when_a_kept_section_has_many_small_fields(tmp_path: Path) -> None:
+    # Impact (R025): the list of what was left out must not itself grow past the budget.
+    from support import RunBundleBuilder
+
+    from auditex.mcp_server import summarize_run
+
+    many = {f"surface_{index}": {"status": "blocked_permission", "note": "x" * 60} for index in range(1500)}
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .manifest(**many)
+        .report_pack(summary={"overall_status": "partial"}, findings=[], evidence_paths=[])
+        .build()
+    )
+
+    result = summarize_run(str(run_dir))
+
+    assert len(json.dumps(result, default=str)) <= 48_000
+    assert result["manifest"]["tenant_name"]
+
+
 def test_mcp_summary_of_a_small_run_keeps_every_section(tmp_path: Path) -> None:
     from support import RunBundleBuilder
 
