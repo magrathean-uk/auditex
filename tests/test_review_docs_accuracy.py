@@ -466,3 +466,17 @@ def test_product_manual_carries_the_earlier_lanes_operator_facts():
     for flag in ("--install-tools", "--non-interactive", "--doh-endpoint"):
         assert f"`{flag}" in m365, flag
     assert "`blocked`" in manual and "no collector completed" in manual
+
+
+def test_security_reference_names_the_read_guard_content_and_local_state_refusals():
+    from azure_tenant_audit.adapters.read_guard import CONTENT_CMDLET_DENY
+
+    denied = {name.lower() for name in CONTENT_CMDLET_DENY}
+    examples = ("get-content", "get-variable", "get-history", "get-winevent")
+    assert set(examples) <= denied
+    privacy = _flat(_doc("docs/reference/security-privacy.md"))
+    row = privacy[privacy.index("| Command adapters |") :]
+    row = row[: row.index("| SharePoint admin REST |")]
+    assert "`CONTENT_CMDLET_DENY`" in row
+    for name in ("Get-Content", "Get-Variable", "Get-History", "Get-WinEvent"):
+        assert f"`{name}`" in row, name
