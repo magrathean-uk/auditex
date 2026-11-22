@@ -206,15 +206,28 @@ pipx install --force "auditex[google,mcp]"
 ```
 
 List **every** extra you want to keep, because pipx installs exactly the extras named on its last install. Without
-`--force`, pipx only reports that Auditex is already installed and adds nothing. On a computer without Auditex yet,
-you can install it with the extras in one step instead of Step 4:
+`--force`, pipx only reports that Auditex is already installed and adds nothing. If you installed with extra options
+in Step 4, add the same options here: `--python 3.12 --fetch-missing-python` on Ubuntu 22.04, `--python python3.11`
+on RHEL or Rocky Linux 9.
+
+On a computer without Auditex yet, you can install it with the extras in one step instead of Step 4. Use the form
+for your system, exactly as in Step 4:
 
 ```bash
 pipx install "auditex[google,mcp]"
 ```
 
-If you installed with `--python` in Step 4 (Ubuntu 22.04, RHEL or Rocky Linux 9), add the same `--python` option
-here.
+On **Ubuntu 22.04** (or any system whose default Python is older than 3.11):
+
+```bash
+pipx install --python 3.12 --fetch-missing-python "auditex[google,mcp]"
+```
+
+On RHEL or Rocky Linux 9 with Python 3.11 from Step 2:
+
+```bash
+pipx install --python python3.11 "auditex[google,mcp]"
+```
 
 The `local-answer` extra compiles llama.cpp while it installs, so it needs CMake and a C and C++ compiler first
 (`xcode-select --install` and `brew install cmake` on macOS; `sudo apt install -y build-essential cmake` on Ubuntu

@@ -389,3 +389,18 @@ def test_the_plain_environment_google_hint_command_pastes_into_bash(installed_pa
     assert shlex.split(command) == ["python", "-m", "pip", "install", "auditex[google]"]
     assert subprocess.run(["bash", "-n", "-c", command], capture_output=True).returncode == 0
     assert "Python that runs Auditex" in hint
+
+
+# Review blocker 4 (round 2): Step 7's one-step install with extras replaces Step 4, but gave only the plain form, so
+# on stock Ubuntu 22.04 (Python 3.10) it found no compatible Python and fetched none. Every Step 4 form must appear in
+# Step 7 with the extras, and the --force route must carry the same interpreter options.
+def test_the_one_step_extras_install_keeps_every_step_4_python_option() -> None:
+    guide = (ROOT / "docs/guides/install-guide.md").read_text(encoding="utf-8")
+    step4 = _section(guide, "## Step 4")
+    step7 = _section(guide, "## Step 7")
+    step4_forms = [line.strip() for line in step4.splitlines() if line.strip().startswith("pipx install")]
+    assert "pipx install --python 3.12 --fetch-missing-python auditex" in step4_forms
+    step7_lines = {line.strip() for line in step7.splitlines()}
+    for form in step4_forms:
+        assert form.removesuffix("auditex") + '"auditex[google,mcp]"' in step7_lines, form
+    assert "--fetch-missing-python" in step7.split('pipx install "auditex[google,mcp]"', 1)[0]
