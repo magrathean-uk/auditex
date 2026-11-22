@@ -19,7 +19,7 @@ from azure_tenant_audit.dns_lookup import (
 )
 
 from .auth import POLICIES_SCOPE
-from .client import classify_google_error, minimise_gmail_settings
+from .client import classify_google_error, gmail_settings_status, minimise_gmail_settings
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
@@ -506,10 +506,10 @@ class GoogleGmailSettingsCollector:
         for user_email in targets:
             start = time.perf_counter()
             try:
-                rows.append(minimise_gmail_settings(client.get_gmail_settings_for_user(user_email)))
-                status = "ok"
-                error_class = None
-                error = None
+                settings = minimise_gmail_settings(client.get_gmail_settings_for_user(user_email))
+                rows.append(settings)
+                # The client keeps each failed settings read as ``<name>_error``: all failing fails the mailbox.
+                status, error_class, error = gmail_settings_status(settings)
             except Exception as exc:  # noqa: BLE001
                 status = "failed"
                 error_class, error = classify_google_error(exc)
@@ -519,7 +519,7 @@ class GoogleGmailSettingsCollector:
                     self.name,
                     f"mailboxSettings:{user_email}",
                     status=status,
-                    item_count=1 if status == "ok" else 0,
+                    item_count=0 if status == "failed" else 1,
                     duration_ms=duration_ms,
                     endpoint="gmail.users.settings",
                     error_class=error_class,

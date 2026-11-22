@@ -106,3 +106,71 @@ def test_r058_single_call_reads_are_retried(_no_backoff_sleep: list[float]) -> N
     client._services[("admin", "directory_v1")] = type("Dir", (), {"users": lambda self: users})()
     assert client.list_user_aliases("u1@example.com") == [{"alias": "a@example.com"}]
     assert len(_no_backoff_sleep) == 1
+
+
+# ---- R055: Gmail settings reads that fail are not recorded as ok ----------------------------------------------
+
+
+class _GmailSettings:
+    """Every Gmail settings call answers with ``outcome`` (an error to raise, or a payload) unless named in ``ok``."""
+
+    def __init__(self, outcome: Any, ok: tuple[str, ...] = ()) -> None:
+        self.outcome = outcome
+        self.ok = ok
+
+    def __getattr__(self, name: str) -> Any:
+        def call(*_args: Any, **_kwargs: Any) -> Any:
+            if name in self.ok:
+                return _Request({})
+            if name in {"filters", "forwardingAddresses", "sendAs", "delegates"}:
+                return _GmailSettings(self.outcome, ok=("list",) if name in self.ok else ())
+            return _Request(self.outcome)
+
+        return call
+
+
+def _gmail_client(settings: _GmailSettings) -> GoogleWorkspaceClient:
+    users = type("Users", (), {"settings": lambda self: settings})()
+    client = GoogleWorkspaceClient(credentials=None)
+    assert client._services is not None
+    client._services[("gmail", "v1")] = type("Gmail", (), {"users": lambda self: users})()
+    return client
+
+
+def test_r055_every_settings_read_failing_fails_the_mailbox_row_and_the_probe() -> None:
+    from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
+    from auditex.google_workspace.run import build_google_capability_rows, build_google_preflight_rows
+
+    client = _gmail_client(_GmailSettings(_HttpError(403)))
+    result = GoogleGmailSettingsCollector().run({"client": client, "users": [{"primaryEmail": "me@example.com"}]})
+    row = next(item for item in result.coverage if item["name"] == "mailboxSettings:me")
+    assert row["status"] == "failed"
+    assert row["error_class"] == "insufficient_permissions"
+    assert result.status == "partial"
+
+    preflight = build_google_preflight_rows(client, ["google_gmail_settings"], domain="example.com")
+    assert preflight[0]["status"] == "failed" and preflight[0]["error_class"] == "insufficient_permissions"
+    capability = build_google_capability_rows(
+        ["google_gmail_settings"], auth_mode="oauth", dependency_status={"available": True}, coverage_rows=preflight
+    )
+    assert capability[0]["status"] == "blocked_by_scope"
+
+
+def test_r055_some_settings_reads_failing_make_the_mailbox_row_partial() -> None:
+    from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
+
+    client = _gmail_client(_GmailSettings(_HttpError(404), ok=("getAutoForwarding", "getImap", "getPop", "getVacation")))
+    result = GoogleGmailSettingsCollector().run({"client": client, "users": [{"primaryEmail": "me@example.com"}]})
+    row = next(item for item in result.coverage if item["name"] == "mailboxSettings:me")
+    assert row["status"] == "partial"
+    assert row["error_class"] == "resource_not_found"
+    assert result.payload["mailboxSettings"]["value"][0]["userEmail"] == "me"
+
+
+def test_r055_clean_settings_reads_stay_ok() -> None:
+    from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
+
+    client = _gmail_client(_GmailSettings({}))
+    result = GoogleGmailSettingsCollector().run({"client": client, "users": []})
+    assert [(row["name"], row["status"]) for row in result.coverage] == [("mailboxSettings:me", "ok")]
+    assert result.status == "ok"

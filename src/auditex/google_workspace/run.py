@@ -43,7 +43,7 @@ from .auth import (
     read_service_account_summary,
     safe_auth_summary,
 )
-from .client import GoogleWorkspaceClient, classify_google_error
+from .client import GoogleWorkspaceClient, classify_google_error, gmail_settings_status
 from .collectors import (
     COLLECTOR_SECTIONS,
     DEFAULT_ORDER,
@@ -309,6 +309,19 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
     }
 
 
+def _gmail_preflight_status(row: dict[str, Any], check: Any) -> dict[str, Any]:
+    """A probe read that returned settings whose every read failed is not ready; some failing is partial."""
+    if row.get("status") != "ok":
+        return {}
+    for payload in getattr(check, "payloads", None) or []:
+        if not isinstance(payload, dict):
+            continue
+        status, error_class, error = gmail_settings_status(payload)
+        if status != "ok":
+            return {"status": status, "error_class": error_class, "error": error}
+    return {}
+
+
 def build_google_preflight_rows(
     client: Any,
     selected: list[str],
@@ -330,14 +343,18 @@ def build_google_preflight_rows(
             def gmail_check() -> list[dict[str, Any]]:
                 # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
                 if not getattr(client, "per_user_delegation", True):
-                    return [client.get_gmail_settings_for_user("me")]
+                    gmail_check.payloads = [client.get_gmail_settings_for_user("me")]  # type: ignore[attr-defined]
+                    return gmail_check.payloads  # type: ignore[attr-defined]
                 users = client.list_directory("users", top=1)
                 if not users:
                     return []
                 email = str(users[0].get("primaryEmail") or users[0].get("email") or "")
-                return [client.get_gmail_settings_for_user(email)] if email else []
+                gmail_check.payloads = [client.get_gmail_settings_for_user(email)] if email else []  # type: ignore[attr-defined]
+                return gmail_check.payloads  # type: ignore[attr-defined]
 
-            rows.append(_preflight_call(collector, "mailboxSettings", gmail_check))
+            row = _preflight_call(collector, "mailboxSettings", gmail_check)
+            row.update(_gmail_preflight_status(row, gmail_check))
+            rows.append(row)
         elif collector == "google_devices":
             rows.append(_preflight_call(collector, "mobileDevices", lambda: client.list_devices("mobile", top=top)))
         elif collector == "google_dns_posture":

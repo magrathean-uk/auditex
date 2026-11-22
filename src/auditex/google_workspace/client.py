@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -49,6 +49,35 @@ GROUP_SETTING_FIELDS = (
     "email,allowExternalMembers,whoCanJoin,whoCanPostMessage,messageModerationLevel,"
     "whoCanViewMembership,whoCanViewGroup"
 )
+
+
+# The settings each mailbox read makes; a failed one is kept in the payload as ``<name>_error``.
+GMAIL_SETTING_NAMES: tuple[str, ...] = (
+    "autoForwarding", "filters", "forwardingAddresses", "sendAs", "imap", "pop", "vacation", "delegates",
+)
+
+
+def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str | None]:
+    """Status, dominant error class and error of one mailbox's settings read.
+
+    Every settings read failing is ``failed``; some failing is ``partial``; none failing is ``ok``.
+    """
+    failures = {
+        name: error
+        for name in GMAIL_SETTING_NAMES
+        if isinstance(error := payload.get(f"{name}_error"), dict) and error
+    }
+    if not failures:
+        return "ok", None, None
+    classes = Counter(str(error.get("error_class") or "client_error") for error in failures.values())
+    error_class = classes.most_common(1)[0][0]
+    example = next(
+        (str(error.get("error") or "") for error in failures.values() if str(error.get("error_class") or "client_error") == error_class),
+        "",
+    )
+    status = "failed" if len(failures) == len(GMAIL_SETTING_NAMES) else "partial"
+    error = f"{len(failures)} of {len(GMAIL_SETTING_NAMES)} Gmail settings reads failed ({', '.join(sorted(failures))})"
+    return status, error_class, f"{error}: {example}" if example else error
 
 
 class GoogleWorkspaceError(RuntimeError):
