@@ -959,6 +959,10 @@ def test_the_policy_scope_is_requested_on_its_own_token_so_a_missing_grant_fails
     monkeypatch.setitem(sys.modules, "google.oauth2.service_account", service_account)
     monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
     monkeypatch.setitem(sys.modules, "google.oauth2", oauth2)
+    exceptions = types.ModuleType("google.auth.exceptions")
+    exceptions.GoogleAuthError = type("GoogleAuthError", (Exception,), {})  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "google.auth", types.ModuleType("google.auth"))
+    monkeypatch.setitem(sys.modules, "google.auth.exceptions", exceptions)
     monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
     config = google_run._auth_config(
         GoogleRunConfig(tenant_name="T", out=Path("."), subject="admin@example.com", service_account_key=key, collectors="google_directory,google_policies"),

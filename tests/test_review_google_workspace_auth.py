@@ -296,6 +296,10 @@ def service_account_module(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
     monkeypatch.setitem(sys.modules, "google.oauth2", types.ModuleType("google.oauth2"))
     monkeypatch.setitem(sys.modules, "google.oauth2.service_account", service_account)
+    exceptions = types.ModuleType("google.auth.exceptions")
+    exceptions.GoogleAuthError = _GoogleAuthError  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "google.auth", types.ModuleType("google.auth"))
+    monkeypatch.setitem(sys.modules, "google.auth.exceptions", exceptions)
     monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
     return loaded
 
@@ -332,3 +336,31 @@ def test_r092_owner_only_key_is_loaded(tmp_path: Path, service_account_module: l
     key = _key(tmp_path, 0o600)
     credentials = google_auth.build_google_credentials(_delegation_config(key))
     assert service_account_module == [str(key)] and credentials.scopes == ("scope://a",)
+
+
+# ---- in-session review follow-ups ---------------------------------------------------------------------------------
+
+
+def test_r059_malformed_service_account_key_is_a_sign_in_failure_not_a_traceback(
+    tmp_path: Path, service_account_module: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def malformed(path: str, *, scopes: list[str]) -> Any:
+        raise _GoogleAuthError("Service account info was not in the expected format, missing fields token_uri.")
+
+    monkeypatch.setattr(sys.modules["google.oauth2.service_account"].Credentials, "from_service_account_file", staticmethod(malformed))
+    with pytest.raises(RuntimeError, match="Google sign-in failed"):
+        google_auth.build_google_credentials(_delegation_config(_key(tmp_path, 0o600)))
+
+
+def test_r059_consent_flow_errors_outside_google_auth_are_a_sign_in_failure(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    class AccessDeniedError(Exception):
+        pass
+
+    oauth_modules["flow_error"] = AccessDeniedError("access_denied")
+    with pytest.raises(RuntimeError, match="Google sign-in failed"):
+        google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+
+
+def test_r092_missing_key_says_not_found(tmp_path: Path, service_account_module: list[str]) -> None:
+    with pytest.raises(ValueError, match="not found"):
+        google_auth.build_google_credentials(_delegation_config(tmp_path / "absent.json"))

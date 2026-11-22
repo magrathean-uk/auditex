@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -94,15 +95,19 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
             raise ValueError("--service-account-key is required for domain-delegation auth")
         if not config.subject:
             raise ValueError("--subject is required for domain-delegation auth")
+        from google.auth.exceptions import GoogleAuthError
         from google.oauth2 import service_account
 
         shared_scopes = [scope for scope in config.scopes if scope not in config.isolated_scopes]
         key_path = config.service_account_key.expanduser()
         _check_private_key_file(key_path)
-        credentials = service_account.Credentials.from_service_account_file(
-            str(key_path),
-            scopes=shared_scopes,
-        )
+        try:
+            credentials = service_account.Credentials.from_service_account_file(
+                str(key_path),
+                scopes=shared_scopes,
+            )
+        except GoogleAuthError as exc:  # a key file missing fields (MalformedError)
+            raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); check the service-account key file.") from None
         return credentials.with_subject(config.subject)
 
     if config.auth_mode == "oauth":
@@ -133,7 +138,10 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                     credentials = None
             if not credentials or not credentials.valid:
                 flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
-                credentials = flow.run_local_server(port=0)
+                try:
+                    credentials = flow.run_local_server(port=0)
+                except Exception as exc:  # noqa: BLE001 - oauthlib's denial and scope-change errors are not GoogleAuthError
+                    raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
         except GoogleAuthError as exc:
             # A fixed message: the library's text can carry token material.
             raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
@@ -154,6 +162,8 @@ def _check_private_key_file(path: Path) -> None:
     The key can act as any user in the domain, so it gets the same check as the Microsoft 365 certificate. The
     message is fixed and never repeats the path or the file's content.
     """
+    if not os.path.lexists(path):
+        raise ValueError("service_account_key_missing: the service-account key file was not found.")
     from azure_tenant_audit.certificate_auth import (
         CertificateAuthError,
         _read_private_file,
