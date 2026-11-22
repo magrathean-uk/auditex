@@ -561,3 +561,12 @@ def test_r150_markup_pem_scan_needs_matching_labels_and_stays_linear() -> None:
     started = time.perf_counter()
     redact_output(many, markup=True)
     assert time.perf_counter() - started < 5
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack", "explainer"])
+def test_r150_round2_numbers_in_embedded_json_and_credential_arrays(profile: str) -> None:
+    from azure_tenant_audit.output_redaction import redact_output
+
+    embedded = json.dumps({"password": 98765432123, "loginCredential": [_PARITY_CANARY]})
+    out = json.dumps(redact_output({"blob": embedded}, profile=profile))
+    assert "98765432123" not in out and _PARITY_CANARY not in out

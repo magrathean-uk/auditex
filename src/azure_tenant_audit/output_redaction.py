@@ -282,9 +282,14 @@ _SECRET_LAST_PAIRS = frozenset({"privatekey", "sharedkey", "keymaterial"})
 _KEY_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 
 
-# Under these a list or mapping is masked whole too (an Authorization header list, a client_assertion object); a
-# ``...Credential`` key can hold metadata records the audit reads, so only its scalars are masked.
+# Under these a mapping is masked whole too (a client_assertion object); a ``...Credential`` key can hold metadata
+# records the audit reads, so only its scalars and lists of scalars are masked.
 _SECRET_STRUCTURED_WORDS = _SECRET_LAST_WORDS - {"credential"}
+
+
+def _secret_scalar(value: Any) -> bool:
+    """A value that can itself be a credential: text, bytes or a number (also one kept literal from embedded JSON)."""
+    return isinstance(value, (str, bytes, int, float, _Num)) and not isinstance(value, bool)
 
 
 def _secret_key(key: Any, *, structured: bool = False) -> bool:
@@ -2110,7 +2115,9 @@ class _Redactor:
             if norm in _SECRET_NORMS and _non_empty(item):
                 item = SECRET_PLACEHOLDER
             elif _non_empty(item) and _secret_key(key) and (
-                isinstance(item, (str, bytes, int, float)) or (_secret_key(key, structured=True) and not isinstance(item, bool))
+                _secret_scalar(item)
+                or (isinstance(item, (list, tuple)) and all(_secret_scalar(member) for member in item))
+                or (_secret_key(key, structured=True) and not isinstance(item, bool))
             ):
                 item = SECRET_PLACEHOLDER
             elif isinstance(item, str):
