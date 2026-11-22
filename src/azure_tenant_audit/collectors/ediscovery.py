@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ..adapters import get_adapter
@@ -18,6 +19,27 @@ from .base import (
 
 # Cases whose searches and operations are read (two reads each); past it a fan-out gap row names the rest.
 CASE_FANOUT_LIMIT = 50
+
+# Shared, case-prefixed and hashed page names from the Graph case fan-out.
+_CASE_CHUNK_NAME = re.compile(
+    r"((?:case-[A-Za-z0-9_.-]+-)?(?:searches|operations)-[0-9]{5,})\.(?:jsonl|meta\.json)"
+)
+
+
+def _discard_unreferenced_case_chunks(
+    run_dir: str | Path | None, chunk_writer: Any, retained: set[str]
+) -> None:
+    """A rerun replaces case searches and operations, including their stored pages."""
+    discard = getattr(chunk_writer, "discard", None)
+    if run_dir is None or discard is None:
+        return
+    directory = Path("chunks/ediscovery")
+    stale = set()
+    for path in (Path(run_dir) / directory).glob("*"):
+        match = _CASE_CHUNK_NAME.fullmatch(path.name)
+        if match:
+            stale.add((directory / f"{match[1]}.jsonl").as_posix())
+    discard(sorted(stale - retained))
 
 
 class _CaseChunkWriter:
@@ -110,6 +132,8 @@ class EDiscoveryCollector(Collector):
         write_export_checkpoint = context.get("write_export_checkpoint")
         write_export_records = context.get("write_export_records")
         write_export_summary = context.get("write_export_summary")
+        chunk_writer = context.get("chunk_writer")
+        run_dir = context.get("run_dir")
 
         base_queries = {
             "cases": {"endpoint": "/security/cases/ediscoveryCases", "params": {}},
@@ -120,7 +144,7 @@ class EDiscoveryCollector(Collector):
             base_queries,
             top=top,
             page_size=page_size,
-            chunk_writer=context.get("chunk_writer"),
+            chunk_writer=chunk_writer,
             log_event=log_event,
         )
         coverage.extend(base_coverage)
@@ -131,7 +155,7 @@ class EDiscoveryCollector(Collector):
         # Each case's searches and operations get half the operator's limit; no limit means none.
         case_top = None if operator_limit is None else max(1, operator_limit // 2)
         # A streamed case list keeps only a 20-row inline sample; read every case from its chunk files.
-        cases, case_issues, _failed, _cut = input_rows(base_payload.get("cases"), context.get("run_dir"))
+        cases, case_issues, _failed, _cut = input_rows(base_payload.get("cases"), run_dir)
         case_ids = [case["id"] for case in cases if isinstance(case.get("id"), str) and case["id"]]
         if case_issues:
             coverage.append(
@@ -155,6 +179,7 @@ class EDiscoveryCollector(Collector):
                 )
             )
             case_ids = case_ids[:CASE_FANOUT_LIMIT]
+        retained_case_chunks: set[str] = set()
         if case_ids:
             for case_id in case_ids:
 
@@ -174,7 +199,7 @@ class EDiscoveryCollector(Collector):
                     },
                     top=case_top,
                     page_size=page_size,
-                    chunk_writer=_CaseChunkWriter(writer, case_id) if (writer := context.get("chunk_writer")) else None,
+                    chunk_writer=_CaseChunkWriter(chunk_writer, case_id) if chunk_writer else None,
                     log_event=log_event,
                 )
                 section = f"case_{case_id}"
@@ -182,8 +207,12 @@ class EDiscoveryCollector(Collector):
                     "searches": case_payload.get("searches", {}),
                     "operations": case_payload.get("operations", {}),
                 }
+                for endpoint in payload[section].values():
+                    retained_case_chunks.update(endpoint.get("chunk_files", []))
                 coverage.extend(case_coverage)
                 total += sum(row.get("item_count", 0) for row in case_coverage if row.get("type") == "graph")
+
+        _discard_unreferenced_case_chunks(run_dir, chunk_writer, retained_case_chunks)
 
         for command in self.command_collectors:
             command_plane = str(command.get("plane", "inventory"))
