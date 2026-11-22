@@ -157,6 +157,18 @@ def test_r048_severity_follows_whether_the_role_is_tier0() -> None:
     assert severities == {"r-1": "high", "r-2": "medium"}
 
 
+def test_a_pim_role_add_outside_role_management_is_still_a_privilege_change() -> None:
+    """Bot review of PR #148: PIM role assignments for groups and Azure resources log outside RoleManagement."""
+    snapshot = _audit_snapshot(
+        _audit("p-1", "ResourceManagement", "Add member to role in PIM completed (timebound)", [_role_target("Owner")]),
+        _audit("p-2", "GroupManagement", "Add member to role in PIM completed (timebound)", [_role_target("Global Administrator")]),
+        _audit("p-3", "ApplicationManagement", "Add eligible member to role in PIM completed (permanent)", []),
+        _audit("p-4", "GroupManagement", "Add member to group", [_role_target("Global Administrator")]),
+    )
+    severities = {item["id"].split(":")[1]: item["severity"] for item in _rule_findings(snapshot, "security.privilege_change_event")}
+    assert severities == {"p-1": "medium", "p-2": "high", "p-3": "high"}
+
+
 # ---- R049: handled risky sign-ins are not open findings -----------------------------------------------------------
 
 
