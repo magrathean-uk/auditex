@@ -132,8 +132,8 @@ def test_unread_federated_credentials_stay_distinct_from_none_configured() -> No
     ]
     records = {r["id"]: r for r in _records(_normalized({"app_credentials": {"applicationCredentials": {"value": apps}}}),
                                            "application_credentials")}
-    assert records["a1"]["federated_credentials_state"] == "unknown"
-    assert "federated_credentials_state" not in records["a2"]
+    assert records["a1"]["federated_read_state"] == "unknown"
+    assert "federated_read_state" not in records["a2"]
 
 
 def test_the_folder_lookup_scope_and_read_are_declared() -> None:
@@ -151,7 +151,9 @@ def test_the_folder_lookup_scope_and_read_are_declared() -> None:
     entry = permissions["collector_permissions"]["mailbox_forwarding"]
     assert entry["optional_graph_scopes"] == MailboxForwardingCollector.optional_permissions == ["MailboxFolder.Read.All"]
     assert "MailboxFolder.Read.All" not in entry["graph_scopes"]
-    assert "mailFolders" in definitions["collectors"]["mailbox_forwarding"]["query_plan"]
+    # The query plan names payload sections (offline replay marks a missing one absent); the folder lookup is a
+    # per-user coverage row with no payload section, so it is declared by its scope, not as a planned section.
+    assert "mailFolders" not in definitions["collectors"]["mailbox_forwarding"]["query_plan"]
     assert "never a message" in entry["notes"]
 
 
@@ -247,3 +249,18 @@ def test_response_trace_rows_never_reach_the_command_log(tmp_path, monkeypatch) 
     assert logs
     leaked = [str(p.relative_to(run_dir)) for p in logs if "merger" in p.read_text(encoding="utf-8", errors="ignore")]
     assert leaked == [], leaked
+
+
+def test_the_unread_federated_marker_passes_the_sensitive_key_gate() -> None:
+    """R032 repair (review): the marker reaches finding evidence, so its key must not read as a credential."""
+    from azure_tenant_audit.contracts import _walk_sensitive_ai_safe
+    from azure_tenant_audit.findings import build_findings
+
+    apps = [{"id": "a1", "display_name": "Ownerless", "owner_count": 0, "federated_credentials": None}]
+    snapshot = _normalized({"app_credentials": {"applicationCredentials": {"value": apps}}})
+    findings = build_findings([], normalized_snapshot=snapshot)
+    no_owner = [f for f in findings if f.get("rule_id") == "app_credentials.no_owner"]
+    hits: list[dict] = []
+    _walk_sensitive_ai_safe(findings, "findings", hits)
+    assert hits == []
+    assert no_owner and no_owner[0]["evidence"].get("federated_read_state") == "unknown"

@@ -2641,7 +2641,7 @@ def build_normalized_snapshot(
             owner_count=item.get("owner_count"),
             federated_credentials=item.get("federated_credentials") or [],
             # None from the collector means the read failed: keep that apart from none configured (R032).
-            federated_credentials_state=(
+            federated_read_state=(
                 "unknown" if "federated_credentials" in item and item["federated_credentials"] is None else None
             ),
             required_resource_access=item.get("required_resource_access") or [],
