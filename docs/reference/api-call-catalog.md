@@ -238,7 +238,7 @@ optional `Mail.ReadBasic.All` permission. It is never part of the default reader
 
 | Collector | Call | Fields read | Permission |
 | --- | --- | --- | --- |
-| `mailbox_forwarding` | `GET /users/{id}/mailFolders` (`$select=id,displayName`, `$top=100`) and `GET /users/{id}/mailFolders/junkemail`, `/mailFolders/deleteditems`, `/mailFolders/archive`, `/mailFolders/conversationhistory` (`$select=id`), sent together in one Graph `$batch` of GET requests | Folder IDs and display names; never a message, header or body | `Mail.ReadBasic.All` (optional) |
+| `mailbox_forwarding` | `GET /users/{id}/mailFolders` (`$select=id,displayName`, `$top=100`) and `GET /users/{id}/mailFolders/junkemail`, `/mailFolders/deleteditems`, `/mailFolders/archive`, `/mailFolders/conversationhistory` (`$select=id`), sent together in one Graph `$batch` of GET requests (further pages of the folder list as plain GETs) | Folder IDs and display names; never a message, header or body | `Mail.ReadBasic.All` (optional) |
 
 Blast radius: by the permission's nature the app could read basic message properties (subject, sender, recipients,
 dates) of every mailbox, never a body, preview or attachment; Auditex calls only these folder routes. Without the

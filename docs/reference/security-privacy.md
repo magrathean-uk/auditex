@@ -287,7 +287,7 @@ key before any send, and the run folder is checked unchanged before anything is 
 
 | Sink | Settings | Calls |
 | --- | --- | --- |
-| `teams`, `slack` | `AUDITEX_TEAMS_WEBHOOK_URL`, `AUDITEX_SLACK_WEBHOOK_URL` (a credential) | One HTTPS POST to the webhook URL: a text summary and the redacted payload. |
+| `teams`, `slack` | `AUDITEX_TEAMS_WEBHOOK_URL`, `AUDITEX_SLACK_WEBHOOK_URL` (a credential) | One POST to the webhook URL: a text summary and the redacted payload. The scheme is not checked; use the `https://` URL the service issues. |
 | `smtp` | `AUDITEX_SMTP_HOST` and `AUDITEX_SMTP_TO` (required), `AUDITEX_SMTP_FROM` (default `auditex@localhost`), `AUDITEX_SMTP_PORT` (default 25), `AUDITEX_SMTP_USER` and `AUDITEX_SMTP_PASSWORD` (login only when both are set), `AUDITEX_SMTP_ALLOW_SELF_SIGNED` | One SMTP session with STARTTLS: a text summary and the whole payload JSON. A server that does not offer STARTTLS is refused; nothing is sent in plain text. |
 | `jira` | `AUDITEX_JIRA_BASE_URL`, `AUDITEX_JIRA_PROJECT_KEY`, `AUDITEX_JIRA_EMAIL`, `AUDITEX_JIRA_API_TOKEN` (required), `AUDITEX_JIRA_ISSUE_TYPE` (default `Task`) | `GET <base>/rest/api/3/search/jql` for an issue in the project with the run's `auditex-fp-<fingerprint>` label; when none is found, `POST <base>/rest/api/3/issue` with a summary, the labels `auditex` and the fingerprint label, and a description holding a text summary and the whole payload JSON. Basic authentication with the e-mail and API token. |
 | `github` | `AUDITEX_GITHUB_TOKEN` and `AUDITEX_GITHUB_REPO` (required), `AUDITEX_GITHUB_API_ROOT` (default `https://api.github.com`), `AUDITEX_GITHUB_LABELS` (default `auditex`, comma-separated) | `GET <api>/search/issues` for an open issue whose title carries `fp:<fingerprint>`; when one is found, `POST <api>/repos/<repo>/issues/<number>/comments`, otherwise `POST <api>/repos/<repo>/issues` with a title, the labels and a body holding a text summary and the whole payload JSON. Bearer token. |
@@ -302,7 +302,7 @@ key before any send, and the run folder is checked unchanged before anything is 
   When the de-duplication search fails, the result says `dedup: skipped` (with `dedup_http_status` when the service
   answered) and a new ticket is created.
 - A transport failure returns `status: failed` with `error_class` and no exception text, because that text can carry
-  the webhook URL. A failing webhook reply keeps only a short service code, otherwise `HTTP <status>`. The CLI still
+  the webhook URL (an SMTP TLS handshake failure reports the TLS error text instead). A failing webhook reply keeps only a short service code, otherwise `HTTP <status>`. The CLI still
   exits 0 with a failed result.
 
 ## External lookups
@@ -359,12 +359,12 @@ check stores only a count of bypassed accounts.
 
 ## Outbound destinations
 
-Every host an Auditex process can contact, for an egress allowlist. Offline replay contacts none of them.
+Every host an audit, probe, report, export, explain or notify command can contact, for an egress allowlist. Offline replay contacts none of them. Installing tools (`auditex setup`, guided-run `--install-tools`) also reaches PyPI, PSGallery and the operating system's package repositories.
 
 | Destination | When | What |
 | --- | --- | --- |
 | `login.microsoftonline.com` | Every live Microsoft 365 run | Certificate token requests to the tenant's token endpoint; with `dns_posture`, the public OpenID discovery document per verified domain. |
-| `graph.microsoft.com` | Every live Microsoft 365 run | Read-only Graph GETs. Report downloads may be redirected once to a Microsoft download host (`*.office.com`, `*.office.net`, `*.office365.com`, `*.microsoft.com`, `*.microsoftonline.com`, `*.sharepoint.com`, `*.azureedge.net`, `*.windows.net`); any other redirect target is refused. |
+| `graph.microsoft.com` | Every live Microsoft 365 run | Read-only Graph GETs. Report downloads may be redirected (at most three hops) to a Microsoft download host (`*.office.com`, `*.office.net`, `*.office365.com`, `*.microsoft.com`, `*.microsoftonline.com`, `*.sharepoint.com`, `*.azureedge.net`, `*.windows.net`); any other redirect target is refused. |
 | `outlook.office365.com` | `exchange_policy` (default) | Exchange Online PowerShell session for read-only `Get-*` cmdlets. |
 | `ps.compliance.protection.outlook.com` | `exchange_policy` in an app-only certificate run | Security & Compliance PowerShell session for the alert and DLP policy reads. |
 | `api.interfaces.records.teams.microsoft.com` | `teams_policy`, commercial and GCC | Five allowlisted Teams admin GETs. |

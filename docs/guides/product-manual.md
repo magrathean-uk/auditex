@@ -108,8 +108,9 @@ auditex run \
 needs (PowerShell 7 and `ExchangeOnlineManagement` only when `exchange_policy` or `targeted_users_coverage` is
 selected) and installs missing ones
 only on request: at its prompt, or without asking with `--install-tools`, which may use `sudo` with the system package
-manager and installs `ExchangeOnlineManagement` from PSGallery. `--non-interactive` never prompts and never installs;
-missing tools then stop the run with exit status 2 unless `--skip-tool-check` is given. `--doh-endpoint URL` names the DNS-over-HTTPS resolver, as on `auditex run`.
+manager and installs `ExchangeOnlineManagement` from PSGallery. In an installed package it installs nothing: it prints
+the manual steps and continues. `--non-interactive` never prompts; missing tools then stop the run with exit status 2
+unless `--install-tools` (install without asking) or `--skip-tool-check` is given. `--doh-endpoint URL` names the DNS-over-HTTPS resolver, as on `auditex run`.
 
 ## Google Workspace Audit Flow
 
@@ -233,8 +234,9 @@ A completed run directory contains the contract artifacts. Start with:
 8. `reports/report-pack.json`
 
 `validation.json` must be valid for customer handoff. Partial audits can still be useful, but the blocker reasons must be explicit.
-The auditor score grade in the report pack and `auditex report analyze` is `blocked` when no collector completed;
-such a run has no score to read.
+The auditor score grade in the report pack and `auditex report analyze` is `blocked` when no collector completed, or
+when coverage gaps bring the coverage component to 0 (six gaps on a partial run, seven on an ok run); such a run has
+no score to read.
 Accepted-risk findings with expired waiver dates are stale for handoff and should be treated like a review blocker until re-approved.
 
 ### Attack paths

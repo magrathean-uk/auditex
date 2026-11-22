@@ -81,7 +81,7 @@ verdicts can agree or disagree with baseline pass/fail statuses; not-assessed ro
 A value rule uses the shared closed gate first (the rule's `closed_gate` cell, rendered by
 `value_rules/gates.py`), then its own ordered section list, then its kind. The rule engine and catalogue follow
 spec v3.9.1 with addenda A1 and A2 (the catalogue's `spec_version` is `v3.9.1`); the cell inventory and reason
-codes are checked by the assessment validator, which applies the same rules to `2026-11-22` (current; it adds only the optional projection `rule_view`) and `2026-11-05` files. The [output contract](../reference/output-contract.md)
+codes are checked by the assessment validator, which applies the same rules to `2026-11-22` (current; it adds only the optional projection `rule_view`) and `2026-11-05` files, except the earlier Safe Links citation for MS.SECURITYSUITE 7.1-7.3 (including its `no_rules_configured` cell), accepted only in `2026-11-05` files. The [output contract](../reference/output-contract.md)
 lists the policy ids each rule covers. A rule that raises answers the catalogued `rule_evaluation_failed` reason
 with the `report_product_fault` recommendation, and logs only the rule id and the exception class.
 
