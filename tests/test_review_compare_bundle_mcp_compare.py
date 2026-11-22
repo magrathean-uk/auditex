@@ -205,6 +205,22 @@ def test_diff_duplicate_suffix_never_overwrites_a_real_key(tmp_path: Path) -> No
     assert things["added"] == [] and things["removed"] == []
 
 
+def test_diff_duplicate_suffix_never_takes_a_real_key_from_the_other_run(tmp_path: Path) -> None:
+    # Review of repair round 1 (R053/R068): the real key item#2 exists only in the later run.
+    run_a = _run(tmp_path, "run-a", created_utc="2026-10-01T00:00:00Z", findings=[], coverage={})
+    run_b = _run(tmp_path, "run-b", created_utc="2026-10-02T00:00:00Z", findings=[], coverage={})
+    before = [{"key": "item", "v": 1}, {"key": "item", "v": 2}]
+    after = [{"key": "item", "v": 1}, {"key": "item", "v": 2}, {"key": "item#2", "v": 3}]
+    _write(run_a / "normalized" / "things.json", {"kind": "things", "records": before})
+    _write(run_b / "normalized" / "things.json", {"kind": "things", "records": after})
+
+    things = diff_run_directories(run_a, run_b)["changes"]["things"]
+
+    assert things["changed"] == []
+    assert things["removed"] == []
+    assert things["added"] == [{"key": "item#2", "v": 3}]
+
+
 # R132: missing or empty run directories
 
 

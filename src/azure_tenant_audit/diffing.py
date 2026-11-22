@@ -265,14 +265,17 @@ def _record_key(record: dict[str, Any], kind: str, index: int) -> str:
     return f"{kind}:{index}"
 
 
-def _record_index(records: list[dict[str, Any]], kind: str) -> tuple[dict[str, dict[str, Any]], list[str]]:
+def _record_index(
+    records: list[dict[str, Any]], kind: str, reserved: frozenset[str] = frozenset()
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
     """Rows by key, and the keys more than one row carries.
 
     A repeated key is reported, not overwritten: its later rows get ``#2``, ``#3`` suffixes so every row is compared.
-    A suffix that is also some row's real key is skipped, so a generated key never replaces a real one.
+    A suffix that is also a real key, in this run or in ``reserved`` (the other run's real keys), is skipped, so a
+    generated key never replaces or pairs with a real one.
     """
     keys = [_record_key(record, kind, position) for position, record in enumerate(records)]
-    taken = set(keys)
+    taken = set(keys) | reserved
     index: dict[str, dict[str, Any]] = {}
     duplicates: list[str] = []
     seen: Counter[str] = Counter()
@@ -413,8 +416,12 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path, *, classic: bool 
     suppressed_path_counts: Counter[str] = Counter()
 
     for kind in sorted(set(left_records) | set(right_records)):
-        before_index, before_duplicates = _record_index(left_records.get(kind, []), kind)
-        after_index, after_duplicates = _record_index(right_records.get(kind, []), kind)
+        before_rows, after_rows = left_records.get(kind, []), right_records.get(kind, [])
+        real_keys = frozenset(
+            _record_key(record, kind, position) for rows in (before_rows, after_rows) for position, record in enumerate(rows)
+        )
+        before_index, before_duplicates = _record_index(before_rows, kind, real_keys)
+        after_index, after_duplicates = _record_index(after_rows, kind, real_keys)
         added_keys = sorted(set(after_index) - set(before_index))
         removed_keys = sorted(set(before_index) - set(after_index))
         shared_keys = sorted(set(before_index) & set(after_index))
