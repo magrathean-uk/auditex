@@ -2,6 +2,8 @@
 
 Tenant administrators: every permission, role and setting the reader app needs is in [Reader app permissions](reader-app-permissions.md).
 
+The audit machine runs Linux, macOS or WSL2 (Windows Subsystem for Linux 2). On native Windows Auditex stops with "Auditex needs Linux, macOS or WSL2; native Windows is not supported yet." Run it inside a WSL2 distribution.
+
 ## Default Exchange and public DNS collection
 
 Runs with the `auto` or `global-reader` profile select `exchange_policy`

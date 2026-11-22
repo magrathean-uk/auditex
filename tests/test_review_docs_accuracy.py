@@ -358,3 +358,15 @@ def test_setup_guide_names_the_google_dns_notice_and_how_to_turn_it_off():
     # The Microsoft 365 notice names the configurable resolver, not Cloudflare alone.
     m365 = _flat(_section(_doc("docs/guides/setup-guide.md"), "## Default Exchange and public DNS collection"))
     assert DOH_ENDPOINT_ENV in m365 and "--doh-endpoint" in m365
+
+
+# #18 -------------------------------------------------------------------------------------------------------------
+
+
+def test_setup_guide_and_manual_say_native_windows_is_unsupported():
+    from azure_tenant_audit.guarded_io import UNSUPPORTED_PLATFORM_MESSAGE
+
+    assert "WSL2" in UNSUPPORTED_PLATFORM_MESSAGE
+    for relative in ("docs/guides/setup-guide.md", "docs/guides/product-manual.md"):
+        text = _flat(_doc(relative))
+        assert UNSUPPORTED_PLATFORM_MESSAGE in text, f"{relative} must quote the native Windows refusal"
