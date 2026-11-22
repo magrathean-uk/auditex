@@ -29,6 +29,9 @@ With the optional `Mail.ReadBasic.All` permission, `mailbox_forwarding` reads ma
 (folder IDs and display names) for users whose inbox rules move mail, never a message or header. The
 permission itself also allows basic message properties (subject, sender, recipients, dates), which
 Auditex never requests.
+Google Workspace directory users are read through a field mask (ID, primary e-mail, full name, admin and 2-step
+verification flags, suspension, archive state, sign-in and creation times and organisational unit): recovery e-mail,
+recovery phone, phone numbers, addresses and notes are not received.
 Value-rule records carry policy, cell, code, section names and controlled reason
 text, not tenant evidence values. Serving rules read a separate in-memory view
 on both the run-bundle and internal ScubaGear export paths after source, ledger,
@@ -583,6 +586,18 @@ paths. Public baseline example addresses are kept. A pseudonym is keyed with the
 run's private key (see [Pseudonym key](#pseudonym-key)). GUIDs become `Guid` plus a digest,
 which is stable on another pass without reserving a range of real GUIDs.
 
+Credential masking in the shareable profiles covers:
+
+- PEM private-key blocks (in rendered markup only complete blocks whose BEGIN and END labels match);
+- `client_assertion`, `private_key`, `passphrase`, `token`, `pwd`, `passwd`, `certificate_path`, `certificate_thumbprint`
+  and `certificate_password` assignments in text;
+- any value whose key's last word names a credential (secret, password, passphrase, token, credential,
+  authorization, assertion, private key, shared key), including numbered or `...Value` forms;
+- lists and mappings under such keys, except mappings under a `...Credential` key, which hold credential metadata.
+
+Google customer ids (under `tenant_id` and `customer_id` keys) are masked as `Id <pseudonym>` in shareable output;
+local output keeps the real id.
+
 The report structure is redacted before rendering, so free-text keys work in
 Markdown and HTML as well as JSON. Customer-pack source JSON is a redacted
 derivative: the pack records the original and derivative hashes separately.
@@ -880,6 +895,14 @@ credential dumps, or customer signing keys. Keep them in `.secrets/` or another
 local Git-excluded path. Do not place those paths in repository defaults.
 
 No command or MCP tool accepts a bearer token: Microsoft 365 tokens are minted in memory from the reader app's certificate.
+
+The Google OAuth token cache is written owner-only (0600); a folder Auditex creates for it is 0700, and an existing
+folder keeps its mode. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
+others can read, or a link, is refused with `service_account_key_refused`.
+
+`--verbose` raises Auditex's own logging to DEBUG but keeps `urllib3` and `msal` at WARNING, because their request
+lines can carry a pre-authenticated download query. Redirect-hop and download-host errors name only the host, path and
+status.
 
 Use AI and MCP only with bundle artifacts intended for reasoning, such as
 `summary.json`, `summary.md`, `data-handling.json`, `audit-plan.json`,

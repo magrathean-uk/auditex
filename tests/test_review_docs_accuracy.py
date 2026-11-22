@@ -396,3 +396,27 @@ def test_optional_inbox_rule_folder_permission_is_documented_everywhere_and_neve
     for name in _HIDE_FROM_USER_WELL_KNOWN:
         assert f"/mailFolders/{name}" in section, name
     assert "unknown" in section
+
+
+# Earlier lanes' wording for security-privacy.md ------------------------------------------------------------------
+
+
+def test_security_reference_carries_the_earlier_lanes_privacy_facts():
+    from auditex.google_workspace.client import _USER_FIELDS
+    from azure_tenant_audit import output_redaction
+
+    for field in ("recoveryEmail", "recoveryPhone", "phones", "addresses", "notes"):
+        assert field not in _USER_FIELDS, f"Google user reads now receive {field}; revisit the doc"
+    assert "passphrase" in _doc("src/azure_tenant_audit/output_redaction.py")
+    assert output_redaction._CUSTOMER_ID_KEYS
+    cli_source = _doc("src/azure_tenant_audit/cli.py")
+    assert 'for library in ("urllib3", "msal")' in cli_source
+    privacy = _flat(_doc("docs/reference/security-privacy.md"))
+    collected = privacy[privacy.index("## Data collected") : privacy.index("## What is enforced where")]
+    assert "field mask" in collected and "recovery e-mail" in collected
+    redaction = privacy[privacy.index("## Output redaction boundary") : privacy.index("### Person names")]
+    for needle in ("PEM private-key blocks", "passphrase", "Google customer ids"):
+        assert needle in redaction, needle
+    credentials = privacy[privacy.index("## Credentials and local files") : privacy.index("## Suspected exposure")]
+    assert "OAuth token cache" in credentials and "0600" in credentials and "0700" in credentials
+    assert "`--verbose`" in privacy and "urllib3" in privacy and "msal" in privacy
