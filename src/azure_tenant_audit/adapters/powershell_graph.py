@@ -383,8 +383,8 @@ class PowerShellGraphAdapter(Adapter):
                         },
                     )
 
-            if (result.returncode != 0 or self._looks_like_not_found(combined)
-                    or self._looks_like_auth_required(combined)):
+            if (result.returncode != 0 or (not _json_success(result.returncode, stdout) and (
+                    self._looks_like_not_found(combined) or self._looks_like_auth_required(combined)))):
                 module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
                 if module_missing:
                     error_class = "module_not_found"
@@ -534,7 +534,8 @@ class PowerShellGraphAdapter(Adapter):
                     "stdout_bytes": numbers["stdout_bytes"], "stderr_bytes": numbers["stderr_bytes"],
                 })
 
-            if run.returncode != 0 or self._looks_like_not_found(combined) or self._looks_like_auth_required(combined):
+            if run.returncode != 0 or (not _json_success(run.returncode, stdout) and (
+                    self._looks_like_not_found(combined) or self._looks_like_auth_required(combined))):
                 module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
                 if module_missing:
                     error_class = "module_not_found"
@@ -602,6 +603,18 @@ class PowerShellGraphAdapter(Adapter):
         except Exception:  # noqa: BLE001 - fixed class only: no str(exc), repr or traceback for this command
             event("command.failed", "PowerShell command exception", {"error_class": "command_exception", **numbers})
             return failure("command_exception", "command_exception", numbers)
+
+
+def _json_success(returncode: int | None, stdout: str | None) -> bool:
+    """A zero exit whose stdout parses as JSON is a read that ran (R020): tenant rows such as a rule named 'Block
+    unauthorized sharing' must never be searched for refusal text, so the text heuristics apply only otherwise."""
+    if returncode != 0 or not stdout or not stdout.strip():
+        return False
+    try:
+        json.loads(stdout)
+    except (ValueError, RecursionError):
+        return False
+    return True
 
 
 def _session_kind(value: Any) -> str | None:
