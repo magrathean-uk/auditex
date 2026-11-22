@@ -264,6 +264,18 @@ def test_compare_reports_a_finding_the_baseline_could_not_assess_as_newly_assess
     assert "- Newly assessed findings: 1 (high 1)" in markdown
 
 
+def test_compare_treats_a_baseline_with_no_recorded_coverage_as_not_assessed(tmp_path: Path) -> None:
+    # Repair round 1 (R133): a baseline that recorded no collector at all assessed nothing, as the resolved side
+    # already treats a later run without coverage.
+    run_a = _run(tmp_path, "run-a", created_utc="2026-10-01T00:00:00Z", findings=[], coverage={})
+    run_b = _run(tmp_path, "run-b", created_utc="2026-10-02T00:00:00Z", findings=[FINDING], coverage={"identity": "complete"})
+
+    drift = compare_runs([run_a, run_b])["baseline_diff"]["drift_summary"]
+
+    assert drift["new_findings"] == []
+    assert drift["newly_assessed_findings"] == [FINDING["id"]]
+
+
 def test_compare_still_reports_a_finding_the_baseline_assessed_as_new(tmp_path: Path) -> None:
     run_a = _run(tmp_path, "run-a", created_utc="2026-10-01T00:00:00Z", findings=[], coverage={"identity": "complete"})
     run_b = _run(tmp_path, "run-b", created_utc="2026-10-02T00:00:00Z", findings=[FINDING], coverage={"identity": "complete"})

@@ -633,8 +633,9 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
     newly_assessed: list[dict[str, Any]] = []
     for key in sorted(set(right) - set(left)):
         # R133: a finding the baseline could not have raised (its collector or its rule's inputs were missing there)
-        # is newly assessed, not a regression. A baseline that recorded no coverage at all is taken as assessed.
-        gap = reassessment_gap(right[key], left_coverage, left_sections) if left_coverage else None
+        # is newly assessed, not a regression. A baseline that recorded no coverage at all assessed nothing, as a later
+        # run without coverage reassesses nothing on the resolved side.
+        gap = reassessment_gap(right[key], left_coverage, left_sections)
         # A finding that names no collector gives no evidence either way about the baseline; it stays new.
         if gap is None or gap == "collector_unknown":
             new.append(_summary(right[key]))
