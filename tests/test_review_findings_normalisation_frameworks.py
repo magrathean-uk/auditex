@@ -201,3 +201,24 @@ def test_r105_inline_records_are_counted_once() -> None:
     assert len(_iter_source_records(view)) == 2
     _entries, missing = build_friendly_name_catalog({}, collector_payloads={"identity": {"users": view}})
     assert missing == 1
+
+
+# ---- R112: an LTSB device's end-of-life text gives the date that edition ran out -------------------------------------
+
+
+def test_r112_ltsb_end_of_life_description_cites_the_long_term_servicing_date(monkeypatch) -> None:
+    from datetime import UTC, date, datetime
+
+    from azure_tenant_audit import endpoint_posture
+
+    monkeypatch.setattr(endpoint_posture, "today_utc", lambda: date(2026, 11, 21))
+    device = {
+        "id": "dev-1", "deviceName": "LTSB-1", "operatingSystem": "Windows", "osVersion": "10.0.14393.7000",
+        "complianceState": "compliant", "isEncrypted": True, "lastSyncDateTime": "2026-11-20T00:00:00Z",
+    }
+    snapshot = _snapshot({"intune": {"managedDevices": {"value": [device]}}})
+    findings = build_findings([], normalized_snapshot=snapshot, now=datetime(2026, 11, 21, 12, tzinfo=UTC))
+    (finding,) = [item for item in findings if item.get("rule_id") == "intune.device_os_end_of_life"]
+    description = finding["description"]
+    assert "2026-10-13" in description, description
+    assert "Long-Term Servicing" in description

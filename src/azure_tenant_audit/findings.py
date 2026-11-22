@@ -3091,7 +3091,13 @@ def _build_device_posture_findings(
                         **{
                             **_metadata_for("intune.device_os_end_of_life"),
                             "description": (
-                                f"{lifecycle.release_name} reached the end of its security updates on {lifecycle.end_of_support}."
+                                (
+                                    f"{lifecycle.release_name}: General Availability editions ended security updates on "
+                                    f"{lifecycle.end_of_support}; Long-Term Servicing editions on this build ended on "
+                                    f"{lifecycle.ltsc_end_of_support}."
+                                    if lifecycle.ltsc_end_of_support
+                                    else f"{lifecycle.release_name} reached the end of its security updates on {lifecycle.end_of_support}."
+                                )
                                 + (
                                     f" A paid extended support programme runs to {lifecycle.extended_support_until}; Auditex cannot see enrolment."
                                     if lifecycle.extended_support_until
