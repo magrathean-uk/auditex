@@ -190,6 +190,10 @@ SESSION_SCOPED_MANIFEST_KEYS = frozenset(
 )
 
 
+class ResumeRefusedError(ValueError):
+    """A run folder that cannot be resumed (an offline replay's folder)."""
+
+
 class AuditWriter:
     # A class default as well, so a writer made without __init__ (a test double) can still count.
     lone_surrogates_replaced = 0
@@ -247,6 +251,12 @@ class AuditWriter:
         existing_manifest_path = self.run_dir / "run-manifest.json"
         existing_manifest = self._safe_load_json(existing_manifest_path)
         if run_dir is not None and isinstance(existing_manifest, dict):
+            if existing_manifest.get("mode") == "offline" or existing_manifest.get("replay_source"):
+                # R051: only a live session resumes a folder, and an offline replay's folder would label the live
+                # evidence as replayed with no tenant contact (its audit log keeps the replay's run.started).
+                raise ResumeRefusedError(
+                    f"{run_dir.name} is an offline replay, not a live run; a replay cannot be resumed. Start a new run."
+                )
             # R114: a resumed run keeps the identity its manifest recorded, whatever the folder is called now or the
             # tenant name this session was given, so the manifest, summary and checkpoints name one run.
             recorded_run_id = existing_manifest.get("run_id")

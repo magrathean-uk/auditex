@@ -13,7 +13,7 @@ def _first_session(tmp_path: Path, **metadata: Any) -> Path:
     from azure_tenant_audit.output import AuditWriter
 
     writer = AuditWriter(tmp_path, "lab", "r1")
-    writer.write_bundle({"collectors": [], "mode": "offline", **metadata})
+    writer.write_bundle({"collectors": [], "mode": "app", **metadata})
     return writer.run_dir
 
 
@@ -21,25 +21,37 @@ def _manifest(run_dir: Path) -> dict[str, Any]:
     return json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
 
 
-def test_live_resume_of_an_offline_replay_folder_drops_the_replay_and_other_session_keys(tmp_path: Path) -> None:
+def test_live_resume_of_an_offline_replay_folder_is_refused(tmp_path: Path) -> None:
+    import pytest
+
+    from azure_tenant_audit.output import AuditWriter, ResumeRefusedError
+
+    writer = AuditWriter(tmp_path, "lab", "r1")
+    writer.write_bundle({"collectors": [], "mode": "offline", "replay_source": {"file": "sample_result.json"}})
+
+    with pytest.raises(ResumeRefusedError, match="offline replay"):
+        AuditWriter(tmp_path, "lab", run_dir=writer.run_dir)
+    assert _manifest(writer.run_dir)["replay_source"] == {"file": "sample_result.json"}
+
+
+def test_resume_drops_the_earlier_sessions_waiver_and_sampling_keys(tmp_path: Path) -> None:
     from azure_tenant_audit.output import AuditWriter
 
     run_dir = _first_session(
         tmp_path,
-        replay_source={"file": "sample_result.json"},
         waiver_path="waivers.json",
         top_limit=5,
         sample_truncated=True,
         truncated_sections=["users"],
-        fixture_provenance={"source": "sample"},
+        probe_mode="full",
     )
-    assert _manifest(run_dir)["replay_source"] == {"file": "sample_result.json"}
+    assert _manifest(run_dir)["waiver_path"] == "waivers.json"
 
     AuditWriter(tmp_path, "lab", run_dir=run_dir).write_bundle({"collectors": [], "mode": "app"})
 
     manifest = _manifest(run_dir)
     assert manifest["mode"] == "app"
-    for key in ("replay_source", "waiver_path", "top_limit", "sample_truncated", "truncated_sections", "fixture_provenance"):
+    for key in ("waiver_path", "top_limit", "sample_truncated", "truncated_sections", "probe_mode"):
         assert key not in manifest, key
 
 
