@@ -201,3 +201,35 @@ def test_r099_pre_lane_policy_flags_ok_answer_still_validates(tmp_path):
     _legacy_rows(tampered)[0]["rule_precheck"]["section"] = LEGACY_SECTIONS[:-1]
     with pytest.raises(ValueError):
         validate_assessment(tampered)
+
+
+# ---- R106: rule_view belongs to a new assessment schema version; 2026-11-05 keeps the contract its readers know ----
+
+
+def test_r106_rule_view_is_written_under_a_new_schema_version(tmp_path):
+    from azure_tenant_audit.scuba_assessment import (
+        ASSESSMENT_SCHEMAS,
+        validate_assessment,
+    )
+    payload = _assessment(tmp_path, [])
+    written = json.loads((tmp_path / "model_assessment.json").read_text())
+    assert any("rule_view" in d for d in written["projection"]["sections"].values())
+    assert written["schema_version"] != "2026-11-05" and written["schema_version"] in ASSESSMENT_SCHEMAS
+    validate_assessment(written)
+    # A file that advertises 2026-11-05 means what that version's readers know: no rule_view.
+    old = json.loads(json.dumps(written))
+    old["schema_version"] = "2026-11-05"
+    with pytest.raises(ValueError):
+        validate_assessment(old)
+    old["projection"] = payload["projection"]         # rule_view removed, as the pre-lane writer wrote it
+    validate_assessment(old)
+
+
+def test_r106_frozen_2026_11_05_schema_has_no_rule_view():
+    from pathlib import Path
+
+    from azure_tenant_audit.scuba_assessment import ASSESSMENT_SCHEMAS
+    root = Path(__file__).resolve().parents[1]
+    frozen = json.loads((root / ASSESSMENT_SCHEMAS["2026-11-05"]).read_text(encoding="utf-8"))
+    assert frozen["properties"]["schema_version"]["const"] == "2026-11-05"
+    assert "rule_view" not in frozen["$defs"]["projection_section"]["properties"]

@@ -36,8 +36,12 @@ ASSESSMENT_SCHEMAS = {
     "2026-10-27.1": "schemas/model_assessment-2026-10-27.1.schema.json",
     "2026-10-28": "schemas/model_assessment-2026-10-28.schema.json",
     "2026-10-29": "schemas/model_assessment-2026-10-29.schema.json",
-    "2026-11-05": MODEL_ASSESSMENT_SCHEMA,
+    "2026-11-05": "schemas/model_assessment-2026-11-05.schema.json",
+    # Review R106: 2026-11-22 adds the optional projection rule_view; nothing else differs from 2026-11-05.
+    "2026-11-22": MODEL_ASSESSMENT_SCHEMA,
 }
+# The versions that share the 2026-11-05 validation rules.
+_CURRENT = frozenset({"2026-11-05", "2026-11-22"})
 
 
 SCAN_BOUND_FIELDS = frozenset({"scan_max_rows", "scan_max_bytes", "scan_max_chunks"})
@@ -290,14 +294,14 @@ def validate_assessment(payload: Any) -> None:
     from .scuba_precheck import optional_collection_entry
     optional = optional_collection_entry()
     optional_sections = {s for policy in optional["policies"].values() for s in policy["sections"]}
-    if version in {"2026-10-29", "2026-11-05"}:
+    if version == "2026-10-29" or version in _CURRENT:
         projection = payload["projection"]
         sections = projection["sections"]
         if set(sections) != {s for policy in catalogue.values() for s in policy["sections"]}:
             raise ValueError("Invalid projection section catalogue")
         for section, detail in sections.items():
             if detail["reason"] == optional["reason_code"] and (
-                    version != "2026-11-05" or section not in optional_sections
+                    version not in _CURRENT or section not in optional_sections
                     or detail["status"] != "not_collected"):
                 raise ValueError("Invalid optional-collection projection reason")
             if ((detail["status"] == "projected") != (detail["reason"] is None)
@@ -367,12 +371,12 @@ def validate_assessment(payload: Any) -> None:
             if not loopback or any(redaction[k] for k in ("user_display_names", "email_addresses", "immutable_ids")):
                 raise ValueError("Invalid unredacted projection")
     counts = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0}
-    if version in {"2026-10-28", "2026-10-29", "2026-11-05"}:
+    if version in {"2026-10-28", "2026-10-29"} or version in _CURRENT:
         counts["rule_answered"] = 0
     # A rules-only file (2026-11-05) is marked by its envelope or by an uncovered row; any marker binds all of
     # them: no endpoint, no model name, no serving block, no model-answered or shadow row. Legacy files unchanged.
     if any(row["reason"] == "rule_not_implemented" for row in payload["policies"]) or (
-            version == "2026-11-05" and (payload["endpoint_host"] == "none" or payload["model_name"] == "rules-only")):
+            version in _CURRENT and (payload["endpoint_host"] == "none" or payload["model_name"] == "rules-only")):
         if (payload["endpoint_host"] != "none" or payload["model_name"] != "rules-only"
                 or "serving" in payload or any(
                     row["reason"] not in {"rule_precheck", "rule_not_implemented", "policy_not_in_catalogue"}
@@ -395,7 +399,7 @@ def validate_assessment(payload: Any) -> None:
         if optional["reason_code"] in row["limitations"] and (
                 not is_rule or row.get("rule_precheck", {}).get("reason_code") != optional["reason_code"]):
             raise ValueError("Optional-collection limitation requires its pre-check")
-        if version in {"2026-10-28", "2026-10-29", "2026-11-05"}:
+        if version in {"2026-10-28", "2026-10-29"} or version in _CURRENT:
             counts["rule_answered"] += is_rule
             if ("rule_precheck" in row) != is_rule or "model_shadow" in row and not is_rule:
                 raise ValueError("Invalid rule pre-check metadata")
@@ -457,7 +461,7 @@ def validate_assessment(payload: Any) -> None:
             sections = policy["sections"]
             value_row = None
             if detail["class"] == "value_rule":
-                if version != "2026-11-05":
+                if version not in _CURRENT:
                     raise ValueError("Value rule requires current schema")
                 from .value_rules.catalogue import (
                     cell_entry,
@@ -506,7 +510,7 @@ def validate_assessment(payload: Any) -> None:
                     raise ValueError("Unexpected legacy pre-check metadata")
                 if optional_reason:
                     entry = optional["policies"].get(row["policy_id"])
-                    if (version != "2026-11-05" or entry is None
+                    if (version not in _CURRENT or entry is None
                             or detail["class"] != "absent_section"
                             or detail["rule_id"] != "required_sections_present"
                             or detail.get("reason_text") != optional["reason_text"]
@@ -583,7 +587,7 @@ def validate_assessment(payload: Any) -> None:
                                      "policies": [{**shadow, "comparison": comparison}]})
             continue
         if row["reason"] == "rule_not_implemented":
-            if (version != "2026-11-05" or status != "unknown" or row["attempts"] != 0
+            if (version not in _CURRENT or status != "unknown" or row["attempts"] != 0
                     or row["latency_ms"] != 0 or row["prompt_sha256"] is not None
                     or row["response_sha256"] is not None or row["thinking_disabled"]
                     or row["thinking_stripped"] or "finish_reason" in row

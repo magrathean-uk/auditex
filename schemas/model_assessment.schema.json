@@ -6,7 +6,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "2026-11-05"
+      "const": "2026-11-22"
     },
     "generated_at": {
       "type": "string",
