@@ -42,17 +42,20 @@ def test_shareable_preview_preserves_local_structure_after_redaction(tmp_path: P
     assert expected["executive_summary"]["ordinary_count"] == 42
 
 
+# The synthetic 90k-user run's two largest files scaled to the 250,000 users the identity collector reads (R090).
+_PROJECTED_250K = (46_281_912 * 250_000 // 90_000, 41_546_181 * 250_000 // 90_000)
+
+
 @pytest.mark.parametrize("sizes", [
     (46_281_912, 41_546_181),  # the largest files of the synthetic 90k-user run
     (48 * 1024 * 1024,) * 3,  # more than the old aggregate limit
+    _PROJECTED_250K,  # a 250,000-user run (R090)
 ])
 def test_scan_accepts_large_synthetic_file_sizes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sizes: tuple[int, ...]
 ) -> None:
     root = tmp_path / "run"
     _sparse_run(root, sizes)
-    assert redaction._MAX_FILE_BYTES == 64 * 1024 * 1024
-    assert redaction._MAX_SCAN_BYTES == 256 * 1024 * 1024
     # NUL-filled sparse files are not JSON. Exercise the real reader and budget, skipping only parsing.
     read_sizes: list[int] = []
     monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: read_sizes.append(len(data)))
@@ -80,6 +83,18 @@ def _message(exc: pytest.ExceptionInfo[redaction.ContextIncompleteError], root: 
 
 
 @pytest.mark.usefixtures("low_limits")
+def test_a_file_over_the_per_file_cap_still_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "run"
+    _sparse_run(root, (redaction._MAX_FILE_BYTES + 1,))
+    monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: None)
+
+    with pytest.raises(redaction.ContextIncompleteError) as error:
+        redaction.snapshot_run(root)
+
+    assert error.value.size_limit
+    assert redaction.context_for_run(root).incomplete
+
+
 def test_scan_accepts_exact_file_and_aggregate_limits(tmp_path: Path) -> None:
     root = tmp_path / "run"
     _sparse_run(root, (100, 50))

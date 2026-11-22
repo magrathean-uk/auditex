@@ -660,10 +660,12 @@ def _collect(value: Any, found: _Found, *, names: bool) -> None:
 # -- contexts ---------------------------------------------------------------------------------------------------------
 
 # Discovery limits. Hitting one is never silent: the context is flagged ``incomplete`` (see ``RedactionContext``).
-# A synthetic 90k-user run measured 44.1 MiB for its largest file and 84.1 MiB total. These limit scan bytes, not RSS.
-_MAX_SCAN_FILES = 5_000            # ``normalized/**/*.json`` files per run
-_MAX_FILE_BYTES = 64 * 1024 * 1024  # one file; a larger one is not read
-_MAX_SCAN_BYTES = 256 * 1024 * 1024  # all files of one run together
+# A synthetic 90k-user run measured 44.1 MiB for its largest file and 84.1 MiB total; scaled to the 250,000 users the
+# identity collector reads, that is about 123 MiB and 234 MiB (R090). The caps cover that with headroom and still
+# refuse anything larger (fail closed). These limit scan bytes, not RSS.
+_MAX_SCAN_FILES = 5_000             # ``normalized/**/*.json`` files per run
+_MAX_FILE_BYTES = 160 * 1024 * 1024  # one file; a larger one is not read
+_MAX_SCAN_BYTES = 384 * 1024 * 1024  # all files of one run together
 _MAX_SCAN_DEPTH = 32               # directory levels below ``normalized/``
 _MAX_REASONS = 20                  # problems a context keeps (the rest is only counted)
 _MAX_LISTED_FILES = 10             # problems a refusal names (the rest is only counted)
