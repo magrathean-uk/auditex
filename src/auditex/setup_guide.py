@@ -184,7 +184,8 @@ def build_google_setup_guide(
         raise ValueError("Google auth must be domain-delegation or oauth.")
 
     domain_delegation_steps = [
-        "Install Auditex with google extras: python -m pip install -e '.[google]'.",
+        "Install Auditex with the google extra: pipx install \"auditex[google]\" (add other extras inside the brackets, "
+        "for example auditex[google,mcp]; from a source checkout: python -m pip install -e '.[google]').",
         "Create or choose a Google Cloud project and enable the listed APIs.",
         "Create a service account, enable domain-wide delegation, and copy its OAuth client ID.",
         "In Google Admin Console, open Security > Access and data control > API controls > Domain-wide delegation.",

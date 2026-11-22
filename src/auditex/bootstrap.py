@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import platform
 import shutil
@@ -28,6 +29,33 @@ def is_source_checkout() -> bool:
     except OSError:
         return False
     return own_tree and BOOTSTRAP_SCRIPT.is_file() and SELECT_PYTHON_SCRIPT.is_file()
+
+
+# The module each optional extra provides, to tell which extras an installed Auditex already has.
+_EXTRA_MODULES = {"google": "googleapiclient", "mcp": "mcp", "local-answer": "llama_cpp"}
+
+
+def _extra_installed(extra: str) -> bool:
+    module = _EXTRA_MODULES.get(extra)
+    try:
+        return bool(module) and importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def extra_install_command(extra: str) -> str:
+    """The command that adds an optional extra to this Auditex, for the route it was installed by.
+
+    A source checkout takes an editable install in its folder. A pipx install is reinstalled with the extras it
+    already has plus the new one (pipx keeps only the extras named on its last install). Any other environment
+    installs through the interpreter that runs Auditex, never a bare `python` that may be another one.
+    """
+    if is_source_checkout():
+        return f"python -m pip install -e '.[{extra}]'"
+    if (Path(sys.prefix) / "pipx_metadata.json").is_file():
+        extras = sorted({name for name in _EXTRA_MODULES if _extra_installed(name)} | {extra})
+        return f'pipx install --force "auditex[{",".join(extras)}]"'
+    return f"{sys.executable} -m pip install 'auditex[{extra}]'"
 
 
 def detect_package_manager() -> str | None:
@@ -208,7 +236,7 @@ def run_setup(*, with_exchange: bool = False, with_pwsh: bool = False, with_mcp:
         print(
             "auditex setup prepares a source checkout; this Auditex is an installed package, so its Python is ready.\n"
             "Optional packs are installed by hand:\n"
-            "  MCP server:      python -m pip install 'auditex[mcp]'\n"
+            f"  MCP server:      {extra_install_command('mcp')}\n"
             "  Exchange checks: install PowerShell 7, then the ExchangeOnlineManagement module\n"
             "                   for the current user (from PSGallery, without trusting the gallery)\n"
             "Run auditex doctor to check."

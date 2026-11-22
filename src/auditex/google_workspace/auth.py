@@ -65,14 +65,13 @@ class GoogleAuthConfig:
 def google_dependency_status() -> dict[str, Any]:
     missing = [package for module, package in _DEPENDENCIES.items() if not _module_available(module)]
     missing = sorted(dict.fromkeys(missing))
-    return {
-        "available": not missing,
-        "missing": missing,
-        "install_hint": "Install Google extras with `python -m pip install -e '.[google]'` "
-        "(google-auth, google-auth-oauthlib, google-api-python-client)."
-        if missing
-        else "",
-    }
+    hint = ""
+    if missing:
+        from ..bootstrap import extra_install_command
+
+        hint = (f"Install Google extras with `{extra_install_command('google')}` "
+                "(google-auth, google-auth-oauthlib, google-api-python-client).")
+    return {"available": not missing, "missing": missing, "install_hint": hint}
 
 
 def _module_available(module: str) -> bool:
