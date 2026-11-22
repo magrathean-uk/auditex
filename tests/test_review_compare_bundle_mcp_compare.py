@@ -359,3 +359,31 @@ def test_cli_diff_of_a_verified_same_tenant_pair_resolves_and_exits_0(tmp_path: 
     assert result["status"] == "ok"
     assert result["drift_summary"]["resolved_findings"] == [FINDING["id"]]
 
+
+def _keys(value: Any) -> set[str]:
+    if isinstance(value, dict):
+        return set(value) | {key for item in value.values() for key in _keys(item)}
+    if isinstance(value, list):
+        return {key for item in value for key in _keys(item)}
+    return set()
+
+
+def test_mcp_drift_keeps_its_newly_assessed_keys_when_a_person_has_that_name(tmp_path: Path) -> None:
+    # Repair round 2 (R133): a directory identity named "Newly Assessed" must not rename the result keys of the
+    # public MCP diff and compare handlers. Every key the unredacted result carries stays a key.
+    from auditex.mcp_server import compare_many_runs
+
+    run_a = _run(tmp_path, "run-a", created_utc="2026-10-01T00:00:00Z", findings=[], coverage={"identity": "blocked_permission"})
+    run_b = _run(tmp_path, "run-b", created_utc="2026-10-02T00:00:00Z", findings=[FINDING], coverage={"identity": "complete"})
+    person = {"kind": "user", "display_name": "Newly Assessed", "principal_name": "newly.assessed@contoso.example", "user_type": "Member"}
+    for run_dir in (run_a, run_b):
+        _write(run_dir / "normalized" / "users.json", {"kind": "users", "records": [person]})
+
+    raw_compare = compare_runs([run_a, run_b])
+    assert "newly_assessed" in _keys(raw_compare)
+    for raw, redacted in (
+        (raw_compare, compare_many_runs([str(run_a), str(run_b)])),
+        (diff_run_directories(run_a, run_b), diff_runs(str(run_a), str(run_b))),
+    ):
+        lost = {key for key in _keys(raw) if "assessed" in key} - _keys(redacted)
+        assert not lost, lost

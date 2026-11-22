@@ -2854,3 +2854,13 @@ x509certificatemultifactor x509certificatesinglefactor xdgdatahome xgithubapiver
 xmethodoverride xrefs yammerenterprise zapenabled
     """.split()
 )
+
+# Field names the compare, diff, run-bundle and MCP review lane added. They stay out of the generated list above so
+# lanes do not edit it at once; the integrator folds them into it when it next regenerates the list (R133).
+_D5_FIELD_NAMES = _D5_FIELD_NAMES | frozenset(
+    """
+aicontext auditexmcpcommandtimeoutseconds later morefields newlyassessed newlyassessedcount newlyassessedfindings
+notreassessedfindings omittedsections partialrundir readwith reportpack resolutionbasis summarytruncated
+toolchainreadiness
+    """.split()
+)
