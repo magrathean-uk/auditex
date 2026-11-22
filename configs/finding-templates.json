@@ -1389,6 +1389,19 @@
     ],
     "expected_value": "Conditional Access policies are enabled, or report-only for a documented and short evaluation period."
   },
+  "ca.break_glass_exclusion_unverified": {
+    "risk_rating": "low",
+    "description": "One or more enabled Conditional Access policies that require MFA, require a managed device, or block sign-ins exclude none of the emergency-access accounts directly, but exclude a group whose members the run did not read. The accounts may be in that group, so whether they are excluded was not assessed. The finding names each policy and group.",
+    "impact": "If the emergency-access accounts are not in the excluded group, a policy or sign-in service failure can lock out every administrator; the run has no evidence either way.",
+    "remediation": "Confirm the emergency-access accounts are members of the named groups, or exclude the accounts directly (or through a role-assignable group) so the audit can verify the exclusion.",
+    "references": [
+      "Microsoft Entra emergency access accounts"
+    ],
+    "control_ids": [
+      "AUDITEX-CA-BREAK-GLASS-EXCLUSION"
+    ],
+    "expected_value": "Emergency-access accounts are excluded from every enabled policy that requires MFA or a managed device, or blocks sign-ins, by a route the audit can verify."
+  },
   "ca.break_glass_exclusion_missing": {
     "risk_rating": "high",
     "description": "One or more enabled Conditional Access policies that require MFA, require a compliant or hybrid-joined device with no MFA alternative, or block sign-ins exclude none of the emergency-access accounts. The accounts are the ones the operator listed, or, without a list, accounts inferred from names and the Global Administrator role. The finding names each policy. Report-only policies and policies without an MFA, device or block grant are not judged.",

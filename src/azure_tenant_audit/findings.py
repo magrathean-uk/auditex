@@ -2982,6 +2982,7 @@ def _build_teams_federation_findings(normalized_snapshot: dict[str, Any]) -> lis
 _CA_FINDING_RULES = {
     "ca_reporting_only": {"rule_id": "ca.policy_report_only"},
     "ca_break_glass_exclusion": {"rule_id": "ca.break_glass_exclusion_missing"},
+    "ca_break_glass_exclusion_unverified": {"rule_id": "ca.break_glass_exclusion_unverified"},
 }
 
 # SharePoint site ownership states that raise a finding, with the rule and severity of each.
@@ -4142,13 +4143,23 @@ def _normalized_findings(
                 for record in ((normalized_snapshot.get(_BREAK_GLASS_SECTION) or {}).get("records") or [])
                 for ref in _normalized_evidence_refs(_BREAK_GLASS_SECTION, record, "conditional_access")
             ]
-            returned_value = {
-                "account_source": item.get("account_source"),
-                "policies_without_exclusion": len(policies),
-                "policy_names": affected[:_MFA_NOT_ENFORCED_POLICY_LIMIT],
-                **({"unresolved_accounts": item["unresolved_accounts"]} if item.get("unresolved_accounts") else {}),
-            }
+            if ca_rule_id == "ca.break_glass_exclusion_unverified":
+                returned_value = {
+                    "account_source": item.get("account_source"),
+                    "policies_exclusion_unverified": len(policies),
+                    "policy_names": affected[:_MFA_NOT_ENFORCED_POLICY_LIMIT],
+                    "unverified_exclusion_groups": list(item.get("unverified_exclusion_groups") or []),
+                }
+            else:
+                returned_value = {
+                    "account_source": item.get("account_source"),
+                    "policies_without_exclusion": len(policies),
+                    "policy_names": affected[:_MFA_NOT_ENFORCED_POLICY_LIMIT],
+                    **({"unresolved_accounts": item["unresolved_accounts"]} if item.get("unresolved_accounts") else {}),
+                }
         ca_metadata = _metadata_for(ca_rule_id)
+        if ca_rule_id == "ca.break_glass_exclusion_unverified" and item.get("description"):
+            ca_metadata["description"] = str(item["description"])
         _append_note(ca_metadata, _unresolved_note({"unresolved_operator_accounts": item.get("unresolved_accounts")}))
         findings.append(
             _finalize_finding(

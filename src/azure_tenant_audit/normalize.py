@@ -733,6 +733,7 @@ def _build_conditional_access_graph(
         membership_edges=membership_edges,
     )
     break_glass_flagged: list[dict[str, Any]] = []
+    break_glass_unverified: list[dict[str, Any]] = []
     break_glass_in_scope = 0
 
     reference_tracker: dict[str, list[str]] = {}
@@ -962,6 +963,19 @@ def _build_conditional_access_graph(
                     "broad": assessment["broad"],
                 }
             )
+        unverified_groups = list(assessment.get("unverified_exclusion_groups") or [])
+        if assessment.get("exclusion_unverified"):
+            # The policy excludes a group whose members the run did not read: the accounts may be in it, so the
+            # exclusion is neither missing nor proven, and the check is not assessable for this policy.
+            break_glass_unverified.append(
+                {
+                    "policy_id": policy_id,
+                    "policy_name": policy.get("displayName"),
+                    "key": f"conditional_access_policy:{policy_id}",
+                    "enforces": assessment["enforces"],
+                    "unverified_exclusion_groups": unverified_groups,
+                }
+            )
 
         report_only = policy_state == "enabledForReportingButNotEnforced"
         mfa_enforcement = {
@@ -1003,6 +1017,8 @@ def _build_conditional_access_graph(
                 break_glass_enforces=assessment.get("enforces"),
                 break_glass_excluded_accounts=assessment.get("excluded_accounts"),
                 break_glass_not_excluded_accounts=assessment.get("not_excluded_accounts"),
+                break_glass_exclusion_unverified=True if assessment.get("exclusion_unverified") else None,
+                break_glass_unverified_groups=unverified_groups or None,
                 targeting=compact_targeting(targeting),
                 mfa_enforcement=mfa_enforcement,
                 relationships=[
@@ -1042,7 +1058,33 @@ def _build_conditional_access_graph(
             unverified_accounts=accounts.unverified,
             policies_in_scope=break_glass_in_scope,
             policies_missing_exclusion=len(break_glass_flagged),
+            policies_exclusion_unverified=len(break_glass_unverified),
         )
+        if break_glass_unverified:
+            unverified_groups = sorted({group for item in break_glass_unverified for group in item["unverified_exclusion_groups"]})
+            count = len(break_glass_unverified)
+            policy_findings.append(
+                _record(
+                    "ca_finding",
+                    "conditional_access",
+                    "break_glass_unverified",
+                    title="Emergency access exclusions could not be verified",
+                    finding_type="ca_break_glass_exclusion_unverified",
+                    severity="low",
+                    description=(
+                        f"{count} enabled Conditional Access {'policy excludes' if count == 1 else 'policies exclude'} "
+                        "none of the emergency access accounts directly, but "
+                        f"{'excludes' if count == 1 else 'exclude'} a group whose members the run did not read "
+                        f"({', '.join(unverified_groups[:10])}{' and more' if len(unverified_groups) > 10 else ''}). "
+                        "The accounts may be in that group, so whether they are excluded was not assessed."
+                    ),
+                    account_source=accounts.source,
+                    accounts=accounts.labels,
+                    policies=break_glass_unverified,
+                    policy_count=count,
+                    unverified_exclusion_groups=unverified_groups,
+                )
+            )
         if break_glass_flagged:
             policy_findings.append(
                 _record(

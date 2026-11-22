@@ -38,3 +38,72 @@ def test_i7_permission_notes_describe_retired_cli_operations_as_named_skips() ->
         notes = collectors[name]["notes"]
         assert "error m365_cli_not_used" not in notes, name
         assert "skipped with the reason m365_cli_not_used" in notes, name
+
+
+def _break_glass_snapshot(policies: list[dict], groups: list[dict]) -> dict:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payloads = {
+        "identity": {
+            "users": {"value": [
+                {"id": "u-bg1", "displayName": "Emergency One", "userPrincipalName": "bg1@example.com"},
+                {"id": "u-alice", "displayName": "Alice", "userPrincipalName": "alice@example.com"},
+            ]},
+            "groups": {"value": groups},
+            "roleDefinitions": {"value": []},
+            "roleAssignments": {"value": []},
+        },
+        "conditional_access": {"conditionalAccessPolicies": {"value": policies}},
+    }
+    return build_normalized_snapshot(
+        tenant_name="acme", run_id="r", collector_payloads=payloads, break_glass_accounts=["bg1@example.com"]
+    )
+
+
+def _mfa_policy(policy_id: str, users: dict) -> dict:
+    return {
+        "id": policy_id,
+        "displayName": f"Policy {policy_id}",
+        "state": "enabled",
+        "conditions": {"users": users, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["all"]},
+        "grantControls": {"operator": "OR", "builtInControls": ["mfa"]},
+    }
+
+
+def test_i2_an_exclusion_through_an_unread_group_is_reported_unverified_not_silent() -> None:
+    """R040: the run cannot tell whether a plain group holds the listed account, so it says so."""
+    from azure_tenant_audit.findings import build_findings
+
+    groups = [{"id": "g-ca-ex", "displayName": "CA Exclusions", "isAssignableToRole": False}]
+    policy = _mfa_policy("mfa-all", {"includeUsers": ["All"], "excludeGroups": ["g-ca-ex"]})
+
+    snapshot = _break_glass_snapshot([policy], groups)
+
+    record = snapshot["conditional_access_graph"]["records"][0]
+    assert record["missing_break_glass_exclusion"] is False
+    assert record["break_glass_exclusion_unverified"] is True
+    assert record["break_glass_unverified_groups"] == ["CA Exclusions"]
+    assessment = snapshot["break_glass_assessment"]["records"][0]
+    assert assessment["policies_missing_exclusion"] == 0
+    assert assessment["policies_exclusion_unverified"] == 1
+    rules = {item["rule_id"]: item for item in build_findings([], normalized_snapshot=snapshot)}
+    assert "ca.break_glass_exclusion_missing" not in rules
+    unverified = rules["ca.break_glass_exclusion_unverified"]
+    assert unverified["severity"] == "low"
+    assert unverified["affected_objects"] == ["Policy mfa-all"]
+    assert "CA Exclusions" in unverified["description"]
+    assert unverified["returned_value"]["unverified_exclusion_groups"] == ["CA Exclusions"]
+
+
+def test_i2_a_verified_exclusion_raises_no_unverified_note() -> None:
+    groups = [{"id": "g-ca-ex", "displayName": "CA Exclusions", "isAssignableToRole": False}]
+    policy = _mfa_policy("mfa-all", {"includeUsers": ["All"], "excludeUsers": ["u-bg1"]})
+
+    snapshot = _break_glass_snapshot([policy], groups)
+
+    record = snapshot["conditional_access_graph"]["records"][0]
+    assert not record.get("break_glass_exclusion_unverified")
+    assert snapshot["break_glass_assessment"]["records"][0]["policies_exclusion_unverified"] == 0
+    from azure_tenant_audit.findings import build_findings
+
+    assert "ca.break_glass_exclusion_unverified" not in {item["rule_id"] for item in build_findings([], normalized_snapshot=snapshot)}
