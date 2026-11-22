@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from auditex import command_runner
 from auditex.command_runner import run_cli_command
 from azure_tenant_audit.adapters.m365_cli import M365CLIAdapter
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
@@ -199,7 +200,7 @@ def test_command_runner_masks_both_streams_without_clipping_structured_output(mo
             raise subprocess.TimeoutExpired(cmd, 1, output=stdout.encode(), stderr=DIAGNOSTIC.encode())
         return subprocess.CompletedProcess(cmd, 0, stdout, DIAGNOSTIC)
 
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("auditex.command_runner._run_process", fake_run)
     response = run_cli_command(["auditex", "doctor"])
     _assert_private(json.dumps(response))
     assert len(json.loads(response["stdout"])["rows"]) == 20
@@ -438,7 +439,7 @@ def test_mcp_operator_identifiers_survive_without_exposing_cmdlet_output(monkeyp
             raise subprocess.TimeoutExpired(cmd, 1, output=b"{}", stderr=stderr.encode())
         return subprocess.CompletedProcess(cmd, 0, "{}", stderr)
 
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("auditex.command_runner._run_process", fake_run)
     response = run_cli_command(command, cwd=str(tmp_path))
     assert str(run_dir) in response["stderr"]
     assert EMAIL not in response["stderr"] and "recipient-canary" not in response["stderr"]
@@ -468,14 +469,14 @@ def test_m365dsc_classifies_module_missing_before_diagnostic_clipping(monkeypatc
 def test_mcp_resolved_output_path_survives_and_credentials_take_precedence(monkeypatch, tmp_path) -> None:
     command = ["auditex", "run", "--out", "../" + GUID, "--subject", EMAIL, "--client-secret", EMAIL]
     out = (tmp_path / ".." / GUID).resolve()
-    monkeypatch.setattr("subprocess.run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "{}", f"{out}/demo-run\npassword={EMAIL}"))
+    monkeypatch.setattr("auditex.command_runner._run_process", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "{}", f"{out}/demo-run\npassword={EMAIL}"))
     response = run_cli_command(command, cwd=str(tmp_path))
     assert f"{out}/demo-run" in response["stderr"]
     assert EMAIL not in json.dumps(response)
 
 
 def test_mcp_ordinary_operator_label_does_not_exempt_email_local_part(monkeypatch) -> None:
-    monkeypatch.setattr("subprocess.run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "{}", DIAGNOSTIC))
+    monkeypatch.setattr("auditex.command_runner._run_process", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "{}", DIAGNOSTIC))
     response = run_cli_command(["auditex", "run", "--tenant-name", "recipient-canary"])
     _assert_private(response["stderr"])
 
@@ -486,14 +487,14 @@ def test_mcp_offline_guid_run_path_can_be_used_by_next_tool(monkeypatch, tmp_pat
     repo = Path(__file__).resolve().parents[1]
     monkeypatch.setenv("PYTHONPATH", str(repo / "src"))
     command = build_cli_command(tenant_name=GUID, out_dir=str(tmp_path), offline=True)
-    real_run = subprocess.run
+    real_run = command_runner._run_process
 
     def with_cmdlet_diagnostic(cmd, **kwargs):
         result = real_run(cmd, **kwargs)
         result.stderr += "\nGet-Mailbox: " + EMAIL
         return result
 
-    monkeypatch.setattr("subprocess.run", with_cmdlet_diagnostic)
+    monkeypatch.setattr("auditex.command_runner._run_process", with_cmdlet_diagnostic)
     response = run_cli_command(command, cwd=str(repo))
     assert response["returncode"] == 0, response
     run_dir = next(tmp_path.glob(f"{GUID}-run_*"))
@@ -565,7 +566,7 @@ def test_mcp_operator_exemption_does_not_preserve_other_local_parts(monkeypatch,
             raise subprocess.TimeoutExpired(cmd, 1, output=output.encode(), stderr=output.encode())
         return subprocess.CompletedProcess(cmd, 0, output, output)
 
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("auditex.command_runner._run_process", fake_run)
     response = run_cli_command(["auditex", "run", flag, operator])
     expected = operator + "\n***@" + other.split("@", 1)[1]
     assert response["stdout"] == response["stderr"] == expected

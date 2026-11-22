@@ -159,7 +159,7 @@ def test_the_certificate_audit_tool_timeout_names_resume(monkeypatch: pytest.Mon
     def time_out(command: list[str], **kwargs: object) -> None:
         raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 1)
 
-    monkeypatch.setattr("subprocess.run", time_out)
+    monkeypatch.setattr("auditex.command_runner._run_process", time_out)
     certificate = tmp_path / "reader.pem"
     certificate.write_text("not a key", encoding="utf-8")
 
@@ -171,3 +171,38 @@ def test_the_certificate_audit_tool_timeout_names_resume(monkeypatch: pytest.Mon
 
     assert result.get("error_class") == "timeout", result
     assert "--resume-from" in result["error"]
+
+
+def test_a_command_timeout_stops_the_child_and_every_process_it_started(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Repair round 1 (R063/R026): the engine's own children (pwsh) are in its process group and stop with it.
+    import time
+
+    from auditex.command_runner import run_cli_command
+
+    monkeypatch.setenv("AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS", "1")
+    marker = tmp_path / "grandchild-finished"
+
+    result = run_cli_command(["sh", "-c", f"(sleep 2; touch '{marker}') & wait"])
+
+    assert result["error_class"] == "timeout"
+    time.sleep(2.5)
+    assert not marker.exists()
+
+
+def test_a_resumable_command_timeout_names_the_partial_run_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Repair round 1 (R063/R026): the error names the folder --resume-from needs, not just the option.
+    from auditex.command_runner import run_cli_command
+
+    monkeypatch.setenv("AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS", "1")
+    out = tmp_path / "live"
+    (out / "acme-run_earlier").mkdir(parents=True)
+    script = 'mkdir -p "$2/$4-run_20261122T040000Z" && sleep 5'
+
+    result = run_cli_command(["sh", "-c", script, "sh", "--out", str(out), "--tenant-name", "acme"], resumable=True)
+
+    partial = out / "acme-run_20261122T040000Z"
+    assert result["error_class"] == "timeout"
+    assert result["partial_run_dir"] == str(partial)
+    assert f"--resume-from {partial}" in result["error"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -109,6 +110,72 @@ def command_timeout_seconds() -> int | None:
     return None if value <= 0 else value
 
 
+# How long a stopped command's process group gets to release its output pipes after SIGKILL.
+_KILLED_GROUP_DRAIN_SECONDS = 5
+
+
+def _kill_process_group(process: Any) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, AttributeError):
+        process.kill()
+
+
+def _run_process(
+    command: list[str], *, cwd: str | None = None, text: bool = True, capture_output: bool = True,
+    check: bool = False, timeout: int | None = None, env: dict[str, str] | None = None, stdin: Any = None,
+) -> subprocess.CompletedProcess[str]:
+    """``subprocess.run`` for an MCP command, except that a timeout stops the child's whole process group (R063).
+
+    The child starts in its own session, so the PowerShell processes and other children the engine starts share
+    its process group; on timeout the group is killed, not only the direct child, and ``TimeoutExpired`` is raised
+    with whatever output was read.
+    """
+    del text, capture_output, check  # always text, captured and unchecked, as every caller asks
+    process = subprocess.Popen(
+        command, cwd=cwd, env=env, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+        try:
+            stdout, stderr = process.communicate(timeout=_KILLED_GROUP_DRAIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            # A descendant that left the group still holds the pipes; give up on its output.
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+            process.wait()
+            stdout, stderr = "", ""
+        raise subprocess.TimeoutExpired(command, timeout or 0, output=stdout, stderr=stderr) from None
+    except BaseException:
+        _kill_process_group(process)
+        process.wait()
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def _run_folders(command: list[str], cwd: str | None) -> tuple[Path, str] | None:
+    """The ``--out`` folder and the ``<tenant-name>-`` prefix the engine names a new run folder with, if given."""
+    outs = sorted(collect_sensitive_argv_values(command, sensitive_flags={"--out"}))
+    tenants = sorted(collect_sensitive_argv_values(command, sensitive_flags={"--tenant-name"}))
+    if len(outs) != 1 or len(tenants) != 1:
+        return None
+    return Path(cwd or Path.cwd()) / outs[0], f"{tenants[0]}-"
+
+
+def _listed_run_folders(target: tuple[Path, str] | None) -> set[str]:
+    if target is None:
+        return set()
+    out, prefix = target
+    try:
+        return {entry.name for entry in os.scandir(out) if entry.name.startswith(prefix) and entry.is_dir(follow_symlinks=False)}
+    except OSError:
+        return set()
+
+
 def run_cli_command(
     command: list[str], cwd: str | None = None, *, timeout_seconds: int | None = None,
     scrub_operator_inputs: bool = False, resumable: bool = False,
@@ -116,11 +183,14 @@ def run_cli_command(
     """Run an Auditex command for an MCP tool and return its redacted output.
 
     ``timeout_seconds`` defaults to ``command_timeout_seconds()`` (R063): four hours, not the fifteen minutes a
-    full audit of a large tenant outlasts. ``resumable`` marks a command whose run folder ``--resume-from`` can
-    complete (the Microsoft 365 certificate audit); only its timeout says so.
+    full audit of a large tenant outlasts. On timeout the command's whole process group is stopped. ``resumable``
+    marks a command whose run folder ``--resume-from`` can complete (the Microsoft 365 certificate audit); only its
+    timeout says so, naming the partial run folder (``partial_run_dir``) when exactly one new one appeared.
     """
     if timeout_seconds is None:
         timeout_seconds = command_timeout_seconds()
+    run_target = _run_folders(command, cwd) if resumable else None
+    folders_before = _listed_run_folders(run_target)
     child_env = None
     if scrub_operator_inputs:
         command = _without_operator_input_args(command)
@@ -136,7 +206,7 @@ def run_cli_command(
     # otherwise hide that local part inside an unrelated alice@example.com.
     operator_values = {value for value in operator_values if redact_output(value, limit=None) != value}
     try:
-        completed = subprocess.run(
+        completed = _run_process(
             command,
             cwd=cwd,
             text=True,
@@ -149,18 +219,29 @@ def run_cli_command(
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""
         stderr = exc.stderr or ""
-        return {
+        new_folders = sorted(_listed_run_folders(run_target) - folders_before)
+        partial = str(run_target[0] / new_folders[0]) if run_target is not None and len(new_folders) == 1 else None
+        if partial is not None:
+            operator_values.add(partial)
+        resume_hint = ""
+        if resumable:
+            resume_hint = f"; complete it with --resume-from {partial}" if partial else "; complete it with --resume-from"
+        result: dict[str, Any] = {
             "command": redact_command(command),
             "returncode": None,
             "stdout": _redact_text(stdout, sensitive_values, operator_values),
             "stderr": _redact_text(stderr, sensitive_values, operator_values),
             "error_class": "timeout",
-            "error": (
-                f"command timed out after {timeout_seconds}s; the run folder is left unfinalised"
-                + ("; complete it with --resume-from" if resumable else "")
-                + f". Set {COMMAND_TIMEOUT_ENV} for a longer limit (0 for none)."
+            "error": _redact_text(
+                f"command timed out after {timeout_seconds}s; the run folder is left unfinalised{resume_hint}"
+                f". Set {COMMAND_TIMEOUT_ENV} for a longer limit (0 for none).",
+                sensitive_values,
+                operator_values,
             ),
         }
+        if partial is not None:
+            result["partial_run_dir"] = _redact_text(partial, sensitive_values, operator_values)
+        return result
     return {
         "command": redact_command(command),
         "returncode": completed.returncode,
