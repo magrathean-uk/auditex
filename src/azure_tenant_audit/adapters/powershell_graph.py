@@ -272,8 +272,12 @@ class PowerShellGraphAdapter(Adapter):
         log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
         session: dict[str, Any] | None = None,
         response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Run one checked read. ``response_transform`` is honoured only for the sensitive anti-phish read.
+
+        ``timeout`` overrides the process timeout (180 s with a connect step, else 120 s) for a read known to take
+        longer, such as a whole-tenant mailbox aggregate (R047).
 
         ``Get-AntiPhishPolicy`` is recognised as sensitive from the command itself, so a caller that passes no
         transform still gets rows without targeted users (summarised ``not_collected``) and no output text.
@@ -329,9 +333,10 @@ class PowerShellGraphAdapter(Adapter):
                 )
             return {"error": IPPS_SESSION_NOT_OPENED, "error_class": IPPS_SESSION_NOT_OPENED, "command": safe_command}
         prepared = f"$ErrorActionPreference = 'Stop'; {prelude}{self._json_pipeline(script)}"
+        process_timeout = timeout if timeout is not None else (180 if prelude else 120)
         if _sensitive(script):
             return self._run_sensitive(
-                exe=exe, prepared=prepared, env=env, timeout=180 if prelude else 120, script=script,
+                exe=exe, prepared=prepared, env=env, timeout=process_timeout, script=script,
                 adapter_label=adapter_label, safe_command=safe_command, command_words=command_words,
                 has_session=session is not None, prelude=bool(prelude), log_event=log_event,
                 response_transform=response_transform,
@@ -354,7 +359,7 @@ class PowerShellGraphAdapter(Adapter):
                 [exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prepared],
                 text=True,
                 capture_output=True,
-                timeout=180 if prelude else 120,
+                timeout=process_timeout,
                 env=env,
             )
             duration_ms = round((time.time() - start) * 1000, 2)
