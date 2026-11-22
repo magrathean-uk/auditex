@@ -132,3 +132,23 @@ def test_r013_each_mail_scope_is_a_high_risk_grant(scope: str) -> None:
 )
 def test_r013_narrow_or_lookalike_scopes_are_not_high_risk(scope: str) -> None:
     assert _grant_findings([scope]) == []
+
+
+# ---- R116: Gmail's camelCase "POP access not set" value is not POP enabled ---------------------------------
+
+
+def _pop_findings(access_window: str) -> list[dict[str, Any]]:
+    payload = {"google_gmail_settings": {"mailboxSettings": {"value": [
+        {"userEmail": "user@example.com", "pop": {"accessWindow": access_window}}
+    ]}}}
+    return [item for item in _findings(payload) if item.get("rule_id") == "google.gmail_pop_enabled"]
+
+
+@pytest.mark.parametrize("access_window", ["accessWindowUnspecified", "ACCESS_WINDOW_UNSPECIFIED", "disabled"])
+def test_r116_pop_not_set_is_not_enabled(access_window: str) -> None:
+    assert _pop_findings(access_window) == []
+
+
+@pytest.mark.parametrize("access_window", ["allMail", "fromNowOn"])
+def test_r116_pop_enabled_is_still_reported(access_window: str) -> None:
+    assert len(_pop_findings(access_window)) == 1

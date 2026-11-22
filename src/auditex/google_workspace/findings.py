@@ -1517,7 +1517,8 @@ def build_google_findings(
                     returned_value=imap,
                 )
             )
-        if str(pop.get("accessWindow") or "").lower() not in {"", "disabled", "access_window_unspecified"}:
+        # The API spells the enum in camelCase (accessWindowUnspecified); compare without case or underscores.
+        if str(pop.get("accessWindow") or "").lower().replace("_", "") not in {"", "disabled", "accesswindowunspecified"}:
             findings.append(
                 _finding(
                     rule_id="google.gmail_pop_enabled",
