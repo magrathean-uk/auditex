@@ -56,7 +56,10 @@ def test_r006_default_plan_markdown_has_no_optional_heading() -> None:
 
 
 def test_r006_scope_catalog_keeps_optional_scopes_apart_from_required_ones() -> None:
-    from azure_tenant_audit.scope_catalog import aggregate_catalog_rows, load_m365_scope_catalog
+    from azure_tenant_audit.scope_catalog import (
+        aggregate_catalog_rows,
+        load_m365_scope_catalog,
+    )
 
     catalog = load_m365_scope_catalog()
     row = catalog["mailbox_forwarding"]
