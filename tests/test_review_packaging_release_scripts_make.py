@@ -201,3 +201,22 @@ def test_dependabot_leaves_the_ruff_pin_to_the_pre_commit_update() -> None:
         blocks[block.split("\n", 1)[0].strip().strip('"')] = block
     assert 'dependency-name: "ruff"' in blocks["pip"]
     assert 'dependency-name: "ruff"' not in blocks["pre-commit"]
+
+
+@needs_git_checkout
+def test_release_check_refuses_untracked_files(tmp_path: Path) -> None:
+    # Review of R139: an untracked file can satisfy a working-tree check while git archive HEAD leaves it out.
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    for name in ("Makefile", "pyproject.toml", ".pre-commit-config.yaml", "scripts/select-python.sh"):
+        shutil.copy2(ROOT / name, repo / name)
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    (repo / "configs").mkdir()
+    (repo / "configs" / "new.json").write_text("{}", encoding="utf-8")
+
+    run = _make("release-check", f"PYTHON={sys.executable}", cwd=repo, timeout=60)
+
+    assert run.returncode == 2, (run.returncode, run.stderr[-2000:])
+    assert "uncommitted" in run.stderr

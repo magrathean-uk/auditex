@@ -95,7 +95,7 @@ audit-deps:
 
 .PHONY: release-check
 release-check:
-	@test -z "$$(git status --porcelain --untracked-files=no)" || { echo "make release-check: uncommitted changes to tracked files; the checks run on the working tree but release-archive and dist package HEAD, so commit them first" >&2; exit 2; }
+	@test -z "$$(git status --porcelain)" || { echo "make release-check: uncommitted changes or untracked files; the checks run on the working tree but release-archive and dist package HEAD, so commit them first" >&2; exit 2; }
 	$(MAKE) lint
 	$(MAKE) test
 	$(MAKE) contract-smoke
