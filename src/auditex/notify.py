@@ -101,9 +101,10 @@ def _redact_value(value: Any, current_key: str = "") -> Any:
 def _run_fingerprint(payload: dict[str, Any]) -> str:
     """Stable per-run fingerprint used to dedup notify-sink tickets.
 
-    Hash includes tenant_name + run_dir (as the operator wrote it) so re-running ``auditex notify send`` against
-    the same bundle hits the deduplication path instead of creating a fresh ticket on each invocation, and two
-    runs of one tenant never share a fingerprint. ``send_notification`` computes it from the real run directory
+    Hash includes tenant_name + the resolved run directory, so re-running ``auditex notify send`` against the
+    same bundle hits the deduplication path however the path is spelt (``./run``, ``run/``, an absolute path;
+    review R161) instead of creating a fresh ticket on each invocation, and two runs of one tenant never share a
+    fingerprint. ``send_notification`` computes it from the real run directory
     BEFORE the payload is redacted (redaction replaces the run path) and carries the 16-hex digest in the
     payload as ``run_fingerprint``; it is a one-way hash of the path, so the path itself never leaves.
 
@@ -116,6 +117,11 @@ def _run_fingerprint(payload: dict[str, Any]) -> str:
         return carried
     tenant = str(payload.get("tenant_name") or "")
     run_dir = str(payload.get("run_dir") or "")
+    if run_dir:
+        try:
+            run_dir = str(Path(run_dir).resolve())
+        except (OSError, RuntimeError):
+            pass
     digest = hashlib.sha256(f"{tenant}|{run_dir}".encode()).hexdigest()
     return digest[:16]
 
@@ -124,19 +130,21 @@ def _audit_fingerprint_label(payload: dict[str, Any]) -> str:
     return f"auditex-fp-{_run_fingerprint(payload)}"
 
 
+_SEARCH_FAILED = "error"
+
+
 def _jira_search_existing(
     base_url: str, project_key: str, label: str, auth: tuple[str, str]
-) -> str | None:
-    """Look up an existing Auditex issue with the dedup label.
+) -> tuple[str | None, int | str | None]:
+    """Look up an existing Auditex issue with the dedup label: ``(issue_key, failure)``.
 
-    Any error (network, auth failure, malformed response) → ``None``,
-    causing the caller to fall through to create the issue. Failing
-    closed would silently drop notifications during a transient Jira
-    outage; failing open creates one ticket per run, which is the
-    pre-E1 behaviour.
+    Uses GET /rest/api/3/search/jql; Atlassian retired the older GET /rest/api/3/search on Jira Cloud (review
+    R161). Any error (network, auth failure, malformed response) gives no key and a ``failure`` (the HTTP status,
+    or ``"error"``), and the caller falls through to create the issue and reports that dedup was skipped. Failing
+    closed would silently drop notifications during a transient Jira outage.
     """
     jql = f'project = "{project_key}" AND labels = "{label}"'
-    url = f"{base_url.rstrip('/')}/rest/api/3/search"
+    url = f"{base_url.rstrip('/')}/rest/api/3/search/jql"
     try:
         response = requests.get(
             url,
@@ -146,20 +154,30 @@ def _jira_search_existing(
             timeout=15,
         )
     except Exception:  # noqa: BLE001
-        return None
+        return None, _SEARCH_FAILED
     if response.status_code >= 400:
-        return None
+        return None, response.status_code
     try:
-        issues = response.json().get("issues") or []
+        issues = response.json().get("issues")
     except (ValueError, AttributeError, TypeError):
-        return None
-    if not isinstance(issues, list) or not issues:
-        return None
-    first = issues[0]
-    if not isinstance(first, dict):
-        return None
-    key = first.get("key")
-    return str(key) if key else None
+        return None, _SEARCH_FAILED
+    if issues is None:
+        issues = []
+    if not isinstance(issues, list):
+        return None, _SEARCH_FAILED
+    first = issues[0] if issues else None
+    key = first.get("key") if isinstance(first, dict) else None
+    return (str(key) if key else None), None
+
+
+def _dedup_fields(failure: int | str | None) -> dict[str, Any]:
+    """How the dedup search went, for the send result: a skipped search must be visible, not silent."""
+    if failure is None:
+        return {"dedup": "checked"}
+    fields: dict[str, Any] = {"dedup": "skipped"}
+    if isinstance(failure, int):
+        fields["dedup_http_status"] = failure
+    return fields
 
 
 WEBHOOK_ENV = {
@@ -464,7 +482,7 @@ def _send_jira(payload: dict[str, Any]) -> dict[str, Any]:
     # second Jira issue. Search by stable fingerprint label; skip create when
     # found. Search failures fall through to create (fail-open) so a transient
     # Jira outage never silently drops a notification.
-    existing_key = _jira_search_existing(base_url, project_key, dedup_label, auth)
+    existing_key, search_failure = _jira_search_existing(base_url, project_key, dedup_label, auth)
     if existing_key:
         return {
             "status": "deduped",
@@ -519,17 +537,19 @@ def _send_jira(payload: dict[str, Any]) -> dict[str, Any]:
         "response_text": response.text,
         "issue_key": issue_key,
         "fingerprint": fingerprint,
+        **_dedup_fields(search_failure),
     }
 
 
 def _github_search_existing_issue(
     api_root: str, repo: str, fingerprint_token: str, token: str
-) -> tuple[int | None, str | None]:
+) -> tuple[int | None, str | None, int | str | None]:
     """Search GitHub for an open issue whose title contains the dedup
-    token. Returns ``(issue_number, html_url)`` when found, ``(None, None)``
-    on miss or error (fail-open).
+    token. Returns ``(issue_number, html_url, failure)``: the issue when found, ``(None, None, None)`` on a miss,
+    and the HTTP status or ``"error"`` as ``failure`` when the search failed (fail-open, reported as skipped).
+    A closed issue is never commented on (``is:open``, review R161).
     """
-    query = f'repo:{repo} is:issue in:title "{fingerprint_token}"'
+    query = f'repo:{repo} is:issue is:open in:title "{fingerprint_token}"'
     url = f"{api_root.rstrip('/')}/search/issues"
     try:
         response = requests.get(
@@ -543,21 +563,25 @@ def _github_search_existing_issue(
             timeout=15,
         )
     except Exception:  # noqa: BLE001
-        return None, None
+        return None, None, _SEARCH_FAILED
     if response.status_code >= 400:
-        return None, None
+        return None, None, response.status_code
     try:
-        items = response.json().get("items") or []
+        items = response.json().get("items")
     except (ValueError, AttributeError, TypeError):
-        return None, None
-    if not isinstance(items, list) or not items:
-        return None, None
-    first = items[0]
+        return None, None, _SEARCH_FAILED
+    if items is None:
+        items = []
+    if not isinstance(items, list):
+        return None, None, _SEARCH_FAILED
+    first = items[0] if items else None
     if not isinstance(first, dict):
-        return None, None
+        return None, None, None
     number = first.get("number")
     html_url = first.get("html_url")
-    return (int(number) if number is not None else None, str(html_url) if html_url else None)
+    if not isinstance(number, int) or isinstance(number, bool):
+        return None, None, _SEARCH_FAILED
+    return number, (str(html_url) if html_url else None), None
 
 
 def _send_github(payload: dict[str, Any]) -> dict[str, Any]:
@@ -598,7 +622,7 @@ def _send_github(payload: dict[str, Any]) -> dict[str, Any]:
     # E2 dedup: search for an existing issue whose title contains the
     # fingerprint token. If found, append a comment instead of creating
     # a duplicate. Search failures fall through to create (fail-open).
-    existing_number, existing_url = _github_search_existing_issue(
+    existing_number, existing_url, search_failure = _github_search_existing_issue(
         api_root, repo, fingerprint_token, token
     )
     if existing_number is not None:
@@ -665,6 +689,7 @@ def _send_github(payload: dict[str, Any]) -> dict[str, Any]:
         "issue_number": issue_number,
         "issue_url": issue_url,
         "fingerprint": fingerprint,
+        **_dedup_fields(search_failure),
     }
 
 
