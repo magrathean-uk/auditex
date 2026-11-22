@@ -116,7 +116,7 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
             raise ValueError("--oauth-client is required for oauth auth")
         if config.token_cache is None:
             raise ValueError("--token-cache is required for oauth auth")
-        from google.auth.exceptions import GoogleAuthError, RefreshError
+        from google.auth.exceptions import GoogleAuthError, RefreshError, TransportError
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -135,11 +135,22 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                 # refreshed every run and trusted only for the scopes Google's token endpoint grants now.
                 try:
                     credentials.refresh(Request())
-                except RefreshError:
-                    # Revoked, expired (Testing-status clients expire refresh tokens after 7 days) or narrower than
-                    # asked: sign in again.
-                    credentials = None
-                if credentials is not None and not _granted(credentials, config.scopes):
+                except (RefreshError, TransportError) as exc:
+                    if isinstance(exc, TransportError) or getattr(exc, "retryable", False):
+                        # The token endpoint is down or busy: that says nothing about the grant. A token still in
+                        # date is used as it is; an expired one cannot be, and signing in again would not help.
+                        if not credentials.valid:
+                            raise RuntimeError(
+                                "Google sign-in could not be refreshed (temporary error); run again later."
+                            ) from None
+                    else:
+                        # Revoked, expired (Testing-status clients expire refresh tokens after 7 days) or narrower
+                        # than asked: sign in again.
+                        credentials = None
+                    refreshed = False
+                else:
+                    refreshed = True
+                if refreshed and not _granted(credentials, config.scopes):
                     credentials = None
             if not credentials or not credentials.valid:
                 flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
@@ -206,8 +217,13 @@ def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:
 
 
 def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
-    """Whether the last refresh granted every scope this run asks for (an unknown grant is not trusted)."""
-    granted = getattr(credentials, "granted_scopes", None)
+    """Whether the last refresh granted every scope this run asks for.
+
+    Google reports the grant in the token response's ``scope`` field, which RFC 6749 (5.1) lets it leave out when
+    the grant is exactly the scopes the refresh asked for (the cache's own); google-auth then sets no
+    ``granted_scopes``, so the scopes asked for are the grant. A refresh asking for a scope never granted fails.
+    """
+    granted = getattr(credentials, "granted_scopes", None) or getattr(credentials, "scopes", None)
     if not granted:
         return False
     return set(scopes).issubset(set(granted))
