@@ -33,6 +33,14 @@ _CHROMEOS_DEVICE_FIELDS = (
 )
 
 
+# Users: only the fields the audit reads. Recovery e-mail and phone, phones, addresses and notes are never received.
+_USER_FIELDS = (
+    "nextPageToken,users("
+    "id,primaryEmail,name/fullName,isAdmin,isDelegatedAdmin,suspended,archived,"
+    "isEnrolledIn2Sv,isEnforcedIn2Sv,lastLoginTime,creationTime,orgUnitPath)"
+)
+
+
 # Gmail settings `fields` masks: only what normalize.py and findings.py read; no vacation text, signature or filter text.
 GMAIL_VACATION_FIELDS = "enableAutoReply,restrictToContacts,restrictToDomain,startTime,endTime"
 GMAIL_SEND_AS_FIELDS = (
@@ -265,7 +273,8 @@ class GoogleWorkspaceClient:
             # customer=my_customer lists every domain of the tenant, secondary and alias domains included.
             return self._collect_pages(
                 lambda page_token: service.users().list(
-                    customer=self.customer, maxResults=page_size, pageToken=page_token, orderBy="email"
+                    customer=self.customer, maxResults=page_size, pageToken=page_token, orderBy="email",
+                    fields=_USER_FIELDS,
                 ),
                 "users",
                 limit=top,

@@ -174,3 +174,27 @@ def test_r055_clean_settings_reads_stay_ok() -> None:
     result = GoogleGmailSettingsCollector().run({"client": client, "users": []})
     assert [(row["name"], row["status"]) for row in result.coverage] == [("mailboxSettings:me", "ok")]
     assert result.status == "ok"
+
+
+# ---- R115: users are read through a field mask, so recovery contacts never reach the bundle --------------------
+
+
+def test_r115_users_list_names_only_the_fields_the_audit_reads() -> None:
+    calls: list[dict[str, Any]] = []
+
+    class _Users:
+        def list(self, **kwargs: Any) -> _Request:
+            calls.append(kwargs)
+            return _Request({"users": [{"id": "u1", "primaryEmail": "u1@example.com"}]})
+
+    client = GoogleWorkspaceClient(credentials=None)
+    assert client._services is not None
+    client._services[("admin", "directory_v1")] = type("Dir", (), {"users": lambda self: _Users()})()
+    client.list_directory("users")
+    fields = str(calls[0].get("fields") or "")
+    assert fields.startswith("nextPageToken,users(")
+    for name in ("id", "primaryEmail", "isAdmin", "isDelegatedAdmin", "suspended", "archived", "isEnrolledIn2Sv",
+                 "isEnforcedIn2Sv", "lastLoginTime", "creationTime", "orgUnitPath", "name/fullName"):
+        assert name in fields
+    for name in ("recoveryEmail", "recoveryPhone", "phones", "addresses", "notes", "organizations"):
+        assert name not in fields
