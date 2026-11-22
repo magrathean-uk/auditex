@@ -62,3 +62,35 @@ def test_r011_deleted_alert_is_not_collected_as_active() -> None:
     assert [alert["alertId"] for alert in alerts] == ["a-2"]
     findings = _findings({"google_alert_center": {"alerts": {"value": list(alerts)}}})
     assert _rule_ids(findings).count("google.alert_active") == 1
+
+
+# ---- R012: a passed 2-step verification challenge is not a suspicious login --------------------------------
+
+
+def _login(event: str, *, status: str | None = None) -> dict[str, Any]:
+    parameters = [{"name": "login_challenge_status", "value": status}] if status else []
+    return {"id": {"uniqueQualifier": f"{event}-{status}"}, "actor": {"email": "user@example.com"},
+            "events": [{"name": event, "parameters": parameters}]}
+
+
+def _login_findings(*activities: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        item for item in _findings({"google_reports": {"loginActivities": {"value": list(activities)}}})
+        if item.get("rule_id") == "google.login_suspicious_event"
+    ]
+
+
+def test_r012_passed_login_challenge_is_not_suspicious() -> None:
+    assert _login_findings(_login("login_challenge", status="Challenge Passed")) == []
+
+
+def test_r012_failed_login_challenge_is_suspicious() -> None:
+    assert len(_login_findings(_login("login_challenge", status="Challenge Failed"))) == 1
+
+
+@pytest.mark.parametrize(
+    "event",
+    ["suspicious_login", "suspicious_login_activity", "suspicious_login_less_secure_app", "suspicious_programmatic_login"],
+)
+def test_r012_google_suspicious_login_events_are_reported(event: str) -> None:
+    assert len(_login_findings(_login(event))) == 1

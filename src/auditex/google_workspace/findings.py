@@ -984,6 +984,19 @@ def _issue_surface(name: str) -> tuple[str, str | None]:
     return _SURFACE_LABELS.get(prefix, prefix), rest or None
 
 
+def _failed_login_challenge(activity: dict[str, Any]) -> bool:
+    """Whether a login activity holds a ``login_challenge`` event whose ``login_challenge_status`` says it failed."""
+    for event in activity.get("events") or []:
+        if not isinstance(event, dict) or str(event.get("name") or "").strip().lower() != "login_challenge":
+            continue
+        for parameter in event.get("parameters") or []:
+            if not isinstance(parameter, dict) or parameter.get("name") != "login_challenge_status":
+                continue
+            if "fail" in str(parameter.get("value") or "").lower():
+                return True
+    return False
+
+
 def _evidence_unknown_finding(
     *,
     check: str,
@@ -2126,7 +2139,14 @@ def build_google_findings(
             )
         )
 
-    suspicious_login_events = {"suspicious_login", "suspicious_login_activity", "login_challenge"}
+    # Google's own suspicious-login events. A ``login_challenge`` is raised for every verification challenge, passed
+    # ones included, so it counts only when the challenge failed.
+    suspicious_login_events = {
+        "suspicious_login",
+        "suspicious_login_activity",
+        "suspicious_login_less_secure_app",
+        "suspicious_programmatic_login",
+    }
     admin_privilege_events = {
         "assign_role",
         "change_user_admin_privilege",
@@ -2137,7 +2157,9 @@ def build_google_findings(
     for activity in _records(normalized_snapshot, "google_activity_events"):
         event_names = {str(name or "").strip().lower() for name in activity.get("event_names") or []}
         application = str(activity.get("application") or "").lower()
-        if application == "login" and event_names.intersection(suspicious_login_events):
+        if application == "login" and (
+            event_names.intersection(suspicious_login_events) or _failed_login_challenge(activity)
+        ):
             findings.append(
                 _finding(
                     rule_id="google.login_suspicious_event",
