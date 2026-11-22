@@ -94,3 +94,27 @@ def test_users_without_move_rules_need_no_folder_read() -> None:
     MailboxForwardingCollector().run({"client": client})
     assert not any("mailFolders/" in path and "messageRules" not in path for path in client.paths)
     assert not any(path.endswith("/mailFolders") for path in client.paths)
+
+
+def _no_mailbox() -> GraphError:
+    return GraphError("REST API is not yet supported for this mailbox.", status=404,
+                      error_code="MailboxNotEnabledForRESTAPI")
+
+
+def test_guests_are_not_read_and_mailbox_less_users_are_not_a_partial_collection() -> None:
+    """R046: B2B guests and mail-enabled users without a mailbox do not make the collector partial."""
+    users = USERS + [
+        {"id": "g1", "userPrincipalName": "guest_ext#EXT#@contoso.com", "mail": "guest@partner.example", "userType": "Guest"},
+        {"id": "m2", "userPrincipalName": "contact@contoso.com", "mail": "contact@contoso.com", "userType": "Member"},
+    ]
+    client = _Client({"u1": []}, users=users, mailbox_errors={"g1": _no_mailbox(), "m2": _no_mailbox()})
+    result = MailboxForwardingCollector().run({"client": client})
+    assert result.status == "ok", [r for r in result.coverage if r["status"] != "ok"]
+    assert not any("/g1/" in path for path in client.paths)
+    m2 = [r for r in result.coverage if r["name"].endswith(":m2")]
+    assert {r["status"] for r in m2} == {"skipped"} and {r["reason"] for r in m2} == {"no_mailbox"}
+
+
+def test_a_real_read_failure_still_makes_the_collector_partial() -> None:
+    client = _Client({}, mailbox_errors={"u1": GraphError("denied", status=403)})
+    assert MailboxForwardingCollector().run({"client": client}).status == "partial"

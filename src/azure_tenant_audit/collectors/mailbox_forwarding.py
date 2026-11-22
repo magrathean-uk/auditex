@@ -59,6 +59,9 @@ class MailboxForwardingCollector(Collector):
             user_id = user.get("id")
             if not user_id or not mail:
                 continue
+            if str(user.get("userType") or "").strip().lower() == "guest":
+                # A B2B guest's mail is its home address: it has no mailbox in this tenant to read (R046).
+                continue
             user_rules, rules_status = self._fetch_inbox_rules(
                 client, user_id, log_event=log_event
             )
@@ -73,7 +76,14 @@ class MailboxForwardingCollector(Collector):
                 classified = _classify_message_rule(rule, user, accepted_domains, hide_folder_ids)
                 all_rules.append(classified)
 
-            user_settings, settings_status = self._fetch_mailbox_settings(client, user_id)
+            if rules_status.get("reason") == NO_MAILBOX:
+                # The rules read already showed there is no mailbox; its settings are not requested.
+                user_settings, settings_status = None, {
+                    **rules_status, "name": f"mailboxSettings:{user_id}", "endpoint": f"/users/{user_id}/mailboxSettings",
+                    "duration_ms": 0.0,
+                }
+            else:
+                user_settings, settings_status = self._fetch_mailbox_settings(client, user_id)
             if user_settings is not None:
                 all_settings.append(
                     {
@@ -88,7 +98,8 @@ class MailboxForwardingCollector(Collector):
         payload["messageRules"] = {"value": all_rules}
         payload["mailboxSettings"] = {"value": all_settings}
 
-        partial = any(row.get("status") != "ok" for row in coverage)
+        # A user without a mailbox is a skipped row, not a failed read, so it does not make the collection partial.
+        partial = any(row.get("status") not in {"ok", "skipped"} for row in coverage)
         return CollectorResult(
             name=self.name,
             status="partial" if partial else "ok",
@@ -222,8 +233,9 @@ class MailboxForwardingCollector(Collector):
                 if isinstance(values, list):
                     rules = [item for item in values if isinstance(item, dict)]
         except Exception as exc:  # noqa: BLE001
-            status = "failed"
-            error_class, error = _classify_graph_error(exc)
+            status = "skipped" if _no_mailbox(exc) else "failed"
+            if status == "failed":
+                error_class, error = _classify_graph_error(exc)
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
         coverage_row = {
             "collector": self.name,
@@ -236,6 +248,8 @@ class MailboxForwardingCollector(Collector):
             "error_class": error_class,
             "error": error,
         }
+        if status == "skipped":
+            coverage_row["reason"] = NO_MAILBOX
         if log_event:
             log_event(
                 "collector.endpoint.finished",
@@ -311,6 +325,19 @@ class MailboxForwardingCollector(Collector):
             response = client.get_json(path)
         except Exception as exc:  # noqa: BLE001
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            if _no_mailbox(exc):
+                return None, {
+                    "collector": self.name,
+                    "type": "graph",
+                    "name": f"mailboxSettings:{user_id}",
+                    "endpoint": path,
+                    "status": "skipped",
+                    "reason": NO_MAILBOX,
+                    "item_count": 0,
+                    "duration_ms": duration_ms,
+                    "error_class": None,
+                    "error": None,
+                }
             error_class, error = _classify_graph_error(exc)
             return None, {
                 "collector": self.name,
@@ -337,6 +364,19 @@ class MailboxForwardingCollector(Collector):
             "error_class": None,
             "error": None,
         }
+
+
+NO_MAILBOX = "no_mailbox"
+_NO_MAILBOX_CODES = frozenset({"mailboxnotenabledforrestapi", "errornonexistentmailbox"})
+
+
+def _no_mailbox(exc: Exception) -> bool:
+    """Graph's answer for a mail-enabled user with no Exchange Online mailbox (a 404 with a named code)."""
+    return (
+        isinstance(exc, GraphError)
+        and exc.status == 404
+        and str(exc.error_code or "").lower() in _NO_MAILBOX_CODES
+    )
 
 
 def _needs_folder_resolution(rule: dict[str, Any]) -> bool:
