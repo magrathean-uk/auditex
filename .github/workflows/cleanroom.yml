@@ -2,6 +2,8 @@ name: cleanroom
 
 # Proves what a stranger gets from the README alone on a clean runner: no caches, nothing preinstalled
 # beyond what the runner image ships. Offline and demo only; nothing here touches a tenant.
+# Linux and macOS only: native Windows is not supported and WSL2 is the Windows route (#18), and WSL2 runs the
+# Linux steps unchanged.
 on:
   push:
     branches: [wt/cleanroom]
@@ -22,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         python: ["3.11", "3.14"]
     defaults:
       run:
@@ -48,27 +50,27 @@ jobs:
         id: s3
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           python -m pip install -e '.[test]'
       - name: README - auditex doctor --json
         id: s4
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           auditex doctor --json | tee doctor.json
           python -c "import json,sys; sys.exit(0 if json.load(open('doctor.json'))['readiness']['core_ready'] else 1)"
       - name: README - optional google and mcp extras
         id: s5
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           python -m pip install -e '.[google]'
           python -m pip install -e '.[mcp]'
       - name: README - make contract-smoke
         id: s6
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           make contract-smoke
 
       # "Main commands"
@@ -76,7 +78,7 @@ jobs:
         id: s7
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           auditex demo --no-pause
           test -d outputs/demo/runs
           ls outputs/demo
@@ -86,7 +88,7 @@ jobs:
         id: s8
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           auditex setup-guide m365 --collector-preset full --format md | tee setup-m365.md
           auditex setup-guide google --collector-preset everything --format md | tee setup-google.md
           test -s setup-m365.md
@@ -95,7 +97,7 @@ jobs:
         id: s9
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           auditex run --offline --tenant-name demo --out outputs/offline
           ls outputs/offline
           RUN=$(ls -d outputs/offline/*/ | head -1)
@@ -107,7 +109,7 @@ jobs:
         id: s10
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           auditex google run --offline --sample examples/google_workspace_sample.json \
             --domain example.com --tenant-name demo --out outputs/google
           ls outputs/google
@@ -118,7 +120,7 @@ jobs:
         id: s11
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex assess "$RUN"
           test -f "${RUN}model_assessment.json"
@@ -126,7 +128,7 @@ jobs:
         id: s12
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex report render "$RUN" --format md
           auditex report api-calls "$RUN" --format md
@@ -141,7 +143,7 @@ jobs:
         id: s13
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           auditex run --offline --tenant-name demo --out outputs/offline2
           RUN=$(ls -d outputs/offline/*/ | head -1)
           RUN2=$(ls -d outputs/offline2/*/ | head -1)
@@ -152,7 +154,7 @@ jobs:
         id: s14
         continue-on-error: true
         run: |
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          source .venv/bin/activate
           # The server speaks on stdio; closing stdin must end it cleanly.
           auditex-mcp < /dev/null
 
@@ -178,9 +180,7 @@ jobs:
           python3 -c "
           import json, os, sys
           steps = json.loads(os.environ['STEPS'])
-          known = {}
-          if os.environ['RUNNER_OS'] == 'Windows':
-              known = {k: 18 for k in ['s2', 's4', 's6', 's7', 's8', 's9', 's10', 's11', 's12', 's13']}
+          known = {}  # step id -> open issue number, for a failure that is tracked and accepted for now
           bad = [k for k, v in steps.items() if v.get('outcome') == 'failure']
           for k in bad:
               print(k, 'KNOWN, issue #%s' % known[k] if k in known else 'NEW FAILURE')
@@ -194,46 +194,57 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-  # Customer path: the v1.8.0 release wheel in a fresh venv, no source tree.
+  # Customer path, as docs/guides/install-guide.md: pipx installs the wheel built from this commit into its own
+  # environment, and every command runs from an empty folder outside the source tree.
   wheel:
-    name: wheel ${{ matrix.os }} py${{ matrix.python }}
+    name: pipx wheel ${{ matrix.os }} py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         python: ["3.11", "3.14"]
     defaults:
       run:
         shell: bash
     steps:
-      # No checkout on purpose: the runner has no copy of the repository.
+      # Checked out to a side folder only to build the wheel; the commands below never run inside it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          path: source
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        id: py
         with:
           python-version: ${{ matrix.python }}
-      - name: Download the release wheel
+      - name: Build the wheel from this commit
         id: s15
         continue-on-error: true
         run: |
-          mkdir -p "$RUNNER_TEMP/customer" && cd "$RUNNER_TEMP/customer"
-          curl -fsSL -O https://github.com/magrathean-uk/auditex/releases/download/v1.8.0/auditex-1.8.0-py3-none-any.whl
-          ls -l
-      - name: Install into a fresh venv
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/dist" ./source
+          ls -l "$RUNNER_TEMP/dist"
+      - name: Install guide - pipx install from the local wheel
         id: s16
         continue-on-error: true
         run: |
+          mkdir -p "$RUNNER_TEMP/customer"
+          pipx --version
+          pipx install --python "${{ steps.py.outputs.python-path }}" "$(ls "$RUNNER_TEMP"/dist/auditex-*.whl)"
+          pipx environment --value PIPX_BIN_DIR >> "$GITHUB_PATH"
+          pipx list
+      - name: Install guide - auditex --version
+        id: s30
+        continue-on-error: true
+        run: |
           cd "$RUNNER_TEMP/customer"
-          python3 -m venv .venv
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
-          python -m pip install auditex-1.8.0-py3-none-any.whl
-          python -m pip list
+          auditex --version | tee version.txt
+          grep -q '^auditex [0-9]' version.txt
       - name: wheel - doctor --json
         id: s17
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           auditex doctor --json | tee doctor.json
           python -c "import json,sys; sys.exit(0 if json.load(open('doctor.json'))['readiness']['core_ready'] else 1)"
       - name: wheel - demo --no-pause
@@ -241,7 +252,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           auditex demo --no-pause
           find outputs/demo -name 'run-manifest.json' | grep .
       - name: wheel - setup-guide m365
@@ -249,7 +259,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           auditex setup-guide m365 --collector-preset full --format md | tee setup-m365.md
           test -s setup-m365.md
       - name: wheel - offline run
@@ -257,7 +266,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           auditex run --offline --tenant-name demo --out outputs/offline
           RUN=$(ls -d outputs/offline/*/ | head -1)
           test -f "${RUN}run-manifest.json"
@@ -266,7 +274,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex assess "$RUN"
       - name: wheel - report render
@@ -274,7 +281,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex report render "$RUN" --format md
       - name: wheel - report api-calls
@@ -282,7 +288,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex report api-calls "$RUN" --format md
       - name: wheel - report permissions
@@ -290,7 +295,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex report permissions "$RUN" --format md
       - name: wheel - report proof-table
@@ -298,7 +302,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex report proof-table "$RUN" --format md
       - name: wheel - report customer-pack and verify-pack
@@ -306,7 +309,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex report customer-pack "$RUN" --output-dir customer-pack
           auditex report verify-pack customer-pack
@@ -315,7 +317,6 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           RUN=$(ls -d outputs/offline/*/ | head -1)
           auditex report explorer "$RUN"
       - name: wheel - export list
@@ -323,15 +324,13 @@ jobs:
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
           auditex export list
-      - name: Extras from the wheel (google, mcp)
+      - name: Install guide - extras with pipx (google, mcp)
         id: s29
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/customer"
-          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
-          python -m pip install "$(ls auditex-1.8.0-py3-none-any.whl)[google,mcp]"
+          pipx install --force --python "${{ steps.py.outputs.python-path }}" "$(ls "$RUNNER_TEMP"/dist/auditex-*.whl)[google,mcp]"
           auditex google doctor --json
           auditex-mcp < /dev/null
       - name: Collect small report artefacts
@@ -356,9 +355,7 @@ jobs:
           python3 -c "
           import json, os, sys
           steps = json.loads(os.environ['STEPS'])
-          known = {'s17': 17, 's18': 16}
-          if os.environ['RUNNER_OS'] == 'Windows':
-              known = {'s%d' % n: 18 for n in range(17, 30)}
+          known = {}  # step id -> open issue number, for a failure that is tracked and accepted for now
           bad = [k for k, v in steps.items() if v.get('outcome') == 'failure']
           for k in bad:
               print(k, 'KNOWN, issue #%s' % known[k] if k in known else 'NEW FAILURE')

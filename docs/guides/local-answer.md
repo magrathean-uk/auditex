@@ -6,8 +6,15 @@ order; the model only chooses which prepared sentences and values to show for ea
 
 ## Start
 
-1. Install the optional runtime once, in the Auditex folder. It builds `llama-cpp-python` (llama.cpp) from source, so it
-   needs CMake and a C and C++ compiler; on a Mac it is built with Metal.
+1. Install the optional runtime once. It builds `llama-cpp-python` (llama.cpp) from source, so it needs CMake and a C
+   and C++ compiler; on a Mac it is built with Metal. For a pipx install (see the [install guide](install-guide.md)),
+   list every extra you want to keep inside the brackets:
+
+   ```bash
+   pipx install --force "auditex[local-answer]"
+   ```
+
+   In a source checkout, run this in the Auditex folder instead:
 
    ```bash
    python -m pip install -e '.[local-answer]'

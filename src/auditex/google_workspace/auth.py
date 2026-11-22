@@ -65,14 +65,14 @@ class GoogleAuthConfig:
 def google_dependency_status() -> dict[str, Any]:
     missing = [package for module, package in _DEPENDENCIES.items() if not _module_available(module)]
     missing = sorted(dict.fromkeys(missing))
-    return {
-        "available": not missing,
-        "missing": missing,
-        "install_hint": "Install Google extras with `python -m pip install -e '.[google]'` "
-        "(google-auth, google-auth-oauthlib, google-api-python-client)."
-        if missing
-        else "",
-    }
+    hint = ""
+    if missing:
+        from ..bootstrap import extra_install_command, extra_install_note
+
+        note = extra_install_note()
+        hint = (f"Install Google extras with `{extra_install_command('google', for_record=True)}` "
+                f"({note + '; ' if note else ''}google-auth, google-auth-oauthlib, google-api-python-client).")
+    return {"available": not missing, "missing": missing, "install_hint": hint}
 
 
 def _module_available(module: str) -> bool:
@@ -283,8 +283,12 @@ def read_service_account_summary(path: Path | None) -> dict[str, Any]:
         return {"present": False}
     try:
         payload = json.loads(path.expanduser().read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        return {"present": path.expanduser().exists(), "error": str(exc)}
+    except OSError as exc:
+        # The OS message names the file ("[Errno 2] ...: '/home/...'"); this summary is written into the run bundle,
+        # so it keeps only the reason, never the operator's path.
+        return {"present": path.expanduser().exists(), "error": exc.strerror or type(exc).__name__}
+    except ValueError as exc:  # JSONDecodeError and UnicodeDecodeError: the message holds a position, not a path
+        return {"present": True, "error": str(exc)}
     return {
         "present": True,
         "type": payload.get("type"),
