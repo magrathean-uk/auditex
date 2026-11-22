@@ -228,7 +228,7 @@ def build_data_handling_summary(
         "collection_notices": (
             [str(item) for item in collection_notices]
             if collection_notices is not None
-            else collector_activity_notices(collectors, mode, doh_endpoint) if platform != "google_workspace" else []
+            else collector_activity_notices(collectors, mode, doh_endpoint)
         ),
         "dns_resolver": dns_resolver_host(collectors, doh_endpoint) if mode != "offline" else None,
         "provider_assertions": provider_assertions,
