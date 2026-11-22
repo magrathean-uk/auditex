@@ -152,3 +152,31 @@ def test_r116_pop_not_set_is_not_enabled(access_window: str) -> None:
 @pytest.mark.parametrize("access_window", ["allMail", "fromNowOn"])
 def test_r116_pop_enabled_is_still_reported(access_window: str) -> None:
     assert len(_pop_findings(access_window)) == 1
+
+
+# ---- R117: no super admin singleton is asserted from a users list cut short ---------------------------------
+
+
+def _admin_payload() -> dict[str, Any]:
+    return {"google_directory": {"users": {"value": [
+        {"id": "u1", "primaryEmail": "admin@example.com", "isAdmin": True, "isEnforcedIn2Sv": True, "isEnrolledIn2Sv": True},
+        {"id": "u2", "primaryEmail": "user@example.com", "isEnforcedIn2Sv": True, "isEnrolledIn2Sv": True},
+    ]}}}
+
+
+def _cut_users_row() -> dict[str, Any]:
+    from azure_tenant_audit.collectors.base import record_truncation
+
+    row = {"collector": "google_directory", "name": "users", "type": "google", "endpoint": "admin.directory.users.list",
+           "status": "ok", "item_count": 2, "result_limit": 2}
+    record_truncation(row, list_name="users", rows=2, limit=2)
+    return row
+
+
+def test_r117_singleton_is_not_asserted_from_a_cut_users_list() -> None:
+    findings = _findings(_admin_payload(), coverage_rows=[_cut_users_row()], top_limit=2)
+    assert "google.super_admin_singleton" not in _rule_ids(findings)
+
+
+def test_r117_singleton_is_still_reported_from_a_complete_users_list() -> None:
+    assert "google.super_admin_singleton" in _rule_ids(_findings(_admin_payload()))

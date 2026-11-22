@@ -1314,7 +1314,10 @@ def build_google_findings(
         )
 
     super_admins = [user for user in _records(normalized_snapshot, "google_users") if user.get("is_admin")]
-    if len(super_admins) == 1:
+    # A users list cut short (``--top``, a failed page) may hold only some of the super admins: one observed admin is
+    # then no evidence of a single one. More than five observed is sprawl however many were left out.
+    users_cut = "google_directory.users" in {str(item) for item in snapshot.get("truncated_sections") or []}
+    if len(super_admins) == 1 and not users_cut:
         admin = super_admins[0]
         findings.append(
             _finding(
