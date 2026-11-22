@@ -529,3 +529,57 @@ def test_w2_21_a_refused_token_with_no_proven_scope_still_asks_for_scopes() -> N
     assert row["status"] == "blocked_by_scope"
     assert row["blocker_kind"] == "auth_scope"
 
+
+def test_w2_25_a_dns_only_probe_is_not_live_verified_or_exact_scope() -> None:
+    from auditex.google_workspace.run import (
+        _google_probe_summary_rows,
+        build_google_capability_rows,
+        build_google_live_readiness,
+        build_google_preflight_rows,
+    )
+    from azure_tenant_audit.run import build_coverage_ledger
+
+    selected = ["google_dns_posture"]
+    preflight = build_google_preflight_rows(object(), selected, domain="example.com")
+    capability = build_google_capability_rows(
+        selected, auth_mode="domain-delegation", dependency_status={"available": True}, coverage_rows=preflight,
+    )
+    readiness = build_google_live_readiness(selected, capability, coverage_rows=preflight)
+    assert readiness["trust_level"] != "live_verified"
+    gate = readiness["evidence_gates"][0]
+    assert gate["status"] == "unverified"
+    assert "dns-only" in gate["reason"].replace("_", "-")
+    ledger = build_coverage_ledger(
+        capability_rows=capability,
+        result_rows=_google_probe_summary_rows(selected, preflight),
+        diagnostics=[],
+    )
+    assert ledger[0]["coverage_status"] != "complete_exact_scope"
+    assert ledger[0]["coverage_status"] == "not_run"
+    assert "dns-only" in ledger[0]["coverage_reason"].replace("_", "-")
+
+
+def test_w2_25_a_completed_google_probe_read_is_still_live_verified() -> None:
+    from auditex.google_workspace.run import (
+        _google_probe_summary_rows,
+        build_google_capability_rows,
+        build_google_live_readiness,
+        build_google_preflight_rows,
+    )
+    from azure_tenant_audit.run import build_coverage_ledger
+
+    class _Client:
+        def list_alerts(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            return []
+
+    selected = ["google_alert_center"]
+    preflight = build_google_preflight_rows(_Client(), selected, domain="example.com")
+    capability = build_google_capability_rows(
+        selected, auth_mode="domain-delegation", dependency_status={"available": True}, coverage_rows=preflight,
+    )
+    readiness = build_google_live_readiness(selected, capability, coverage_rows=preflight)
+    assert readiness["trust_level"] == "live_verified"
+    ledger = build_coverage_ledger(
+        capability_rows=capability, result_rows=_google_probe_summary_rows(selected, preflight), diagnostics=[],
+    )
+    assert ledger[0]["coverage_status"] == "complete_exact_scope"

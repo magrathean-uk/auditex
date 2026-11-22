@@ -236,6 +236,10 @@ def build_coverage_ledger(
         elif any(item.get("error_class") == "incomplete_evidence" for item in diagnostics_by_collector.get(collector, [])):
             coverage_status = "partial_success"
             coverage_reason = "normalization_incomplete"
+        elif actual_status == "ok" and result.get("live_read") is False:
+            # A readiness note with no read behind it (a DNS-only probe) verified nothing.
+            coverage_status = "not_run"
+            coverage_reason = str(result.get("reason") or "no_live_read")
         elif actual_status == "ok":
             if expected_status == "supported_effective_role":
                 coverage_status = "complete_effective_role"

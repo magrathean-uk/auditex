@@ -48,11 +48,12 @@ def capability_status(row: Mapping[str, Any] | None) -> str:
 
 
 def collectors_with_successful_reads(coverage_rows: Any) -> set[str]:
-    """Return collectors with at least one successful, non-derived read."""
+    """Return collectors with at least one successful, non-derived, live read."""
     return {
         str(row.get("collector") or "")
         for row in _rows(coverage_rows)
-        if row.get("status") == "ok" and row.get("type") != "derived"
+        # A row marked ``live_read`` false is a readiness note with no read behind it (a DNS-only probe).
+        if row.get("status") == "ok" and row.get("type") != "derived" and row.get("live_read") is not False
     }
 
 
@@ -138,7 +139,11 @@ def build_evidence_gate_summary(
                     "status": status,
                     "required_permissions": _strings(row.get("required_permissions")) if row else [],
                     "missing_permissions": missing,
-                    "reason": "not live-verified" if generic_unverified or not row else str(row.get("reason") or ""),
+                    "reason": (
+                        str(row.get("reason"))
+                        if row and generic_unverified and str(row.get("reason") or "").endswith("_not_verified")
+                        else "not live-verified" if generic_unverified or not row else str(row.get("reason") or "")
+                    ),
                     "blocker_kind": blocker["blocker_kind"],
                     "blocker_reason": blocker["blocker_reason"],
                     "next_step": blocker["next_step"],

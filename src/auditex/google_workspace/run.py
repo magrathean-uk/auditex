@@ -253,6 +253,10 @@ def build_google_capability_rows(
                     if classes & {"insufficient_permissions", "unauthenticated"}
                     else "runtime_endpoint_block"
                 )
+        seen = seen_by_collector.get(name, [])
+        if seen and not failures and all(item.get("live_read") is False for item in seen):
+            # Only a DNS readiness note: nothing was looked up and no Google request was made.
+            row_reason = "dns_only_not_verified"
         if auth_mode == "offline" and not failures:
             # A replay observed nothing on a tenant: it is an offline sample, not an exact-scope read.
             row_status = "offline_sample"
@@ -466,7 +470,8 @@ def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None
         rows.append(_preflight_call(collector, "mobileDevices", lambda: client.list_devices("mobile", top=top)))
     elif collector == "google_dns_posture":
         # Only the run's resolver is ready to look the domain up; no Google token is used, so no Google scope is proven.
-        rows.append({"collector": collector, "type": "dns", "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None})
+        # The row is a readiness note with no lookup behind it (``live_read`` false): it verifies nothing.
+        rows.append({"collector": collector, "type": "dns", "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None, "live_read": False})
     elif collector == "google_drive_posture":
         rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
         rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
@@ -935,15 +940,21 @@ def _google_probe_summary_rows(selected: list[str], preflight_rows: list[dict[st
         rows = rows_by_collector.get(collector, [])
         failures = [row for row in rows if row.get("status") != "ok"]
         item_count = sum(int(row.get("item_count") or 0) for row in rows)
-        summary_rows.append(
-            {
-                "name": collector,
-                "status": "failed" if failures else "ok",
-                "item_count": item_count,
-                "message": "preflight ok" if not failures else "preflight blocked",
-                "coverage_rows": len(rows),
-            }
-        )
+        summary = {
+            "name": collector,
+            "status": "failed" if failures else "ok",
+            "item_count": item_count,
+            "message": "preflight ok" if not failures else "preflight blocked",
+            "coverage_rows": len(rows),
+        }
+        if rows and not failures and all(row.get("live_read") is False for row in rows):
+            # Only a readiness note, no lookup or Google request: the probe verified nothing for this collector.
+            summary.update({
+                "live_read": False,
+                "reason": "dns_only_not_verified",
+                "message": "DNS-only readiness; nothing was looked up or verified",
+            })
+        summary_rows.append(summary)
     return summary_rows
 
 
