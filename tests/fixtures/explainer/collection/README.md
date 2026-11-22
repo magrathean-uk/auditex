@@ -16,7 +16,8 @@ The original 919 entries comprise 761 applicable entries across 122 distinct cel
 entries. The 165 absent catalogue cells are all not_met; the product table adds inactive entries for them. Inactive
 entries have explicit null text and rerun_text, empty placeholders and catalogue provenance. Customer wording and
 dependency mappings remain byte-for-byte those of S; tests reconstruct and hash all 919 entries independently of the
-runtime loader. Altering wording or dependency mappings requires review and an intentional pin update. The review status
+runtime loader. Altering wording or dependency mappings requires review and an intentional pin update. Intentional
+updates: the ten AAD `union_possible` input conditions name the shared gaps a union cannot close (review R027). The review status
 is `pending_owner_review`: this data is not asserted to be product-approved.
 
 Optional `cell_inventory` and `policy_sections` metadata supplement the shared CollectionData fields. They let the loader

@@ -204,7 +204,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.1.1v1",
@@ -421,7 +421,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.2.1v1",
@@ -638,7 +638,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.2.3v1",
@@ -828,7 +828,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.1v1",
@@ -1043,7 +1043,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.2v2",
@@ -1906,7 +1906,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.6v1",
@@ -2096,7 +2096,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.7v1",
@@ -2286,7 +2286,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.8v1",
@@ -2476,7 +2476,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.9v1",
@@ -5813,7 +5813,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.9.1v1",

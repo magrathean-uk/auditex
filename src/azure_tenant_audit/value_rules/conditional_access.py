@@ -560,7 +560,10 @@ def _ca_exists(policy_id, sp, sections):
                   "exemption_key_ambiguous", ["scuba_config"])
     ctl = [r for r in res if r[1]]
     if len(ctl) >= 2 and not restricted_pass:
-        if _shared_gap(c, [p for p, r in zip(objs, res, strict=True) if r[1]], sections, allowed_sets):
+        gap = _shared_gap(c, [p for p, r in zip(objs, res, strict=True) if r[1]], sections, allowed_sets)
+        if gap == "role":
+            return _rec(policy_id, "not_met", "no_policy_meets_requirement", f"Requirement not met: no Conditional Access policy meets every condition ({sp['what']}).", "no_policy_meets", None)
+        if gap:
             if policy_id == "MS.AAD.3.2v2" and _v2_key(sections):
                 return _A(policy_id, ITEM_VALUE, "Data unusable: the exemption entry is written under MS.AAD.3.2v2, which ScubaGear ignores (it reads MS.AAD.3.2v1); the policy was not assessed.",
                           "exemption_key_ambiguous", ["scuba_config"])
@@ -583,15 +586,18 @@ _EXCLUDED = {"users": (("Conditions", "Users", "ExcludeUsers"), "Users"), "group
 
 
 def _shared_gap(c, ctl_objs, sections, allowed_sets):
-    """Review R027: True when every control-carrying object excludes the same user, group or application and it is not on the configured exemption list, so no
-    union of them can cover it (the near miss of each object is then a near miss of the set). False where a list or the exemption list cannot be read (the union
-    stays possible). Guest exclusions are not read here: they also name tenants, so the same guest type may be excluded for different tenants. A role excluded by
-    every object stays union_possible: the pinned v3.9.1 vectors (two_partial_no_role_excl, D57) fix that answer until the spec changes."""
+    """Review R027: the gap every control-carrying object shares, so no union of them can cover it; None when there is none. "role" when the row requires no
+    excluded role and every object excludes the same role: a role exclusion is never exemptable, so the set fails as ScubaGear judges each object (no_policy_meets).
+    "exclusion" when every object excludes the same user, group or application and it is not on the configured exemption list (the near miss of each object is then
+    a near miss of the set). A list or exemption list that cannot be read is no shared gap (the union stays possible). Guest exclusions are not read here: they
+    also name tenants, so the same guest type may be excluded for different tenants."""
     def common(path):
         lists = [_lst(p, *path) for p in ctl_objs]
         if any(v is None for v in lists):
             return set()
         return set.intersection(*(set(v) for v in lists))
+    if any(n == "no_role_excl" for n, _ in c["conj"]) and common(("Conditions", "Users", "ExcludeRoles")):
+        return "role"
     for kind in c["ex"]:
         if kind not in _EXCLUDED:
             continue
@@ -600,8 +606,8 @@ def _shared_gap(c, ctl_objs, sections, allowed_sets):
             allowed_sets[kind] = _allowed_exemptions(sections, c["key"], cfgkey)
         allowed = allowed_sets[kind]
         if allowed is not None and common(path) - allowed:
-            return True
-    return False
+            return "exclusion"
+    return None
 
 
 def _v2_key(sections):
