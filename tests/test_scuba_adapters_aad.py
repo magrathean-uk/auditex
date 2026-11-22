@@ -1013,3 +1013,45 @@ def test_app_default_actor_exemption_is_never_every_app(run, policy):
     show the restriction as unqualified. ScubaGear's Rego does not read the field; the section is withheld (not assessed)."""
     exempt = {"customSecurityAttributes": [{"id": "synthetic-attribute", "operator": "equals", "value": True}]}
     assert app_answer(run, policy, exempt) == ("not_assessed", "section_not_collected")
+
+
+def test_app_actor_exemption_on_a_disabled_entry_or_policy_does_not_withhold(run):
+    """Impact prediction 2: an exemption on an entry that is not enforced, or on a disabled custom policy, cannot widen a pass."""
+    from azure_tenant_audit.value_rules import assess
+    exempt = {"customSecurityAttributes": [{"id": "synthetic-attribute", "operator": "equals", "value": True}]}
+    raw = app_default()
+    raw["applicationRestrictions"]["passwordCredentials"][0].update(state="disabled", excludeActors=exempt)
+    operation(run, "consent_policy", "defaultAppManagementPolicy", raw, singleton=True)
+    view = projection.project_run(run).rule_sections["default_app_management_policy"]
+    record = assess("MS.AAD.5.5v1", {"default_app_management_policy": view, "app_management_policies": []})
+    assert (record["verdict"], record["cell"]) == ("not_met", "restriction_not_met")
+    operation(run, "consent_policy", "defaultAppManagementPolicy", app_default(), singleton=True)
+    custom = {"id": "synthetic-custom", "isEnabled": False, "restrictions": {"passwordCredentials": [
+        {"restrictionType": "passwordAddition", "state": "enabled", "restrictForAppsCreatedAfterDateTime": "0001-01-01T00:00:00Z",
+         "maxLifetime": None, "excludeActors": exempt}]}}
+    operation(run, "consent_policy", "appManagementPolicies", [custom])
+    operation(run, "consent_policy", "appManagementPolicyAppliesTo",
+              [{"policyId": "synthetic-custom", "appliesTo": [{"id": "synthetic-app"}], "appliesToTruncated": False}])
+    sections = projection.project_run(run).rule_sections
+    record = assess("MS.AAD.5.5v1", {k: sections[k] for k in ("default_app_management_policy", "app_management_policies")})
+    assert (record["verdict"], record["cell"]) == ("met", "restrictions_compliant")
+
+
+@pytest.mark.parametrize("disabled_extra", [{"conditions": {"futureCondition": ["mock"]}}, {"grantControls": {"termsOfUse": "not-a-list"}}])
+def test_ca_disabled_policy_cannot_withhold_the_rule_view(run, disabled_extra):
+    """Impact prediction 3: a disabled policy cannot change a verdict, so its unreadable extras never withhold the rule view."""
+    from azure_tenant_audit.value_rules import assess
+    manifest = json.loads((run / "run-manifest.json").read_text())
+    write(run, "run-manifest.json", {**manifest, "rule_parameters": {"break_glass_accounts": []}})
+    enabled = deepcopy(CA)
+    enabled["conditions"]["users"].update(excludeRoles=[], excludeGuestsOrExternalUsers=None)
+    enabled["grantControls"] = {"builtInControls": ["mfa"], "operator": "AND", "authenticationStrength": None, "termsOfUse": ["mock"]}
+    disabled = deepcopy(enabled)
+    disabled["state"] = "disabled"
+    for key, value in disabled_extra.items():
+        disabled[key].update(value)
+    operation(run, "conditional_access", "conditionalAccessPolicies", [enabled, disabled])
+    view = projection.project_run(run).rule_sections["conditional_access_policies"]
+    assert isinstance(view, list)
+    record = assess("MS.AAD.3.2v2", {"conditional_access_policies": view, "scuba_config": {"Aad": None, "CapExclusions": {}, "RoleExclusions": {}}})
+    assert (record["verdict"], record["cell"]) == ("met", "met_policy_clean")
