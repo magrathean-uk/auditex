@@ -1310,18 +1310,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result.get("valid") else 1
         if args.report_command != "render":
             return 2
-        print(
-            json.dumps(
-                render_report(
-                    run_dir=args.run_dir,
-                    format_name=args.format,
-                    include_sections=args.include_section,
-                    exclude_sections=args.exclude_section,
-                    output_path=args.output,
-                ),
-                indent=2,
+        from .reporting import UnknownReportSectionError
+
+        try:
+            rendered = render_report(
+                run_dir=args.run_dir,
+                format_name=args.format,
+                include_sections=args.include_section,
+                exclude_sections=args.exclude_section,
+                output_path=args.output,
             )
-        )
+        except UnknownReportSectionError as exc:
+            print(f"auditex report render: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(rendered, indent=2))
         return 0
     if argv[0] == "export":
         parser = _build_export_parser()
@@ -1330,18 +1332,20 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"exporters": list_exporters()}, indent=2))
             return 0
         if args.export_command == "run":
-            print(
-                json.dumps(
-                    run_exporter(
-                        name=args.exporter_name,
-                        run_dir=args.run_dir,
-                        include_sections=args.include_section,
-                        exclude_sections=args.exclude_section,
-                        output_path=args.output,
-                    ),
-                    indent=2,
+            from .reporting import UnknownReportSectionError
+
+            try:
+                exported = run_exporter(
+                    name=args.exporter_name,
+                    run_dir=args.run_dir,
+                    include_sections=args.include_section,
+                    exclude_sections=args.exclude_section,
+                    output_path=args.output,
                 )
-            )
+            except UnknownReportSectionError as exc:
+                print(f"auditex export run: {exc}", file=sys.stderr)
+                return 2
+            print(json.dumps(exported, indent=2))
             return 0
         return 2
     if argv[0] == "notify":

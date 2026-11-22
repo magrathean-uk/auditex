@@ -72,3 +72,41 @@ def test_r123_engine_run_with_a_missing_permission_hints_file_exits_2(monkeypatc
     assert rc == 2
     assert ran == []
     assert "--permission-hints file was not found" in caplog.text
+
+
+# R126 (CLI half): report render and export run refuse an unknown section with exit 2 and the valid ids, not a
+# traceback.
+def _section_run(tmp_path: Path) -> Path:
+    from test_review_reporting_exports_disclosure import APP_FINDING, _write_run
+
+    return _write_run(tmp_path / "run-a", [dict(APP_FINDING)])
+
+
+def test_r126_report_render_refuses_an_unknown_section_with_exit_2(tmp_path, capsys) -> None:  # noqa: ANN001
+    from auditex.cli import main
+
+    run = _section_run(tmp_path)
+    output = tmp_path / "report.md"
+
+    rc = main(["report", "render", str(run), "--format", "md", "--exclude-section", "normalised",
+               "--output", str(output)])
+
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "normalised" in err and "Valid sections:" in err and "normalized" in err
+    assert "Traceback" not in err
+    assert not output.exists()
+
+
+def test_r126_export_run_refuses_an_unknown_section_with_exit_2(tmp_path, capsys) -> None:  # noqa: ANN001
+    from auditex.cli import main
+
+    run = _section_run(tmp_path)
+    output = tmp_path / "x.html"
+
+    rc = main(["export", "run", "html", str(run), "--include-section", "sumary", "--output", str(output)])
+
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "sumary" in err and "Valid sections:" in err
+    assert not output.exists()
