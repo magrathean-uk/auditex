@@ -713,8 +713,13 @@ def main(argv: list[str]) -> int:
             if not args.dry_run:
                 raise
             logger.event("tenant.unverified", "warn", reason="tenant_id_required", note="dry-run makes no tenant calls")
-        client = GraphClient(logger, args.dry_run, tenant_id=tenant_id)
-        client.verify_tenant()
+        try:
+            client = GraphClient(logger, args.dry_run, tenant_id=tenant_id)
+            client.verify_tenant()
+        except (RuntimeError, OSError, subprocess.SubprocessError, requests.RequestException) as exc:
+            if isinstance(exc, TenantGuardError):
+                raise
+            raise TenantGuardError("tenant_check_failed") from exc
     except TenantGuardError as exc:
         manifest.update({"status": "failed", "error": exc.reason, "completedAt": utc_now()})
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")

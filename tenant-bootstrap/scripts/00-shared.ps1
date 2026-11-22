@@ -208,9 +208,10 @@ function Connect-BootstrapExchange {
     }
     # A delegated sign-in lands in the account's own tenant, so prove it is the named lab tenant.
     $tenantId = Get-BootstrapTenantId
-    $connection = @(Get-ConnectionInformation) | Select-Object -Last 1
+    $connection = $null
+    try { $connection = @(Get-ConnectionInformation) | Select-Object -Last 1 } catch { $connection = $null }
     if (-not $connection -or ([string]$connection.TenantID).ToLowerInvariant() -ne $tenantId) {
-      Disconnect-ExchangeOnline -Confirm:$false
+      try { Disconnect-ExchangeOnline -Confirm:$false } catch { }
       throw "tenant_mismatch: the Exchange Online session is not in tenant $tenantId. Nothing was written."
     }
   }

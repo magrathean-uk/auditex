@@ -247,3 +247,20 @@ def test_powershell_exchange_session_in_the_lab_tenant_is_accepted(tmp_path):
     result = run_shared_ps1(tmp_path, LAB_TENANT, LAB_TENANT)
     assert result["exchangeError"] == ""
     assert result["exchangeDisconnected"] is False
+
+
+@pytest.mark.parametrize("kind", sorted(SEEDERS))
+def test_token_acquisition_failure_is_recorded_as_failed_before_any_write(kind, tmp_path, monkeypatch, graph):
+    import subprocess
+
+    def failing_run(argv, *args, **kwargs):
+        raise subprocess.CalledProcessError(1, argv, output="", stderr="no sign-in")
+
+    monkeypatch.delenv("AZURE_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(subprocess, "run", failing_run)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    recorder = graph(LAB_TENANT)
+    result, manifest = run_seeder(kind, lab_config(tmp_path, LAB_TENANT))
+    assert result != 0
+    assert recorder.calls == []
+    assert manifest is not None and manifest.get("status") == "failed" and manifest.get("error") == "tenant_check_failed"

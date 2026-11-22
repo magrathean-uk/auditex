@@ -191,20 +191,22 @@ def test_auth_env_file_is_created_owner_only(tmp_path, monkeypatch):
         returncode=0, stdout=json.dumps({"accessToken": token}), stderr=""))
     env_dir = tmp_path / ".secrets"
     env_file = env_dir / "lab-populator-token.env"
-    seen_modes: list[int] = []
-    real_write = Path.write_text
+    import os
 
-    def spy_write(self, *args, **kwargs):
-        result = real_write(self, *args, **kwargs)
-        if self == env_file:
-            seen_modes.append(mode(self))
-        return result
+    opened: list[tuple[int, int]] = []
+    real_open = os.open
 
-    monkeypatch.setattr(Path, "write_text", spy_write)
+    def spy_open(path, flags, mode_arg=0o777, *args, **kwargs):
+        if Path(path) == env_file:
+            opened.append((flags, mode_arg))
+        return real_open(path, flags, mode_arg, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", spy_open)
     assert module.main([
         "--tenant-id", LAB_TENANT, "--out", str(tmp_path / "claims.json"), "--write-env", str(env_file),
     ]) == 0
     assert env_file.read_text(encoding="utf-8") == f"AZURE_ACCESS_TOKEN={token}\n"
     assert mode(env_file) == 0o600
     assert mode(env_dir) == 0o700
-    assert all(m == 0o600 for m in seen_modes), "the token was briefly readable by others before chmod"
+    # Created owner-only from the first byte, never through a symlink.
+    assert opened and all(m == 0o600 and flags & os.O_NOFOLLOW for flags, m in opened)

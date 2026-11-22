@@ -3207,17 +3207,22 @@ def main(argv: list[str]) -> int:
             if not args.dry_run:
                 raise
             logger.event("tenant.unverified", "warn", reason="tenant_id_required", note="dry-run makes no tenant writes")
-        client = GraphClient(
-            logger,
-            args.dry_run,
-            debug_logger=debug_logger,
-            auth_mode="interactive" if args.interactive else "azure_cli",
-            client_id=args.client_id,
-            browser_command=args.browser_command,
-            interactive_scopes=interactive_scopes,
-            tenant_id=tenant_id,
-        )
-        client.verify_tenant()
+        try:
+            client = GraphClient(
+                logger,
+                args.dry_run,
+                debug_logger=debug_logger,
+                auth_mode="interactive" if args.interactive else "azure_cli",
+                client_id=args.client_id,
+                browser_command=args.browser_command,
+                interactive_scopes=interactive_scopes,
+                tenant_id=tenant_id,
+            )
+            client.verify_tenant()
+        except (RuntimeError, OSError, subprocess.SubprocessError, requests.RequestException) as exc:
+            if isinstance(exc, tenant_guard.TenantGuardError):
+                raise
+            raise tenant_guard.TenantGuardError("tenant_check_failed") from exc
     except tenant_guard.TenantGuardError as exc:
         refused = {
             "runName": args.run_name,
