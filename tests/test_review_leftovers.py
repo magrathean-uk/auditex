@@ -164,7 +164,10 @@ def test_r164_google_doh_endpoint_refuses_abbreviations_without_echo(inline: boo
 
 def test_r164_doh_endpoint_is_redacted_by_every_command_line_scrubber() -> None:
     from auditex.command_runner import SENSITIVE_ARGS, redact_command
-    from auditex.google_workspace.run import _SENSITIVE_COMMAND_FLAGS, scrub_google_command_line
+    from auditex.google_workspace.run import (
+        _SENSITIVE_COMMAND_FLAGS,
+        scrub_google_command_line,
+    )
     from azure_tenant_audit.secret_hygiene import SENSITIVE_ARG_FLAGS, redact_argv
 
     secret = "https://dns.corp.example/tok-zz9"
@@ -199,7 +202,10 @@ def test_output_contract_states_the_diff_gate_and_undated_runs() -> None:
 
 
 def test_output_contract_states_the_mcp_summary_cap_and_command_timeout() -> None:
-    from auditex.command_runner import COMMAND_TIMEOUT_ENV, DEFAULT_COMMAND_TIMEOUT_SECONDS
+    from auditex.command_runner import (
+        COMMAND_TIMEOUT_ENV,
+        DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    )
     from auditex.mcp_server import SUMMARY_RESPONSE_BUDGET_BYTES
 
     text = _flat_doc("docs/reference/output-contract.md")
