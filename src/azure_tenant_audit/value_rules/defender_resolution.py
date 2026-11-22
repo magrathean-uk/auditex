@@ -63,7 +63,7 @@ BI = "built_in_protection_rules"
 
 def _safelinks_core(policy_id, sp, sections, trace):
     # Review R003/R099: a row that lists built_in_protection_rules reads the Built-In Protection rule's exclusions and
-    # judges empty rule lists like any tenant where no rule covers everyone. The shipped 7.x rows do not list it yet.
+    # judges empty rule lists like any tenant where no rule covers everyone. The shipped 7.x rows list it (lane rules-followup).
     builtin_scope = BI in sp.get("sections", ())
     for name in ("protection_policy_rules", "safe_links_policies", "safe_links_rules", "atp_policy_rules", *((BI,) if builtin_scope else ())):
         if not isinstance(sections[name], list):

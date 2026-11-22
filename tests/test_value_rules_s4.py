@@ -89,7 +89,10 @@ def _check_vector(row):
         assert (detail["cell"], detail["reason_code"], detail["reason_text"], detail["section"]) == actual[1:]
         assert precheck_response(detail, {"policy_id": policy, "criticality": criticality},
                                  list(sections), named_limitations=False) == response
-    if row.get("gold_response") is not None and row.get("disagreement") is None:
+    # Review R003: SS 7.x rows gained built_in_protection_rules after their pack gold was taken; as the spec's licensed
+    # twins, that gold's response is not compared (its evidence ids predate the section). Rule fields are compared above.
+    if (row.get("gold_response") is not None and row.get("disagreement") is None
+            and "built_in_section_added" not in row.get("flags", [])):
         assert response == row["gold_response"], row["vector_id"]
     assert row.get("gold_verdict") is not None, row["vector_id"]
     assert row.get("disagreement") is None or row["disagreement"].startswith("expected:"), row["vector_id"]
@@ -127,13 +130,13 @@ def test_fixture_manifest_and_exclusions(vectors):
     rows = [row for group in vectors.values() for row in group]
     assert sha256(FIXTURE.read_bytes()).hexdigest() == manifest["sha256"]
     assert manifest["spec_version"] == "v3.9.1"
-    assert len(rows) == manifest["rows"] == 1707
+    assert len(rows) == manifest["rows"] == 1722  # review R003: 15 constructed Built-In vectors
     assert set(vectors) == POLICIES
     assert dict(Counter(row["policy"] for row in rows)) == manifest["by_policy"]
     assert dict(Counter(f"{row['policy']}:{row['rule_cell']}" for row in rows)) == manifest["by_cell"]
     assert dict(Counter(row["source_kind"] for row in rows)) == manifest["by_source"]
     assert set(manifest["by_source"]) == {"constructed", "pack-train", "pack-validation"}
-    assert len(manifest["by_cell"]) == 160
+    assert len(manifest["by_cell"]) == 166
     assert sum("pack_null_section_met" in row.get("flags", []) for row in rows) == 24
 
 
@@ -219,9 +222,14 @@ def external_vectors():
     path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not path:
         pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
+    from test_value_rules_replay import review_relabel
     grouped = defaultdict(list)
     for row in _rows(Path(path)):
         if row["policy"] in POLICIES:
+            grouped[row["policy"]].append(review_relabel(row)[0])
+    # Review R003: the kit predates the SS 7.x Built-In cells; the shipped constructed vectors reach them.
+    for row in _rows(FIXTURE):
+        if ":review_r003_" in row["vector_id"]:
             grouped[row["policy"]].append(row)
     return grouped
 
@@ -234,7 +242,7 @@ def test_full_external_stage4_vectors(policy, external_vectors):
 
 
 def test_full_external_counts_include_pilot_and_flagged_rows(external_vectors):
-    rows = [row for group in external_vectors.values() for row in group]
+    rows = [row for group in external_vectors.values() for row in group if ":review_r003_" not in row["vector_id"]]
     assert len(rows) == 3615
     assert sum(row["source_kind"].startswith("ss6-") for row in rows) == 1928
     assert sum("pack_null_section_met" in row.get("flags", []) for row in rows) == 24

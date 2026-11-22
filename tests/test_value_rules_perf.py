@@ -130,7 +130,7 @@ def _build(pid, n):
         return {"dmarc_records": [{"domain": f"d{i}.example", "rdata": [record]} for i in range(n)]}
     if kind == "safelinks_resolution":
         policy = {"Identity": "Built-In Protection Policy", **{f: True for f in params["flags"]}}
-        return {"defender_license": True, "protection_policy_rules": [],
+        return {"defender_license": True, "protection_policy_rules": [], "built_in_protection_rules": BI_ALL,
                 "atp_policy_rules": [], "safe_links_rules": [{"State": "Disabled"} for _ in range(n)],
                 "safe_links_policies": [{"Identity": f"p{i}", **{f: True for f in params["flags"]}} for i in range(n)] + [policy]}
     if kind == "pp_flag":
@@ -235,13 +235,18 @@ def test_dmarc_very_long_strings():
     assert _timed(lambda: assess("MS.EXO.4.1v1", {"dmarc_records": [{"domain": "a.example", "rdata": many_chunks}]}))["verdict"] == "met"
 
 
+# Review R003: SS 7.x rows read the Built-In Protection rule; this one excludes no one.
+BI_ALL = [{"Identity": "ATP Built-In Protection Rule", "ExceptIfSentTo": None, "ExceptIfSentToMemberOf": None,
+           "ExceptIfRecipientDomainIs": None}]
+
+
 def test_safelinks_many_partial_rules_each_with_a_policy():
     pid = "MS.SECURITYSUITE.7.3v1"
     rules = [{"State": "Enabled", "SentTo": ["a"], "SentToMemberOf": None, "RecipientDomainIs": None,
               "Priority": i, "SafeLinksPolicy": f"p{i}"} for i in range(N)]
     policies = [{"Identity": f"p{i}", "TrackClicks": True} for i in range(N)] + [{"Identity": "Built-In Protection Policy", "TrackClicks": True}]
     sections = {"defender_license": True, "protection_policy_rules": [], "atp_policy_rules": [], "safe_links_rules": rules,
-                "safe_links_policies": policies}
+                "safe_links_policies": policies, "built_in_protection_rules": BI_ALL}
     assert _timed(lambda: assess(pid, sections))["verdict"] == "met"
     policies[N - 1]["TrackClicks"] = False                # the last partial rule's policy is non-compliant: found after the full pass
     assert _timed(lambda: assess(pid, sections))["cell"] == "partial_rule_noncompliant"
@@ -252,7 +257,8 @@ def test_safelinks_many_covering_rules_and_duplicated_policy():
     rules = [{"State": "Enabled", "SentTo": None, "SentToMemberOf": None, "RecipientDomainIs": None, "Priority": i + 1,
               "SafeLinksPolicy": f"p{i}"} for i in range(N)]
     sections = {"defender_license": True, "protection_policy_rules": [], "atp_policy_rules": [], "safe_links_rules": rules,
-                "safe_links_policies": [{"Identity": f"p{i}", "TrackClicks": True} for i in range(N)] * 2}
+                "safe_links_policies": [{"Identity": f"p{i}", "TrackClicks": True} for i in range(N)] * 2,
+                "built_in_protection_rules": BI_ALL}
     assert _timed(lambda: assess(pid, sections))["cell"] == "policy_duplicated"
 
 
@@ -264,7 +270,8 @@ def test_safelinks_preset_rules_scan_is_linear():
     preset = {"Identity": "Standard Preset Security Policy", "State": "Enabled", "SentTo": None, "SentToMemberOf": None,
               "RecipientDomainIs": None}
     sections = {"defender_license": True, "protection_policy_rules": noise + [preset], "atp_policy_rules": noise + [preset],
-                "safe_links_rules": [], "safe_links_policies": [{"Identity": "Built-In Protection Policy", **flags}]}
+                "safe_links_rules": [], "safe_links_policies": [{"Identity": "Built-In Protection Policy", **flags}],
+                "built_in_protection_rules": BI_ALL}
     assert _timed(lambda: assess(pid, sections))["cell"] == "preset_covers"
 
 
