@@ -2862,6 +2862,6 @@ _D5_FIELD_NAMES = _D5_FIELD_NAMES | frozenset(
     """
 aicontext auditexmcpcommandtimeoutseconds later morefields newlyassessed newlyassessedcount newlyassessedfindings
 notreassessedfindings omittedsections partialrundir readwith reportpack resolutionbasis summarytruncated
-toolchainreadiness
+toolchainreadiness citationsomitted citationsummaryomitted evidencemissingomitted sections
     """.split()
 )
