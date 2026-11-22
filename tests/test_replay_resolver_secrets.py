@@ -141,6 +141,21 @@ def test_safe_resolver_diagnostic_drops_every_secret_and_is_stable(text: str) ->
 
 
 @pytest.mark.parametrize("text", [
+    "HTTP 503.https://dns.corp.example/sec-path?key=sec-query",
+    "status 7https://dns.corp.example/sec-path?key=sec-query",
+    "x+https://dns.corp.example/sec-path?key=sec-query",
+    "retry-https://dns.corp.example/sec-path?key=sec-query",
+])
+def test_url_glued_to_preceding_text_is_scrubbed(text: str) -> None:
+    from azure_tenant_audit.dns_lookup import safe_resolver_diagnostic
+
+    safe = safe_resolver_diagnostic(text)
+    assert "sec-path" not in safe and "sec-query" not in safe
+    assert "dns.corp.example" in safe
+    assert safe_resolver_diagnostic(safe) == safe
+
+
+@pytest.mark.parametrize("text", [
     "DoH query failed for TXT contoso.example at https://[2001:db8::53]:8443 (HTTP 503)",
     "DoH resolver at https://dns.corp.example could not answer TXT selector1._domainkey.contoso.example: SERVFAIL",
     "DoH response from https://cloudflare-dns.com was truncated (TC) for TXT contoso.example",

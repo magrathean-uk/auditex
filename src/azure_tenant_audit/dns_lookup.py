@@ -141,7 +141,7 @@ def doh_resolver_disclosure(endpoint: str) -> str:
 
 
 _DIAGNOSTIC_URL = re.compile(
-    r'(?:(?<![A-Za-z0-9+.-])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)|(?<![\w/])(?:/(?!/)|\?|(?<!:)//))[^\s"<>]+'
+    r'(?:(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)|(?<![\w/])(?:/(?!/)|\?|(?<!:)//))[^\s"<>]+'
 )
 # Only a URL with no path, query or fragment can have trailing prose punctuation restored.
 _PUNCTUATED_ORIGIN = re.compile(
