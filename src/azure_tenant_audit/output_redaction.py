@@ -35,8 +35,12 @@ from .secret_hygiene import (
     PRIVATE_KEY_PEM_RE,
 )
 
+# A complete block whose END label matches its BEGIN label and which holds no other BEGIN marker: an unmatched opening
+# never pairs with a later block's end (so it cannot erase text between them), and each scan stops at the next
+# opening, so many unmatched openings stay linear.
 _PEM_COMPLETE_RE = re.compile(
-    r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----", re.DOTALL
+    r"-----BEGIN (?P<label>(?:[A-Z0-9]+ )*)PRIVATE KEY-----(?:(?!-----BEGIN ).)*?-----END (?P=label)PRIVATE KEY-----",
+    re.DOTALL,
 )
 
 # The output boundary masks at least the credential words the diagnostic redactor masks (R150): one word list.

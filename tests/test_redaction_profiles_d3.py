@@ -543,3 +543,21 @@ def test_r150_structured_values_under_credential_keys_are_replaced(profile: str)
     out = redact_output({"record": value}, profile=profile)["record"]
     assert _PARITY_CANARY not in json.dumps(out) and "12345678" not in json.dumps(out)
     assert out["AllowSimplePassword"] is True
+
+
+def test_r150_markup_pem_scan_needs_matching_labels_and_stays_linear() -> None:
+    import time
+
+    from azure_tenant_audit.output_redaction import redact_output
+
+    rsa, ec = "RSA PRIVATE KEY", "EC PRIVATE KEY"
+    doc = f"| -----BEGIN {rsa}----- |\n## Kept section\n| -----END {ec}----- |"
+    assert "## Kept section" in redact_output(doc, markup=True)
+    # An earlier unmatched opening never swallows text before a later complete block.
+    later = f"-----BEGIN {rsa}----- kept text -----BEGIN {rsa}-----\n{_PARITY_CANARY}\n-----END {rsa}-----"
+    out = redact_output(later, markup=True)
+    assert "kept text" in out and _PARITY_CANARY not in out
+    many = f"-----BEGIN {rsa}----- x\n" * 4000
+    started = time.perf_counter()
+    redact_output(many, markup=True)
+    assert time.perf_counter() - started < 5
