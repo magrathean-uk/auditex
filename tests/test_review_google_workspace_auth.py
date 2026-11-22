@@ -277,3 +277,58 @@ def test_r091_oauth_token_cache_folder_is_created_owner_only(tmp_path: Path, oau
     assert _mode(tmp_path / "cache") == 0o700
     assert _mode(tmp_path / "cache" / "token.json") == 0o600
 
+
+# ---- R092: a domain-wide delegation key readable by others is refused, as the M365 certificate is -----------------
+
+
+@pytest.fixture
+def service_account_module(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    loaded: list[str] = []
+
+    class _Factory:
+        @staticmethod
+        def from_service_account_file(path: str, *, scopes: list[str]) -> _ScopedCredentials:
+            loaded.append(path)
+            return _ScopedCredentials(tuple(scopes))
+
+    service_account = types.ModuleType("google.oauth2.service_account")
+    service_account.Credentials = _Factory  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
+    monkeypatch.setitem(sys.modules, "google.oauth2", types.ModuleType("google.oauth2"))
+    monkeypatch.setitem(sys.modules, "google.oauth2.service_account", service_account)
+    monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
+    return loaded
+
+
+def _key(tmp_path: Path, mode: int) -> Path:
+    key = tmp_path / "key.json"
+    key.write_text(json.dumps({"type": "service_account", "client_email": "sa@example.iam.gserviceaccount.com"}), encoding="utf-8")
+    os.chmod(key, mode)
+    return key
+
+
+def _delegation_config(key: Path) -> google_auth.GoogleAuthConfig:
+    return google_auth.GoogleAuthConfig(auth_mode="domain-delegation", scopes=("scope://a",), subject="admin@example.com",
+                                        service_account_key=key)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604])
+def test_r092_key_readable_by_others_is_refused(tmp_path: Path, service_account_module: list[str], mode: int) -> None:
+    with pytest.raises(ValueError, match="owner-only"):
+        google_auth.build_google_credentials(_delegation_config(_key(tmp_path, mode)))
+    assert service_account_module == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX symbolic links")
+def test_r092_key_behind_a_link_is_refused(tmp_path: Path, service_account_module: list[str]) -> None:
+    link = tmp_path / "link.json"
+    link.symlink_to(_key(tmp_path, 0o600))
+    with pytest.raises(ValueError, match="owner-only"):
+        google_auth.build_google_credentials(_delegation_config(link))
+
+
+def test_r092_owner_only_key_is_loaded(tmp_path: Path, service_account_module: list[str]) -> None:
+    key = _key(tmp_path, 0o600)
+    credentials = google_auth.build_google_credentials(_delegation_config(key))
+    assert service_account_module == [str(key)] and credentials.scopes == ("scope://a",)

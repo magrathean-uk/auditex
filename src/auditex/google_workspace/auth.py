@@ -97,8 +97,10 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         from google.oauth2 import service_account
 
         shared_scopes = [scope for scope in config.scopes if scope not in config.isolated_scopes]
+        key_path = config.service_account_key.expanduser()
+        _check_private_key_file(key_path)
         credentials = service_account.Credentials.from_service_account_file(
-            str(config.service_account_key.expanduser()),
+            str(key_path),
             scopes=shared_scopes,
         )
         return credentials.with_subject(config.subject)
@@ -140,6 +142,27 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         return credentials
 
     raise ValueError(f"unsupported Google auth mode: {config.auth_mode}")
+
+
+# A service-account JSON key is a few KB; anything larger is not one.
+_SERVICE_ACCOUNT_KEY_LIMIT = 64 * 1024
+
+
+def _check_private_key_file(path: Path) -> None:
+    """Refuse a domain-wide delegation key that is not a small, owner-only regular file (no link).
+
+    The key can act as any user in the domain, so it gets the same check as the Microsoft 365 certificate. The
+    message is fixed and never repeats the path or the file's content.
+    """
+    from azure_tenant_audit.certificate_auth import CertificateAuthError, _read_private_file
+
+    try:
+        _read_private_file(path, _SERVICE_ACCOUNT_KEY_LIMIT, "service_account_key_refused")
+    except CertificateAuthError:
+        raise ValueError(
+            "service_account_key_refused: the service-account key must be an owner-only regular file "
+            "(chmod 600, not a link) of at most 64 KB."
+        ) from None
 
 
 def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:

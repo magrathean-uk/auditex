@@ -938,8 +938,13 @@ def test_a_client_without_the_policies_resource_fails_with_an_actionable_message
     assert row["status"] == "failed" and "upgrade it" in row["error"]
 
 
-def test_the_policy_scope_is_requested_on_its_own_token_so_a_missing_grant_fails_only_that_read(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_policy_scope_is_requested_on_its_own_token_so_a_missing_grant_fails_only_that_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     captured: dict[str, Any] = {}
+    key = tmp_path / "key.json"
+    key.write_text("{}", encoding="utf-8")
+    key.chmod(0o600)  # the delegation key must be owner-only (R092)
 
     class _Factory:
         @staticmethod
@@ -956,7 +961,7 @@ def test_the_policy_scope_is_requested_on_its_own_token_so_a_missing_grant_fails
     monkeypatch.setitem(sys.modules, "google.oauth2", oauth2)
     monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
     config = google_run._auth_config(
-        GoogleRunConfig(tenant_name="T", out=Path("."), subject="admin@example.com", service_account_key=Path("/key.json"), collectors="google_directory,google_policies"),
+        GoogleRunConfig(tenant_name="T", out=Path("."), subject="admin@example.com", service_account_key=key, collectors="google_directory,google_policies"),
         ["google_directory", "google_policies"],
     )
 
