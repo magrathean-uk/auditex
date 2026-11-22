@@ -17,7 +17,11 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
-from .dns_lookup import DNS_POSTURE_COLLECTORS, doh_resolver_display
+from .dns_lookup import (
+    DEFAULT_DOH_ENDPOINT,
+    DNS_POSTURE_COLLECTORS,
+    doh_resolver_display,
+)
 
 # These default workload enrichments may be unavailable without blocking the core audit.
 # Their actual failed/partial rows and the run's partial coverage remain unchanged.
@@ -38,7 +42,10 @@ def collector_gap_reason(collector: str, error_class: Any, error: Any = None, *,
         return _COLLECTOR_FAILURE_REASON_TEXT["exchange_policy_failed"]
     if collector in DNS_POSTURE_COLLECTORS and error_class == "dns_resolver_error":
         origin = doh_resolver_display(doh_endpoint)
-        resolver = f"the DNS-over-HTTPS resolver at {origin}" if origin else _UNNAMED_RESOLVER
+        if origin and origin == doh_resolver_display(DEFAULT_DOH_ENDPOINT):
+            resolver = f"the public Cloudflare DNS-over-HTTPS resolver at {origin}"
+        else:
+            resolver = f"the DNS-over-HTTPS resolver at {origin}" if origin else _UNNAMED_RESOLVER
         return _DNS_RESOLVER_REASON.format(resolver=resolver, collector=collector)
     if collector == "dns_posture":
         if error_class == "public_lookup_error":
