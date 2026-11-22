@@ -141,6 +141,13 @@ function Get-BootstrapTenantId {
   return $parsed.ToString()
 }
 
+function Select-BootstrapGraphProfile {
+  # Select-MgProfile exists only in the 1.x Graph SDK; 2.x splits beta into its own modules.
+  if (Get-Command Select-MgProfile -ErrorAction SilentlyContinue) {
+    Select-MgProfile -Name "beta"
+  }
+}
+
 function Connect-BootstrapGraph {
   $cfg = $global:BootstrapSession.Config
   $auth = $cfg.authentication
@@ -152,7 +159,7 @@ function Connect-BootstrapGraph {
     }
     Invoke-BootstrapCommand -Name "connect-mggraph-app" -Module "graph" -Step "auth" -Action {
       Connect-MgGraph -TenantId $tenantId -ClientId $auth.app.clientId -CertificateThumbprint $auth.app.certificateThumbprint -NoWelcome
-      Select-MgProfile -Name "beta"
+      Select-BootstrapGraphProfile
     }
   } else {
     Invoke-BootstrapCommand -Name "connect-mggraph-cli" -Module "graph" -Step "auth" -Action {
@@ -164,8 +171,9 @@ function Connect-BootstrapGraph {
       if (-not $tokenResponse) {
         throw "No Azure CLI access token was returned."
       }
-      Connect-MgGraph -AccessToken $tokenResponse -NoWelcome
-      Select-MgProfile -Name "beta"
+      # Microsoft.Graph.Authentication 2.x takes the token only as a SecureString.
+      Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $tokenResponse -AsPlainText -Force) -NoWelcome
+      Select-BootstrapGraphProfile
     }
   }
 

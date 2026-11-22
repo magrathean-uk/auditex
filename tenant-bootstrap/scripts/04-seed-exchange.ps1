@@ -19,7 +19,7 @@ if ($DryRun) {
 function Ensure-MailboxUser {
   param([string]$Alias, [string]$DisplayName, [switch]$Room)
   $upn = Get-Upn -Alias $Alias
-  if (-not (Get-MgUser -Filter "userPrincipalName eq '$($upn.Replace(\"'\", \"''\"))'" -ErrorAction SilentlyContinue)) {
+  if (-not (Get-MgUser -Filter "userPrincipalName eq '$($upn.Replace("'", "''"))'" -ErrorAction SilentlyContinue)) {
     if ($DryRun) {
       Write-BootstrapEvent -Message "mailbox.user.wouldCreate" -Status "success" -Step "exchange" -Details @{upn=$upn}
     } else {

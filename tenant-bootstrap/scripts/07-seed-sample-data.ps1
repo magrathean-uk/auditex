@@ -30,7 +30,7 @@ $subjectSamples = @("Budget Check-in", "Customer Escalation", "Quarterly Ops", "
 $teams = @()
 Invoke-BootstrapCommand -Name "load-teams" -Module "graph" -Step "data" -Action {
   foreach ($alias in @($cfg.groupNames.itM365, $cfg.groupNames.salesM365, $cfg.groupNames.financeM365)) {
-    $group = Get-MgGroup -Filter "displayName eq '$($alias.Replace(\"'\", \"''\"))'" -ErrorAction SilentlyContinue
+    $group = Get-MgGroup -Filter "displayName eq '$($alias.Replace("'", "''"))'" -ErrorAction SilentlyContinue
     if ($group) {
       try {
         $teams += Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/groups/$($group.Id)/team" -ErrorAction SilentlyContinue
@@ -107,7 +107,7 @@ for ($offset = 0; $offset -lt $days; $offset++) {
   Invoke-BootstrapCommand -Name "seed-onedrive-$offset" -Module "graph" -Step "data" -Action {
     $content = "Seeded document from $day. Topic: $subject. Contains business history."
     $path = "Documents/$safeSubject"
-    Invoke-MgGraphRequest -Method PUT -Uri "https://graph.microsoft.com/v1.0/users/$seedUser/drive/root:/$path:/content" -Body $content -ContentType "text/plain"
+    Invoke-MgGraphRequest -Method PUT -Uri "https://graph.microsoft.com/v1.0/users/$seedUser/drive/root:/${path}:/content" -Body $content -ContentType "text/plain"
   } | Out-Null
 }
 

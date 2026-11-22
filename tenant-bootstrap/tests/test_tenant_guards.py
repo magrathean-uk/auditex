@@ -175,8 +175,12 @@ PWSH_DRIVER = r"""
 $ErrorActionPreference = "Stop"
 . (Join-Path $env:KIT_SCRIPTS "00-shared.ps1") -ConfigPath $env:KIT_CONFIG
 function Write-BootstrapEvent { param($Message, $Status, $Details, $Step) }
-function Connect-MgGraph { }
-function Select-MgProfile { }
+# Microsoft.Graph.Authentication 2.x: -AccessToken is a SecureString and Select-MgProfile no longer exists.
+function Connect-MgGraph {
+  param([SecureString]$AccessToken, [string]$TenantId, [string]$ClientId, [string]$CertificateThumbprint, [switch]$NoWelcome)
+  $global:GraphTokenType = if ($AccessToken) { $AccessToken.GetType().Name } else { "" }
+}
+$global:GraphTokenType = ""
 function az { $global:AzCalls += ,($args -join " "); "fake-token" }
 function Invoke-MgGraphRequest {
   param($Method, $Uri, $OutputType, $ErrorAction)
@@ -195,6 +199,7 @@ $result = [ordered]@{ graphError = ""; exchangeError = "" }
 try { Connect-BootstrapGraph } catch { $result.graphError = $_.Exception.Message }
 try { Connect-BootstrapExchange } catch { $result.exchangeError = $_.Exception.Message }
 $result.azCalls = @($global:AzCalls)
+$result.graphTokenType = $global:GraphTokenType
 $result.exchangeArgs = $global:ExoArgs
 $result.exchangeDisconnected = $global:ExoDisconnected
 $result | ConvertTo-Json -Compress
@@ -331,3 +336,36 @@ def test_verifier_refuses_placeholder_tenant_before_any_read(tmp_path, monkeypat
     assert result != 0
     assert recorder.calls == []
     assert manifest is not None and manifest.get("error") == "tenant_id_required"
+
+
+def test_powershell_graph_connects_with_the_graph_v2_module(tmp_path):
+    result = run_shared_ps1(tmp_path, LAB_TENANT, LAB_TENANT)
+    assert result["graphError"] == ""
+    assert result["graphTokenType"] == "SecureString"
+
+
+@pytest.mark.parametrize("script", sorted(p.name for p in (ROOT / "scripts").glob("*.ps1")) + ["../run-bootstrap.ps1"])
+def test_powershell_bootstrap_scripts_parse(script):
+    import subprocess
+
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("pwsh is not installed")
+    path = (ROOT / "scripts" / script).resolve()
+    if not path.exists():
+        pytest.skip(f"{script} is not in this kit")
+    command = (
+        "$errors = $null; "
+        "[System.Management.Automation.Language.Parser]::ParseFile($env:PS_FILE, [ref]$null, [ref]$errors) | Out-Null; "
+        "$errors | ForEach-Object { \"$($_.Extent.StartLineNumber): $($_.Message)\" }"
+    )
+    proc = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", command],
+                          capture_output=True, text=True, timeout=120, env={**__import__("os").environ, "PS_FILE": str(path)})
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "", proc.stdout
+
+
+def test_powershell_ca_policy_lookup_keeps_the_odata_filter_literal():
+    text = (ROOT / "scripts" / "08-secure-baseline.ps1").read_text(encoding="utf-8")
+    assert "policies?$filter=" not in text
+    assert "policies?`$filter=" in text

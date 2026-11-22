@@ -21,7 +21,7 @@ foreach ($site in $cfg.sharePoint.sites) {
   $siteUrl = "https://$($cfg.tenant.tenantDomain)/sites/$($site.urlSuffix)"
   $ownerAlias = if ($site.ownerAlias) { $site.ownerAlias } else { $cfg.actors.dailyUser }
   $ownerUpn = Get-Upn -Alias $ownerAlias
-  if (-not (Get-MgUser -Filter "userPrincipalName eq '$($ownerUpn.Replace(\"'\", \"''\"))'" -ErrorAction SilentlyContinue)) {
+  if (-not (Get-MgUser -Filter "userPrincipalName eq '$($ownerUpn.Replace("'", "''"))'" -ErrorAction SilentlyContinue)) {
     Write-BootstrapEvent -Message "sharepoint.owner.fallback" -Status "warn" -Step "sharepoint-intune" -Details @{
       requestedOwner = $ownerAlias
       fallback = $cfg.actors.dailyUser
