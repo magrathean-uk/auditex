@@ -135,9 +135,9 @@ def _response_enabled() -> bool:
     return os.environ.get(RESPONSE_ENABLE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _session_tenant(session: Any) -> str | None:
+def _session_tenant(exchange_session: Any) -> str | None:
     """The tenant the session's access token was minted for (its ``tid`` claim), or None when it cannot be read."""
-    token = session.get("access_token") if isinstance(session, dict) else None
+    token = exchange_session.get("access_token") if isinstance(exchange_session, dict) else None
     if not isinstance(token, str):
         return None
     try:
@@ -407,9 +407,9 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                     }
                 )
 
-        session = config.exchange_session
+        exchange_session = config.exchange_session
         if (config.execute and action.needs_exchange_session
-                and not (isinstance(session, dict) and session.get("kind") == "exchange_online")):
+                and not (isinstance(exchange_session, dict) and exchange_session.get("kind") == "exchange_online")):
             blockers.append(
                 {
                     "collector": "response",
@@ -423,7 +423,7 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                     )},
                 }
             )
-        elif config.execute and action.needs_exchange_session and _session_tenant(session) != tenant_id:
+        elif config.execute and action.needs_exchange_session and _session_tenant(exchange_session) != tenant_id:
             # The lab guard checked the configured tenant ID; the session must be that tenant's, or the read would
             # run in whichever organisation the token belongs to.
             blockers.append(
