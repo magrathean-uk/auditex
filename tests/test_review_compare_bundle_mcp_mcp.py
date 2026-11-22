@@ -104,16 +104,42 @@ def test_the_command_timeout_is_configurable_and_names_the_resumable_run(monkeyp
     monkeypatch.setenv("AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS", "1")
     started = time.monotonic()
 
-    result = run_cli_command(["sh", "-c", "sleep 5"])
+    result = run_cli_command(["sh", "-c", "sleep 5"], resumable=True)
 
     assert time.monotonic() - started < 4
     assert result["error_class"] == "timeout"
     assert "--resume-from" in result["error"]
+    assert "AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS" in result["error"]
 
 
-def test_live_audits_have_no_fifteen_minute_limit_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    from auditex import command_runner
+def test_a_command_without_resume_does_not_advise_resume_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from auditex.command_runner import run_cli_command
 
-    monkeypatch.delenv("AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS", "1")
 
-    assert command_runner.command_timeout_seconds() >= 4 * 3600
+    result = run_cli_command(["sh", "-c", "sleep 5"])
+
+    assert result["error_class"] == "timeout"
+    assert "--resume-from" not in result["error"]
+
+
+def test_the_certificate_audit_tool_timeout_names_resume(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import subprocess
+
+    from auditex import mcp_server
+
+    def time_out(command: list[str], **kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 1)
+
+    monkeypatch.setattr("subprocess.run", time_out)
+    certificate = tmp_path / "reader.pem"
+    certificate.write_text("not a key", encoding="utf-8")
+
+    result = mcp_server.tool_handlers()["auditex_run_certificate_audit"](
+        tenant_name="lab", tenant_id="11111111-1111-1111-1111-111111111111",
+        client_id="22222222-2222-2222-2222-222222222222", certificate_path=str(certificate),
+        certificate_thumbprint="A" * 40, out_dir=str(tmp_path / "out"),
+    )
+
+    assert result.get("error_class") == "timeout", result
+    assert "--resume-from" in result["error"]

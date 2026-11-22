@@ -994,7 +994,7 @@ def tool_handlers() -> dict[str, Any]:
             )
         except ValueError as exc:
             return {"status": "blocked", "error": str(exc)}
-        return run_cli_command(command)
+        return run_cli_command(command, resumable=True)
 
     def auditex_google_doctor(
         auth: str = "domain-delegation",

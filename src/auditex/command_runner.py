@@ -111,12 +111,13 @@ def command_timeout_seconds() -> int | None:
 
 def run_cli_command(
     command: list[str], cwd: str | None = None, *, timeout_seconds: int | None = None,
-    scrub_operator_inputs: bool = False,
+    scrub_operator_inputs: bool = False, resumable: bool = False,
 ) -> dict[str, Any]:
     """Run an Auditex command for an MCP tool and return its redacted output.
 
     ``timeout_seconds`` defaults to ``command_timeout_seconds()`` (R063): four hours, not the fifteen minutes a
-    full audit of a large tenant outlasts.
+    full audit of a large tenant outlasts. ``resumable`` marks a command whose run folder ``--resume-from`` can
+    complete (the Microsoft 365 certificate audit); only its timeout says so.
     """
     if timeout_seconds is None:
         timeout_seconds = command_timeout_seconds()
@@ -155,8 +156,9 @@ def run_cli_command(
             "stderr": _redact_text(stderr, sensitive_values, operator_values),
             "error_class": "timeout",
             "error": (
-                f"command timed out after {timeout_seconds}s; the run folder is left unfinalised and can be "
-                f"completed with --resume-from. Set {COMMAND_TIMEOUT_ENV} for a longer limit (0 for none)."
+                f"command timed out after {timeout_seconds}s; the run folder is left unfinalised"
+                + ("; complete it with --resume-from" if resumable else "")
+                + f". Set {COMMAND_TIMEOUT_ENV} for a longer limit (0 for none)."
             ),
         }
     return {
