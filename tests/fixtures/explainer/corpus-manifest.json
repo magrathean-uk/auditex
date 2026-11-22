@@ -1,26 +1,26 @@
 {
  "inputs_sha256": {
   "configs/explainer-baselines.json": "4a9000213454d7a5b8234f52ded5d2abf14ae78d45a6742e0096957b541362fc",
-  "configs/explainer-template.json": "25167f5815fd3bf43c2eb0af84e0dfcd092e32d3d6896409b26a5d218d0ac5b9",
-  "configs/explainer-what-to-collect.json": "39caf38c74dd9bc5ed5878b6d2a4200d0af796c0ba63c27d7d848e1d27a8b4a9",
-  "configs/scuba-value-rules.json": "87afbc22556d1ade5133736fa463d82901864d66a19e0ba9d284b31ab41c93a6",
+  "configs/explainer-template.json": "b4ea3696fa7f3e55a918416a7441ce02176fef56d52f02594d391111aae2d7a0",
+  "configs/explainer-what-to-collect.json": "a95009aa86bfcf6c6d1e41a85da888f84651e7f8c1802e660a4d695a5055fad2",
+  "configs/scuba-value-rules.json": "94e1883b6f53a50e7a406703031c89eda863427b70f33722e098ba4967ee9217",
   "tests/fixtures/explainer/checks/english-words.txt": "b619cca2de479ba35eb5a2c4fd7f3012089b503dd2bca29ccdcf6ff647d70ee9",
   "tests/fixtures/explainer/checks/train-identifiers.json": "47380fc645a8be404c5649c06a1788667f9b8d65b628a09f8eaf003fb285ac60"
  },
  "mutations": {
-  "benign": 2521,
+  "benign": 2524,
   "by_group": {
    "S": 6636,
    "a": 2787,
    "b": 6058,
-   "benign": 2821,
+   "benign": 2824,
    "c": 830,
-   "d": 1020,
-   "e": 930,
+   "d": 1019,
+   "e": 929,
    "e2": 190,
-   "e3": 603
+   "e3": 607
   },
-  "harmful": 19354,
+  "harmful": 19356,
   "known_miss_note": "19,350 of 19,354 harmful mutants are flagged by an expected check (99.979%); the four misses are documented checker gaps (a/c on the qualifier_shadowed cell once its no-conclusion sentence is removed or replaced; e on a paraphrase that flips a state word). No benign control fails.",
   "known_misses": [
    "X0684/a31_not_assessed_drops_no_conclusion_sentence",
@@ -28,58 +28,58 @@
    "X0447/e06_paraphrase_fail_state_flip",
    "X1203/e06_paraphrase_fail_state_flip"
   ],
-  "rows": 21875,
-  "stream_sha256": "a8ff0aa996a4f3d7a50f21cf73c3871c9b25682ed9ed26175c64603d799804ad",
+  "rows": 21880,
+  "stream_sha256": "0aa51a8b6036602c4f794e24001934a38d0c24d9e5d47ec47fdfd8b66bfd6a8a",
   "types": 160
  },
  "note": "Pins for generated test material. Nothing listed here is stored: the pool is the allowed value-rule vector fixtures, the test set, pairs and mutants are generated from it (tests/explainer_checks), and the hashes below detect any drift in the pool, the engine, the template or the generators.",
  "pairs": {
-  "base": 1384,
+  "base": 1390,
   "by_verdict": {
    "met": 228,
    "not_applicable": 40,
-   "not_assessed": 851,
+   "not_assessed": 857,
    "not_met": 265
   },
   "shared": 2,
-  "stream_sha256": "5a0ab8c051f8f9b6111a7e6591ebf9965eccae48d95a5184cbc62d224d51cab6",
+  "stream_sha256": "f6ab36d2130fc591006b6d9eab2b7e702048f899972d4021e5ebf3d8a8cb4aff",
   "twins_per_pair": 5
  },
  "pool": {
   "by_kind": {
-   "constructed": 12166,
+   "constructed": 12181,
    "pack-train": 4313,
    "pack-validation": 527
   },
-  "cells": 1084,
+  "cells": 1090,
   "policies": 102,
-  "vector_ids_sha256": "7247bd5f58eb50d97c034b619f888a9f86de5e93e6cc3740f707ade2f8693a32",
-  "vectors": 17006
+  "vector_ids_sha256": "c8d48d5004d05ea5d71cb5505b35b76f585cffd759a282044f8b2e1a80b10b97",
+  "vectors": 17021
  },
  "schema_version": 1,
  "seed": "explainer-testset-20261105",
  "testset": {
   "counts": {
    "by_kind": {
-    "constructed": 792,
+    "constructed": 798,
     "pack-train": 457,
     "pack-validation": 135
    },
-   "cells_in_pool": 1084,
-   "core": 1084,
+   "cells_in_pool": 1090,
+   "core": 1090,
    "core_by_area": {
     "AAD": 288,
     "EXO": 124,
     "POWERBI": 104,
     "POWERPLATFORM": 50,
-    "SECURITYSUITE": 313,
+    "SECURITYSUITE": 319,
     "SHAREPOINT": 79,
     "TEAMS": 126
    },
    "core_by_verdict": {
     "met": 148,
     "not_applicable": 10,
-    "not_assessed": 761,
+    "not_assessed": 767,
     "not_met": 165
    },
    "depth": 300,
@@ -95,9 +95,9 @@
    "pilot": 96,
    "policies_covered": 102,
    "policies_in_pool": 102,
-   "pool": 17006,
+   "pool": 17021,
    "pool_by_kind": {
-    "constructed": 12166,
+    "constructed": 12181,
     "pack-train": 4313,
     "pack-validation": 527
    },
@@ -114,8 +114,8 @@
     "not_assessed": 38,
     "not_met": 30
    },
-   "total": 1384
+   "total": 1390
   },
-  "rows_sha256": "abbcade68d04d372a339c45d15c36f5b7d0517ffc9e7f4a6c8a1c83185c876f1"
+  "rows_sha256": "c0118eec884a0d88a41390920067cbe30b8be71004a6e8a843d2a66da4590ebc"
  }
 }
