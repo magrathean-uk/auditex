@@ -103,6 +103,13 @@ class PackOutputError(RuntimeError):
 AUDITEX_SARIF_TOOL_URI = "https://github.com/magrathean-uk/auditex"
 AUDITEX_OSCAL_NS = "https://magrathean.uk/auditex/oscal"
 
+# Legal review C1: the fixed scope line every report, customer pack README, handoff and explorer page carries.
+REPORT_DISCLAIMER = (
+    "This report is evidence from an automated, read-only audit run on the date shown. It is not a certificate, an "
+    "assurance opinion or legal advice, and it covers only what the run could read. Coverage gaps are listed and are "
+    "part of the result."
+)
+
 _SECTION_ORDER = (
     "summary",
     "local_answer",
@@ -1628,6 +1635,8 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
     lines = [
         "# Auditex Enterprise Handoff",
         "",
+        REPORT_DISCLAIMER,
+        "",
         f"- Run: {_markdown_cell(payload.get('run_dir'))}",
         f"- Status: {_markdown_cell(payload.get('handoff_status'))}"
         + (f" ({_markdown_cell(', '.join(payload.get('status_reasons') or []))})" if payload.get("status_reasons") else ""),
@@ -1999,6 +2008,8 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
     lines = [
         "# Auditex Customer Pack",
         "",
+        REPORT_DISCLAIMER,
+        "",
         f"- Status: {_markdown_cell(manifest.get('handoff_status'))}",
         f"- Tenant: {_markdown_cell(tenant.get('name'))}",
         f"- Platform: {_markdown_cell(tenant.get('platform'))}",
@@ -2014,7 +2025,7 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         "",
         "1. Read `handoff.md`.",
         "2. Check `validation.json` and the validation summary before trusting the pack.",
-        "3. Review `report.md` for the client-ready report and reviewer index.",
+        "3. Review `report.md` for the report and reviewer index.",
         "4. Review `api-calls.md`: the declared calls and, where the run has a transport ledger, every Graph request and command the audit log observed, with any call outside the declared set.",
         "5. Review `permissions.md` for required and missing scopes.",
         "6. Review `proof-table.md` for finding-to-evidence rows.",
@@ -3184,12 +3195,14 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     lines = [
         "# Auditex Report",
         "",
+        REPORT_DISCLAIMER,
+        "",
         f"- Tenant: {_markdown_cell(_text(summary.get('tenant_name'), 'unknown'))}",
         f"- Status: {_markdown_cell(_text(summary.get('overall_status'), 'unknown'))}",
         f"- Findings: {_markdown_cell(_text(summary.get('finding_count'), str(len(findings))))}",
         f"- Open: {_markdown_cell(_text(summary.get('open_count'), '0'))}",
         f"- Risk: {_markdown_cell(_text(risk.get('grade'), 'unknown'))} / {_markdown_cell(_text(risk.get('score'), '0'))}",
-        f"- Assurance: {_markdown_cell(_text(assurance.get('grade'), 'unknown'))} / {_markdown_cell(_text(assurance.get('score'), '0'))}",
+        f"- Evidence coverage: {_markdown_cell(_text(assurance.get('grade'), 'unknown'))} / {_markdown_cell(_text(assurance.get('score'), '0'))}",
         f"- Scorecard: {_markdown_cell(_text(provider_scorecard.get('grade'), 'unknown'))} / {_markdown_cell(_text(provider_scorecard.get('score'), '0'))}",
     ]
     if live_readiness:
@@ -3503,6 +3516,7 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
         "<style>body{font-family:system-ui,sans-serif;margin:2rem;line-height:1.4}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #ccc;padding:.45rem;text-align:left;vertical-align:top}pre{white-space:pre-wrap;background:#f6f6f6;padding:1rem;overflow:auto}</style>",
         "</head><body>",
         "<h1>Auditex Report</h1>",
+        f"<p class=\"report-disclaimer\">{_html(REPORT_DISCLAIMER)}</p>",
         f"<p><strong>Tenant:</strong> {_html(summary.get('tenant_name') or 'unknown')}</p>",
         f"<p><strong>Status:</strong> {_html(summary.get('overall_status') or 'unknown')}</p>",
     ]
