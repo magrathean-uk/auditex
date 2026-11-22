@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-
 _DNS_COLLECTORS = ("dns_posture", "google_dns_posture")
 
 

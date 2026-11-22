@@ -227,7 +227,10 @@ def test_l1_markdown_and_html_reports_carry_the_disclaimer(tmp_path: Path) -> No
 
 
 def test_l1_customer_pack_readme_and_handoff_carry_the_disclaimer() -> None:
-    from auditex.reporting import _render_pack_readme, render_enterprise_handoff_markdown
+    from auditex.reporting import (
+        _render_pack_readme,
+        render_enterprise_handoff_markdown,
+    )
 
     assert DISCLAIMER in _render_pack_readme({})
     assert DISCLAIMER in render_enterprise_handoff_markdown({})

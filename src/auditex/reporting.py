@@ -62,7 +62,11 @@ from azure_tenant_audit.run_files import (
     hash_run_file,
     read_run_file,
 )
-from azure_tenant_audit.waivers import accepted_risk_summary, has_expired_waiver, is_accepted_status
+from azure_tenant_audit.waivers import (
+    accepted_risk_summary,
+    has_expired_waiver,
+    is_accepted_status,
+)
 
 from .run_bundle import RunBundle, summarize_recomputed_validation
 
