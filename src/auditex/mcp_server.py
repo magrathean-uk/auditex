@@ -473,8 +473,8 @@ def build_response_command(
 
 # MCP clients cap a tool result at tens of kilobytes; a summary over this size drops its heaviest sections (R025).
 SUMMARY_RESPONSE_BUDGET_BYTES = 48_000
-# Sections a size-capped summary may drop, and the tool that reads each one in full.
-_SUMMARY_DROPPABLE_SECTIONS = {
+# Sections a size-capped summary may drop, and the tool that reads each one in full (None: no tool does).
+_SUMMARY_DROPPABLE_SECTIONS: dict[str, str | None] = {
     "report_pack": "auditex_report_analyze",
     "findings": "auditex_proof_table",
     "action_plan": "auditex_report_analyze",
@@ -484,7 +484,8 @@ _SUMMARY_DROPPABLE_SECTIONS = {
     "coverage_ledger": "auditex_enterprise_handoff",
     "capability_matrix": "auditex_permissions_ledger",
     "blockers": "auditex_list_blockers",
-    "diagnostics": "auditex_list_blockers",
+    # No MCP tool returns diagnostics.json; its entry names the bundle artifact to read locally instead.
+    "diagnostics": None,
     "validation": "auditex_enterprise_handoff",
     "data_handling": "auditex_enterprise_handoff",
     "live_readiness": "auditex_enterprise_handoff",
@@ -493,6 +494,9 @@ _SUMMARY_DROPPABLE_SECTIONS = {
     "summary_md": "auditex_report_preview",
     "report_pack_citation_summary": "auditex_report_analyze",
 }
+
+# The bundle artifact a dropped section with no MCP reader is read from locally.
+_SUMMARY_LOCAL_ARTIFACTS = {"diagnostics": "diagnostics.json"}
 
 
 _MANIFEST_ARTIFACTS = "manifest.artifacts"
@@ -527,7 +531,12 @@ def _cap_summary(result: dict[str, Any], budget: int = SUMMARY_RESPONSE_BUDGET_B
             path = capped.get("manifest_path")
         else:
             value = capped.pop(key)
-            entry = {"bytes": size, "read_with": _SUMMARY_DROPPABLE_SECTIONS[key]}
+            entry = {"bytes": size}
+            reader = _SUMMARY_DROPPABLE_SECTIONS[key]
+            if reader is not None:
+                entry["read_with"] = reader
+            elif key in _SUMMARY_LOCAL_ARTIFACTS:
+                entry["artifact"] = _SUMMARY_LOCAL_ARTIFACTS[key]
             path = capped.get(f"{key}_path")
         if isinstance(value, list):
             entry["items"] = len(value)
@@ -583,16 +592,23 @@ class _Measure:
         self.estimate -= size
 
 
-def _drop_fields(capped: dict[str, Any], omitted: dict[str, Any], measure: _Measure, rows: list[tuple[int, str, str | None]]) -> bool:
+def _drop_fields(
+    capped: dict[str, Any], omitted: dict[str, Any], measure: _Measure, rows: list[tuple[int, str, str | None]],
+    private: set[str],
+) -> bool:
+    """Drop ``rows`` largest first until the summary fits. A section losing a field is copied once, on its first
+    loss (``private`` names the sections already copied), so the caller's payload is never changed and a wide
+    section is not copied again for every field it loses."""
     for size, key, name in sorted(rows, key=lambda row: row[0], reverse=True):
         if measure.fits():
             return True
         if name is None:
             omitted[key] = _omitted_entry(capped, key, capped.pop(key), size)
         else:
-            section = dict(capped[key])
-            section.pop(name)
-            capped[key] = section
+            if key not in private:
+                capped[key] = dict(capped[key])
+                private.add(key)
+            capped[key].pop(name)
             _record_omitted_field(capped, omitted, key, name, size)
         measure.dropped(size)
     return measure.fits()
@@ -639,7 +655,8 @@ def _cap_kept_sections(capped: dict[str, Any], omitted: dict[str, Any], budget: 
             )
         elif isinstance(value, list) and value:
             nested.append((_json_size({key: value}), key, None))
-    if _drop_fields(capped, omitted, measure, nested):
+    private: set[str] = set()
+    if _drop_fields(capped, omitted, measure, nested, private):
         return capped
     scalars = [
         (_json_size({name: item}), key, name)
@@ -648,7 +665,7 @@ def _cap_kept_sections(capped: dict[str, Any], omitted: dict[str, Any], budget: 
         for name, item in value.items()
         if name not in _SUMMARY_IDENTITY_FIELDS
     ]
-    if _drop_fields(capped, omitted, measure, scalars) or _drop_sections(capped, measure, keep_identity=True):
+    if _drop_fields(capped, omitted, measure, scalars, private) or _drop_sections(capped, measure, keep_identity=True):
         return capped
     # The run's identity outweighs the detail of the omitted record and the citations.
     _shrink_core(capped, budget)
@@ -676,6 +693,9 @@ def _shrink_core(capped: dict[str, Any], budget: int) -> dict[str, Any]:
         if isinstance(value, list) and value:
             capped[key] = []
             capped[f"{key}_omitted"] = len(value)
+            if key == "citations" and isinstance(capped.get("citation_summary"), dict) and capped["citation_summary"]:
+                # The summary describes the citations returned, which are now none.
+                capped["citation_summary"] = build_citation_summary([])
         elif isinstance(value, dict) and value:
             capped[key] = {}
             capped[f"{key}_omitted"] = len(value)

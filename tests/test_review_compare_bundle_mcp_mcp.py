@@ -386,3 +386,81 @@ def test_a_terminated_mcp_server_stops_a_command_whose_first_process_already_exi
     assert server.returncode != 0
     time.sleep(2.5)
     assert not marker.exists()
+
+
+# Bot review wave 2, group L: summary capping and command shutdown
+
+
+def _sections_copied_per_field_drop(field_count: int, monkeypatch: pytest.MonkeyPatch) -> tuple[int, dict, dict]:
+    from auditex import mcp_server
+
+    seen: list[object] = []  # held, so each copy keeps its own id
+    real = mcp_server._record_omitted_field
+
+    def record(capped, omitted, key, name, size):
+        seen.append(capped[key])
+        return real(capped, omitted, key, name, size)
+
+    monkeypatch.setattr(mcp_server, "_record_omitted_field", record)
+    manifest = {"tenant_name": "acme", "run_id": "r1"} | {f"note_{index}": "x" * 20 for index in range(field_count)}
+    original = dict(manifest)
+    result = mcp_server._cap_summary({"manifest": manifest}, budget=4_000)
+    return len({id(section) for section in seen}), manifest == original and len(manifest) == len(original), result
+
+
+@pytest.mark.parametrize("field_count", [2_000, 4_000])
+def test_capping_a_wide_section_copies_it_once_however_many_fields_it_loses(
+    field_count: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Bot review (greptile/coderabbit, PR 172): every dropped field copied the whole shrinking section.
+    copies, input_unchanged, result = _sections_copied_per_field_drop(field_count, monkeypatch)
+
+    assert copies == 1
+    assert input_unchanged
+    assert len(json.dumps(result, default=str)) <= 4_000
+    assert result["manifest"]["run_id"] == "r1"
+    assert result["omitted_sections"]["manifest.fields"]["more_fields"] > 0
+
+
+def test_omitted_diagnostics_point_at_a_place_that_holds_them(tmp_path: Path) -> None:
+    # Bot review (coderabbit, PR 172): the hint named auditex_list_blockers, which returns no diagnostics.
+    from support import RunBundleBuilder
+
+    from auditex.mcp_server import _cap_summary, list_blockers, summarize_run_raw
+
+    run_dir = RunBundleBuilder(tmp_path).blockers([{"collector": "identity", "status": "blocked"}]).build()
+    (run_dir / "diagnostics.json").write_text(
+        json.dumps([{"collector": f"c{index}", "note": "n" * 200} for index in range(400)]), encoding="utf-8"
+    )
+
+    summary = _cap_summary(summarize_run_raw(str(run_dir)), budget=20_000)
+    entry = summary["omitted_sections"]["diagnostics"]
+    read_with = entry.get("read_with")
+
+    if read_with == "auditex_list_blockers":
+        assert "diagnostics" in list_blockers(str(run_dir)), "the named tool does not return the diagnostics"
+    assert read_with is None
+    assert entry["artifact"] == "diagnostics.json"
+    assert entry["path"].endswith("diagnostics.json")
+
+
+def test_emptied_citations_leave_a_citation_summary_that_agrees() -> None:
+    # Bot review (coderabbit, PR 172): the summary still counted the citation the cap had removed.
+    from auditex.mcp_server import _cap_summary
+    from azure_tenant_audit.citations import build_citation_summary
+
+    citations = [{"artifact_path": "run-manifest.json", "reason": "r" * 200}]
+    payload = {
+        "manifest": {"tenant_name": "acme", "run_id": "r1"},
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
+    }
+
+    result = _cap_summary(payload, budget=400)
+
+    assert len(json.dumps(result, default=str)) <= 400
+    assert result["citations"] == []
+    assert result["citations_omitted"] == 1
+    summary = result["citation_summary"]
+    assert summary == {} or summary.get("citation_count") == 0, summary
+    assert payload["citations"] == citations
