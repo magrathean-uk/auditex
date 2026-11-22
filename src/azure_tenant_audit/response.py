@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,7 +17,9 @@ from .secret_hygiene import redact_argv
 LAB_TENANT_ENV = "AUDITEX_LAB_TENANT_IDS"
 DEFAULT_LAB_TENANT_IDS: tuple[str, ...] = ()
 RESPONSE_SENSITIVE_ARGS = {"--sensitive-users", "--partner-domains", "--command-override", "--adapter-override", "--access-token", "--client-secret", "--token"}
-ALLOWED_RESPONSE_ADAPTERS = tuple(sorted(ADAPTERS.keys()))
+# Only adapters that run a command (R086): teams_admin_rest has no run() and m365_cli is retired (DEC-108 D2).
+ALLOWED_RESPONSE_ADAPTERS = tuple(sorted(name for name in ADAPTERS if name in {"m365dsc", "powershell_graph"}))
+RETIRED_RESPONSE_ADAPTERS = frozenset({"m365_cli"})
 SAFE_RESPONSE_FIELD_BLACKLIST = frozenset("\x00\r\n\t;&|`$<>\"'")
 MAX_RESPONSE_FIELD_LENGTH = 512
 
@@ -53,6 +55,8 @@ class ResponseAction:
     adapter: str
     commands: tuple[str, ...]
     required_fields: tuple[str, ...] = ()
+    # Exchange Online cmdlets exist only inside a connected session, so execution needs one (R086).
+    needs_exchange_session: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,9 @@ class ResponseConfig:
     command_override: str | None = None
     allow_adapter_override: bool = False
     allow_command_override: bool = False
+    # The lab Exchange Online session (kind exchange_online, app-only token, initial domain) the Exchange actions run
+    # in; without one they are blocked before any command runs. Never printed: it holds a token.
+    exchange_session: dict[str, Any] | None = field(default=None, repr=False)
 
 
 RESPONSE_ACTIONS: dict[str, ResponseAction] = {
@@ -89,6 +96,7 @@ RESPONSE_ACTIONS: dict[str, ResponseAction] = {
             'Get-MessageTrace -RecipientAddress "{target}"',
         ),
         required_fields=("target",),
+        needs_exchange_session=True,
     ),
     "user_audit_history": ResponseAction(
         name="user_audit_history",
@@ -99,6 +107,7 @@ RESPONSE_ACTIONS: dict[str, ResponseAction] = {
             'Search-UnifiedAuditLog -UserIds "{target}"',
         ),
         required_fields=("target",),
+        needs_exchange_session=True,
     ),
     "purview_audit_export": ResponseAction(
         name="purview_audit_export",
@@ -301,7 +310,18 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                 "recommendations": {"notes": f"Use one of: {', '.join(ALLOWED_RESPONSE_ADAPTERS)}"},
             }
         )
-    if action is not None:
+    if action is not None and (adapter_name or action.adapter) in RETIRED_RESPONSE_ADAPTERS:
+        blockers.append(
+            {
+                "collector": "response",
+                "item": f"response.action:{action.name}",
+                "status": "failed",
+                "error_class": "response_action_retired",
+                "error": f"Response action '{action.name}' needs the retired '{adapter_name or action.adapter}' adapter.",
+                "recommendations": {"notes": "This action cannot run until it has a supported adapter."},
+            }
+        )
+    elif action is not None:
         try:
             adapter = get_adapter(adapter_name or action.adapter)
         except KeyError:
@@ -343,7 +363,21 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                     }
                 )
 
-        missing = [field for field in action.required_fields if not getattr(config, field, None)]
+        session = config.exchange_session
+        if (config.execute and action.needs_exchange_session
+                and not (isinstance(session, dict) and session.get("kind") == "exchange_online")):
+            blockers.append(
+                {
+                    "collector": "response",
+                    "item": f"response.session:{action.name}",
+                    "status": "failed",
+                    "error_class": "exchange_session_unavailable",
+                    "error": f"Response action '{action.name}' needs a connected Exchange Online session.",
+                    "recommendations": {"notes": "Supply the lab Exchange Online session, or run the dry-run plan."},
+                }
+            )
+
+        missing = [name for name in action.required_fields if not getattr(config, name, None)]
         if missing:
             blockers.append(
                 {
@@ -420,7 +454,10 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
         else:
             last_failure: dict[str, Any] | None = None
             for index, command in enumerate(planned_commands, start=1):
-                command_payload = adapter.run(command, log_event=writer.log_event)
+                if action.needs_exchange_session and adapter.name == "powershell_graph":
+                    command_payload = adapter.run(command, log_event=writer.log_event, session=config.exchange_session)
+                else:
+                    command_payload = adapter.run(command, log_event=writer.log_event)
                 command_payload.setdefault("command", command)
                 command_payload.setdefault("plan_position", index)
                 executed = command_payload.get("error") is None

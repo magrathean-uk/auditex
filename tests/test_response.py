@@ -17,7 +17,7 @@ class _FakeAdapter:
     def dependency_check(self) -> bool:
         return True
 
-    def run(self, command: str, log_event=None):  # noqa: ANN001, ARG002
+    def run(self, command: str, log_event=None, session=None):  # noqa: ANN001, ARG002
         self.run_calls.append(command)
         return {
             "command": command,
@@ -76,6 +76,7 @@ def test_response_execute_runs_when_lab_guard_is_satisfied(tmp_path: Path, monke
             execute=True,
             allow_lab_response=True,
             run_name="response-allowed",
+            exchange_session={"kind": "exchange_online", "access_token": "constructed", "organization": "lab.onmicrosoft.com"},
         )
     )
 
