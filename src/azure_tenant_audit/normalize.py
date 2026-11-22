@@ -739,6 +739,11 @@ def _build_conditional_access_graph(
         role_definitions=role_definitions,
         admin_rows=admin_rows,
         membership_edges=membership_edges,
+        read_member_groups={
+            str(item["groupId"])
+            for item in values(identity_payload, "roleAssignableGroupMembers")
+            if item.get("groupId") and isinstance(item.get("members"), list)
+        },
     )
     break_glass_flagged: list[dict[str, Any]] = []
     break_glass_unverified: list[dict[str, Any]] = []
