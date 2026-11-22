@@ -79,3 +79,33 @@ def test_security_policy_supports_the_released_minor():
     # Every upgrade hint names the supported minor, never an older one.
     hints = re.findall(r"upgrade to the latest ([0-9.]+x)", policy)
     assert hints and set(hints) == {minor}, hints
+
+
+# R074 ------------------------------------------------------------------------------------------------------------
+
+_NUMBER_WORDS = {5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
+
+
+def _section(markdown: str, heading: str) -> str:
+    start = markdown.index(heading)
+    level = len(heading) - len(heading.lstrip("#"))
+    rest = markdown[start + len(heading):]
+    end = re.search(rf"(?m)^#{{1,{level}}} ", rest)
+    return rest[: end.start()] if end else rest
+
+
+def test_admin_guide_teams_section_matches_the_collector_and_adapter():
+    from auditex.scuba_adapters_teams import CERTIFICATE_AUTH_MARKER
+    from azure_tenant_audit.collectors.teams_policy import APP_SETTINGS_OPERATION, TEAMS_OPERATIONS
+
+    operations = len(TEAMS_OPERATIONS) + (APP_SETTINGS_OPERATION not in TEAMS_OPERATIONS)
+    section = _flat(_section(_doc("docs/guides/admin-permission-guide.md"), "### Teams policy reads in app-only runs"))
+    # Without a certificate token every operation the collector records is skipped.
+    skipped_counts = re.findall(r"all (\w+) operations are `skipped`", section)
+    assert skipped_counts == [_NUMBER_WORDS[operations]], f"collector skips {operations} operations: {skipped_counts}"
+    assert APP_SETTINGS_OPERATION in section
+    # The adapter supplies ScubaGear's certificate marker on the certificate skip and decides TEAMS 5.1-5.3.
+    assert "no certificate marker is synthesised" not in section
+    assert "TEAMS 5.1-5.3 remain not assessed" not in section
+    (marker,) = CERTIFICATE_AUTH_MARKER
+    assert marker in section
