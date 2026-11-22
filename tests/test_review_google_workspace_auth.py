@@ -118,6 +118,9 @@ class _UserCredentials:
         self.valid = valid
         self.expired = not valid
         self.refresh_token = "<REDACTED>"
+        self.token_uri = "https://oauth2.googleapis.com/token"
+        self.client_id = "constructed-client"
+        self.client_secret = "<REDACTED>"
         self.refresh_error = refresh_error
         self.tag = tag
         # What Google's token endpoint grants on a refresh: the cache's ``scopes`` are only what was asked for.
@@ -131,7 +134,10 @@ class _UserCredentials:
 
     @classmethod
     def from_authorized_user_file(cls, path: str, scopes: list[str] | None = None) -> _UserCredentials:
-        info = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls.from_authorized_user_info(json.loads(Path(path).read_text(encoding="utf-8")), scopes)
+
+    @classmethod
+    def from_authorized_user_info(cls, info: dict[str, Any], scopes: list[str] | None = None) -> _UserCredentials:
         return cls(scopes if scopes is not None else info.get("scopes") or [], valid=info.get("valid", True),
                    refresh_error=info.get("refresh_error", False), granted=info.get("granted"),
                    failure=info.get("failure"), omit_scope=info.get("omit_scope", False),
@@ -142,11 +148,20 @@ class _UserCredentials:
 
     def refresh(self, _request: Any) -> None:
         if self.refresh_error:
-            raise _RefreshError("invalid_grant")
+            # google-auth's shape (oauth2/_client.py _handle_error_response): the details text, then the parsed body.
+            raise _RefreshError("invalid_grant: Token has been expired or revoked.",
+                                {"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+        if self.failure == "invalid_request_naming_a_grant":
+            raise _RefreshError("invalid_request: missing invalid_grant hint",
+                                {"error": "invalid_request", "error_description": "missing invalid_grant hint"})
         if self.failure == "retryable":
             raise _RefreshError("internal_failure", retryable=True)
         if self.failure == "transport":
             raise _TransportError("connection refused")
+        if self.failure == "plain_text_missing_fields":
+            # A token endpoint body that is not JSON reaches RefreshError as one plain-text argument, the same shape as
+            # google-auth's local missing-fields text, so it can begin with the same words.
+            raise _RefreshError("The credentials do not contain the necessary fields, said the proxy")
         if self.failure == "bad_gateway":
             # google-auth retries only 500, 503, 504, 408 and 429: a 502 HTML page is a non-retryable RefreshError.
             raise _RefreshError("Unexpected response", "<html>502 Bad Gateway</html>")
@@ -176,7 +191,10 @@ def oauth_modules(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             state["flows"] += 1
             if state["flow_error"] is not None:
                 raise state["flow_error"]
-            return _UserCredentials(self.scopes, tag="consented")
+            credentials = _UserCredentials(self.scopes, tag="consented")
+            if state.get("consent_grant") is not None:
+                credentials.granted_scopes = list(state["consent_grant"])
+            return credentials
 
     modules = {
         "google": types.ModuleType("google"),
@@ -198,6 +216,8 @@ def oauth_modules(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
+    # As in real_oauth: the fallback tests assume a volume that enforces ownership (the test volume may be noowners).
+    monkeypatch.setattr(google_auth, "ownership_enforced", lambda _path: True)
     return state
 
 
@@ -422,7 +442,7 @@ def test_r059_refresh_granting_fewer_scopes_is_re_consented(tmp_path: Path, oaut
 def test_r059_temporary_refresh_failure_on_a_valid_cache_keeps_the_sign_in(
     tmp_path: Path, oauth_modules: dict[str, Any], failure: str
 ) -> None:
-    _write_cache(tmp_path, scopes=["scope://a"], failure=failure)
+    _write_cache(tmp_path, scopes=["scope://a"], failure=failure, **{google_auth.VERIFIED_SCOPES_KEY: ["scope://a"]})
     credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
     assert oauth_modules["flows"] == 0
     assert credentials.tag == "cached"
@@ -502,3 +522,260 @@ def test_r092_a_key_that_is_not_json_is_refused_with_a_fixed_message(tmp_path: P
     with pytest.raises(ValueError, match="service_account_key_invalid") as raised:
         google_auth.build_google_credentials(_delegation_config(key))
     assert "PRIVATE" not in str(raised.value)
+
+
+# ---- bot review wave 2 (items 16, 18, 26): only an actual grant is trusted, and a fallback is never written back ----
+
+_SCOPE_A = "https://www.googleapis.com/auth/admin.directory.user.readonly"
+_SCOPE_B = "https://www.googleapis.com/auth/admin.reports.audit.readonly"
+
+
+def _real_refresh_error(response: Any, *, retryable: bool = False) -> Exception:
+    from google.auth.exceptions import RefreshError
+    from google.oauth2 import _client
+
+    try:
+        _client._handle_error_response(response, retryable)
+    except RefreshError as exc:
+        return exc
+    raise AssertionError("google-auth did not raise")
+
+
+def test_item18_grant_errors_match_the_parsed_oauth_error_field_exactly() -> None:
+    from google.auth.exceptions import RefreshError
+
+    assert google_auth._is_grant_error(_real_refresh_error({"error": "invalid_grant", "error_description": "revoked"}))
+    assert google_auth._is_grant_error(_real_refresh_error({"error": "invalid_scope"}))
+    # The grant word only in the description is not a grant error.
+    assert not google_auth._is_grant_error(
+        _real_refresh_error({"error": "invalid_request", "error_description": "invalid_grant hint"}))
+    assert not google_auth._is_grant_error(_real_refresh_error("<html>invalid_grant</html>"))
+    assert not google_auth._is_grant_error(_real_refresh_error({"error": "invalid_grant"}, retryable=True))
+    assert not google_auth._is_grant_error(_real_refresh_error({"error": ["invalid_grant"]}))
+    # A one-argument text is a plain-text endpoint body or google-auth's local text: neither is matched on its words
+    # (repair round 1). Missing local fields are found on the credentials before any refresh.
+    missing = RefreshError("The credentials do not contain the necessary fields need to refresh the access token. "
+                           "You must specify refresh_token, token_uri, client_id, and client_secret.")
+    assert not google_auth._is_grant_error(missing)
+
+
+def test_item18_invalid_request_naming_a_grant_does_not_open_consent(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    _write_cache(tmp_path, scopes=["scope://a"], failure="invalid_request_naming_a_grant", valid=False)
+    with pytest.raises(RuntimeError, match="run again later"):
+        google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+    assert oauth_modules["flows"] == 0
+
+
+def test_item26_refresh_and_consent_record_the_verified_grant(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    _write_cache(tmp_path, scopes=["scope://a", "scope://b"], granted=["scope://a", "scope://b"], valid=False)
+    google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+    cache = json.loads((tmp_path / "cache" / "token.json").read_text(encoding="utf-8"))
+    assert cache[google_auth.VERIFIED_SCOPES_KEY] == ["scope://a", "scope://b"]
+
+    _write_cache(tmp_path, scopes=["scope://a"])
+    google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a", "scope://c")))
+    assert oauth_modules["flows"] == 1
+    cache = json.loads((tmp_path / "cache" / "token.json").read_text(encoding="utf-8"))
+    assert cache["tag"] == "consented" and cache[google_auth.VERIFIED_SCOPES_KEY] == ["scope://a", "scope://c"]
+
+
+@pytest.fixture
+def real_oauth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Authentic google-auth credentials; the token endpoint is down (TransportError) and consent must not start."""
+    from google.auth.exceptions import TransportError
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    state: dict[str, Any] = {"during_refresh": None}
+
+    def _refresh(self: Any, _request: Any) -> None:
+        if state["during_refresh"] is not None:
+            state["during_refresh"]()
+        raise TransportError("connection refused")
+
+    monkeypatch.setattr(Credentials, "refresh", _refresh)
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file",
+                        classmethod(lambda *_a, **_k: pytest.fail("consent must not start during an outage")))
+    # The test volume may ignore ownership (macOS noowners); the fallback tests below assume one that enforces it, and
+    # the noowners case has its own test.
+    monkeypatch.setattr(google_auth, "ownership_enforced", lambda _path: True)
+    return state
+
+
+def _real_cache(tmp_path: Path, scopes: list[str], verified: list[str] | None) -> Path:
+    from datetime import timedelta
+
+    from google.auth import _helpers
+    from google.oauth2.credentials import Credentials
+
+    credentials = Credentials(token="<REDACTED-access>", refresh_token="<REDACTED-refresh>",
+                              token_uri="https://oauth2.googleapis.com/token", client_id="constructed-client",
+                              client_secret="<REDACTED-secret>", scopes=scopes,
+                              expiry=_helpers.utcnow() + timedelta(hours=1))
+    info = json.loads(credentials.to_json())
+    if verified is not None:
+        info[google_auth.VERIFIED_SCOPES_KEY] = verified
+    path = tmp_path / "cache" / "token.json"
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    path.write_text(json.dumps(info), encoding="utf-8")
+    os.chmod(path, 0o600)
+    return path
+
+
+def test_item26_old_cache_cannot_vouch_for_a_scope_during_an_outage(tmp_path: Path, real_oauth: dict[str, Any]) -> None:
+    # google-auth serialises the scopes asked for, never the grant: an old-format cache proves nothing about B.
+    _real_cache(tmp_path, [_SCOPE_A, _SCOPE_B], verified=None)
+    with pytest.raises(RuntimeError, match="run again later"):
+        google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_B,)))
+
+
+def test_item26_verified_grant_without_the_scope_fails_closed_during_an_outage(
+    tmp_path: Path, real_oauth: dict[str, Any]
+) -> None:
+    _real_cache(tmp_path, [_SCOPE_A, _SCOPE_B], verified=[_SCOPE_A])
+    with pytest.raises(RuntimeError, match="run again later"):
+        google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_B,)))
+
+
+def test_item16_fallback_returns_the_cached_token_and_never_writes_it_back(
+    tmp_path: Path, real_oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _real_cache(tmp_path, [_SCOPE_A, _SCOPE_B], verified=[_SCOPE_A, _SCOPE_B])
+    newer = '{"written": "by another run while this refresh failed"}'
+    real_oauth["during_refresh"] = lambda: path.write_text(newer, encoding="utf-8")
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_B,)))
+    assert credentials.valid and credentials.token == "<REDACTED-access>"
+    assert path.read_text(encoding="utf-8") == newer
+
+
+def test_item16_a_refused_cache_write_does_not_abort_a_usable_fallback(
+    tmp_path: Path, real_oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _real_cache(tmp_path, [_SCOPE_A], verified=[_SCOPE_A])
+
+    def _refused(*_a: Any, **_k: Any) -> None:
+        raise PermissionError(13, "refused")
+
+    monkeypatch.setattr(google_auth, "secure_write_text", _refused)
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,)))
+    assert credentials.valid
+
+
+# ---- repair round 1 for group H (items 18, 26) ---------------------------------------------------------------------
+
+
+def test_item18_plain_text_error_beginning_with_the_missing_fields_words_does_not_open_consent(
+    tmp_path: Path, oauth_modules: dict[str, Any]
+) -> None:
+    _write_cache(tmp_path, scopes=["scope://a"], failure="plain_text_missing_fields", valid=False)
+    with pytest.raises(RuntimeError, match="run again later"):
+        google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+    assert oauth_modules["flows"] == 0
+
+
+def test_item18_cache_missing_a_refresh_field_signs_in_again_without_a_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    path = _real_cache(tmp_path, [_SCOPE_A], verified=[_SCOPE_A])
+    info = json.loads(path.read_text(encoding="utf-8"))
+    info["client_secret"] = None  # present but empty: google-auth loads it and could never refresh it
+    path.write_text(json.dumps(info), encoding="utf-8")
+    monkeypatch.setattr(Credentials, "refresh", lambda *_a: pytest.fail("a cache that cannot refresh is not sent"))
+    consented = Credentials(token="<REDACTED-new>", refresh_token="<REDACTED-refresh>", client_id="constructed-client",
+                            client_secret="<REDACTED-secret>", token_uri="https://oauth2.googleapis.com/token",
+                            scopes=[_SCOPE_A], granted_scopes=[_SCOPE_A])
+    flow = types.SimpleNamespace(run_local_server=lambda port=0: consented)
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", classmethod(lambda *_a, **_k: flow))
+    assert google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,))) is consented
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="POSIX modes, not as root")
+def test_item26_outage_fallback_refuses_a_cache_from_a_folder_others_can_change(
+    tmp_path: Path, real_oauth: dict[str, Any]
+) -> None:
+    path = _real_cache(tmp_path, [_SCOPE_A], verified=[_SCOPE_A])
+    os.chmod(path.parent, 0o777)  # another account could have planted this cache and its recorded grant
+    try:
+        with pytest.raises(PermissionError, match="secret_folder_refused"):
+            google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,)))
+    finally:
+        os.chmod(path.parent, 0o700)
+
+
+def test_item26_fresh_consent_narrower_than_the_run_is_refused_naming_the_missing_scopes(
+    tmp_path: Path, oauth_modules: dict[str, Any]
+) -> None:
+    oauth_modules["consent_grant"] = ["scope://a"]
+    with pytest.raises(RuntimeError) as caught:
+        google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a", "scope://b", "scope://c")))
+    message = str(caught.value)
+    assert "scope://b" in message and "scope://c" in message and "scope://a" not in message
+    assert "REDACTED" not in message and caught.value.__cause__ is None
+    assert not (tmp_path / "cache" / "token.json").exists()
+
+
+# ---- repair round 2 for group H (items 18, 26) ---------------------------------------------------------------------
+
+
+def _consented(refresh_token: str | None, scopes: list[str]) -> Any:
+    from google.oauth2.credentials import Credentials
+
+    return Credentials(token="<REDACTED-new>", refresh_token=refresh_token, client_id="constructed-client",
+                       client_secret="<REDACTED-secret>", token_uri="https://oauth2.googleapis.com/token",
+                       scopes=scopes, granted_scopes=scopes)
+
+
+def test_item18_a_cache_auditex_saved_without_a_refresh_token_leads_to_fresh_consent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Google may leave the refresh token out of a consent response; Auditex saves that cache (google-auth drops the
+    # empty field), and the next run must sign in again rather than stop on google-auth's ValueError.
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    consents = [_consented(None, [_SCOPE_A]), _consented("<REDACTED-refresh>", [_SCOPE_A])]
+    flow = types.SimpleNamespace(run_local_server=lambda port=0: consents.pop(0))
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", classmethod(lambda *_a, **_k: flow))
+    monkeypatch.setattr(Credentials, "refresh", lambda *_a: pytest.fail("a cache that cannot refresh is not sent"))
+    google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,)))
+    assert "refresh_token" not in json.loads((tmp_path / "cache" / "token.json").read_text(encoding="utf-8"))
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,)))
+    assert credentials.refresh_token == "<REDACTED-refresh>" and consents == []
+
+
+def test_item26_outage_fallback_is_off_where_the_volume_ignores_ownership(
+    tmp_path: Path, real_oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On a macOS volume mounted with "Ignore ownership" every account passes the owner check, so the recorded grant
+    # could be another account's: the cached token is not used during an outage.
+    _real_cache(tmp_path, [_SCOPE_A], verified=[_SCOPE_A])
+    monkeypatch.setattr(google_auth, "ownership_enforced", lambda _path: False)
+    with pytest.raises(RuntimeError, match="run again later"):
+        google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,)))
+
+
+def test_item26_default_oauthlib_partial_consent_names_the_missing_scopes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Without scope relaxation oauthlib raises its own Warning on a narrower grant, before any credentials exist.
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from oauthlib.oauth2.rfc6749.parameters import parse_token_response
+
+    monkeypatch.delenv("OAUTHLIB_RELAX_TOKEN_SCOPE", raising=False)
+    response = json.dumps({"access_token": "<REDACTED-access>", "token_type": "Bearer", "expires_in": 3600,
+                           "refresh_token": "<REDACTED-refresh>", "scope": _SCOPE_A})
+
+    def _consent(port: int = 0) -> Any:
+        return parse_token_response(response, scope=[_SCOPE_A, _SCOPE_B])
+
+    flow = types.SimpleNamespace(run_local_server=_consent)
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", classmethod(lambda *_a, **_k: flow))
+    with pytest.raises(RuntimeError) as caught:
+        google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A, _SCOPE_B)))
+    message = str(caught.value)
+    assert "missing scopes: " + _SCOPE_B in message and _SCOPE_A not in message
+    assert "REDACTED" not in message and caught.value.__cause__ is None
+    assert not (tmp_path / "cache" / "token.json").exists()

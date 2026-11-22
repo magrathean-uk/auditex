@@ -466,3 +466,38 @@ def test_the_sharepoint_admin_token_is_minted_from_the_certificate(certificate_m
     assert [request["scope"] for request in entra.token_requests] == [SHAREPOINT_ADMIN_ORIGIN + "/.default"]
     assert entra.token_requests[0]["grant_type"] == "client_credentials"
     assert token_fits(token, SHAREPOINT_ADMIN_ORIGIN)
+
+
+# ---- bot review wave 2 (item 14): a malformed authority is the fixed refusal, never urllib's ValueError ------------
+
+
+@pytest.mark.parametrize("authority", ["https://login.microsoftonline.com:abc/", "https://login.microsoftonline.com:99999/",
+                                       "https://[login.microsoftonline.com/", "https://login.microsoftonline.com]/"])
+def test_malformed_authority_is_the_fixed_refusal(authority):
+    with pytest.raises(CertificateAuthError) as caught:
+        certificate_auth.certificate_authority(authority, TENANT)
+    assert caught.value.error_code == "certificate_authority_refused"
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+@pytest.mark.parametrize("host", sorted(certificate_auth.CERTIFICATE_AUTHORITY_HOSTS))
+def test_every_entra_authority_is_still_accepted(host):
+    assert certificate_auth.certificate_authority(f"https://{host}/", TENANT) == f"https://{host}/{TENANT}"
+
+
+def test_malformed_authority_port_stops_the_engine_before_the_run_folder(monkeypatch, tmp_path, caplog):
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    from azure_tenant_audit import cli
+
+    use_fake_certificate(monkeypatch)
+    monkeypatch.setenv("AZURE_AUTHORITY", "https://login.microsoftonline.com:private-marker/")
+    monkeypatch.setattr(cli, "GraphClient", lambda *_a, **_k: pytest.fail("no client"))
+    out = tmp_path / "out"
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", TENANT, "--client-id", CLIENT_ID, *FAKE_CERTIFICATE_ARGS, "--out", str(out),
+    ])
+    with caplog.at_level("INFO"):
+        assert cli.run_live(args) == 2
+    assert "private-marker" not in caplog.text
+    assert not out.exists()

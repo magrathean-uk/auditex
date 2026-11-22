@@ -957,7 +957,28 @@ local Git-excluded path. Do not place those paths in repository defaults.
 No command or MCP tool accepts a bearer token: Microsoft 365 tokens are minted in memory from the reader app's certificate.
 
 The Google OAuth token cache is written owner-only (0600); a folder Auditex creates for it is 0700, and an existing
-folder keeps its mode. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
+folder keeps its mode. The cache is replaced in one step: the new copy is written to a file beside it, which then takes
+its place. Its folder must therefore let you create and replace files there, be owned by you (or root) and not let other
+accounts replace entries (no group or world write unless the sticky bit is set, as on `/tmp`). On macOS the folder must
+also carry no ACL entry that allows anything: an allow entry can let another account replace files in a `0700` folder,
+or pass read access on to the cache written into it. Deny-only entries, such as the one on `~/Desktop`, are accepted.
+The ACL is read with the C library's ACL calls through Python's standard `ctypes`; Linux needs no separate check because
+a POSIX ACL shows in the mode's group bits. A folder that fails any of this, or a missing folder that cannot be created,
+is refused with `secret_folder_refused`, which never names the path. Point `--token-cache` at a file in an
+owner-controlled writable folder; the default `.secrets/` folder is created `0700`. The cache is read through the same
+folder check, and only when it is a regular file (not a link) you own with no group or world write and no allowing ACL;
+otherwise the run stops with `secret_file_refused`, so a cache another account could have planted is never used. The
+cache is refreshed every run and saved only after a successful refresh or a fresh consent, together with the scopes
+Google actually granted (`auditex_verified_scopes`). A fresh consent that grants fewer scopes than the run needs is
+neither used nor saved; the run stops and names the missing scopes. When Google's token endpoint is down, a cached
+token still in date is used without rewriting the cache, and only when its recorded grant covers the run; an older
+cache that records no grant, or one whose grant is narrower, stops the run with "run again later". This outage
+fallback is off where the owner check proves nothing: on a macOS volume with "Ignore ownership on this volume" set
+(mounted `noowners`, read from the volume's mount flags), when those flags cannot be read, and on Windows; there an
+outage always stops the run with "run again later". Only the token endpoint's own grant errors (`invalid_grant`,
+`invalid_scope`, `invalid_client`, `unauthorized_client`) or a cache missing a field a refresh needs (checked on the
+cached credentials before any refresh, never from an error's text, and including a cache saved from a consent that
+returned no refresh token) start a new consent. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
 others can read, or a link, is refused with `service_account_key_refused`.
 
 `--verbose` raises Auditex's own logging to DEBUG but keeps `urllib3` and `msal` at WARNING, because their request
