@@ -1,0 +1,198 @@
+"""Review lane compare-bundle-mcp: resuming a run folder (R051, R052, R114)."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+# R051 / R052 / R114: resuming a run folder
+
+
+def _first_session(tmp_path: Path, **metadata: Any) -> Path:
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, "lab", "r1")
+    writer.write_bundle({"collectors": [], "mode": "app", **metadata})
+    return writer.run_dir
+
+
+def _manifest(run_dir: Path) -> dict[str, Any]:
+    return json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+
+
+def test_live_resume_of_an_offline_replay_folder_is_refused(tmp_path: Path) -> None:
+    import pytest
+
+    from azure_tenant_audit.output import AuditWriter, ResumeRefusedError
+
+    writer = AuditWriter(tmp_path, "lab", "r1")
+    writer.write_bundle({"collectors": [], "mode": "offline", "replay_source": {"file": "sample_result.json"}})
+
+    with pytest.raises(ResumeRefusedError, match="offline replay"):
+        AuditWriter(tmp_path, "lab", run_dir=writer.run_dir)
+    assert _manifest(writer.run_dir)["replay_source"] == {"file": "sample_result.json"}
+
+
+def test_the_engine_cli_refuses_a_live_resume_of_a_replay_with_exit_2_and_no_traceback(
+    tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
+    # The refusal goes through the CLI guard: a fixed, path-free message and exit 2, before any tenant contact.
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, "lab", "r1")
+    writer.write_bundle({"collectors": [], "mode": "offline", "replay_source": {"file": "sample_result.json"}})
+
+    def refuse_resume(**_: Any) -> int:
+        AuditWriter(tmp_path, "lab", run_dir=writer.run_dir)
+        return 0
+
+    monkeypatch.setattr(cli, "run_live", lambda args, **kwargs: refuse_resume())
+    code = cli.main(["--tenant-name", "lab", "--out", str(tmp_path), "--resume-from", str(writer.run_dir)])
+
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "offline replay" in err and "Traceback" not in err
+    assert str(tmp_path) not in err
+
+
+def test_resume_drops_the_earlier_sessions_waiver_and_sampling_keys(tmp_path: Path) -> None:
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(
+        tmp_path,
+        waiver_path="waivers.json",
+        top_limit=5,
+        sample_truncated=True,
+        truncated_sections=["users"],
+        probe_mode="full",
+    )
+    assert _manifest(run_dir)["waiver_path"] == "waivers.json"
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir).write_bundle({"collectors": [], "mode": "app"})
+
+    manifest = _manifest(run_dir)
+    assert manifest["mode"] == "app"
+    for key in ("waiver_path", "top_limit", "sample_truncated", "truncated_sections", "probe_mode"):
+        assert key not in manifest, key
+
+
+def test_resume_drops_the_earlier_sessions_preset_preflight_and_throttle_choices(tmp_path: Path) -> None:
+    # Repair round 1 (R051): the engine CLI passes None for a choice the resumed session did not make.
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path, collector_preset="full", preflight_path="preflight.json", throttle_mode="safe")
+    assert _manifest(run_dir)["collector_preset"] == "full"
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir).write_bundle(
+        {"collectors": [], "mode": "app", "collector_preset": None, "preflight_path": None, "throttle_mode": None}
+    )
+
+    manifest = _manifest(run_dir)
+    for key in ("collector_preset", "preflight_path", "throttle_mode"):
+        assert key not in manifest, key
+
+
+def test_resume_removes_the_earlier_sessions_post_finalisation_answers(tmp_path: Path) -> None:
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    stale = ["model_assessment.json", "local_answer.json", "reports/handoff.md", "reports/explorer.html"]
+    for relative in stale:
+        (run_dir / relative).write_text("{}", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    assert [relative for relative in stale if (run_dir / relative).exists()] == []
+
+
+def test_resume_removes_post_finalisation_answers_whatever_their_name_case(tmp_path: Path) -> None:
+    # Repair round 1 (R052): on a case-insensitive volume MODEL_ASSESSMENT.json is read as model_assessment.json.
+    import os
+
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    stale = ["MODEL_ASSESSMENT.json", "Local_Answer.json", "reports/HANDOFF.md"]
+    for relative in stale:
+        (run_dir / relative).write_text("{}", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    left = set(os.listdir(run_dir)) | {f"reports/{name}" for name in os.listdir(run_dir / "reports")}
+    assert [relative for relative in stale if relative in left] == []
+
+
+def test_resume_removes_post_finalisation_answers_under_a_case_folded_name(tmp_path: Path) -> None:
+    # Review of repair round 1 (R052): APFS folds the long s (U+017F) to s, which str.lower() does not.
+    import os
+
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    stale = "model_a\u017f\u017fessment.json"
+    (run_dir / stale).write_text("{}", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    assert stale not in os.listdir(run_dir)
+
+
+def test_resume_keeps_a_root_file_whose_name_only_folds_to_a_generated_report_path(tmp_path: Path) -> None:
+    # Repair round 2 (R052): NFKC turns a fullwidth solidus (U+FF0F) into "/". A root file named
+    # "reports\uff0fhandoff.md" is not reports/handoff.md on any volume, so a resume must leave it alone.
+    import os
+
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    operator_file = "reports\uff0fhandoff.md"
+    (run_dir / operator_file).write_text("operator notes", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    assert operator_file in os.listdir(run_dir)
+
+
+def test_resume_keeps_a_report_whose_name_only_ends_in_a_newline(tmp_path: Path) -> None:
+    # Review of repair round 2 (R052): "handoff.md\n" is not reports/handoff.md. It is neither removed on resume nor
+    # left out of the bundle hashes as a post-finalisation output.
+    import os
+
+    from azure_tenant_audit.bundle_integrity import is_post_finalization_output
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    (run_dir / "reports").mkdir(exist_ok=True)
+    (run_dir / "reports" / "handoff.md\n").write_text("operator notes", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    assert "handoff.md\n" in os.listdir(run_dir / "reports")
+    assert not is_post_finalization_output("reports/handoff.md\n")
+
+
+def test_resume_under_another_tenant_name_keeps_one_run_id(tmp_path: Path) -> None:
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+
+    AuditWriter(tmp_path, "Other", run_dir=run_dir).write_bundle({"collectors": [], "mode": "app"})
+
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert _manifest(run_dir)["run_id"] == "r1"
+    assert summary["run_id"] == "r1"
+    assert summary["tenant_name"] == "lab"
+
+
+def test_resume_of_a_renamed_folder_keeps_the_manifest_run_id(tmp_path: Path) -> None:
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    renamed = run_dir.rename(run_dir.with_name("lab-r1-copy"))
+
+    AuditWriter(tmp_path, "lab", run_dir=renamed).write_bundle({"collectors": [], "mode": "app"})
+
+    summary = json.loads((renamed / "summary.json").read_text(encoding="utf-8"))
+    assert summary["run_id"] == _manifest(renamed)["run_id"] == "r1"

@@ -20,7 +20,7 @@ from .guarded_io import (
 )
 
 MAX_RUN_FILE_BYTES = 32 * 1024 * 1024
-MAX_RUN_DATA_BYTES = 256 * 1024 * 1024
+MAX_RUN_DATA_BYTES = 512 * 1024 * 1024  # at least the shareable redaction scan's per-file cap (R090)
 _DEFAULT_LIMIT = object()
 _CHUNK_BYTES = 1024 * 1024
 _WRITER_READS = ContextVar("auditex_uncapped_writer_reads", default=False)

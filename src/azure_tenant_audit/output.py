@@ -26,6 +26,7 @@ from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
 from .evidence_db import register_run_log
 from .findings import apply_coverage_gaps_to_report_pack
+from .guarded_io import UnsafeRunFileError
 from .partner_domains import (
     BUNDLE_PATH as PARTNER_DOMAINS_PATH,
 )
@@ -174,6 +175,38 @@ class AuditLogger:
                 LOG.exception("Failed to dispatch audit event listener.")
 
 
+# Manifest keys that describe one session (a replay source, the waiver file, sampling limits, a probe, the operator's
+# preset, preflight and throttle choices): a resumed run does not inherit them from the earlier session's manifest (R051).
+SESSION_SCOPED_MANIFEST_KEYS = frozenset(
+    {
+        "collector_preset",
+        "preflight_path",
+        "throttle_mode",
+        "replay_source",
+        "fixture_provenance",
+        "waiver_path",
+        "top_limit",
+        "sample_truncated",
+        "truncated_sections",
+        "probe_mode",
+        "probe_surface",
+    }
+)
+
+
+class ResumeRefusedError(UnsafeRunFileError):
+    """A run folder that cannot be resumed (an offline replay's folder).
+
+    An ``UnsafeRunFileError``, so the CLI guard prints this fixed, path-free refusal and exits 2.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("resume-from", reason="offline_replay")
+
+    def __str__(self) -> str:
+        return "Refusing resume-from: the folder is an offline replay, which cannot be resumed as a live run. Start a new run."
+
+
 class AuditWriter:
     # A class default as well, so a writer made without __init__ (a test double) can still count.
     lone_surrogates_replaced = 0
@@ -230,6 +263,20 @@ class AuditWriter:
         self.checkpoint_state_path = self.checkpoints_dir / "checkpoint-state.json"
         existing_manifest_path = self.run_dir / "run-manifest.json"
         existing_manifest = self._safe_load_json(existing_manifest_path)
+        if run_dir is not None and isinstance(existing_manifest, dict):
+            if existing_manifest.get("mode") == "offline" or existing_manifest.get("replay_source"):
+                # R051: only a live session resumes a folder, and an offline replay's folder would label the live
+                # evidence as replayed with no tenant contact (its audit log keeps the replay's run.started).
+                raise ResumeRefusedError()
+            # R114: a resumed run keeps the identity its manifest recorded, whatever the folder is called now or the
+            # tenant name this session was given, so the manifest, summary and checkpoints name one run.
+            recorded_run_id = existing_manifest.get("run_id")
+            if isinstance(recorded_run_id, str) and recorded_run_id.strip():
+                self.run_id = recorded_run_id
+            recorded_tenant = existing_manifest.get("tenant_name")
+            if isinstance(recorded_tenant, str) and recorded_tenant.strip():
+                tenant_name = recorded_tenant
+            self._remove_post_finalization_outputs()
         self._checkpoint_state: dict[str, dict[str, Any]] = self._load_checkpoint_state()
         self.coverage_index_path = self.index_dir / "coverage.jsonl"
         self.summary: dict[str, Any] = {"schema_version": SUMMARY_SCHEMA_VERSION, "tenant_name": tenant_name, "run_id": self.run_id, "collectors": []}
@@ -264,9 +311,24 @@ class AuditWriter:
             for key, value in existing_manifest.items():
                 if key in {"created_utc", "run_dir", "audit_log_path", "audit_command_log_path", "debug_log_path", "collectors"}:
                     continue
+                if key in SESSION_SCOPED_MANIFEST_KEYS:
+                    # R051: these describe the session that wrote them; this session records its own or none.
+                    continue
                 self._manifest[key] = value
             if existing_manifest.get("tenant_name"):
                 self._manifest["tenant_name"] = existing_manifest["tenant_name"]
+
+    def _remove_post_finalization_outputs(self) -> None:
+        """Remove the answers, previews and reports written after an earlier session was finalised (R052).
+
+        They were built from that session's evidence; a resumed run changes the evidence, so keeping them would let
+        ``auditex explain``, report previews and the MCP local answer show the incomplete first session's verdicts.
+        """
+        from .bundle_integrity import post_finalization_outputs
+        from .guarded_io import remove_guarded_output
+
+        for relative in post_finalization_outputs(self.run_dir):
+            remove_guarded_output(self.run_dir / relative)
 
     def _mkdir_private(self, path: Path) -> None:
         """Create and tighten owned run directories through admitted, no-follow descriptors."""

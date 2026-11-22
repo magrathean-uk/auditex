@@ -259,7 +259,8 @@ def test_same_label_cannot_override_different_established_uuids(tmp_path):
 
 
 def _legacy(root: Path, *, tenant_id: str | None = None, label: str = "Customer") -> Path:
-    manifest = {"tenant_name": label, "run_id": root.name, "platform": "m365"}
+    # Dated: a chronological compare blocks an undated run (R132); these runs test legacy tenant identity only.
+    manifest = {"tenant_name": label, "run_id": root.name, "platform": "m365", "created_utc": "2026-01-01T00:00:00Z"}
     if tenant_id:
         manifest["tenant_id"] = tenant_id
     _write(root / "run-manifest.json", manifest)

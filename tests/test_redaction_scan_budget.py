@@ -42,17 +42,20 @@ def test_shareable_preview_preserves_local_structure_after_redaction(tmp_path: P
     assert expected["executive_summary"]["ordinary_count"] == 42
 
 
+# The synthetic 90k-user run's two largest files scaled to the 250,000 users the identity collector reads (R090).
+_PROJECTED_250K = (46_281_912 * 250_000 // 90_000, 41_546_181 * 250_000 // 90_000)
+
+
 @pytest.mark.parametrize("sizes", [
     (46_281_912, 41_546_181),  # the largest files of the synthetic 90k-user run
     (48 * 1024 * 1024,) * 3,  # more than the old aggregate limit
+    _PROJECTED_250K,  # a 250,000-user run (R090)
 ])
 def test_scan_accepts_large_synthetic_file_sizes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sizes: tuple[int, ...]
 ) -> None:
     root = tmp_path / "run"
     _sparse_run(root, sizes)
-    assert redaction._MAX_FILE_BYTES == 64 * 1024 * 1024
-    assert redaction._MAX_SCAN_BYTES == 256 * 1024 * 1024
     # NUL-filled sparse files are not JSON. Exercise the real reader and budget, skipping only parsing.
     read_sizes: list[int] = []
     monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: read_sizes.append(len(data)))
@@ -62,6 +65,94 @@ def test_scan_accepts_large_synthetic_file_sizes(
     assert read_sizes == list(sizes)
     for profile in (redaction.PROFILE_SHAREABLE, redaction.PROFILE_CUSTOMER_PACK, redaction.PROFILE_EXPLAINER):
         assert redaction.redact_output({"owner": "private"}, profile=profile, context=context)["owner"] == "<redacted-text>"
+
+
+_LATIN_USER = {
+    "displayName": "Alexandra Konstantinopoulou-Smythe",
+    "userPrincipalName": "alexandra.konstantinopoulou-smythe@halcyonfreight-logistics.example",
+    "mail": "alexandra.konstantinopoulou-smythe@halcyonfreight-logistics.example",
+    "department": "Customer Service and Operations",
+}
+# Non-Latin names and departments are written as \uXXXX escapes, six bytes a character (repair round 2, R090).
+_JAPANESE_USER = {
+    "displayName": "\u5c71\u7530 \u82b1\u5b50\uff08\u6771\u4eac\u672c\u793e \u55b6\u696d\u4f01\u753b\u90e8 "
+    "\u30b7\u30cb\u30a2\u30de\u30cd\u30fc\u30b8\u30e3\u30fc\uff09",
+    "userPrincipalName": "hanako.yamada.tokyo-headquarters.sales-planning@halcyonfreight-logistics-japan.example",
+    "mail": "hanako.yamada.tokyo-headquarters.sales-planning@halcyonfreight-logistics-japan.example",
+    "department": "\u55b6\u696d\u4f01\u753b\u90e8 \u56fd\u969b\u7269\u6d41\u4e8b\u696d\u672c\u90e8 \u6771\u65e5\u672c\u30a8\u30ea\u30a2 "
+    "\u6cd5\u4eba\u55b6\u696d\u7b2c\u4e09\u30b0\u30eb\u30fc\u30d7 \u81ea\u52d5\u8eca\u7523\u696d\u62c5\u5f53",
+}
+
+
+def _full_user_section_bytes(users: int, person: dict[str, str] = _LATIN_USER) -> int:
+    """Bytes of ``normalized/users.json`` for ``users`` users, in the writer's layout (indent 2), built by the real
+    normaliser from Graph users with every field it keeps filled (sign-in activity included)."""
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    rows = [
+        {
+            "id": f"0d3e1a7f-0000-4000-8000-{index:012d}",
+            **person,
+            "userType": "Member",
+            "accountEnabled": True,
+            "createdDateTime": "2021-03-04T10:11:12Z",
+            "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z",
+        }
+        for index in range(users)
+    ]
+    activity = {"lastSuccessfulSignInDateTime": "2026-11-01T08:00:00Z", "lastSignInDateTime": "2026-11-01T08:00:00Z"}
+    snapshot = build_normalized_snapshot(
+        tenant_name="lab",
+        run_id="r1",
+        collector_payloads={
+            "identity": {
+                "users": {"value": rows},
+                "userSignInActivity": {"value": [{"id": row["id"], "signInActivity": activity} for row in rows]},
+            }
+        },
+    )
+    return len(json.dumps(snapshot["users"], indent=2).encode("utf-8"))
+
+
+def test_the_per_file_cap_covers_a_full_users_section_at_the_250000_user_collection_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Repair round 1 (R090): the normal user record shape and layout, at the identity collector's 250,000-user cap.
+    per_user = _full_user_section_bytes(2) - _full_user_section_bytes(1)
+    users_file = _full_user_section_bytes(1) + per_user * (250_000 - 1)
+    assert users_file > 180 * 1024 * 1024  # the shape the review measured (about 189 MiB), not a smaller one
+    other_files = _PROJECTED_250K[1]  # the next largest file of the 90k-user run, scaled to 250,000 users
+    root = tmp_path / "run"
+    _sparse_run(root, (users_file, other_files))
+    monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: None)
+
+    assert len(redaction.snapshot_run(root)) == 2
+    assert not redaction.context_for_run(root).incomplete
+
+
+def test_the_caps_cover_250000_users_with_non_latin_names_and_long_addresses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Repair round 2 (R090): a Japanese display name and department, long addresses and sign-in activity take more
+    # than 1,100 bytes a user, so the users section alone is over 256 MiB at the 250,000-user collection cap.
+    per_user = _full_user_section_bytes(2, _JAPANESE_USER) - _full_user_section_bytes(1, _JAPANESE_USER)
+    assert per_user > 1_100
+    users_file = _full_user_section_bytes(1, _JAPANESE_USER) + per_user * (250_000 - 1)
+    assert users_file > 256 * 1024 * 1024
+    root = tmp_path / "run"
+    _sparse_run(root, (users_file, *_PROJECTED_250K))
+    monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: None)
+
+    assert len(redaction.snapshot_run(root)) == 3
+    assert not redaction.context_for_run(root).incomplete
+
+
+def test_the_run_file_reader_accepts_every_normalised_file_the_redaction_scan_accepts() -> None:
+    # Review of repair round 2 (R090): diff, compare and the local report read normalised files through
+    # ``read_run_file``; a cap lower than the scan's drops or refuses a users section the shareable output accepts.
+    from azure_tenant_audit import run_files
+
+    assert run_files._limit_for("normalized/users.json") >= redaction._MAX_FILE_BYTES
 
 
 @pytest.fixture
@@ -77,6 +168,21 @@ def _message(exc: pytest.ExceptionInfo[redaction.ContextIncompleteError], root: 
     assert "private-name" not in message and str(root) not in message
     assert "private content" not in message
     return message
+
+
+def test_a_file_over_the_real_per_file_cap_still_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # R090 raised the caps; the real cap (not a lowered test limit) still refuses a larger file.
+    assert redaction._MAX_FILE_BYTES >= max(_PROJECTED_250K)
+    assert redaction._MAX_SCAN_BYTES >= sum(_PROJECTED_250K)
+    root = tmp_path / "run"
+    _sparse_run(root, (redaction._MAX_FILE_BYTES + 1,))
+    monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: None)
+
+    with pytest.raises(redaction.ContextIncompleteError) as error:
+        redaction.snapshot_run(root)
+
+    assert error.value.size_limit
+    assert redaction.context_for_run(root).incomplete
 
 
 @pytest.mark.usefixtures("low_limits")

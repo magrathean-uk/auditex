@@ -101,7 +101,7 @@ def test_offline_validation_scrubs_the_child_environment(
         observed["env"] = dict(os.environ if kwargs.get("env") is None else kwargs["env"])
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr("auditex.command_runner.subprocess.run", run)
+    monkeypatch.setattr("auditex.command_runner._run_process", run)
     result = tools["auditex_run_offline_validation"](tenant_name="sample", out_dir="offline")
 
     assert result["returncode"] == 0
@@ -119,7 +119,7 @@ def test_offline_validation_closes_child_stdin(tools: dict[str, Any], monkeypatc
         observed.update(kwargs)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr("auditex.command_runner.subprocess.run", run)
+    monkeypatch.setattr("auditex.command_runner._run_process", run)
     result = tools["auditex_run_offline_validation"](tenant_name="sample", out_dir="offline")
 
     assert result["returncode"] == 0
@@ -149,7 +149,7 @@ def test_offline_validation_drops_operator_input_flags(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(mcp_server, "build_cli_command", build_with_inputs)
-    monkeypatch.setattr("auditex.command_runner.subprocess.run", run)
+    monkeypatch.setattr("auditex.command_runner._run_process", run)
     result = tools["auditex_run_offline_validation"](tenant_name="sample", out_dir="offline")
 
     assert result["returncode"] == 0
@@ -186,7 +186,7 @@ def test_other_tools_keep_operator_input_environment(
         observed["stdin"] = kwargs.get("stdin")
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr("auditex.command_runner.subprocess.run", run)
+    monkeypatch.setattr("auditex.command_runner._run_process", run)
     result = tools[tool_name](**arguments)
 
     assert result["returncode"] == 0

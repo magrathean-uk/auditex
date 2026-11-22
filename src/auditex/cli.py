@@ -1467,8 +1467,15 @@ def main(argv: list[str] | None = None) -> int:
         context = current_context()
         context.bind_run(argv[1])
         context.bind_run(argv[2])
-        print(json.dumps(diff_run_directories(argv[1], argv[2]), indent=2))
-        return 0
+        from .compare import diff_two_runs
+
+        # The engine diff's guarded loaders refuse an unsafe run file (exit 2) before verification could turn it into
+        # a blocked pair; the printed diff then goes through compare's tenant gate, bundle verification and
+        # reassessment check (R054), and a blocked pair exits 1.
+        diff_run_directories(argv[1], argv[2])
+        result = diff_two_runs(argv[1], argv[2])
+        print(json.dumps(result, indent=2))
+        return 1 if result.get("status") == "blocked" else 0
     if argv[0] == "probe":
         parser = _build_probe_parser()
         _refuse_removed_auth_flag(parser, argv[1:])

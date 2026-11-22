@@ -664,10 +664,14 @@ def _collect(value: Any, found: _Found, *, names: bool) -> None:
 # -- contexts ---------------------------------------------------------------------------------------------------------
 
 # Discovery limits. Hitting one is never silent: the context is flagged ``incomplete`` (see ``RedactionContext``).
-# A synthetic 90k-user run measured 44.1 MiB for its largest file and 84.1 MiB total. These limit scan bytes, not RSS.
-_MAX_SCAN_FILES = 5_000            # ``normalized/**/*.json`` files per run
-_MAX_FILE_BYTES = 64 * 1024 * 1024  # one file; a larger one is not read
-_MAX_SCAN_BYTES = 256 * 1024 * 1024  # all files of one run together
+# A synthetic 90k-user run measured 44.1 MiB for its largest file and 84.1 MiB total. A users section with every
+# field the normaliser keeps, at the 250,000 users the identity collector reads, is about 189 MiB in the writer's
+# layout with Latin names and about 265 MiB with Japanese names and departments (written as \uXXXX escapes) and long
+# addresses; the rest of such a run is about 110 MiB (R090). The caps allow about 2,100 bytes a user and still refuse
+# anything larger (fail closed). These limit scan bytes, not RSS.
+_MAX_SCAN_FILES = 5_000             # ``normalized/**/*.json`` files per run
+_MAX_FILE_BYTES = 512 * 1024 * 1024  # one file; a larger one is not read
+_MAX_SCAN_BYTES = 1024 * 1024 * 1024  # all files of one run together
 _MAX_SCAN_DEPTH = 32               # directory levels below ``normalized/``
 _MAX_REASONS = 20                  # problems a context keeps (the rest is only counted)
 _MAX_LISTED_FILES = 10             # problems a refusal names (the rest is only counted)
@@ -2855,5 +2859,15 @@ writecapablescopes writecapablescopesusedforreadonlymethods writeenterprisehando
 writeexportcheckpoint writeexportrecords writeexportsummary writelikepermissioncount writerisk
 x509certificatemultifactor x509certificatesinglefactor xdgdatahome xgithubapiversion xhttpmethod xhttpmethodoverride
 xmethodoverride xrefs yammerenterprise zapenabled
+    """.split()
+)
+
+# Field names the compare, diff, run-bundle and MCP review lane added. They stay out of the generated list above so
+# lanes do not edit it at once; the integrator folds them into it when it next regenerates the list (R133).
+_D5_FIELD_NAMES = _D5_FIELD_NAMES | frozenset(
+    """
+aicontext auditexmcpcommandtimeoutseconds later morefields newlyassessed newlyassessedcount newlyassessedfindings
+notreassessedfindings omittedsections partialrundir readwith reportpack resolutionbasis summarytruncated
+toolchainreadiness citationsomitted citationsummaryomitted evidencemissingomitted sections
     """.split()
 )

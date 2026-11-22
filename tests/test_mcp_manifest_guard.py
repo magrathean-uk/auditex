@@ -103,7 +103,9 @@ def _plant_bad_file(path: Path, kind: str) -> None:
         path.mkdir()
     elif kind == "oversize":
         with path.open("wb") as handle:
-            handle.truncate(256 * 1024 * 1024 + 1)
+            from azure_tenant_audit.run_files import MAX_RUN_DATA_BYTES
+
+            handle.truncate(MAX_RUN_DATA_BYTES + 1)
     else:
         raise AssertionError(kind)
 
