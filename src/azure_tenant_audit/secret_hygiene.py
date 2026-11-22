@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import stat
+import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -139,22 +140,51 @@ def ensure_private_dir(path: str | Path, *, mode: int = 0o700) -> Path:
     return directory
 
 
+def _create_private_parents(directory: Path, *, mode: int = 0o700) -> None:
+    """Create the missing folders above a secret file owner-only; a folder that already exists is left as it is.
+
+    The secret file itself is what is kept private, so an operator's working or shared folder never has its mode changed.
+    """
+    missing: list[Path] = []
+    current = directory
+    while not current.exists() and current != current.parent:
+        missing.append(current)
+        current = current.parent
+    for folder in reversed(missing):
+        try:
+            folder.mkdir(mode=mode)
+        except FileExistsError:
+            continue
+        if os.name == "posix":
+            try:
+                os.chmod(folder, mode)  # mkdir's mode is reduced by the umask
+            except OSError:
+                pass
+
+
 def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> Path:
-    """Write text without briefly creating world-readable secret files."""
+    """Write text without briefly creating world-readable secret files.
+
+    The text goes to a new owner-only file beside the target (created exclusively, never through a link), which then
+    replaces the target in one step: an old copy at a looser mode is never rewritten in place, and a link at the path
+    is replaced rather than followed.
+    """
 
     target = Path(path).expanduser()
-    ensure_private_dir(target.parent)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    fd = os.open(str(target), flags, mode)
+    _create_private_parents(target.parent)
+    fd, temporary = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(content)
-    finally:
         if os.name == "posix":
-            try:
-                os.chmod(target, mode)
-            except OSError:
-                pass
+            os.chmod(temporary, mode)
+        os.replace(temporary, target)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
     return target
 
 

@@ -135,7 +135,7 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         except GoogleAuthError as exc:
             # A fixed message: the library's text can carry token material.
             raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
-        token_cache.parent.mkdir(parents=True, exist_ok=True)
+        # Creates any missing folder owner-only; an existing folder (the working directory, a shared one) keeps its mode.
         secure_write_text(token_cache, credentials.to_json(), mode=0o600)
         return credentials
 

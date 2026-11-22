@@ -3,6 +3,8 @@ service-account key file mode and the token cache write."""
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
 import types
 from pathlib import Path
@@ -212,3 +214,66 @@ def test_r059_google_auth_error_ends_the_run_as_google_auth_failed(
                                          collectors="google_alert_center"))
     assert rc == 2
     assert json.loads(capsys.readouterr().err)["error"] == "google_auth_failed"
+
+
+# ---- R091: writing the token cache never changes an existing folder, and never writes through a link -------------
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(os.lstat(path).st_mode)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_r091_pre_existing_parent_dir_mode_unchanged(tmp_path: Path) -> None:
+    from azure_tenant_audit.secret_hygiene import secure_write_text
+
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    os.chmod(shared, 0o755)
+    cache = shared / "token.json"
+    cache.write_text("old", encoding="utf-8")
+    os.chmod(cache, 0o644)
+
+    secure_write_text(cache, "new")
+
+    assert _mode(shared) == 0o755
+    assert _mode(cache) == 0o600
+    assert cache.read_text(encoding="utf-8") == "new"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_r091_missing_parent_dirs_are_created_owner_only(tmp_path: Path) -> None:
+    from azure_tenant_audit.secret_hygiene import secure_write_text
+
+    target = tmp_path / "a" / "b" / "token.json"
+    secure_write_text(target, "x")
+    assert _mode(tmp_path / "a") == 0o700 and _mode(tmp_path / "a" / "b") == 0o700
+    assert _mode(target) == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX symbolic links")
+def test_r091_a_link_at_the_cache_path_is_replaced_not_written_through(tmp_path: Path) -> None:
+    from azure_tenant_audit.secret_hygiene import secure_write_text
+
+    elsewhere = tmp_path / "elsewhere.txt"
+    elsewhere.write_text("keep", encoding="utf-8")
+    link = tmp_path / "token.json"
+    link.symlink_to(elsewhere)
+
+    secure_write_text(link, "secret")
+
+    assert elsewhere.read_text(encoding="utf-8") == "keep"
+    assert not link.is_symlink() and link.read_text(encoding="utf-8") == "secret"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["elsewhere.txt", "token.json"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_r091_oauth_token_cache_folder_is_created_owner_only(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    previous = os.umask(0o022)
+    try:
+        google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+    finally:
+        os.umask(previous)
+    assert _mode(tmp_path / "cache") == 0o700
+    assert _mode(tmp_path / "cache" / "token.json") == 0o600
+
