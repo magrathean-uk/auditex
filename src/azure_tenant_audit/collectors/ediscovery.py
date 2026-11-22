@@ -199,10 +199,6 @@ class EDiscoveryCollector(Collector):
 
             if command_plane == "export":
                 response = self._run_command_variants(list(command["commands"]), command["name"], log_event)
-                if response.get("error") == M365_CLI_NOT_USED:
-                    payload[operation_name] = _retired_cli_skip(response, operation=operation_name)
-                    coverage.append(_retired_cli_coverage(self.name, command, response, plane))
-                    continue
                 payload[operation_name] = response
                 count = self._item_count(response)
                 total += count
@@ -271,12 +267,6 @@ class EDiscoveryCollector(Collector):
                 continue
 
             response = self._run_command_variants(list(command["commands"]), command["name"], log_event)
-            if response.get("error") == M365_CLI_NOT_USED:
-                # The CLI for Microsoft 365 is no longer run (DEC-108 D2): a named skip, as exchange records, not a
-                # command_not_found failure that reads as a missing local tool and makes the collector partial.
-                payload[operation_name] = _retired_cli_skip(response, operation=operation_name)
-                coverage.append(_retired_cli_coverage(self.name, command, response, plane))
-                continue
             payload[command["name"]] = response
             count = self._item_count(response)
             total += count
@@ -300,6 +290,9 @@ class EDiscoveryCollector(Collector):
                 }
             )
 
+        # The CLI for Microsoft 365 is no longer run (DEC-108 D2): its operations become named skips, as exchange
+        # records them, not command_not_found failures that read as a missing local tool and make this partial.
+        _mark_retired_cli_skips(payload, coverage)
         partial = any(row.get("status") not in {"ok", "skipped"} for row in coverage)
         return CollectorResult(
             name=self.name,
@@ -366,33 +359,22 @@ class EDiscoveryCollector(Collector):
         return response
 
 
-def _retired_cli_skip(response: dict[str, Any], *, operation: str) -> dict[str, Any]:
-    """The payload of an operation the retired CLI for Microsoft 365 would have run: a named skip, no error."""
-    return {
-        "value": [],
-        "status": "skipped",
-        "reason": M365_CLI_NOT_USED,
-        "operation": operation,
-        "command": response.get("command"),
-        "command_variants": response.get("command_variants"),
-        "source": response.get("source", "command"),
-    }
 
-
-def _retired_cli_coverage(collector: str, command: dict[str, Any], response: dict[str, Any], plane: str) -> dict[str, Any]:
-    return {
-        "collector": collector,
-        "type": "command",
-        "category": command.get("category", "inventory"),
-        "name": str(command["name"]),
-        "source": response.get("source", "command"),
-        "command": response.get("command"),
-        "command_variants": list(command["commands"]),
-        "status": "skipped",
-        "reason": M365_CLI_NOT_USED,
-        "item_count": 0,
-        "duration_ms": response.get("duration_ms", 0.0),
-        "error_class": None,
-        "error": None,
-        "plane": plane,
-    }
+def _mark_retired_cli_skips(payload: dict[str, Any], coverage: list[dict[str, Any]]) -> None:
+    """Turn every command operation the retired CLI answered with m365_cli_not_used into a named skip."""
+    for row in coverage:
+        if row.get("type") != "command" or row.get("error") != M365_CLI_NOT_USED:
+            continue
+        name = str(row.get("name"))
+        row.update(status="skipped", reason=M365_CLI_NOT_USED, item_count=0, error_class=None, error=None)
+        response = payload.get(name)
+        if isinstance(response, dict):
+            payload[name] = {
+                "value": [],
+                "status": "skipped",
+                "reason": M365_CLI_NOT_USED,
+                "operation": name,
+                "command": response.get("command"),
+                "command_variants": response.get("command_variants"),
+                "source": response.get("source", "command"),
+            }
