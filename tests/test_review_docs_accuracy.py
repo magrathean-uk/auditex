@@ -186,3 +186,23 @@ def test_reader_app_guide_says_app_readonly_full_needs_ediscovery():
     for name in extra:
         assert f"`{name}`" in setup, f"setup guide must say app-readonly-full adds `{name}`"
     assert "eDiscovery.Read.All" in setup
+
+
+# R146 ------------------------------------------------------------------------------------------------------------
+
+
+def test_api_catalogue_lists_every_dns_posture_query_and_scopes_the_lookup_cap():
+    from azure_tenant_audit.collectors.dns_posture import MAX_PUBLIC_LOOKUP_DOMAINS
+
+    source = _doc("src/azure_tenant_audit/dns_lookup.py")
+    body = source[source.index("def collect_domain_posture") :]
+    prefixes = [p for p in re.findall(r'resolver\.query\(f"([^"{]*)\{domain\}"', body) if p]
+    assert {"_dmarc.", "_mta-sts.", "default._bimi."} <= set(prefixes), prefixes
+    catalogue = _flat(_doc("docs/reference/api-call-catalog.md"))
+    for prefix in prefixes:
+        assert f"TXT {prefix}<domain>" in catalogue, f"api-call-catalog.md has no dns_posture row for TXT {prefix}<domain>"
+    # The cap applies to the OpenID discovery reads only; MTA-STS policy reads cover every eligible domain.
+    assert f"for the audited tenant (at most {MAX_PUBLIC_LOOKUP_DOMAINS})" not in catalogue
+    paragraph = catalogue[catalogue.index("Public HTTPS lookups target only domains") :][:900]
+    assert f"first {MAX_PUBLIC_LOOKUP_DOMAINS}" in paragraph and "OpenID" in paragraph
+    assert "MTA-STS" in paragraph and "every" in paragraph
