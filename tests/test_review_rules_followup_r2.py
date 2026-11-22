@@ -159,6 +159,7 @@ def _assessment(tmp_path, rules):
     payload = json.loads((tmp_path / "model_assessment.json").read_text())
     for detail in payload["projection"]["sections"].values():
         detail.pop("rule_view", None)          # the pre-lane writer had no rule_view (R106)
+    payload["schema_version"] = "2026-11-05"   # ... and wrote this version
     return payload
 
 

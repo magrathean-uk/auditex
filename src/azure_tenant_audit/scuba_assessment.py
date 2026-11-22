@@ -263,15 +263,16 @@ def validate_explainer(row: dict[str, Any], result: Any) -> None:
 
 # Review R099 (repair): SS 7.1 to 7.3 read built_in_protection_rules since lane rules-followup. Answers the earlier writer
 # emitted cite the five sections it read, and empty rule lists answered the since-retired no_rules_configured cell; both
-# still validate, but only with that exact earlier citation.
+# still validate, but only with that exact earlier citation and only in a file that advertises 2026-11-05 (repair
+# round 2: a 2026-11-22 file cites what the current rule reads). A rule fault (null cell) is read the same way.
 _SAFELINKS_LEGACY_POLICIES = frozenset({"MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1"})
 _SAFELINKS_LEGACY_SECTIONS = ["atp_policy_rules", "defender_license", "protection_policy_rules", "safe_links_policies",
                               "safe_links_rules"]
 
 
-def _legacy_safelinks_cell(policy_id: str, detail: dict[str, Any], value_row: dict[str, Any] | None,
+def _legacy_safelinks_cell(version: str, policy_id: str, detail: dict[str, Any], value_row: dict[str, Any] | None,
                            cell: dict[str, Any] | None) -> dict[str, Any] | None:
-    if (policy_id not in _SAFELINKS_LEGACY_POLICIES or value_row is None
+    if (version != "2026-11-05" or policy_id not in _SAFELINKS_LEGACY_POLICIES or value_row is None
             or detail.get("section") != _SAFELINKS_LEGACY_SECTIONS):
         return cell
     if cell is None and detail["cell"] == "no_rules_configured":
@@ -492,7 +493,7 @@ def validate_assessment(payload: Any) -> None:
                             "reason_texts": [shared["reason_text"]], "cited": list(value_row["sections"])}
                 else:
                     cell = cell_entry(row["policy_id"], detail["cell"], value_row) if value_row else None
-                    cell = _legacy_safelinks_cell(row["policy_id"], detail, value_row, cell)
+                cell = _legacy_safelinks_cell(version, row["policy_id"], detail, value_row, cell)
                 if (value_row is None or cell is None or detail["rule_id"] != value_row["rule_id"]
                         or not reason_matches(cell, detail["reason_code"], detail["reason_text"])
                         or detail["field"] is not None or detail["value"] is not None):
