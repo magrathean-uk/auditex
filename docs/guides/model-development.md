@@ -30,9 +30,8 @@ still use is recorded in [provenance](../provenance/provenance.md).
 
 ## Where the training ran
 
-The model experiments of 2026 ran on two research supercomputers: Isambard-AI in the UK and JUPITER in the
-EU. None of the trained models shipped; the optional plain-language answer uses a ready-made model, and every
-verdict still comes from the value rules.
+The training ran on the Isambard-AI and JUPITER supercomputers. None of the trained models shipped; the
+optional plain-language answer uses a ready-made model, and every verdict still comes from the value rules.
 
 We acknowledge the use of resources provided by the Isambard-AI National AI Research Resource (AIRR)
 (McIntosh-Smith, Alam and Woods, 2024, arXiv:2410.11199), operated by the University of Bristol and funded by
