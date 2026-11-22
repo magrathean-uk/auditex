@@ -135,13 +135,15 @@ contract, `scuba_config` row): ScubaGear's default configuration, the tenant's c
 policy's outcome). The cloud comes from the `dns_posture` OpenID discovery when the run has it, else from US
 Government licence SKUs, else it is taken as `commercial`.
 
-**DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** The opt-in `dns_posture` collector saves `spf_records`,
+**DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** The `dns_posture` collector saves `spf_records`,
 `dkim_records` and `dmarc_records` for tenant Exchange accepted domains (coexistence excluded) when complete
 same-run `acceptedDomains` evidence is available; otherwise it uses Graph-verified domains with the Email service
 (a missing or non-list `supportedServices` field is kept). Records include resolver logs, which the private rule
 view keeps and the projection drops before its shape and budget checks. Failed or truncated reads withhold the
-dependent sections. `dns_posture` remains outside default collector sets; its public lookups and OpenID discovery
-are described in the [privacy model](../reference/security-privacy.md).
+dependent sections. `dns_posture` is selected by default in the `auto`, `global-reader` and `app-readonly-full`
+profiles and the `full` preset; `--exclude dns_posture` omits it (see
+[default Exchange and public DNS collection](setup-guide.md#default-exchange-and-public-dns-collection)). Its public
+lookups and OpenID discovery are described in the [privacy model](../reference/security-privacy.md).
 
 The value-rule test vectors live in `tests/fixtures/value-rules/` (constructed rows with vector ids and origins;
 see [provenance](../provenance/provenance.md)). `AUDITEX_TEST_VALUE_RULE_VECTORS_V391=<kit vectors.jsonl>`

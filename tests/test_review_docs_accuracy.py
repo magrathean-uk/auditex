@@ -109,3 +109,33 @@ def test_admin_guide_teams_section_matches_the_collector_and_adapter():
     assert "TEAMS 5.1-5.3 remain not assessed" not in section
     (marker,) = CERTIFICATE_AUTH_MARKER
     assert marker in section
+
+
+# R076 ------------------------------------------------------------------------------------------------------------
+
+
+def _profiles_with(collector: str) -> list[str]:
+    from azure_tenant_audit.profiles import PROFILES
+
+    return [name for name, profile in PROFILES.items() if collector in profile.default_collectors]
+
+
+def _presets_with(collector: str) -> list[str]:
+    presets = json.loads(_doc("configs/collector-presets.json"))
+    presets = presets.get("presets", presets)
+    return [name for name, preset in presets.items() if collector in (preset.get("include") or [])]
+
+
+def test_ai_assessment_guide_states_dns_posture_default_selection():
+    profiles, presets = _profiles_with("dns_posture"), _presets_with("dns_posture")
+    assert profiles and presets, "dns_posture is a default collector; this test would be vacuous otherwise"
+    guide = _flat(_doc("docs/guides/ai-assessment.md"))
+    assert "opt-in `dns_posture`" not in guide
+    assert "`dns_posture` remains outside default collector sets" not in guide
+    paragraph = guide[guide.index("**DNS evidence for EXO") :]
+    paragraph = paragraph[: paragraph.index("The value-rule test vectors")]
+    for name in [*profiles, *presets]:
+        assert f"`{name}`" in paragraph, f"the DNS evidence paragraph must name `{name}`, which selects dns_posture"
+    assert "--exclude dns_posture" in paragraph
+    assert "setup-guide.md#default-exchange-and-public-dns-collection" in paragraph
+
