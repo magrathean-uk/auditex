@@ -341,3 +341,20 @@ def test_doh_resolver_choice_is_disclosed_for_m365_and_google():
         assert f"`{preset}`" in lookups, f"External lookups must name the Google `{preset}` preset"
     assert "--exclude google_dns_posture" in lookups and "`dns_resolver`" in lookups
     assert re.search(r"\| `google_dns_posture` \| DoH ", catalogue), "api-call-catalog.md needs a google_dns_posture row"
+
+
+# L6 --------------------------------------------------------------------------------------------------------------
+
+
+def test_setup_guide_names_the_google_dns_notice_and_how_to_turn_it_off():
+    from auditex.google_workspace.run import PRESETS
+    from azure_tenant_audit.dns_lookup import DOH_ENDPOINT_ENV
+
+    google = _flat(_section(_doc("docs/guides/setup-guide.md"), "## Google Workspace"))
+    for preset, selected in PRESETS.items():
+        if "google_dns_posture" in selected:
+            assert f"`{preset}`" in google, f"setup guide must say the `{preset}` preset sends domain names to DoH"
+    assert "--exclude google_dns_posture" in google and DOH_ENDPOINT_ENV in google
+    # The Microsoft 365 notice names the configurable resolver, not Cloudflare alone.
+    m365 = _flat(_section(_doc("docs/guides/setup-guide.md"), "## Default Exchange and public DNS collection"))
+    assert DOH_ENDPOINT_ENV in m365 and "--doh-endpoint" in m365

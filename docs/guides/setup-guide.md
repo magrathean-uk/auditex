@@ -36,9 +36,10 @@ collector and run **ok** when other reads succeed; the gate passes with a named
 limitation. The gap remains in coverage, collection gaps, the handoff, explorer and
 AI context.
 
-The run sends the tenant's domain names to the public **Cloudflare DNS-over-HTTPS
-resolver**, `https://cloudflare-dns.com/dns-query`. Only domain names, no user data,
-are sent to that resolver. SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange
+The run sends the tenant's domain names to the **DNS-over-HTTPS resolver**: the public
+Cloudflare resolver, `https://cloudflare-dns.com/dns-query`, unless `--doh-endpoint URL`
+or `AUDITEX_DOH_ENDPOINT` names another plain `https://` resolver. Only domain names,
+no user data, are sent to that resolver. SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange
 accepted domains (coexistence excluded) when the same run collected them, else
 Graph verified domains with the Email service. Posture checks and MTA-STS and
 public Entra OpenID discovery HTTPS reads stay on Graph-verified domains. No
@@ -72,8 +73,8 @@ Exchange session failures retain the tooling or app-consent remediation.
 The CLI writes a collector-only notice to stderr and records it as `partial_workload_notice` in the summary.
 
 `auditex probe live --surface all` includes Exchange policy and DNS posture.
-The standalone probe prints the Exchange session and Cloudflare resolver notices
-before its reads; use `--surface` to limit probe surfaces.
+The standalone probe prints the Exchange session and DNS resolver notices
+before its reads (it takes the resolver from `AUDITEX_DOH_ENDPOINT`); use `--surface` to limit probe surfaces.
 `--probe-first` defers these two collectors to the collection phase, so it does not
 repeat their PowerShell sessions or public lookups. A standalone probe performs
 the reads and a subsequent run repeats them. Added runtime depends on tenant size,
@@ -122,6 +123,12 @@ Admin flow:
 4. In Admin Console, open Security > Access and data control > API controls > Domain-wide delegation.
 5. Add the OAuth app ID and paste the generated comma-separated scopes. The 2-step verification policy needs `cloud-identity.policies.readonly` and the Cloud Identity API.
 6. Run the generated doctor and probe commands.
+
+Google DNS posture (`google_dns_posture`, in the `core-security`, `mail` and `everything` presets) sends the
+customer's verified domain names, and nothing else, to the public Cloudflare DNS-over-HTTPS resolver
+(`https://cloudflare-dns.com/dns-query`), or to the resolver set in `AUDITEX_DOH_ENDPOINT`. The run prints this notice
+on stderr before collection and writes it to `data-handling.json` and the report. Turn it off with
+`--exclude google_dns_posture`, or use the `identity` or `collaboration` preset.
 
 `--domain` is a label. Users and groups are listed for the whole customer, and the internal domains (primary, secondary and alias) come from the Directory domains list.
 
