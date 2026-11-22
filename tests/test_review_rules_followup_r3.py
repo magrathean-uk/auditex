@@ -7,8 +7,23 @@ from __future__ import annotations
 import json
 
 import pytest
-from test_review_rules_followup_r2 import LEGACY_SECTIONS, SL_POLICIES, _assessment, _legacy_rows
+from test_review_rules_followup_r2 import (
+    LEGACY_SECTIONS,
+    SL_POLICIES,
+    _assessment,
+    _legacy_rows,
+)
+from test_review_value_rules_defender_dns import (
+    BI_ALL,
+    GROUP_ONLY,
+    SCOPE_ALL,
+    SL_BUILTIN,
+    SL_FLAGS,
+    _safelinks,
+    _sl_rule,
+)
 
+from azure_tenant_audit.value_rules import assess
 from azure_tenant_audit.value_rules.catalogue import row_for
 
 # ---- R099: the pre-lane reading is bound to files that advertise 2026-11-05 ----
@@ -68,11 +83,6 @@ def test_r099_retired_answers_are_rejected_in_a_current_file(tmp_path):
 
 
 # ---- R100: a known false flag decides; earlier rules that together name every recipient shadow a later one ----
-
-from test_review_value_rules_defender_dns import BI_ALL, GROUP_ONLY, SCOPE_ALL, SL_BUILTIN, SL_FLAGS, _safelinks, _sl_rule  # noqa: E402
-
-from azure_tenant_audit.value_rules import assess  # noqa: E402
-
 
 def _answer(policy_id, sections):
     record = assess(policy_id, sections)
