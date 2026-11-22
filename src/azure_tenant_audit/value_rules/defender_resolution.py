@@ -124,7 +124,7 @@ def _safelinks_core(policy_id, sp, sections, trace):
         applied = top[0]["SafeLinksPolicy"]
     # v3.7 (lens B DEF-F1, D98; as SS 6.x D32): an enabled rule that covers only some recipients and applies before the covering rule (a lower Priority number, or no covering
     # rule at all) gives those recipients its policy; when that policy is exported with a flag off, the named recipients get a non-compliant policy: not_met. A partial rule
-    # whose precedence or policy cannot be read is left as in v3.6 (it does not decide).
+    # that applies first with an unreadable policy leaves its recipients unjudged (R100, below); one whose Priority cannot be read is left as in v3.6 (it does not decide).
     low_cov = min(r["Priority"] for r in cand) if cand else None
     # Policies by Identity, built once (a string Identity is the only thing a string name equals): one list scan per
     # partial rule was quadratic in rules times policies.
@@ -132,6 +132,7 @@ def _safelinks_core(policy_id, sp, sections, trace):
     for e in sections["safe_links_policies"]:
         if isinstance(e, dict) and type(e.get("Identity")) is str:
             by_identity.setdefault(e["Identity"], []).append(e)
+    partial_unread = None
     for r in partial:
         pr = r.get("Priority")
         if cand and not (_is_num(pr) and pr < low_cov):
@@ -142,6 +143,15 @@ def _safelinks_core(policy_id, sp, sections, trace):
             return _rec(policy_id, "not_met", "partial_scope_policy_flag_off",
                         f"Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable {sp['what']}, so those recipients get a non-compliant policy.",
                         "partial_rule_noncompliant", None, div="D98")
+        # Review R100: a partial rule that applies first gives its recipients its policy; when that policy is missing,
+        # duplicated or lacks a boolean flag, those recipients are unjudged (as data_unusable_partial_tier in SS 1.x).
+        if partial_unread is None:
+            if not pp:
+                partial_unread = "missing"
+            elif len(pp) > 1:
+                partial_unread = "duplicated"
+            elif any(type(pp[0].get(f)) is not bool for f in sp["flags"]):
+                partial_unread = "flag"
     if builtin_scope and applied == BUILTIN:
         # A preset whose both parts are enabled but scoped to some recipients may also cover the excluded recipients.
         preset_partial = any(({"q", "x", "u"} & set(eop[t]) or eop_u) and ({"q", "x", "u"} & set(atp[t]) or atp_u)
@@ -164,6 +174,17 @@ def _safelinks_core(policy_id, sp, sections, trace):
     if "unusable" in flags:
         return _A(policy_id, ITEM_VALUE, "Data unusable: the applied Safe Links policy lacks a boolean value for a flag the policy reads; the policy was not assessed.",
                   "policy_flag_unusable", ["safe_links_policies"])
+    if partial_unread == "missing":
+        return _A(policy_id, "data_unavailable_applied_policy_not_exported",
+                  "Data unavailable: the applied Safe Links policy is not in safe_links_policies; the policy was not assessed.", "policy_not_in_export",
+                  ["safe_links_policies"], partial_scope=True)
+    if partial_unread == "duplicated":
+        return _A(policy_id, "data_unusable_applied_policy_duplicated",
+                  "Data unusable: the applied Safe Links policy appears more than once; the policy was not assessed.", "policy_duplicated", ["safe_links_policies"],
+                  partial_scope=True)
+    if partial_unread == "flag":
+        return _A(policy_id, ITEM_VALUE, "Data unusable: the applied Safe Links policy lacks a boolean value for a flag the policy reads; the policy was not assessed.",
+                  "policy_flag_unusable", ["safe_links_policies"], partial_scope=True)
     return _rec(policy_id, "met", "applied_policy_flags_on", f"Requirement met: the applied Safe Links policy enables {sp['what']}.", "policy_flags_ok", None,
                 applied="built_in" if applied == BUILTIN else "custom")
 
