@@ -195,7 +195,10 @@ def test_r049_remediated_dismissed_or_safe_signins_raise_no_finding() -> None:
 
 
 def test_r105_inline_records_are_counted_once() -> None:
-    from azure_tenant_audit.friendly_names import _iter_source_records, build_friendly_name_catalog
+    from azure_tenant_audit.friendly_names import (
+        _iter_source_records,
+        build_friendly_name_catalog,
+    )
 
     view = {"value": [{"id": "a"}, {"id": "b", "displayName": "B"}]}
     assert len(_iter_source_records(view)) == 2

@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from . import endpoint_posture, exchange_protection, external_sharing, os_lifecycle
-from .attack_graph import TIER0_GRAPH_PERMISSIONS, TIER0_ROLE_TEMPLATES, analyze_attack_graph
+from .attack_graph import (
+    TIER0_GRAPH_PERMISSIONS,
+    TIER0_ROLE_TEMPLATES,
+    analyze_attack_graph,
+)
 from .autopilot import build_board_report_sections
 from .baselines import (
     SECURE_SCORE_LOW_THRESHOLD_PERCENT,
