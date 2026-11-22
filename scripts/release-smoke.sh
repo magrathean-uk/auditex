@@ -36,6 +36,10 @@ elif [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
 else
   BASE_PYTHON="python3"
 fi
+# A relative interpreter path is anchored here, before the script changes into its empty folder.
+if [[ "${BASE_PYTHON}" == */* ]]; then
+  BASE_PYTHON="$(cd "$(dirname "${BASE_PYTHON}")" && pwd)/$(basename "${BASE_PYTHON}")"
+fi
 mkdir -p "${SMOKE_PARENT}"
 SMOKE_ROOT="$(cd "$(mktemp -d "${SMOKE_PARENT}/run.XXXXXX")" && pwd)"
 # Every installed command runs from an empty folder, never the checkout, so a shipped file missing from the
@@ -81,7 +85,27 @@ auditex setup >/dev/null
 demo_dir="${SMOKE_ROOT}/${kind}-demo"
 mkdir "${demo_dir}"
 (cd "${demo_dir}" && auditex demo --no-pause --no-html >/dev/null)
-test -d "${demo_dir}/outputs/demo/runs"
+# Both demo runs prove the demo tenant and its remediated twin shipped (the demo falls back otherwise).
+test -d "${demo_dir}/outputs/demo/runs/halcyon-demo"
+test -d "${demo_dir}/outputs/demo/runs/halcyon-after-fixes"
+# Every shipped file committed in HEAD is in the installed data.
+git -C "${REPO_ROOT}" ls-files > "${SMOKE_ROOT}/${kind}-tracked.txt"
+"${VPY}" - "${SMOKE_ROOT}/${kind}-tracked.txt" <<'PY'
+import sys
+from pathlib import PurePosixPath
+
+from azure_tenant_audit import resources
+from azure_tenant_audit.shipped_content import SHIPPED_CONTENT_AREAS
+
+patterns = [pattern for area in SHIPPED_CONTENT_AREAS for pattern in area.package_patterns]
+tracked = {
+    name for name in open(sys.argv[1], encoding="utf-8").read().splitlines()
+    if any(len(PurePosixPath(name).parts) == len(PurePosixPath(p).parts) and PurePosixPath(name).match(p) for p in patterns)
+}
+installed = set(resources.shipped_resource_manifest()["resources"])
+missing = sorted(tracked - installed)
+assert tracked and not missing, missing
+PY
 deactivate_venv
 
 create_venv "${kind}-google"
