@@ -9,6 +9,7 @@ import ssl
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -315,8 +316,26 @@ def _send_webhook(sink: str, payload: dict[str, Any]) -> dict[str, Any]:
         "sink": sink,
         "payload": payload,
         "http_status": response.status_code,
-        "response_text": response.text,
+        "response_text": _webhook_reply(response, url),
     }
+
+
+def _webhook_reply(response: Any, url: str) -> str:
+    """The service's reply, safe to print: a failure keeps only a short service code (``invalid_token``), because any
+    longer reply can echo the webhook URL in some spelling; a success reply has the URL removed."""
+    text = str(response.text or "")
+    if response.status_code >= 400:
+        return text.strip() if re.fullmatch(r"[a-z_]{1,64}", text.strip()) else f"HTTP {response.status_code}"
+    return _without_webhook_url(text, url)
+
+
+def _without_webhook_url(text: str, url: str) -> str:
+    """The service's reply with every spelling of the webhook URL (whole, path, query) removed: it is a credential."""
+    parsed = urlparse(url)
+    pieces = [url, parsed.path + (f"?{parsed.query}" if parsed.query else ""), parsed.query, parsed.path]
+    for piece in sorted({piece for piece in pieces if piece and piece != "/"}, key=len, reverse=True):
+        text = text.replace(piece, "<webhook-url>")
+    return text
 
 
 def _smtp_ssl_context(allow_self_signed: bool) -> ssl.SSLContext:
@@ -680,18 +699,27 @@ def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[
     if dry_run:
         return {"status": "planned", "dry_run": True, **base}
     if sink in WEBHOOK_ENV:
-        result = _send_webhook(sink, payload)
-        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
-    if sink == "smtp":
-        result = _send_smtp(payload)
-        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
-    if sink == "jira":
-        result = _send_jira(payload)
-        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
-    if sink == "github":
-        result = _send_github(payload)
-        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
-    return {"status": "blocked", "dry_run": False, "reason": "unsupported sink", **base}
+        send = lambda: _send_webhook(sink, payload)  # noqa: E731
+    elif sink == "smtp":
+        send = lambda: _send_smtp(payload)  # noqa: E731
+    elif sink == "jira":
+        send = lambda: _send_jira(payload)  # noqa: E731
+    elif sink == "github":
+        send = lambda: _send_github(payload)  # noqa: E731
+    else:
+        return {"status": "blocked", "dry_run": False, "reason": "unsupported sink", **base}
+    try:
+        result = send()
+    except (requests.RequestException, OSError, smtplib.SMTPException) as exc:
+        # R065: a transport error's text can carry the webhook URL (the Slack /services/ path or the Teams sig=
+        # query), which is a credential. Report only the exception class; never str(exc).
+        result = {
+            "status": "failed",
+            "sink": sink,
+            "error_class": type(exc).__name__,
+            "reason": f"{sink} transport error ({type(exc).__name__})",
+        }
+    return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
 
 
 def _redact_envelope(envelope: dict[str, Any], run_dir: str) -> dict[str, Any]:

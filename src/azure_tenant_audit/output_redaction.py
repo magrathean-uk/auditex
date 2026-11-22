@@ -27,12 +27,25 @@ from .guarded_io import (
 )
 from .secret_hygiene import _OUTPUT_EMAIL_RE as OUTPUT_EMAIL_RE
 from .secret_hygiene import _OUTPUT_GUID_RE as OUTPUT_GUID_RE
-from .secret_hygiene import BEARER_RE, JWT_RE
+from .secret_hygiene import (
+    BEARER_RE,
+    INLINE_SECRET_VALUE,
+    INLINE_SECRET_WORDS,
+    JWT_RE,
+    PRIVATE_KEY_PEM_RE,
+)
 
-# Keep the output-specific form local: diagnostic argv redaction is a separate boundary.
+# A complete block whose END label matches its BEGIN label and which holds no other BEGIN marker: an unmatched opening
+# never pairs with a later block's end (so it cannot erase text between them), and each scan stops at the next
+# opening, so many unmatched openings stay linear.
+_PEM_COMPLETE_RE = re.compile(
+    r"-----BEGIN (?P<label>(?:[A-Z0-9]+ )*)PRIVATE KEY-----(?:(?!-----BEGIN ).)*?-----END (?P=label)PRIVATE KEY-----",
+    re.DOTALL,
+)
+
+# The output boundary masks at least the credential words the diagnostic redactor masks (R150): one word list.
 INLINE_SECRET_RE = re.compile(
-    r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key)"
-    r"[\"']?\s*[=:]\s*)(?P<value>\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,;]+)",
+    rf"(?P<prefix>[\"']?(?:{INLINE_SECRET_WORDS})[\"']?\s*[=:]\s*)(?P<value>{INLINE_SECRET_VALUE})",
     re.IGNORECASE,
 )
 
@@ -256,6 +269,36 @@ def _norm(key: Any) -> str:
 
 
 _SECRET_NORMS = frozenset(_norm(key) for key in _SECRET_KEYS)
+
+# A key whose last word (camelCase, snake_case or kebab-case) names a credential (``ApplicationSecret``,
+# ``CertificatePassword``, ``sharedSecret``, ``clientAssertion``, ``preSharedKey``) holds one: its scalar value is
+# replaced (R150). Only the last word counts, so metadata keys that merely mention a credential
+# (``passwordCredentials``, ``passwordPolicies``, ``tokenLifetimePolicies``, ``lastPasswordChangeDateTime``) keep
+# their values, and a boolean setting (``AllowSimplePassword``) is never a credential.
+_SECRET_LAST_WORDS = frozenset(
+    {"secret", "password", "passwd", "pwd", "passphrase", "token", "credential", "authorization", "assertion"}
+)
+_SECRET_LAST_PAIRS = frozenset({"privatekey", "sharedkey", "keymaterial"})
+_KEY_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+
+
+# Under these a mapping is masked whole too (a client_assertion object); a ``...Credential`` key can hold metadata
+# records the audit reads, so only its scalars and lists of scalars are masked.
+_SECRET_STRUCTURED_WORDS = _SECRET_LAST_WORDS - {"credential"}
+
+
+def _secret_scalar(value: Any) -> bool:
+    """A value that can itself be a credential: text, bytes or a number (also one kept literal from embedded JSON)."""
+    return isinstance(value, (str, bytes, int, float, _Num)) and not isinstance(value, bool)
+
+
+def _secret_key(key: Any, *, structured: bool = False) -> bool:
+    words = [word.lower() for word in _KEY_WORD_RE.findall(str(key))]
+    # A numbered copy (``clientSecret2``, ``password1``) or a value qualifier (``secretValue``) names the same thing.
+    while words and (words[-1].isdigit() or (len(words) > 1 and words[-1] in {"value", "text"})):
+        words.pop()
+    last_words = _SECRET_STRUCTURED_WORDS if structured else _SECRET_LAST_WORDS
+    return bool(words) and (words[-1] in last_words or "".join(words[-2:]) in _SECRET_LAST_PAIRS)
 
 
 @dataclass(frozen=True)
@@ -1979,6 +2022,9 @@ class _Redactor:
         # ``minimal``: rendered JSON, HTML, CSV and Markdown. ``key=value`` secrets were redacted in the structure
         # before rendering; the inline pattern cannot tell where a value ends in markup. Mapping keys use the full
         # pattern (a key such as ``password=value`` carries its credential in the key text).
+        # Rendered markup is a whole document: only a complete BEGIN..END block is masked there, so a lone marker in
+        # tenant text cannot erase everything after it. A string value is bounded, so a cut-off block is masked to its end.
+        value = (_PEM_COMPLETE_RE if minimal else PRIVATE_KEY_PEM_RE).sub("***redacted-private-key***", value)
         value = JWT_RE.sub("***redacted-jwt***", BEARER_RE.sub("Bearer ***redacted***", value))
         value = _redact_url_credentials(value)
         if minimal:
@@ -2067,6 +2113,12 @@ class _Redactor:
         for key, item in record.items():
             norm = _norm(key)
             if norm in _SECRET_NORMS and _non_empty(item):
+                item = SECRET_PLACEHOLDER
+            elif _non_empty(item) and _secret_key(key) and (
+                _secret_scalar(item)
+                or (isinstance(item, (list, tuple)) and all(_secret_scalar(member) for member in item))
+                or (_secret_key(key, structured=True) and not isinstance(item, bool))
+            ):
                 item = SECRET_PLACEHOLDER
             elif isinstance(item, str):
                 if not item:
@@ -2601,7 +2653,7 @@ pagecount pagenumber pagesize pagetoken paginationfailed paginationnotfollowed p
 parentdisplayname parentid parentpolicyname parenttype parse parser parserclass partial partialbad partialcollectors
 partialfingerprints partialrequirementnogapfound partialrulenoncompliant partialsuccess partialtiermaycover
 partialtiernoncompliant partialtierviolation partialworkloadnotice partnerconfigurations partnerdomains pass
-passcodeminlength passcoderequired passed passwd password passwordcredentials passwordexpiryset passwordsneverexpire
+passcodeminlength passcoderequired passed passphrase passwd password passwordcredentials passwordexpiryset passwordsneverexpire
 pastendoflife patch path patharguments pathcount pathprefix paths pathsafter pathsbefore pathsfound pathstyle
 payload payloadfilename payloadname payroll pctpartial percentage permission permissioncount permissiongrantpolicies
 permissiongrantpoliciesassigned permissiongrantpolicycollection permissiongrantpolicyidsassignedtodefaultuserrole
@@ -2712,7 +2764,7 @@ serviceunavailable serving session sessioncontext sessioncontextpath sessioncont
 settingandcertconflict settingcascade settingduplicated settingentryduplicated settingentrymissing settingname
 settingnames settings settingsempty settingsnotalist settingsnotread settingsshapeunusable settingvalue setupnotices setuponly
 setupsteps severity severitybefore severitycounts sha256 shall shallnotmet shareable shared sharedcontrolcount shareddrives
-sharedexceptions sharedreasons shareofsiteswithanyonelinks sharepoint sharepointaccess sharepointadmin sharepointadminaccessdenied sharepointadmincertificaterequired sharepointadminhostunknown sharepointadminhostunresolved sharepointadminhttperror sharepointadminrest sharepointadminsecondsigninrequired sharepointadminthrottled sharepointadmintokenfailed sharepointadmintokenrefused sharepointadmintokenunavailable sharepointadminunauthenticated sharepointadminunsupportedenvironment sharepointenterprise
+sharedexceptions sharedkey sharedreasons shareofsiteswithanyonelinks sharepoint sharepointaccess sharepointadmin sharepointadminaccessdenied sharepointadmincertificaterequired sharepointadminhostunknown sharepointadminhostunresolved sharepointadminhttperror sharepointadminrest sharepointadminsecondsigninrequired sharepointadminthrottled sharepointadmintokenfailed sharepointadmintokenrefused sharepointadmintokenunavailable sharepointadminunauthenticated sharepointadminunsupportedenvironment sharepointenterprise
 sharepointfilecontentreads sharepointlocation sharepointpermissionedges sharepointpermissions sharepointsettings sharepointsharingfindings
 sharepointsitepostureobjects sharepointsiteusagedetail sharepointstandard sharepointtenantsettings sharepointwac
 sharingalloweddomainlist sharingblockeddomainlist sharingcapability sharingcapabilityfromsites

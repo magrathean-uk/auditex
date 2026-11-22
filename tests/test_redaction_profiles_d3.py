@@ -449,3 +449,124 @@ def test_d3_refuses_change_between_payload_build_and_discovery(
     assert NAME not in capsys.readouterr().out
     assert not output.exists()
     assert not sent
+
+
+# R150 / R087: the shareable boundary masks at least what the diagnostic redactor (secret_hygiene) masks.
+_PARITY_CANARY = "PARITYCANARY726"
+_PEM_LABEL = "PRIVATE KEY"
+_PEM = f"-----BEGIN {_PEM_LABEL}-----\nconstructed-{_PARITY_CANARY}\n-----END {_PEM_LABEL}-----"
+_PARITY_TEXTS = (
+    f"error while loading key: {_PEM}",
+    f"client_assertion={_PARITY_CANARY}",
+    f"private_key: {_PARITY_CANARY}",
+    f"passphrase={_PARITY_CANARY}",
+    f"token={_PARITY_CANARY}",
+    f"Kiosk passphrase: {_PARITY_CANARY}",
+    f"pwd={_PARITY_CANARY}",
+    f"passwd={_PARITY_CANARY}",
+    f"certificate_password={_PARITY_CANARY}",
+    f'{{"password": "Pa\\"ss{_PARITY_CANARY}", "x": 1}}',
+)
+_PARITY_KEYS = (
+    "secret", "token", "credential", "authorization", "passphrase", "ApplicationSecret", "CertificatePassword",
+    "sharedSecret", "preSharedKey", "clientAssertion", "private_key", "privateKey", "Client-Secret",
+    "clientSecret2", "password1", "secretValue", "secret_text", "tokenValue",
+)
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack", "explainer"])
+@pytest.mark.parametrize("text", _PARITY_TEXTS)
+def test_r150_shareable_text_parity_with_diagnostic_redactor(profile: str, text: str) -> None:
+    from azure_tenant_audit.output_redaction import redact_output
+    from azure_tenant_audit.secret_hygiene import redact_text
+
+    assert _PARITY_CANARY not in redact_text(text), "the diagnostic redactor masks every shape"
+    assert _PARITY_CANARY not in json.dumps(redact_output({"error": text}, profile=profile))
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack", "explainer"])
+@pytest.mark.parametrize("key", _PARITY_KEYS)
+def test_r150_shareable_masks_camel_case_secret_keys(profile: str, key: str) -> None:
+    from azure_tenant_audit.output_redaction import redact_output
+
+    result = redact_output({"record": {key: _PARITY_CANARY}}, profile=profile)
+    assert _PARITY_CANARY not in json.dumps(result)
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack"])
+def test_r150_secret_key_matching_keeps_audit_metadata(profile: str) -> None:
+    """Keys that only mention a credential word keep their values (expiry metadata, settings, counts)."""
+    from azure_tenant_audit.output_redaction import redact_output
+
+    record = {
+        "passwordCredentials": [{"endDateTime": "2027-01-01T00:00:00Z", "keyId": "k1"}],
+        "passwordPolicies": "DisablePasswordExpiration",
+        "tokenLifetimePolicies": ["policy-a"],
+        "lastPasswordChangeDateTime": "2026-01-01T00:00:00Z",
+        "AllowSimplePassword": True,
+        "passwordExpirationDays": 90,
+    }
+    result = redact_output({"record": record}, profile=profile)["record"]
+    assert result["passwordCredentials"][0]["endDateTime"] == "2027-01-01T00:00:00Z"
+    assert result["passwordPolicies"] == "DisablePasswordExpiration"
+    assert result["tokenLifetimePolicies"] == ["policy-a"]
+    assert result["lastPasswordChangeDateTime"] == "2026-01-01T00:00:00Z"
+    assert result["AllowSimplePassword"] is True
+    assert result["passwordExpirationDays"] == 90
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack"])
+def test_r150_markup_pass_does_not_truncate_document_at_lone_pem_marker(profile: str) -> None:
+    """A lone BEGIN marker in rendered text (no END) must not erase the rest of the document; a full block is masked."""
+    from azure_tenant_audit.output_redaction import redact_output
+
+    lone = f"| -----BEGIN {_PEM_LABEL}----- tail |\n\n## Next section\nrow"
+    assert "## Next section" in redact_output(lone, profile=profile, markup=True)
+    assert _PARITY_CANARY not in redact_output(f"before {_PEM} after", profile=profile, markup=True)
+    # A string value is bounded, so a cut-off block in structure is still masked to its end.
+    assert _PARITY_CANARY not in json.dumps(
+        redact_output({"error": f"-----BEGIN {_PEM_LABEL}-----\n{_PARITY_CANARY}"}, profile=profile)
+    )
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack", "explainer"])
+def test_r150_structured_values_under_credential_keys_are_replaced(profile: str) -> None:
+    """A list or mapping under a credential key (an Authorization header list, a client_assertion object) is masked."""
+    from azure_tenant_audit.output_redaction import redact_output
+
+    value = {
+        "Authorization": [f"Basic {_PARITY_CANARY}"],
+        "client_assertion": {"value": _PARITY_CANARY},
+        "sharedSecret": [12345678],
+        "AllowSimplePassword": True,
+    }
+    out = redact_output({"record": value}, profile=profile)["record"]
+    assert _PARITY_CANARY not in json.dumps(out) and "12345678" not in json.dumps(out)
+    assert out["AllowSimplePassword"] is True
+
+
+def test_r150_markup_pem_scan_needs_matching_labels_and_stays_linear() -> None:
+    import time
+
+    from azure_tenant_audit.output_redaction import redact_output
+
+    rsa, ec = "RSA PRIVATE KEY", "EC PRIVATE KEY"
+    doc = f"| -----BEGIN {rsa}----- |\n## Kept section\n| -----END {ec}----- |"
+    assert "## Kept section" in redact_output(doc, markup=True)
+    # An earlier unmatched opening never swallows text before a later complete block.
+    later = f"-----BEGIN {rsa}----- kept text -----BEGIN {rsa}-----\n{_PARITY_CANARY}\n-----END {rsa}-----"
+    out = redact_output(later, markup=True)
+    assert "kept text" in out and _PARITY_CANARY not in out
+    many = f"-----BEGIN {rsa}----- x\n" * 4000
+    started = time.perf_counter()
+    redact_output(many, markup=True)
+    assert time.perf_counter() - started < 5
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack", "explainer"])
+def test_r150_round2_numbers_in_embedded_json_and_credential_arrays(profile: str) -> None:
+    from azure_tenant_audit.output_redaction import redact_output
+
+    embedded = json.dumps({"password": 98765432123, "loginCredential": [_PARITY_CANARY]})
+    out = json.dumps(redact_output({"blob": embedded}, profile=profile))
+    assert "98765432123" not in out and _PARITY_CANARY not in out

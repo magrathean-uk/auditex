@@ -93,10 +93,18 @@ _OUTPUT_ENCODINGS = {
 _OUTPUT_SAMPLE_MARGIN = 2048
 # ``key=value``, ``key: value`` and the JSON forms ``"key": "value"`` / ``'key':'value'``: the closing quote of the
 # key and a quoted value (which may hold spaces) are part of the match, so a JSON-keyed secret is not left behind.
+# The credential words both redactors (this diagnostic one and the shareable ``output_redaction`` one) mask as
+# ``word=value``; a quoted value may hold backslash-escaped quotes.
+INLINE_SECRET_WORDS = (
+    r"access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|passwd|pwd|authorization"
+    r"|api[_-]?key|client[_-]?assertion|private[_-]?key|passphrase|token"
+    r"|certificate[_-]?(?:path|thumbprint|password(?:[_-]?(?:env|file))?)"
+)
+# A quoted value runs to its closing quote, or to the end of the text when it was cut off before one. A value that is
+# exactly a redaction marker (``***redacted-jwt***``), ending at a value boundary, is left as it is.
+INLINE_SECRET_VALUE = r"(?!\*\*\*redacted(?:-[a-z-]+)?\*\*\*(?![^\s,;]))(?:\"(?:[^\"\\]|\\.)*(?:\"|\\?\Z)|'(?:[^'\\]|\\.)*(?:'|\\?\Z)|[^\s,;]+)"
 INLINE_SECRET_RE = re.compile(
-    r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key"
-    r"|client[_-]?assertion|private[_-]?key|passphrase|certificate[_-]?(?:path|thumbprint|password(?:[_-]?(?:env|file))?))"
-    r"[\"']?\s*[=:]\s*)(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+    rf"(?P<prefix>[\"']?(?:{INLINE_SECRET_WORDS})[\"']?\s*[=:]\s*)(?P<value>{INLINE_SECRET_VALUE})",
     re.IGNORECASE,
 )
 
@@ -176,6 +184,10 @@ def collect_sensitive_argv_values(
             skip_next = False
             continue
         option, separator, value = item.partition("=")
+        words = str(item).split(maxsplit=1)
+        if len(words) == 2 and "=" not in words[0] and _sensitive_option(words[0], flags):
+            values.add(words[1])  # a single malformed token '--client-secret value', as redact_argv reads it
+            continue
         if _sensitive_option(option, flags):
             if separator:
                 if value:
@@ -265,6 +277,11 @@ def redact_argv(
             skip_next = False
             continue
         option, separator, _value = item.partition("=")
+        words = str(item).split(maxsplit=1)
+        if len(words) == 2 and "=" not in words[0] and _sensitive_option(words[0], flags):
+            # A single malformed token '--client-secret value' (as parse_guarded also splits it).
+            redacted.append(f"{words[0]} ***redacted***")
+            continue
         if _sensitive_option(option, flags):
             if separator:
                 redacted.append(f"{option}=***redacted***")

@@ -249,3 +249,89 @@ def test_permission_stop_families_separate_security_endpoints() -> None:
     assert family(None, "https://graph.microsoft.com/v1.0/security/alerts_v2?$top=5") == "security/alerts_v2"
     assert family(None, "https://graph.microsoft.com/v1.0/security/secureScores") == "security/secureScores"
     assert family(None, "https://graph.microsoft.com/beta/reports/getX(period='D30')") == "reports/getX"
+
+
+def test_failed_redirect_hop_error_has_no_signed_query(monkeypatch) -> None:
+    """R158: a connect failure on the download hop must not carry the pre-authenticated query into evidence."""
+    import pytest
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+
+    client = fake_graph_client(throttle_mode="safe")
+    signed = "https://reports.office.com/data/download/abc123?sig=TOPSECRETSIGNATURE&se=2026"
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ANN001, ANN003
+        if url.startswith("https://graph.microsoft.com"):
+            return graph_response(302, {}, headers={"Location": signed})
+        raise RequestsConnectionError(f"HTTPSConnectionPool(host='reports.office.com', port=443): Max retries exceeded with url: {url}")
+
+    monkeypatch.setattr(client.session, "request", _request)
+    with pytest.raises(RequestsConnectionError) as caught:
+        client.get_json("/reports/getOffice365ActiveUserDetail(period='D7')")
+    message, classified = str(caught.value), _classify_graph_error(caught.value)
+    assert "TOPSECRETSIGNATURE" not in message and "sig=" not in message
+    assert "reports.office.com" in message
+    assert classified[0] == "client_error" and "TOPSECRETSIGNATURE" not in classified[1]
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+
+
+def test_download_host_error_body_does_not_carry_signed_query(monkeypatch) -> None:
+    """R158 (review): an HTTP error body from the download host that echoes the signed URL is not kept."""
+    import pytest
+
+    client = fake_graph_client(throttle_mode="safe")
+    signed = "https://reports.office.com/data/download/abc123?sig=TOPSECRETSIGNATURE&se=2026"
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ANN001, ANN003
+        if url.startswith("https://graph.microsoft.com"):
+            return graph_response(302, {}, headers={"Location": signed})
+        denied = graph_response(403, f"AuthenticationFailed: signature mismatch for {url}")
+        denied.url = url
+        return denied
+
+    monkeypatch.setattr(client.session, "request", _request)
+    for call in (client.get_content, client.get_json):
+        with pytest.raises(GraphError) as caught:
+            call("/reports/getOffice365ActiveUserDetail(period='D7')")
+        assert caught.value.status == 403
+        assert "TOPSECRETSIGNATURE" not in str(caught.value) and "TOPSECRETSIGNATURE" not in str(caught.value.request)
+        assert _classify_graph_error(caught.value)[0] == "insufficient_permissions"
+
+
+def test_failed_redirect_hop_error_holds_no_signed_request(monkeypatch) -> None:
+    """R158: the re-raised hop error keeps no request object naming the signed URL."""
+    import pytest
+    import requests
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+
+    client = fake_graph_client(throttle_mode="safe")
+    signed = "https://reports.office.com/data/download/abc123?sig=TOPSECRETSIGNATURE&se=2026"
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ANN001, ANN003
+        if url.startswith("https://graph.microsoft.com"):
+            return graph_response(302, {}, headers={"Location": signed})
+        raise RequestsConnectionError(f"failed: {url}", request=requests.Request("GET", url).prepare())
+
+    monkeypatch.setattr(client.session, "request", _request)
+    with pytest.raises(RequestsConnectionError) as caught:
+        client.get_content("/reports/getOffice365ActiveUserDetail(period='D7')")
+    assert caught.value.request is None and "TOPSECRETSIGNATURE" not in repr(caught.value.args)
+
+
+def test_download_host_json_error_code_is_not_kept(monkeypatch) -> None:
+    """R158 (review round 2): an off-Graph JSON error code that echoes the signed URL is not kept either."""
+    import pytest
+
+    client = fake_graph_client(throttle_mode="safe")
+    signed = "https://reports.office.com/data/download/abc123?sig=TOPSECRETSIGNATURE&se=2026"
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ANN001, ANN003
+        if url.startswith("https://graph.microsoft.com"):
+            return graph_response(302, {}, headers={"Location": signed})
+        denied = graph_response(403, {"error": {"code": f"Denied {url}", "message": "no"}})
+        denied.url = url
+        return denied
+
+    monkeypatch.setattr(client.session, "request", _request)
+    with pytest.raises(GraphError) as caught:
+        client.get_json("/reports/getOffice365ActiveUserDetail(period='D7')")
+    assert caught.value.status == 403 and "TOPSECRETSIGNATURE" not in str(caught.value.error_code)

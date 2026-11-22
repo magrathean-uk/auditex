@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import math
 import random
@@ -242,6 +243,13 @@ class _WaitBudget:
     def take(self, seconds: float) -> None:
         self.remaining -= seconds
         self.spent += seconds
+
+
+def _off_graph_reason(response: Any) -> str:
+    """An error from the download host after a redirect: its body can echo the signed URL (a credential), so only the
+    host and status are kept (R158)."""
+    host = urlparse(str(getattr(response, "url", "") or "")).hostname or "unknown"
+    return f"HTTP {response.status_code} from download host {host}"
 
 
 class GraphError(RuntimeError):
@@ -667,7 +675,13 @@ class GraphClient:
                     "Graph redirect hop raised exception",
                     {"method": "GET", "url": redacted_url(target), "error": type(exc).__name__, "hop": hops},
                 )
-                raise
+                # R158: the original text names the signed download URL (its query is a credential) and collectors
+                # store str(exc). Re-raise a copy of the same exception type, so retries and classification are
+                # unchanged, naming only the host and path and holding no request or response.
+                safe = copy.copy(exc)
+                safe.args = (f"Redirect hop to {event['host']}{event['path']} failed ({type(exc).__name__})",)
+                safe.request = safe.response = None
+                raise safe from None
             current_url = target
         return response
 
@@ -692,6 +706,8 @@ class GraphClient:
                 elif isinstance(error, str):
                     reason = error
             error_url = response.url if graph_host_url(response.url) else redacted_url(response.url)
+            if not graph_host_url(response.url):
+                reason, error_code = _off_graph_reason(response), None
             self._emit(
                 "graph.response.error",
                 "Graph endpoint returned error response",
@@ -710,8 +726,9 @@ class GraphClient:
             self._require_graph_url(url)
         response = self._request("GET", url, params=params)
         if response.status_code >= 400:
-            error_url = response.url if graph_host_url(response.url) else redacted_url(response.url)
-            raise GraphError(response.text, status=response.status_code, request=error_url)
+            if graph_host_url(response.url):
+                raise GraphError(response.text, status=response.status_code, request=response.url)
+            raise GraphError(_off_graph_reason(response), status=response.status_code, request=redacted_url(response.url))
         return response.text
 
     def _require_graph_url(self, url: Any) -> None:

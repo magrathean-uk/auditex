@@ -126,3 +126,47 @@ def test_secure_write_json_sets_posix_private_file_mode(tmp_path) -> None:
     # Windows and some mounted filesystems can ignore chmod; POSIX CI should be strict.
     if mode is not None:
         assert mode & 0o077 == 0
+
+
+def test_redact_text_masks_quoted_secret_with_escaped_quote() -> None:
+    """R093: a quoted secret holding an escaped quote is masked whole, not up to the escape."""
+    from azure_tenant_audit.secret_hygiene import redact_text
+
+    double = redact_text('{"password": "Pa\\"ss-Secret99", "x": 1}')
+    single = redact_text("password='Pa\\'ss-Secret99'")
+    assert "Secret99" not in double
+    assert double.endswith(', "x": 1}')
+    assert "Secret99" not in single
+
+
+def test_redact_argv_masks_single_token_flag_and_value() -> None:
+    """R093: a malformed single argv token '--client-secret value' is masked like parse_guarded treats it."""
+    from azure_tenant_audit.secret_hygiene import redact_argv
+
+    assert redact_argv(["tool", "--client-secret abc123"]) == ["tool", "--client-secret ***redacted***"]
+    assert redact_argv(["tool", "--tenant-id contoso"]) == ["tool", "--tenant-id contoso"]
+
+
+def test_collect_sensitive_argv_values_reads_single_token_flag_and_value() -> None:
+    """R093 (review): child-output scrubbing collects the value of a malformed single token too."""
+    from azure_tenant_audit.secret_hygiene import collect_sensitive_argv_values
+
+    assert collect_sensitive_argv_values(["tool", "--client-secret abc123"]) == {"abc123"}
+
+
+def test_redact_text_masks_unterminated_quoted_secret_to_the_end() -> None:
+    """R093 (review): an opening quote with no closing quote (a cut-off diagnostic) is masked to the end."""
+    from azure_tenant_audit.secret_hygiene import redact_text
+
+    out = redact_text('error: {"password": "Pa\\"ss word Secret99')
+    assert out == 'error: {"password": ***redacted***'
+
+
+def test_redact_text_round2_cut_off_after_backslash_and_marker_prefix() -> None:
+    """R093 (review round 2): a quoted value cut off after a backslash is masked to the end; only an exact redaction
+    marker is left as it is, not a credential that merely starts with one."""
+    from azure_tenant_audit.secret_hygiene import redact_text
+
+    assert redact_text('password="abc def\\') == "password=***redacted***"
+    assert "TAILSECRET" not in redact_text("password=***redacted***TAILSECRET")
+    assert redact_text("token: ***redacted-jwt***") == "token: ***redacted-jwt***"

@@ -1171,6 +1171,10 @@ def main(
         if not (args.certificate_path and args.certificate_thumbprint):
             parser.error_prevalidated("--certificate-path and --certificate-thumbprint are used together")
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s")
+    # R157: urllib3 logs each request line (query included) at DEBUG; a report download hop's query is a
+    # pre-authenticated credential, so the HTTP and token libraries stay at WARNING even with --verbose.
+    for library in ("urllib3", "msal"):
+        logging.getLogger(library).setLevel(logging.WARNING)
 
     if args.env:
         load_env_file(Path(args.env), guarded=True)

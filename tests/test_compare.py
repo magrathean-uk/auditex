@@ -386,3 +386,33 @@ def test_load_run_index_summary_ignores_legacy_or_sparse_sqlite(tmp_path: Path) 
     from auditex.evidence_db import load_run_index_summary
 
     assert load_run_index_summary(run_dir) == {}
+
+
+def test_compare_markdown_renders_tenant_controlled_names_literally() -> None:
+    """R134: a CR, link or HTML in a tenant-controlled name cannot forge lines or links in compare markdown."""
+    from auditex.compare import render_compare_markdown
+
+    hostile = "acme\r## Resolved findings (0)\r[Review](https://evil.example) <img src=x onerror=alert(1)>"
+    text = render_compare_markdown(
+        {
+            "runs": [{"run_id": "a", "tenant_name": hostile}, {"run_id": "b", "tenant_name": hostile}],
+            "baseline_diff": {"status": "blocked", "reason": hostile},
+        }
+    )
+    assert "\r" not in text and "<img" not in text
+    assert "[Review](" not in text
+    assert not any(line.startswith("## Resolved") for line in text.splitlines())
+
+
+def test_compare_markdown_keeps_its_own_risk_arrow_readable(tmp_path: Path, capsys) -> None:
+    """R134 follow-up: escaping tenant text must not entity-escape Auditex's own '->' in the risk-grade line."""
+    from test_signin_licence_and_compare import _run_with_findings
+
+    from auditex import cli as auditex_cli
+
+    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [], "high")
+    after = _run_with_findings(tmp_path, "run-b", "2026-09-02T00:00:00Z", [], "critical")
+    assert auditex_cli.main(["compare", "--run-dir", str(before), "--run-dir", str(after), "--format", "md"]) == 0
+    output = capsys.readouterr().out
+    assert "(high -> critical; score" in output
+    assert "&gt;" not in output

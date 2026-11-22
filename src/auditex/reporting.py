@@ -227,7 +227,8 @@ def _observation_basis(safety: Mapping[str, Any]) -> str:
 
 def _replay_text(safety: Mapping[str, Any]) -> str:
     """What an offline replay says about itself: where the evidence came from and that no tenant was contacted."""
-    source = _text(safety.get("replay_source")).strip()
+    # The sample's file name is operator input printed into Markdown (README, handoff, ledger): escaped (R064).
+    source = markdown_inline(_text(safety.get("replay_source")))
     origin = f"replayed from {source}" if source else "replayed from an offline sample file"
     return f"{origin}, no tenant contact"
 
@@ -1807,7 +1808,7 @@ _VERBATIM_IF_UNCHANGED = frozenset({"bundle-hashes.json"})
 _LOCAL_PATH_LABEL = "<local-path>"
 
 
-_LOCAL_ABSOLUTE_PATH = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
+_LOCAL_ABSOLUTE_PATH = re.compile(r"^(?:/|\\\\|[A-Za-z]:[\\/])")  # POSIX, UNC (\\server\share) or drive path
 
 
 def _local_path_label(value: Any) -> Any:
@@ -1816,6 +1817,16 @@ def _local_path_label(value: Any) -> Any:
         name = re.split(r"[\\/]", value.rstrip("\\/"))[-1]
         return f"{_LOCAL_PATH_LABEL}/{name}" if name else _LOCAL_PATH_LABEL
     return value
+
+
+def _local_path_argument(value: Any) -> Any:
+    """One command-line item: a bare absolute path, or the value of ``--flag=/abs/path``, as ``<local-path>/<name>``."""
+    if isinstance(value, str) and value.startswith("--") and "=" in value:
+        flag, _, path = value.partition("=")
+        if _LOCAL_ABSOLUTE_PATH.match(path):
+            return f"{flag}={_local_path_label(path)}"
+        return value
+    return _local_path_label(value)
 
 
 def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> dict[str, Any]:
@@ -1827,11 +1838,22 @@ def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> d
     safe = _pack_payload(payload, run_path)
     if "run_dir" in payload:
         safe["run_dir"] = run_path.name
-    if isinstance(safe.get("waiver_path"), str):
-        safe["waiver_path"] = _local_path_label(safe["waiver_path"])
     if isinstance(safe.get("command_line"), list):
-        safe["command_line"] = [_local_path_label(item) for item in safe["command_line"]]
-    return safe
+        safe["command_line"] = [_local_path_argument(item) for item in safe["command_line"]]
+    return _relabel_path_fields(safe)
+
+
+_PATH_FIELD = re.compile(r"(?:path|dir|directory|file)s?$", re.IGNORECASE)
+
+
+def _relabel_path_fields(value: Any, key: str = "") -> Any:
+    """Every absolute path under a path-named key (``waiver_path``, a nested ``input_path``), at any depth, as
+    ``<local-path>/<name>``; run-relative references and every other value are unchanged."""
+    if isinstance(value, Mapping):
+        return {item_key: _relabel_path_fields(item, str(item_key)) for item_key, item in value.items()}
+    if isinstance(value, list):
+        return [_relabel_path_fields(item, key) for item in value]
+    return _local_path_label(value) if _PATH_FIELD.search(key) else value
 
 
 def _copy_source_artifact(
@@ -1897,7 +1919,9 @@ def _copy_source_artifact(
             manifest_copy = {**manifest_copy, "pseudonym_notice": TEMPORARY_KEY_NOTICE}
         write_private_text(destination, json.dumps(manifest_copy, indent=2, ensure_ascii=False) + "\n")
     elif isinstance(payload, (Mapping, list)):
-        local_free = _pack_payload(payload, run_path) if isinstance(payload, Mapping) else _pack_safe(payload, run_path)
+        local_free = _relabel_path_fields(
+            _pack_payload(payload, run_path) if isinstance(payload, Mapping) else _pack_safe(payload, run_path)
+        )
         derived = settle_citations(redact_output(local_free, profile=PROFILE_CUSTOMER_PACK, context=context))
         if relative in _VERBATIM_IF_UNCHANGED:
             if derived != payload:
@@ -2852,8 +2876,28 @@ def _offline_live_readiness(*sources: Mapping[str, Any]) -> str | None:
     return None
 
 
+# Every C0 and C1 control (CR, LF, tab included) and the Unicode line and paragraph separators: a line break inside a
+# value would let tenant text start a new Markdown line (a forged heading, list item or table row).
+_MARKDOWN_BREAKS = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+# A backslash that would escape the next punctuation character (it could cancel the pipe escape), link brackets and
+# the table cell separator.
+_MARKDOWN_INLINE_SPECIAL = re.compile(r"\\(?=[!-/:-@\[-`{-~])|[\[\]|]")
+
+
+def markdown_inline(value: Any) -> str:
+    """Untrusted text as one line of Markdown that renders literally (R064, R134).
+
+    Line breaks become spaces, ``<`` becomes an entity (no raw HTML or autolink can open; a lone ``>`` cannot start
+    either, so ``a -> b`` stays readable), link brackets and the table cell separator are backslash-escaped.
+    Identifiers (``MS.AAD.1.1v1``, ``identity:global_admin``) stay readable.
+    Shared by the report, customer-pack and compare Markdown renderers.
+    """
+    text = _MARKDOWN_BREAKS.sub(" ", "" if value is None else str(value)).strip()
+    return _MARKDOWN_INLINE_SPECIAL.sub(lambda match: "\\" + match[0], text).replace("<", "&lt;")
+
+
 def _markdown_cell(value: Any) -> str:
-    return _text(value, "").replace("|", "\\|").replace("\n", " ").strip()
+    return markdown_inline(_text(value, ""))
 
 
 def _markdown_value(value: Any) -> str:
@@ -3121,22 +3165,25 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     lines = [
         "# Auditex Report",
         "",
-        f"- Tenant: {_text(summary.get('tenant_name'), 'unknown')}",
-        f"- Status: {_text(summary.get('overall_status'), 'unknown')}",
-        f"- Findings: {_text(summary.get('finding_count'), str(len(findings)))}",
-        f"- Open: {_text(summary.get('open_count'), '0')}",
-        f"- Risk: {_text(risk.get('grade'), 'unknown')} / {_text(risk.get('score'), '0')}",
-        f"- Assurance: {_text(assurance.get('grade'), 'unknown')} / {_text(assurance.get('score'), '0')}",
-        f"- Scorecard: {_text(provider_scorecard.get('grade'), 'unknown')} / {_text(provider_scorecard.get('score'), '0')}",
+        f"- Tenant: {_markdown_cell(_text(summary.get('tenant_name'), 'unknown'))}",
+        f"- Status: {_markdown_cell(_text(summary.get('overall_status'), 'unknown'))}",
+        f"- Findings: {_markdown_cell(_text(summary.get('finding_count'), str(len(findings))))}",
+        f"- Open: {_markdown_cell(_text(summary.get('open_count'), '0'))}",
+        f"- Risk: {_markdown_cell(_text(risk.get('grade'), 'unknown'))} / {_markdown_cell(_text(risk.get('score'), '0'))}",
+        f"- Assurance: {_markdown_cell(_text(assurance.get('grade'), 'unknown'))} / {_markdown_cell(_text(assurance.get('score'), '0'))}",
+        f"- Scorecard: {_markdown_cell(_text(provider_scorecard.get('grade'), 'unknown'))} / {_markdown_cell(_text(provider_scorecard.get('score'), '0'))}",
     ]
     if live_readiness:
-        lines.append(f"- Live readiness: {_text(live_readiness.get('trust_level'), 'unknown')}")
+        lines.append(f"- Live readiness: {_markdown_cell(_text(live_readiness.get('trust_level'), 'unknown'))}")
         cannot_trust = live_readiness.get("cannot_trust") or []
         if cannot_trust:
-            lines.append("- Cannot trust: " + ", ".join(_text(item) for item in cannot_trust[:5]))
+            lines.append("- Cannot trust: " + ", ".join(_markdown_cell(item) for item in cannot_trust[:5]))
     lines.append("")
     if surface_coverage:
-        lines.append("- Coverage: " + ", ".join(f"{_text(row.get('surface'))}: {_text(row.get('status'))}" for row in surface_coverage))
+        lines.append(
+            "- Coverage: "
+            + ", ".join(f"{_markdown_cell(row.get('surface'))}: {_markdown_cell(row.get('status'))}" for row in surface_coverage)
+        )
         lines.append("")
     _append_local_answer_markdown(lines, _mapping(selected_sections.get("local_answer")))
     _append_mapping_markdown(lines, "Executive Summary", _mapping(selected_sections.get("executive_summary")))
@@ -3175,7 +3222,7 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
         detection = _mapping(selected_sections.get("detection_coverage"))
         _append_rows_markdown(
             lines,
-            f"Detection Coverage (score {_text(detection.get('score'), 'n/a')})",
+            f"Detection Coverage (score {_markdown_cell(_text(detection.get('score'), 'n/a'))})",
             _dict_rows(detection.get("signals")),
             (("Signal", "title"), ("Status", "status"), ("Reason", "reason"), ("Why it matters", "why_it_matters")),
         )
@@ -3190,7 +3237,7 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     if coverage_gaps:
         lines.extend(["## Coverage Gaps", ""])
         for gap in coverage_gaps:
-            error_classes = ", ".join(_text(item) for item in gap.get("error_classes") or [])
+            error_classes = ", ".join(_text(item) for item in gap.get("error_classes") or [])  # escaped below
             detail = f" ({error_classes})" if error_classes else ""
             lines.append(f"- {_markdown_cell(gap.get('severity'))}: {_markdown_cell(gap.get('message'))}{_markdown_cell(detail)}")
         lines.append("")

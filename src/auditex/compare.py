@@ -26,6 +26,7 @@ from azure_tenant_audit.rule_parameters import (
 from azure_tenant_audit.run_files import read_run_file
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
+from .reporting import markdown_inline
 from .run_bundle import RunBundle
 
 
@@ -582,7 +583,8 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
 
 
 def _md(value: Any) -> str:
-    return str(value if value is not None else "").replace("|", "\\|").replace("\n", " ").strip()
+    # R134: the report's escaper (line breaks, raw HTML, link brackets, cell separators) for tenant-controlled names.
+    return markdown_inline(value)
 
 
 def _severity_counts(rows: list[dict[str, Any]]) -> str:
@@ -652,10 +654,11 @@ def render_compare_markdown(result: dict[str, Any]) -> str:
     delta = build_finding_delta(before, after)
     risk_before, risk_after = delta["risk_before"], delta["risk_after"]
     grade_before, grade_after = risk_before.get("grade") or "unknown", risk_after.get("grade") or "unknown"
-    risk_change = "unchanged" if grade_before == grade_after else f"{grade_before} -> {grade_after}"
+    # The arrow is Auditex's own text: escape only the grades, so the terminal shows '->' and not '-&gt;'.
+    risk_change = "unchanged" if grade_before == grade_after else f"{_md(grade_before)} -> {_md(grade_after)}"
     summary = baseline.get("summary") if isinstance(baseline.get("summary"), dict) else {}
     lines += [
-        f"- Risk grade: {_md(grade_before)} -> {_md(grade_after)} ({_md(risk_change)}; score {_md(risk_before.get('score'))} -> {_md(risk_after.get('score'))})",
+        f"- Risk grade: {_md(grade_before)} -> {_md(grade_after)} ({risk_change}; score {_md(risk_before.get('score'))} -> {_md(risk_after.get('score'))})",
         f"- New findings: {len(delta['new'])} ({_severity_counts(delta['new'])})",
         f"- Resolved findings: {len(delta['resolved'])} ({_severity_counts(delta['resolved'])})",
         f"- Not reassessed findings: {len(delta['not_reassessed'])} ({_severity_counts(delta['not_reassessed'])})",

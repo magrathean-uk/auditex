@@ -35,7 +35,8 @@ def test_customer_pack_redacts_all_files_and_verifies(planted_run: Path, tmp_pat
     target = tmp_path / "pack"
     result = write_enterprise_handoff_pack(planted_run, target)
     texts = {p.relative_to(target): p.read_text() for p in target.rglob("*") if p.is_file()}
-    assert texts and "<redacted-text>" in texts[Path("report.md")]
+    # Markdown shows the placeholder as visible text (a raw tag would render as nothing).
+    assert texts and "&lt;redacted-text>" in texts[Path("report.md")]
     for path, text in texts.items():
         assert all(value not in text for value in (OWNER, NOTES, GUID)), path
     rows = [row for row in result["source_artifacts"] if row.get("source_path") == "reports/report-pack.json"]
@@ -93,3 +94,55 @@ def test_handoff_routes_refuse_normalised_fifo_before_validation(planted_run: Pa
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
+
+
+def test_customer_pack_run_manifest_relabels_flag_equals_paths(tmp_path: Path) -> None:
+    """R021: '--out=/abs/path' style command-line items lose the operator's absolute path in the pack."""
+    from auditex.reporting import write_enterprise_handoff_pack
+
+    run = offline_run(tmp_path, "r021")
+    manifest_path = run / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    operator = tmp_path / "operator-home" / "Clients" / "Acme"
+    windows = "C:\\Users\\operator\\Clients\\Acme\\sample.json"
+    manifest["command_line"] = [
+        "azure-tenant-audit",
+        f"--out={operator / 'audits'}",
+        f"--waiver-file={operator / 'waivers.json'}",
+        f"--sample={windows}",
+        "--tenant-name=r021",
+        "--resume-from",
+        str(operator / "previous"),
+        "--out=\\\\fileserver\\Clients\\Acme\\audits",
+        "\\\\fileserver\\Clients\\Acme\\waivers.json",
+    ]
+    manifest["fixture_provenance"] = {
+        "input_path": str(operator / "samples" / "tenant.json"),
+        "input_paths": [str(operator / "samples" / "more.json")],
+        "artifact_path": "raw/x.json",
+    }
+    manifest_path.write_text(json.dumps(manifest))
+    rehash(run)
+
+    target = tmp_path / "pack"
+    write_enterprise_handoff_pack(run, target)
+    copied = json.loads((target / "source-artifacts" / "run-manifest.json").read_text())
+    assert copied["fixture_provenance"] == {
+        "input_path": "<local-path>/tenant.json",
+        "input_paths": ["<local-path>/more.json"],
+        "artifact_path": "raw/x.json",
+    }
+    assert copied["command_line"] == [
+        "azure-tenant-audit",
+        "--out=<local-path>/audits",
+        "--waiver-file=<local-path>/waivers.json",
+        "--sample=<local-path>/sample.json",
+        "--tenant-name=r021",
+        "--resume-from",
+        "<local-path>/previous",
+        "--out=<local-path>/audits",
+        "<local-path>/waivers.json",
+    ]
+    text = json.dumps(copied)
+    assert "operator-home" not in text and "C:\\\\Users" not in text
+    assert "fileserver" not in text and "Acme" not in text

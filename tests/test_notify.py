@@ -146,3 +146,111 @@ def test_send_notification_falls_back_to_manifest_and_findings(tmp_path: Path) -
     assert result["payload"]["report_pack_path"] is None
     assert "reports/report-pack.json" in result["evidence_missing"]
     assert "live-readiness.json" in result["evidence_missing"]
+
+
+def test_send_notification_webhook_transport_error_does_not_leak_webhook_url(tmp_path: Path, monkeypatch) -> None:
+    """R065: a transport failure must not surface the webhook URL (a credential) in the result or a traceback."""
+    import requests
+
+    run_dir = tmp_path / "run"
+    _write_run_bundle(run_dir)
+    secret_url = "https://hooks.slack.example.test/services/T000/B000/SECRETPART"
+    teams_url = "https://flow.example.test/workflows/abc/triggers/manual?api-version=1&sig=SIGSECRET"
+
+    def _fake_post(url, json=None, timeout=None):  # noqa: ANN001
+        raise requests.exceptions.ConnectionError(
+            f"HTTPSConnectionPool(host='hooks.slack.example.test', port=443): Max retries exceeded with url: {url}"
+        )
+
+    monkeypatch.setattr("auditex.notify.requests.post", _fake_post)
+    for sink, env_name, url in (
+        ("slack", "AUDITEX_SLACK_WEBHOOK_URL", secret_url),
+        ("teams", "AUDITEX_TEAMS_WEBHOOK_URL", teams_url),
+    ):
+        monkeypatch.setenv(env_name, url)
+        result = send_notification(run_dir=str(run_dir), sink=sink, dry_run=False)
+        dumped = json.dumps(result)
+        assert result["status"] == "failed"
+        assert result["error_class"] == "ConnectionError"
+        assert "SECRETPART" not in dumped
+        assert "SIGSECRET" not in dumped
+        assert "/services/" not in dumped
+
+
+def test_notify_cli_webhook_transport_error_prints_no_webhook_url(tmp_path: Path, monkeypatch, capsys) -> None:
+    """R065: the CLI path prints a failed result, not a traceback carrying the webhook path."""
+    import requests
+
+    from auditex.cli import main
+
+    run_dir = tmp_path / "run"
+    _write_run_bundle(run_dir)
+    secret_url = "https://hooks.slack.example.test/services/T000/B000/SECRETPART"
+
+    def _fake_post(url, json=None, timeout=None):  # noqa: ANN001
+        raise requests.exceptions.ConnectionError(f"Max retries exceeded with url: {url}")
+
+    monkeypatch.setenv("AUDITEX_SLACK_WEBHOOK_URL", secret_url)
+    monkeypatch.setattr("auditex.notify.requests.post", _fake_post)
+    exit_code = main(["notify", "send", str(run_dir), "--sink", "slack", "--execute"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "SECRETPART" not in captured.out + captured.err
+    assert json.loads(captured.out)["status"] == "failed"
+
+
+def test_send_notification_smtp_transport_error_returns_failed(tmp_path: Path, monkeypatch) -> None:
+    """R065: an SMTP connection failure becomes a failed result instead of an uncaught traceback."""
+    run_dir = tmp_path / "run"
+    _write_run_bundle(run_dir)
+
+    def _refuse(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise ConnectionRefusedError(61, "Connection refused")
+
+    monkeypatch.setenv("AUDITEX_SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("AUDITEX_SMTP_TO", "ops@example.test")
+    monkeypatch.setattr("auditex.notify.smtplib.SMTP", _refuse)
+    result = send_notification(run_dir=str(run_dir), sink="smtp", dry_run=False)
+    assert result["status"] == "failed"
+    assert result["error_class"] == "ConnectionRefusedError"
+
+
+def test_send_notification_webhook_error_body_echoing_url_is_scrubbed(tmp_path: Path, monkeypatch) -> None:
+    """R065 (review): a 4xx body that echoes the webhook path or query does not reach the result."""
+    run_dir = tmp_path / "run"
+    _write_run_bundle(run_dir)
+    secret_url = "https://hooks.slack.example.test/services/T000/B000/SECRETPART?sig=SIGSECRET"
+
+    class _Response:
+        status_code = 404
+        text = "no_service: POST /services/T000/B000/SECRETPART?sig=SIGSECRET not found"
+
+    monkeypatch.setenv("AUDITEX_SLACK_WEBHOOK_URL", secret_url)
+    monkeypatch.setattr("auditex.notify.requests.post", lambda *_a, **_k: _Response())
+    result = send_notification(run_dir=str(run_dir), sink="slack", dry_run=False)
+    dumped = json.dumps(result)
+    assert result["status"] == "failed" and result["http_status"] == 404
+    assert "SECRETPART" not in dumped and "SIGSECRET" not in dumped
+    assert result["response_text"] == "HTTP 404"
+
+
+def test_send_notification_webhook_error_reply_keeps_only_a_short_code(tmp_path: Path, monkeypatch) -> None:
+    """R065 (review round 2): a failing reply is kept only when it is a short service code; anything else (a
+    JSON-escaped echo of the path) becomes a fixed diagnostic."""
+    run_dir = tmp_path / "run"
+    _write_run_bundle(run_dir)
+    monkeypatch.setenv("AUDITEX_SLACK_WEBHOOK_URL", "https://hooks.slack.example.test/services/T000/B000/SECRETPART")
+    replies = iter(['{"path": "\\/services\\/T000\\/B000\\/SECRETPART"}', "invalid_token"])
+
+    class _Response:
+        status_code = 403
+
+        @property
+        def text(self) -> str:
+            return next(replies)
+
+    monkeypatch.setattr("auditex.notify.requests.post", lambda *_a, **_k: _Response())
+    first = send_notification(run_dir=str(run_dir), sink="slack", dry_run=False)
+    assert "SECRETPART" not in json.dumps(first) and first["response_text"] == "HTTP 403"
+    second = send_notification(run_dir=str(run_dir), sink="slack", dry_run=False)
+    assert second["response_text"] == "invalid_token"
