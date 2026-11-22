@@ -470,6 +470,7 @@ _PARITY_TEXTS = (
 _PARITY_KEYS = (
     "secret", "token", "credential", "authorization", "passphrase", "ApplicationSecret", "CertificatePassword",
     "sharedSecret", "preSharedKey", "clientAssertion", "private_key", "privateKey", "Client-Secret",
+    "clientSecret2", "password1", "secretValue", "secret_text", "tokenValue",
 )
 
 

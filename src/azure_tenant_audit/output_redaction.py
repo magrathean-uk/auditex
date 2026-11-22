@@ -280,6 +280,9 @@ _KEY_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 
 def _secret_key(key: Any) -> bool:
     words = [word.lower() for word in _KEY_WORD_RE.findall(str(key))]
+    # A numbered copy (``clientSecret2``, ``password1``) or a value qualifier (``secretValue``) names the same thing.
+    while words and (words[-1].isdigit() or (len(words) > 1 and words[-1] in {"value", "text"})):
+        words.pop()
     return bool(words) and (words[-1] in _SECRET_LAST_WORDS or "".join(words[-2:]) in _SECRET_LAST_PAIRS)
 
 
