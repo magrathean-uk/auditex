@@ -364,3 +364,26 @@ def test_create_app_grants_consent_for_the_configured_permissions_only_in_the_na
 def test_create_app_dry_run_makes_no_tenant_call(populator_config, directory):
     assert directory["module"].main(["--config", str(populator_config), "--tenant-id", LAB_TENANT, "--dry-run", "--create-secret"]) == 0
     assert directory["az"] == [] and directory["graph"] == []
+
+
+def test_a_failed_run_never_removes_a_secret_another_run_saved(populator_config, directory, monkeypatch):
+    """Run 1 fails after its destination check; meanwhile run 2 saved its credential at the same path.
+    Run 1's cleanup must leave run 2's file alone."""
+    import requests
+
+    secret_file = populator_config.parent.parent / ".secrets" / "lab-populator-app-secret.json"
+    other_run = json.dumps({"password": "run-2-credential"})
+    real_request = requests.Session.request
+
+    def interleaved(session, method, url, *args, **kwargs):
+        if method.upper() == "POST" and url.endswith("/applications"):
+            secret_file.write_text(other_run, encoding="utf-8")
+            return FakeGraphResponse(500)
+        return real_request(session, method, url, *args, **kwargs)
+
+    monkeypatch.setattr(requests.Session, "request", interleaved)
+    with pytest.raises(RuntimeError):
+        directory["module"].main(["--config", str(populator_config), "--tenant-id", LAB_TENANT, "--create-secret"])
+    assert secret_file.exists(), "a failed run removed the credential another run had saved"
+    assert secret_file.read_text(encoding="utf-8") == other_run
+    assert sorted(path.name for path in secret_file.parent.iterdir()) == [secret_file.name]

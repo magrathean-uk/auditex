@@ -9,10 +9,12 @@ token's tenant, switching the Azure CLI default account mid-run cannot move a wr
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import uuid
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
@@ -43,17 +45,26 @@ class TenantRefused(RuntimeError):
         self.reason = reason
 
 
-def open_owner_only(path: Path) -> int:
-    """Open a secret file as 0600 without truncating it; never follow a symlink at the final path."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+def stage_secret_file(path: Path) -> tuple[int, Path]:
+    """Check the secret destination and open a private staging file beside it.
+
+    The destination must be absent or a regular file (never a symlink). The staging file has a unique
+    name, is created 0600 with O_EXCL, and only ever replaces the destination by an atomic rename once
+    the credential is written, so this run never deletes or truncates a file another run saved.
+    """
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise OSError(errno.EPERM, "the destination is not a regular file")
+    fd, staged = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     os.fchmod(fd, 0o600)
-    return fd
+    return fd, Path(staged)
 
 
-def write_owner_only_fd(fd: int, text: str) -> None:
+def commit_secret_file(fd: int, staged: Path, path: Path, text: str) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.truncate(0)
         handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(staged, path)
 
 
 def ensure_private_dir(path: Path) -> None:
@@ -230,11 +241,11 @@ def main(argv: list[str]) -> int:
     try:
         return populate(args, directory, pending)
     finally:
-        # A run that opened the secret file but never wrote it closes it, and removes it if this run made it.
+        # A run that staged a secret file but never committed it removes only its own staging file.
         if pending.get("fd") is not None:
             os.close(pending["fd"])
-            if pending.get("created"):
-                pending["path"].unlink(missing_ok=True)
+        if pending.get("staged") is not None:
+            pending["staged"].unlink(missing_ok=True)
 
 
 def populate(args: argparse.Namespace, directory: Directory | None, pending: dict) -> int:
@@ -243,14 +254,12 @@ def populate(args: argparse.Namespace, directory: Directory | None, pending: dic
     manifest_path = args.config.parent.parent / ".secrets" / "lab-populator-app.json"
     ensure_private_dir(manifest_path.parent)
     secret_path = args.config.parent.parent / ".secrets" / "lab-populator-app-secret.json"
-    secret_fd: int | None = None
     if args.create_secret and not args.dry_run:
         # Check the local destination before any directory write, so a refused destination never
         # leaves an issued credential unstored.
-        existed = secret_path.exists() or secret_path.is_symlink()
         try:
-            secret_fd = open_owner_only(secret_path)
-            pending.update(fd=secret_fd, created=not existed, path=secret_path)
+            secret_fd, staged = stage_secret_file(secret_path)
+            pending.update(fd=secret_fd, staged=staged)
         except OSError as exc:
             print(f"secret_path_refused: cannot store the secret at {secret_path.name}: {exc.strerror}. Nothing was changed.", file=sys.stderr)
             return 4
@@ -353,9 +362,9 @@ def populate(args: argparse.Namespace, directory: Directory | None, pending: dic
             "password": secret.get("secretText"),
             "endDateTime": secret.get("endDateTime"),
         }
-        pending["fd"] = None
-        write_owner_only_fd(secret_fd, json.dumps(secret_payload, indent=2, sort_keys=True))
-        secret_fd = None
+        secret_fd, staged = pending.pop("fd"), pending["staged"]
+        commit_secret_file(secret_fd, staged, secret_path, json.dumps(secret_payload, indent=2, sort_keys=True))
+        pending.pop("staged")
         secret_stored = True
 
     return finish(args, manifest_path, secret_path, app_name, app_id, planned_permissions, secret_stored)
