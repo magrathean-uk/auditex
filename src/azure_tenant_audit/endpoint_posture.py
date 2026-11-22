@@ -198,7 +198,8 @@ def device_posture_summary(
     """Counts of the devices each check says nothing about.
 
     Whether a device can be judged at all is fixed here: a device with no last-sync time, or an OS the
-    table does not describe, is unknown whatever day it is. The one date-dependent unknown, a Windows build
+    table does not describe, is unknown whatever day it is. A device on a platform the table does not cover
+    (Linux, Windows Server) is counted in ``os_lifecycle_not_covered``, not as unknown. The one date-dependent unknown, a Windows build
     whose Home/Pro end of support has passed but whose Enterprise/Education date has not, is counted as of
     ``os_lifecycle_evaluated_on`` because the edition is not in the data.
     """
@@ -211,9 +212,17 @@ def device_posture_summary(
     in_grace_period = sum(1 for device in devices if compliance_state(device) == COMPLIANCE_IN_GRACE_PERIOD)
     lifecycle_reasons: Counter[str] = Counter()
     edition_dependent = 0
+    not_covered = 0
     for device in devices:
         _family_name, release, reason = os_lifecycle.lookup(device.get("platform"), device.get("os_version"))
-        if release is None:
+        if release is None and reason == os_lifecycle.REASON_PLATFORM_NOT_COVERED:
+            # A named platform the table does not describe (Linux, Windows Server) is outside the end-of-life rule,
+            # not an unknown that holds it open. A device that reports no platform at all could be anything.
+            if str(device.get("platform") or "").strip():
+                not_covered += 1
+            else:
+                lifecycle_reasons["platform_missing"] += 1
+        elif release is None:
             lifecycle_reasons[str(reason)] += 1
         elif os_lifecycle.classify(device.get("platform"), device.get("os_version"), today).state == os_lifecycle.STATE_EDITION_DEPENDENT:
             edition_dependent += 1
@@ -235,6 +244,7 @@ def device_posture_summary(
         "os_lifecycle_unknown": sum(lifecycle_reasons.values()),
         "os_lifecycle_unknown_reasons": [{"reason": name, "count": lifecycle_reasons[name]} for name in sorted(lifecycle_reasons)],
         "os_lifecycle_edition_dependent": edition_dependent,
+        "os_lifecycle_not_covered": not_covered,
         "os_lifecycle_evaluated_on": today.isoformat(),
         "os_lifecycle_table_verified_on": os_lifecycle.table_verified_on(),
     }

@@ -1,8 +1,8 @@
 {
   "_documentation": "Dated operating-system end-of-life table used by the intune.device_os_end_of_life rule. Auditex reads it from configs/ and never from the network. verified_on is the date every entry was last checked against its sources; refresh the table (and verified_on) when a release is added or a date changes, and keep tests/test_os_lifecycle.py green. end_of_support is the last day the vendor serves security updates for every General Availability edition of the release; a device is past end of life only after that date. end_of_support_home_pro is the earlier date for Home and Pro editions when it differs: between the two dates the edition decides, and Intune's osVersion does not show it, so the rule reports unknown (edition_dependent) rather than guess. ltsc_end_of_support is the last day of the latest Long-Term Servicing release that shares the build (LTSC, LTSB or IoT Enterprise LTSC): osVersion does not show the edition, so between end_of_support and ltsc_end_of_support the state is unknown (edition_dependent), and only after ltsc_end_of_support is the build past end of life. Windows Server shares some builds and is not covered. extended_support_until is a paid extension (Windows 10 ESU) whose enrolment Auditex cannot see. end_of_support is null while the vendor still patches the release. A release that is not in the table, or a version that cannot be parsed, is unknown, never supported. confidence is vendor_published for dates the vendor publishes and derived for Apple and Android, which publish none.",
   "schema_version": "2026-10-22",
-  "verified_on": "2026-10-22",
-  "scope": "Windows 10 and 11 releases (matched on the build number in osVersion; Long-Term Servicing editions that share a build are recorded as ltsc_end_of_support), macOS, iOS and iPadOS (matched on the major version) and Android (matched on the major version). Windows Server and Windows IoT editions other than IoT Enterprise LTSC are not covered.",
+  "verified_on": "2026-11-22",
+  "scope": "Windows 10 and 11 releases (matched on the build number in osVersion; Long-Term Servicing editions that share a build are recorded as ltsc_end_of_support), Windows 8.1 (matched on its 6.3 kernel version), macOS, iOS and iPadOS (matched on the major version) and Android (matched on the major version). Windows Server and Windows IoT editions other than IoT Enterprise LTSC are not covered.",
   "platforms": {
     "windows": {
       "title": "Windows",
@@ -84,7 +84,7 @@
             "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
             "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
           ],
-          "status": "edition_dependent"
+          "status": "end_of_life"
         },
         {
           "id": "windows-11-22h2",
@@ -319,6 +319,19 @@
           ],
           "note": "Windows 10 Enterprise LTSB 2015 shares build 10240 and reached end of support on 2025-10-14.",
           "status": "end_of_life"
+        },
+        {
+          "id": "windows-8-1",
+          "name": "Windows 8.1",
+          "kernel": "6.3",
+          "end_of_support": "2023-01-10",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-81"
+          ],
+          "note": "Windows 8.1 reports osVersion 6.3.<build> and is matched on that kernel version.",
+          "status": "end_of_life"
         }
       ]
     },
@@ -427,6 +440,20 @@
       "title": "iOS and iPadOS",
       "match": "major",
       "releases": [
+        {
+          "id": "ios-before-13",
+          "name": "iOS and iPadOS 12 and earlier",
+          "major_below": 13,
+          "end_of_support": "2023-01-23",
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Apple publishes no end-of-life dates. iOS 12.5.7 (23 January 2023) was the last iOS 12 security release; older releases ended earlier.",
+          "status": "end_of_life"
+        },
         {
           "id": "ios-13",
           "name": "iOS and iPadOS 13",
@@ -539,6 +566,20 @@
       "title": "Android",
       "match": "major",
       "releases": [
+        {
+          "id": "android-before-7",
+          "name": "Android 6 and earlier",
+          "major_below": 7,
+          "end_of_support": "2019-10-01",
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Android Open Source Project security bulletins stopped covering Android 6 and earlier no later than they stopped covering Android 7, so the date is Android 7's last patch; the true date is earlier. Some manufacturers patch their own builds for longer, so check the device maker's support policy before treating the device as unpatched.",
+          "status": "end_of_life"
+        },
         {
           "id": "android-7",
           "name": "Android 7",

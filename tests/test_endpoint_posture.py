@@ -107,8 +107,10 @@ def test_the_device_summary_counts_what_each_check_cannot_judge() -> None:
     assert (summary["encryption_on"], summary["encryption_off"], summary["encryption_unknown"]) == (2, 1, 2)
     assert (summary["jailbreak_jailbroken"], summary["jailbreak_clean"], summary["jailbreak_unknown"], summary["jailbreak_not_applicable"]) == (1, 0, 1, 3)
     assert summary["last_sync_unknown"] == 2
-    assert summary["os_lifecycle_unknown"] == 2
-    assert summary["os_lifecycle_unknown_reasons"] == [{"reason": "os_version_missing", "count": 1}, {"reason": "platform_not_covered", "count": 1}]
+    # Linux is outside the table's scope (R111): counted apart, not as unknown.
+    assert summary["os_lifecycle_unknown"] == 1
+    assert summary["os_lifecycle_unknown_reasons"] == [{"reason": "os_version_missing", "count": 1}]
+    assert summary["os_lifecycle_not_covered"] == 1
     # 24H2 is between its Home/Pro and Enterprise/Education dates on 2026-10-22: the edition is not in the data.
     assert summary["os_lifecycle_edition_dependent"] == 1 and summary["os_lifecycle_evaluated_on"] == "2026-10-22"
     assert summary["platform_counts"] == {"android": 1, "ios": 1, "other": 1, "windows": 2}

@@ -171,3 +171,52 @@ def test_i9_a_single_or_absent_dmarc_record_raises_no_duplicate_finding() -> Non
     assert "dns_posture.dmarc_multiple_records" not in rules
     _, rules = _dns_findings([])
     assert "dns_posture.dmarc_missing" in rules and "dns_posture.dmarc_multiple_records" not in rules
+
+
+def test_i5_the_shipped_table_has_floors_for_old_ios_android_and_windows_8_1() -> None:
+    """R111: devices below the oldest listed release are past end of life, not unknown."""
+    from datetime import date
+
+    from azure_tenant_audit.os_lifecycle import STATE_PAST_END_OF_LIFE, classify
+
+    today = date(2026, 11, 22)
+    for system, version, release_id in (
+        ("iOS", "12.5.7", "ios-before-13"),
+        ("iPadOS", "9.3.5", "ios-before-13"),
+        ("Android", "6.0.1", "android-before-7"),
+        ("Android", "5.1", "android-before-7"),
+        ("Windows", "6.3.9600", "windows-8-1"),
+    ):
+        state = classify(system, version, today)
+        assert (state.state, state.release_id) == (STATE_PAST_END_OF_LIFE, release_id), (system, version)
+
+
+def test_i5_devices_on_platforms_the_table_does_not_cover_do_not_hold_the_end_of_life_rule_open() -> None:
+    """R111: a Linux or Windows Server device is outside the rule's scope, not an unknown that blocks it."""
+    from datetime import date
+
+    from azure_tenant_audit import endpoint_posture
+
+    devices = [
+        {"platform": "Windows", "os_version": "10.0.26200.1000"},
+        {"platform": "Linux", "os_version": "6.1"},
+        {"platform": "Windows Server 2019", "os_version": "10.0.17763.6000"},
+    ]
+    summary = endpoint_posture.device_posture_summary(devices, read_state="collected", today=date(2026, 11, 22))
+
+    assert summary["os_lifecycle_unknown"] == 0
+    assert summary["os_lifecycle_unknown_reasons"] == []
+    assert summary["os_lifecycle_not_covered"] == 2
+
+
+def test_i5_a_device_with_no_platform_is_still_unknown() -> None:
+    from datetime import date
+
+    from azure_tenant_audit import endpoint_posture
+
+    summary = endpoint_posture.device_posture_summary(
+        [{"platform": "", "os_version": "10.0.26200.1000"}], read_state="collected", today=date(2026, 11, 22)
+    )
+    assert summary["os_lifecycle_unknown"] == 1
+    assert summary["os_lifecycle_unknown_reasons"] == [{"reason": "platform_missing", "count": 1}]
+    assert summary["os_lifecycle_not_covered"] == 0

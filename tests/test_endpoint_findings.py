@@ -206,17 +206,20 @@ def test_a_build_a_long_term_servicing_edition_shares_is_not_called_past_end_of_
     assert findings[0]["evidence"]["os_lifecycle"]["ltsc_end_of_support"] == "2026-10-13"
     summary = _record(snapshot, "device_posture", "device_posture_summary")
     assert summary["os_lifecycle_edition_dependent"] == 2
-    # The server is not a Windows client: unknown, not judged against Windows 10.
-    assert {row["reason"]: row["count"] for row in summary["os_lifecycle_unknown_reasons"]} == {"platform_not_covered": 1}
-    assert rule_inputs_gap("intune.device_os_end_of_life", snapshot) == "os_lifecycle_unknown_for_1_devices"
+    # The server is not a Windows client: not judged against Windows 10, and outside the rule rather than unknown (R111).
+    assert not summary.get("os_lifecycle_unknown_reasons")
+    assert summary["os_lifecycle_not_covered"] == 1
+    assert rule_inputs_gap("intune.device_os_end_of_life", snapshot) == "os_edition_dependent_for_2_devices"
 
 
 def test_an_unlisted_release_is_unknown_for_the_end_of_life_rule() -> None:
     snapshot = _snapshot(**_devices(_device("future", version="10.0.99999.1"), _device("tux", "Linux", "6.1")))
     assert not _by_rule(_findings(snapshot), "intune.device_os_end_of_life")
-    assert rule_inputs_gap("intune.device_os_end_of_life", snapshot) == "os_lifecycle_unknown_for_2_devices"
-    reasons = {row["reason"] for row in _record(snapshot, "device_posture", "device_posture_summary")["os_lifecycle_unknown_reasons"]}
-    assert reasons == {"release_not_in_table", "platform_not_covered"}
+    # The Linux device is outside the table's scope (R111); only the unlisted Windows build is unknown.
+    assert rule_inputs_gap("intune.device_os_end_of_life", snapshot) == "os_lifecycle_unknown_for_1_devices"
+    summary = _record(snapshot, "device_posture", "device_posture_summary")
+    assert {row["reason"] for row in summary["os_lifecycle_unknown_reasons"]} == {"release_not_in_table"}
+    assert summary["os_lifecycle_not_covered"] == 1
 
 
 # ---- compliance policies ----------------------------------------------------------------------------------

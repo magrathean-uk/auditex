@@ -76,8 +76,11 @@ def test_releases_are_keyed_uniquely_on_the_build_or_the_major_version() -> None
         keys = []
         for row in platform["releases"]:
             if family == "windows":
-                assert isinstance(row["build"], int) and "major" not in row and "major_below" not in row, row["id"]
-                keys.append(row["build"])
+                # A Windows 10 or 11 release is keyed on its build; an older one (8.1) on its kernel version.
+                assert ("build" in row) != ("kernel" in row), row["id"]
+                assert "major" not in row and "major_below" not in row, row["id"]
+                assert isinstance(row["build"], int) if "build" in row else isinstance(row["kernel"], str), row["id"]
+                keys.append(row.get("build", f"kernel-{row.get('kernel')}"))
             else:
                 assert ("major" in row) != ("major_below" in row), row["id"]
                 assert all(isinstance(row.get(name, 0), int) for name in ("major", "major_below")), row["id"]
@@ -117,16 +120,16 @@ def test_status_agrees_with_the_dates_on_the_verification_date() -> None:
 
 
 def test_the_windows_table_covers_every_release_of_windows_10_and_11_that_intune_reports() -> None:
-    builds = {row["build"] for row in _TABLE["platforms"]["windows"]["releases"]}
+    builds = {row.get("build") for row in _TABLE["platforms"]["windows"]["releases"]}
     # Windows 10 1507 to 22H2 and Windows 11 21H2 to 26H2.
     assert {10240, 14393, 17763, 19044, 19045, 22000, 22621, 22631, 26100, 26200, 28000, 26300} <= builds
-    windows_10 = next(row for row in _TABLE["platforms"]["windows"]["releases"] if row["build"] == 19045)
+    windows_10 = next(row for row in _TABLE["platforms"]["windows"]["releases"] if row.get("build") == 19045)
     assert windows_10["end_of_support"] == "2025-10-14"
     assert windows_10["extended_support_until"] == "2028-10-10", "the paid ESU window must be recorded"
 
 
 def test_every_build_a_long_term_servicing_edition_shares_records_its_later_end_date() -> None:
-    by_build = {row["build"]: row for row in _TABLE["platforms"]["windows"]["releases"]}
+    by_build = {row["build"]: row for row in _TABLE["platforms"]["windows"]["releases"] if "build" in row}
     # LTSC 2019 (17763), LTSC 2021 and IoT LTSC 2021 (19044), LTSC and IoT LTSC 2024 (26100), LTSB 2016 (14393) and 2015 (10240).
     assert {build: by_build[build].get("ltsc_end_of_support") for build in (10240, 14393, 17763, 19044, 26100)} == {
         10240: "2025-10-14",
@@ -223,11 +226,11 @@ def test_apple_and_android_releases_are_matched_on_the_major_version() -> None:
         ("Windows", "11", REASON_VERSION_UNPARSABLE),
         ("macOS", "Sonoma", REASON_VERSION_UNPARSABLE),
         ("Android", "S", REASON_VERSION_UNPARSABLE),
-        ("Windows", "6.3.9600", REASON_NOT_IN_TABLE),
+        ("Windows", "6.1.7601", REASON_NOT_IN_TABLE),
         ("Windows", "10.0.99999.1", REASON_NOT_IN_TABLE),
         ("macOS", "99.0", REASON_NOT_IN_TABLE),
-        ("iOS", "12.5.8", REASON_NOT_IN_TABLE),
-        ("Android", "6.0", REASON_NOT_IN_TABLE),
+        ("iOS", "99.0", REASON_NOT_IN_TABLE),
+        ("Android", "99", REASON_NOT_IN_TABLE),
         ("Linux", "6.1", REASON_PLATFORM_NOT_COVERED),
         ("Windows Phone", "10.0.15254", REASON_PLATFORM_NOT_COVERED),
         (None, "10.0.19045", REASON_PLATFORM_NOT_COVERED),
