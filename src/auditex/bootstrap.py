@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -28,6 +30,75 @@ def is_source_checkout() -> bool:
     except OSError:
         return False
     return own_tree and BOOTSTRAP_SCRIPT.is_file() and SELECT_PYTHON_SCRIPT.is_file()
+
+
+# The module each optional extra provides, to tell which extras an installed Auditex already has.
+_EXTRA_MODULES = {"google": "googleapiclient", "mcp": "mcp", "local-answer": "llama_cpp"}
+
+
+def _extra_installed(extra: str) -> bool:
+    module = _EXTRA_MODULES.get(extra)
+    try:
+        return bool(module) and importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _installed_from_file() -> str | None:
+    """The local wheel or sdist this Auditex was installed from (PEP 610 direct_url.json), or None for an index install."""
+    try:
+        from importlib.metadata import PackageNotFoundError, distribution
+
+        text = distribution("auditex").read_text("direct_url.json")
+    except (PackageNotFoundError, OSError, ValueError):
+        return None
+    try:
+        data = json.loads(text or "{}")
+    except ValueError:
+        return None
+    url = str(data.get("url") or "") if isinstance(data, dict) else ""
+    if not url.startswith("file:") or "dir_info" in data:
+        return None
+    from urllib.parse import unquote, urlparse
+
+    return unquote(urlparse(url).path) or None
+
+
+def extra_install_command(extra: str, *, for_record: bool = False) -> str:
+    """The command that adds an optional extra to this Auditex, for the route it was installed by.
+
+    A source checkout takes an editable install in its folder. A pipx install is reinstalled with the extras it
+    already has plus the new one (pipx keeps only the extras named on its last install). Any other environment
+    installs through the interpreter that runs Auditex, never a bare `python` that may be another one. An Auditex
+    installed from a downloaded wheel or sdist names that file again, not the package index.
+
+    ``for_record`` gives a command that may be written into a run bundle: it never names a local path (the interpreter
+    or the wheel file). In a plain environment it starts with a bare ``python``; ``extra_install_note`` says which one.
+    """
+    if is_source_checkout():
+        return f"python -m pip install -e '.[{extra}]'"
+    pipx = (Path(sys.prefix) / "pipx_metadata.json").is_file()
+    extras = ",".join(sorted({name for name in _EXTRA_MODULES if _extra_installed(name)} | {extra})) if pipx else extra
+    local_file = _installed_from_file()
+    if local_file and for_record:
+        local_file = "<downloaded auditex wheel>"
+    if local_file:
+        spec = shlex.quote(f"{local_file}[{extras}]")
+    else:
+        spec = f'"auditex[{extras}]"' if pipx else f"'auditex[{extras}]'"
+    if pipx:
+        return f"pipx install --force {spec}"
+    if for_record:
+        return f"python -m pip install {spec}"
+    return f"{shlex.quote(sys.executable)} -m pip install {spec}"
+
+
+def extra_install_note() -> str:
+    """What the operator must know beside a ``for_record`` command and outside it, so the command stays pasteable:
+    in a plain environment, that ``python`` means the interpreter that runs Auditex. Empty for pipx and a checkout."""
+    if is_source_checkout() or (Path(sys.prefix) / "pipx_metadata.json").is_file():
+        return ""
+    return "run it with the Python that runs Auditex"
 
 
 def detect_package_manager() -> str | None:
@@ -208,7 +279,7 @@ def run_setup(*, with_exchange: bool = False, with_pwsh: bool = False, with_mcp:
         print(
             "auditex setup prepares a source checkout; this Auditex is an installed package, so its Python is ready.\n"
             "Optional packs are installed by hand:\n"
-            "  MCP server:      python -m pip install 'auditex[mcp]'\n"
+            f"  MCP server:      {extra_install_command('mcp')}\n"
             "  Exchange checks: install PowerShell 7, then the ExchangeOnlineManagement module\n"
             "                   for the current user (from PSGallery, without trusting the gallery)\n"
             "Run auditex doctor to check."

@@ -29,6 +29,8 @@ from typing import Any, Protocol
 
 import requests
 
+from .dns_lookup import safe_resolver_diagnostic
+
 DEFAULT_TIMEOUT_SECONDS = 5.0
 # The requests timeout bounds each socket read, not the response: a host that sends a byte every few seconds could
 # hold one fetch for days. One fetch therefore stops at this wall-clock deadline (review R163).
@@ -178,7 +180,8 @@ def fetch_mta_sts_policy(domain: str, fetcher: HttpsFetcher) -> dict[str, Any]:
         return {"url": url, "fetch_status": "skipped", "error": "invalid_domain_name"}
     status, body, error = fetcher.get_text(url)
     if status is None:
-        return {"url": url, "fetch_status": "unreachable", "http_status": None, "error": error}
+        return {"url": url, "fetch_status": "unreachable", "http_status": None,
+                "error": safe_resolver_diagnostic(error) if error else error}
     if status != 200:
         return {"url": url, "fetch_status": "http_error", "http_status": status}
     parsed = parse_mta_sts_policy(body)
@@ -226,7 +229,7 @@ def fetch_tenant_discovery(domain: str, fetcher: HttpsFetcher) -> dict[str, Any]
         return {"url": url, "discovery_status": "skipped", "error": "invalid_domain_name"}
     status, body, error = fetcher.get_text(url)
     if status is None:
-        return {"url": url, "discovery_status": "unreachable", "error": error}
+        return {"url": url, "discovery_status": "unreachable", "error": safe_resolver_diagnostic(error) if error else error}
     if status != 200:
         return {"url": url, "discovery_status": "not_found" if status in {400, 404} else "http_error", "http_status": status}
     try:

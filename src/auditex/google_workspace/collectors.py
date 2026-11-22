@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -16,10 +15,13 @@ from azure_tenant_audit.collectors.base import (
     record_truncation,
 )
 from azure_tenant_audit.dns_lookup import (
+    DNS_POSTURE_COLLECTORS,
     DohClient,
     DohError,
     collect_domain_posture,
+    doh_resolver_display,
     resolve_doh_endpoint,
+    safe_resolver_diagnostic,
     unknown_posture,
 )
 
@@ -99,7 +101,7 @@ def _coverage(
     if error_class:
         row["error_class"] = error_class
     if error:
-        row["error"] = error
+        row["error"] = safe_resolver_diagnostic(error) if collector in DNS_POSTURE_COLLECTORS else error
     if subject_scoped:
         row["subject_scoped"] = subject_scoped
     return row
@@ -628,15 +630,20 @@ class GoogleDnsPostureCollector:
         top = _context_limit(context)
         domain = context.get("domain")
         resolver = context.get("dns_resolver")
+        endpoint = context.get("doh_endpoint")
         if resolver is None:
             # The run's resolver: an explicit endpoint, else AUDITEX_DOH_ENDPOINT, else Cloudflare.
             try:
-                resolver = DohClient(endpoint=resolve_doh_endpoint(context.get("doh_endpoint")))
+                endpoint = resolve_doh_endpoint(endpoint)
+                resolver = DohClient(endpoint=endpoint)
             except ValueError as exc:
                 row = _coverage(self.name, "dohEndpoint", status="failed", item_count=0, duration_ms=0,
                                 surface_type="dns", endpoint="doh", error_class="config_error", error=str(exc))
                 return CollectorResult(self.name, "partial", {"domains": {"value": []}, "domainPosture": {"value": []}}, 0,
                                        "DNS-over-HTTPS endpoint is not valid", coverage=[row])
+        else:
+            endpoint = getattr(resolver, "endpoint", endpoint)
+        resolver_origin = doh_resolver_display(endpoint)
         log_event: AuditLogger | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         domains: list[dict[str, Any]] = []
@@ -678,9 +685,9 @@ class GoogleDnsPostureCollector:
                 if posture.get("resolver_error"):
                     status = "failed"
                     error_class = "dns_resolver_error"
-                    posture["resolver_error"] = error = _resolver_error(str(posture["resolver_error"]), resolver)
+                    error = posture["resolver_error"]
             except DohError as exc:
-                error = _resolver_error(str(exc), resolver)
+                error = safe_resolver_diagnostic(exc)
                 posture = {
                     "domain": domain_name,
                     "resolver_error": error,
@@ -690,19 +697,20 @@ class GoogleDnsPostureCollector:
                 error_class = "dns_resolver_error"
             assessments.append(posture)
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
-            coverage.append(
-                _coverage(
-                    self.name,
-                    f"posture:{domain_name}",
-                    status=status,
-                    item_count=1,
-                    duration_ms=duration_ms,
-                    surface_type="dns",
-                    endpoint=f"doh://{domain_name}",
-                    error_class=error_class,
-                    error=error,
-                )
+            row = _coverage(
+                self.name,
+                f"posture:{domain_name}",
+                status=status,
+                item_count=1,
+                duration_ms=duration_ms,
+                surface_type="dns",
+                endpoint=f"doh://{domain_name}",
+                error_class=error_class,
+                error=error,
             )
+            if resolver_origin and error_class == "dns_resolver_error":
+                row["doh_endpoint"] = resolver_origin
+            coverage.append(row)
         partial = any(row.get("status") != "ok" for row in coverage)
         return CollectorResult(
             self.name,
@@ -711,40 +719,6 @@ class GoogleDnsPostureCollector:
             len(domains) + len(assessments),
             coverage=coverage,
         )
-
-
-_URL = re.compile(r"\b(https?)://([^/\s'\"<>?#]+)[^\s'\"<>]*")
-# A failed connection names the request path alone (requests: "Max retries exceeded with url: /path?query").
-_BARE_URL_PATH = re.compile(r"\b(url:\s*)/[^\s'\"<>]*", re.IGNORECASE)
-
-
-def _host_only(text: str) -> str:
-    """``text`` with every URL cut to its scheme and host: a configured resolver's path can hold a private profile id."""
-    text = _URL.sub(lambda match: f"{match.group(1)}://{match.group(2)}", text)
-    return _BARE_URL_PATH.sub(lambda match: f"{match.group(1)}/", text)
-
-
-# The transport failure that DohClient wraps: "DoH query failed for <type> <name>: <library text>".
-_TRANSPORT_FAILURE = re.compile(r"^(DoH query failed for \S+ \S+): (.*)$", re.DOTALL)
-_HTTP_STATUS = re.compile(r"^\s*(\d{3}) (?:Client|Server) Error\b")
-
-
-def _resolver_error(text: str, resolver: Any) -> str:
-    """A failed lookup described by Auditex's own wording, the resolver's host and the HTTP status only.
-
-    The library text of a transport failure (the HTTP reason, the request URL or path) can repeat the configured
-    resolver's private profile path, so none of it is kept. Answer errors (SERVFAIL, truncated) are Auditex's
-    own wording and are kept, with any URL cut to its host.
-    """
-    match = _TRANSPORT_FAILURE.match(text)
-    if match is None:
-        return _host_only(text)
-    status = _HTTP_STATUS.match(match.group(2))
-    detail = f"HTTP {status.group(1)}" if status else "request failed"
-    endpoint = str(getattr(resolver, "endpoint", "") or "")
-    url = _URL.search(endpoint) or _URL.search(match.group(2))
-    host = f"{url.group(1)}://{url.group(2)}" if url else "the DNS-over-HTTPS resolver"
-    return f"{match.group(1)} at {host} ({detail})"
 
 
 def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: list[dict[str, Any]]) -> None:

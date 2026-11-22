@@ -687,8 +687,11 @@ def test_ca_extra_grant_control_reaches_the_rule(run, extra):
     assert ca_rule_answer(run, {extra: ["mock-extra"]}) == ("not_met", "no_policy_meets")
 
 
-def test_ca_unknown_grant_control_reaches_the_rule_as_unknown(run):
-    assert ca_rule_answer(run, {"futureControl": ["mock-extra"]}) == ("not_assessed", "policy_field_unusable")
+@pytest.mark.parametrize("value", [["mock-extra"], {"id": "synthetic-control"}, [{"id": "synthetic-control"}],
+                                   {"displayName": "Synthetic"}], ids=["strings", "id_object", "id_list", "name_object"])
+def test_ca_unknown_grant_control_reaches_the_rule_as_unknown(run, value):
+    """Bot review of PR #149: a control carried only by id or displayName must not be stripped to nothing."""
+    assert ca_rule_answer(run, {"futureControl": value}) == ("not_assessed", "policy_field_unusable")
 
 
 @pytest.mark.parametrize("path", ["conditions", "applications"])

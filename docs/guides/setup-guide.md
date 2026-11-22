@@ -128,7 +128,7 @@ Admin flow:
 
 Google DNS posture (`google_dns_posture`, in the `core-security`, `mail` and `everything` presets) sends the
 customer's verified domain names, and nothing else, to the public Cloudflare DNS-over-HTTPS resolver
-(`https://cloudflare-dns.com/dns-query`), or to the resolver set in `AUDITEX_DOH_ENDPOINT`. The run prints this notice
+(`https://cloudflare-dns.com/dns-query`), or to the resolver named by `--doh-endpoint URL` or `AUDITEX_DOH_ENDPOINT`. The run prints this notice
 on stderr before collection and writes it to `data-handling.json` and the report. Turn it off with
 `--exclude google_dns_posture`, or use the `identity` or `collaboration` preset.
 

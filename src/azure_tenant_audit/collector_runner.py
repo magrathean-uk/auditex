@@ -7,6 +7,7 @@ from typing import Any, Protocol, TypedDict
 
 from .collection_gaps import NON_FATAL_COLLECTORS, collector_gap_reason
 from .collectors.base import CollectorResult
+from .dns_lookup import DNS_POSTURE_COLLECTORS, safe_resolver_diagnostic
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 ChunkWriter = Callable[[str, str, int, list[dict[str, Any]], dict[str, Any] | None], str | None]
@@ -25,6 +26,7 @@ class CoverageRow(TypedDict, total=False):
     duration_ms: float
     error_class: str | None
     error: str | None
+    doh_endpoint: str
 
 
 class ResultRow(TypedDict, total=False):
@@ -206,7 +208,8 @@ class CollectorRunner:
 
             # An exception message can quote tenant text: a lone surrogate becomes U+FFFD once, here, before the log,
             # the result row, the checkpoint and the coverage row repeat it.
-            error = self._valid_text(redact_output(exc))
+            detail = safe_resolver_diagnostic(exc) if collector_name in DNS_POSTURE_COLLECTORS else exc
+            error = self._valid_text(redact_output(detail))
             self._log(
                 legacy_context,
                 "collector.failed",
@@ -302,7 +305,7 @@ class CollectorRunner:
         }
         if result.name in NON_FATAL_COLLECTORS and result.status != "ok":
             reasons = list(dict.fromkeys(
-                collector_gap_reason(result.name, item.get("error_class"), item.get("error"))
+                collector_gap_reason(result.name, item.get("error_class"), doh_endpoint=item.get("doh_endpoint"))
                 for item in coverage_rows if item.get("status") != "ok"
             ))
             row["message"] = " ".join(reason for reason in reasons if reason) or collector_gap_reason(result.name, "unknown")

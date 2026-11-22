@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from collections import Counter
 from contextvars import ContextVar
 from copy import deepcopy
@@ -2396,10 +2397,14 @@ def _privilege_event_severity(category: str, activity: str, target_resources: An
     """The privilege-change severity of a directory audit event, or None when it is not a privilege change.
 
     A directory role assignment or PIM activation (category RoleManagement) is high for a tier-0 role or a role
-    the event does not name, and medium for another named role. Outside RoleManagement only an application
-    permission grant of a tier-0 Graph permission counts; routine enterprise-app user assignments do not.
+    the event does not name, and medium for another named role. A PIM role add, assignment or activation is graded
+    the same way whatever its category, since PIM logs group and Azure resource roles outside RoleManagement.
+    Otherwise only an application permission grant of a tier-0 Graph permission counts; routine enterprise-app user
+    assignments do not.
     """
-    if category == "rolemanagement":
+    words = set(re.findall(r"[a-z]+", activity))
+    pim_role_change = {"pim", "role"} <= words and bool(words & {"add", "assign", "activate"})
+    if category == "rolemanagement" or pim_role_change:
         if "role" not in activity or not any(word in activity for word in ("add", "assign", "activate")):
             return None
         roles = [value.lower() for value in _audit_target_values(target_resources, _ROLE_NAME_PROPERTIES)]
