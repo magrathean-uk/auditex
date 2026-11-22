@@ -5,6 +5,7 @@ from math import ceil
 from typing import Any
 
 from ..adapters import get_adapter
+from ..adapters.m365_cli import M365_CLI_NOT_USED
 from .base import Collector, CollectorResult
 
 
@@ -149,6 +150,11 @@ class PurviewCollector(Collector):
                             extra={"summary_path": f"raw/purview/{operation_name}/summary.json"},
                         )
             payload_name = str(command["name"])
+            retired = response.get("error") == M365_CLI_NOT_USED
+            if retired:
+                # The CLI for Microsoft 365 is no longer run (DEC-108 D2): a named skip, as exchange records, not a
+                # command_not_found failure that reads as a missing local tool and makes the collector partial.
+                response = _retired_cli_skip(response, operation=payload_name)
             payload[payload_name] = response
             optional_failure = False
             if command_plane == "inventory" and response.get("error") and bool(command.get("optional")):
@@ -156,7 +162,7 @@ class PurviewCollector(Collector):
                 optional_failure = True
             item_count = self._item_count(response)
             total += item_count
-            status = "failed" if response.get("error") else "ok"
+            status = "skipped" if retired else "failed" if response.get("error") else "ok"
             error_class = response.get("error_class") or ("command_error" if response.get("error") else None)
             coverage.append(
                 {
@@ -168,6 +174,7 @@ class PurviewCollector(Collector):
                     "command": response.get("command", ""),
                     "command_variants": response.get("command_variants"),
                     "status": status,
+                    **({"reason": M365_CLI_NOT_USED, "optional": bool(command.get("optional"))} if retired else {}),
                     "item_count": item_count,
                     "duration_ms": response.get("duration_ms", 0.0),
                     "error_class": error_class,
@@ -252,3 +259,16 @@ class PurviewCollector(Collector):
             "command_parse_error",
             "command_not_simulated",
         }
+
+
+def _retired_cli_skip(response: dict[str, Any], *, operation: str) -> dict[str, Any]:
+    """The payload of an operation the retired CLI for Microsoft 365 would have run: a named skip, no error."""
+    return {
+        "value": [],
+        "status": "skipped",
+        "reason": M365_CLI_NOT_USED,
+        "operation": operation,
+        "command": response.get("command", ""),
+        "command_variants": response.get("command_variants"),
+        "source": response.get("source", "command"),
+    }

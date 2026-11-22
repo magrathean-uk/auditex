@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from . import endpoint_posture, exchange_protection, external_sharing, os_lifecycle
-from .attack_graph import analyze_attack_graph
+from .attack_graph import (
+    TIER0_GRAPH_PERMISSIONS,
+    TIER0_ROLE_TEMPLATES,
+    analyze_attack_graph,
+)
 from .autopilot import build_board_report_sections
 from .baselines import (
     SECURE_SCORE_LOW_THRESHOLD_PERCENT,
@@ -573,7 +577,7 @@ def _earliest_state(
 
 
 def _first_long_validity_secret(credentials: list[Any]) -> dict[str, Any] | None:
-    """Detect a password credential whose total validity exceeds 2 years OR
+    """Detect an unexpired password credential whose total validity exceeds 2 years OR
     is open-ended (missing ``end_date_time``)."""
     for credential in credentials:
         if not isinstance(credential, dict):
@@ -583,6 +587,9 @@ def _first_long_validity_secret(credentials: list[Any]) -> dict[str, Any] | None
         if end is None:
             return {**credential, "validity_days": None, "open_ended": True}
         if start is None:
+            continue
+        if (end if end.tzinfo else end.replace(tzinfo=UTC)) <= _utc_now():
+            # An expired secret cannot be used; secret_expired reports it.
             continue
         validity_days = int((end - start).total_seconds() // 86400)
         if validity_days > _SECRET_LONG_VALIDITY_DAYS:
@@ -642,13 +649,15 @@ def _build_app_credential_findings(item: dict[str, Any]) -> list[dict[str, Any]]
         warning_days=_CERTIFICATE_EXPIRY_WARNING_DAYS,
     )
 
+    # An expired credential can no longer authenticate, so it is low (stale-credential hygiene). Expiring
+    # credentials are evaluated on their own: an old expired secret must not hide one about to break the app.
     if earliest_secret_expired is not None:
         findings.append(
             _finalize_finding(
                 {
                     "id": f"app_credentials:{object_id}:secret_expired",
                     "rule_id": "app_credentials.secret_expired",
-                    "severity": "critical",
+                    "severity": "low",
                     "category": "application",
                     "title": "Application secret is expired",
                     "status": "open",
@@ -661,7 +670,7 @@ def _build_app_credential_findings(item: dict[str, Any]) -> list[dict[str, Any]]
                 }
             )
         )
-    elif earliest_secret_expiring is not None:
+    if earliest_secret_expiring is not None:
         findings.append(
             _finalize_finding(
                 {
@@ -687,7 +696,7 @@ def _build_app_credential_findings(item: dict[str, Any]) -> list[dict[str, Any]]
                 {
                     "id": f"app_credentials:{object_id}:certificate_expired",
                     "rule_id": "app_credentials.certificate_expired",
-                    "severity": "high",
+                    "severity": "low",
                     "category": "application",
                     "title": "Application certificate is expired",
                     "status": "open",
@@ -700,7 +709,7 @@ def _build_app_credential_findings(item: dict[str, Any]) -> list[dict[str, Any]]
                 }
             )
         )
-    elif earliest_cert_expiring is not None:
+    if earliest_cert_expiring is not None:
         findings.append(
             _finalize_finding(
                 {
@@ -969,8 +978,12 @@ def _build_cross_tenant_partner_findings(item: dict[str, Any]) -> list[dict[str,
     findings: list[dict[str, Any]] = []
     evidence_refs = _normalized_evidence_refs("cross_tenant_partner_objects", item, "cross_tenant_access")
     direct_inbound_allowed = str(item.get("b2b_direct_connect_inbound_access") or "").lower() == "allowed"
+    # Normalisation resolves inherited values from the default policy. A trust flag still None was not read,
+    # and a partner inheriting both values only repeats the default policy, whose own rule reports it.
+    inherited = set(item.get("inherited_from_default") or [])
+    inherits_both = {"b2b_direct_connect_inbound_access", "inbound_trust_mfa_accepted"} <= inherited
 
-    if direct_inbound_allowed and not item.get("inbound_trust_mfa_accepted"):
+    if direct_inbound_allowed and item.get("inbound_trust_mfa_accepted") is False and not inherits_both:
         findings.append(
             _finalize_finding(
                 {
@@ -1692,7 +1705,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
         metadata["description"] = (
             "Everyone is required to use MFA, but only by combining policies: the all-users policy excludes "
             f"{_exclusion_text(rows, len(covered))}, and a separate policy for the administrator roles requires MFA of "
-            "them. CIS 5.2.2.2 and ScubaGear MS.AAD.3.2v1 look for one all-users policy that excludes nobody but "
+            "them. CIS 5.2.2.2 and ScubaGear MS.AAD.3.2v2 look for one all-users policy that excludes nobody but "
             "documented emergency access accounts, so they are not met. Cyber Essentials reads the combined result."
         )
         findings.append(
@@ -2285,11 +2298,15 @@ def _build_reports_concealed_names_findings(normalized_snapshot: dict[str, Any])
 
 def _build_risky_signin_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     risky_states = {"atrisk", "confirmedcompromised"}
-    ignored_states = {"", "none", "dismissed", "remediated", "confirmedsafe"}
+    # Graph keeps the risk level after an analyst handles a sign-in, so a handled state ends the finding at any level.
+    handled_states = {"dismissed", "remediated", "confirmedsafe"}
+    ignored_states = {"", "none", *handled_states}
     findings: list[dict[str, Any]] = []
     for item in ((normalized_snapshot.get("security_signin_events") or {}).get("records") or []):
         risk_level = str(item.get("risk_level_aggregated") or item.get("risk_level_during_signin") or "").strip().lower()
         risk_state = str(item.get("risk_state") or "").strip().lower()
+        if risk_state in handled_states:
+            continue
         if risk_level not in {"high", "medium", "low"} and (risk_state in ignored_states or risk_state not in risky_states):
             continue
         severity = "high" if risk_level == "high" or risk_state in risky_states else "medium"
@@ -2331,6 +2348,48 @@ def _actor_from_directory_audit(item: dict[str, Any]) -> str:
     )
 
 
+_ROLE_NAME_PROPERTIES = {"role.displayname", "roledefinition.displayname", "role.templateid"}
+_TIER0_ROLE_NAMES_LOWER = {name.lower() for name, _weight in TIER0_ROLE_TEMPLATES.values()} | set(TIER0_ROLE_TEMPLATES)
+_TIER0_APP_PERMISSIONS = set(TIER0_GRAPH_PERMISSIONS)
+
+
+def _audit_target_values(target_resources: Any, properties: set[str]) -> list[str]:
+    """New values of the named modified properties across an audit event's target resources."""
+    values: list[str] = []
+    for target in target_resources if isinstance(target_resources, list) else []:
+        if not isinstance(target, dict):
+            continue
+        if properties is _ROLE_NAME_PROPERTIES and str(target.get("type") or "").lower() == "role" and target.get("displayName"):
+            values.append(str(target["displayName"]))
+        for prop in target.get("modifiedProperties") or []:
+            if isinstance(prop, dict) and str(prop.get("displayName") or "").lower() in properties:
+                value = str(prop.get("newValue") or "").strip().strip('"').strip()
+                if value:
+                    values.append(value)
+    return values
+
+
+def _privilege_event_severity(category: str, activity: str, target_resources: Any) -> str | None:
+    """The privilege-change severity of a directory audit event, or None when it is not a privilege change.
+
+    A directory role assignment or PIM activation (category RoleManagement) is high for a tier-0 role or a role
+    the event does not name, and medium for another named role. Outside RoleManagement only an application
+    permission grant of a tier-0 Graph permission counts; routine enterprise-app user assignments do not.
+    """
+    if category == "rolemanagement":
+        if "role" not in activity or not any(word in activity for word in ("add", "assign", "activate")):
+            return None
+        roles = [value.lower() for value in _audit_target_values(target_resources, _ROLE_NAME_PROPERTIES)]
+        if not roles or any(role in _TIER0_ROLE_NAMES_LOWER for role in roles):
+            return "high"
+        return "medium"
+    if activity == "add app role assignment to service principal":
+        permissions = _audit_target_values(target_resources, {"approle.value"})
+        if any(permission in _TIER0_APP_PERMISSIONS for permission in permissions):
+            return "high"
+    return None
+
+
 def _build_privilege_event_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for item in ((normalized_snapshot.get("security_directory_audit_events") or {}).get("records") or []):
@@ -2339,9 +2398,8 @@ def _build_privilege_event_findings(normalized_snapshot: dict[str, Any]) -> list
         result = str(item.get("result") or "").strip().lower()
         if result and result not in {"success", "succeeded"}:
             continue
-        if category != "rolemanagement" and "role" not in activity:
-            continue
-        if not (("add" in activity or "assign" in activity or "activate" in activity) and "role" in activity):
+        severity = _privilege_event_severity(category, activity, item.get("target_resources"))
+        if severity is None:
             continue
         actor = _actor_from_directory_audit(item)
         findings.append(
@@ -2349,7 +2407,7 @@ def _build_privilege_event_findings(normalized_snapshot: dict[str, Any]) -> list
                 {
                     "id": f"security_directory_audit:{item.get('id')}:privilege_change",
                     "rule_id": "security.privilege_change_event",
-                    "severity": "high",
+                    "severity": severity,
                     "category": "identity",
                     "title": "Privileged role change observed",
                     "status": "open",
@@ -3037,7 +3095,13 @@ def _build_device_posture_findings(
                         **{
                             **_metadata_for("intune.device_os_end_of_life"),
                             "description": (
-                                f"{lifecycle.release_name} reached the end of its security updates on {lifecycle.end_of_support}."
+                                (
+                                    f"{lifecycle.release_name}: General Availability editions ended security updates on "
+                                    f"{lifecycle.end_of_support}; Long-Term Servicing editions on this build ended on "
+                                    f"{lifecycle.ltsc_end_of_support}."
+                                    if lifecycle.ltsc_end_of_support
+                                    else f"{lifecycle.release_name} reached the end of its security updates on {lifecycle.end_of_support}."
+                                )
                                 + (
                                     f" A paid extended support programme runs to {lifecycle.extended_support_until}; Auditex cannot see enrolment."
                                     if lifecycle.extended_support_until
@@ -3479,7 +3543,9 @@ def _normalized_findings(
             continue
         scope_tokens = {str(token) for token in str(item.get("scope") or "").split() if token}
         high_risk = sorted(scope_tokens & risky_scopes)
-        if not high_risk and int(item.get("owner_count") or 0) > 0:
+        owner_count = item.get("owner_count")
+        # owner_count None means the owners were never read: only a read, empty owner list is weak ownership.
+        if not high_risk and (owner_count is None or int(owner_count) > 0):
             continue
         findings.append(
             _finalize_finding(

@@ -381,14 +381,6 @@
     ]
   },
   "sharepoint.broad_link": {
-    "cis_m365_v7": [
-      "7.2.3",
-      "7.2.7"
-    ],
-    "cisa_scuba": [
-      "MS.SHAREPOINT.1.1v1",
-      "MS.SHAREPOINT.2.1v1"
-    ],
     "ms_secure_score": [
       "spo_external_sharing_managed"
     ],
@@ -418,14 +410,6 @@
     ]
   },
   "sharepoint.external_principal": {
-    "cis_m365_v7": [
-      "7.2.3",
-      "7.2.6"
-    ],
-    "cisa_scuba": [
-      "MS.SHAREPOINT.1.1v1",
-      "MS.SHAREPOINT.1.3v1"
-    ],
     "ms_secure_score": [
       "spo_external_sharing_managed"
     ],
@@ -661,12 +645,6 @@
     ]
   },
   "app_consent.high_privilege": {
-    "cis_m365_v7": [
-      "5.1.5.1"
-    ],
-    "cisa_scuba": [
-      "MS.AAD.5.2v1"
-    ],
     "ms_secure_score": [
       "IntegratedApps"
     ],
@@ -707,7 +685,7 @@
       "2.1.8"
     ],
     "cisa_scuba": [
-      "MS.EXO.2.2v2"
+      "MS.EXO.2.2v3"
     ],
     "ms_secure_score": [
       "exo_SPF_records_for_all_domains"
@@ -740,7 +718,7 @@
       "2.1.8"
     ],
     "cisa_scuba": [
-      "MS.EXO.2.2v2"
+      "MS.EXO.2.2v3"
     ],
     "ms_secure_score": [
       "exo_SPF_records_for_all_domains"
@@ -859,7 +837,7 @@
       "2.1.8"
     ],
     "cisa_scuba": [
-      "MS.EXO.2.2v2"
+      "MS.EXO.2.2v3"
     ],
     "ms_secure_score": [
       "exo_SPF_records_for_all_domains"
@@ -967,12 +945,6 @@
     ]
   },
   "mailbox_forwarding.external_inbox_rule": {
-    "cis_m365_v7": [
-      "6.2.1"
-    ],
-    "cisa_scuba": [
-      "MS.EXO.1.1v2"
-    ],
     "ms_secure_score": [
       "mdo_autoforwardingmode",
       "mdo_blockmailforward"
@@ -2156,7 +2128,7 @@
       "5.2.2.2"
     ],
     "cisa_scuba": [
-      "MS.AAD.3.2v1"
+      "MS.AAD.3.2v2"
     ],
     "ms_secure_score": [
       "MFARegistrationV2"
@@ -2198,7 +2170,7 @@
       "5.2.2.2"
     ],
     "cisa_scuba": [
-      "MS.AAD.3.2v1"
+      "MS.AAD.3.2v2"
     ],
     "ms_zero_trust": [
       "identities"
@@ -3495,7 +3467,7 @@
           "5.2.2.2"
         ],
         "cisa_scuba": [
-          "MS.AAD.3.2v1"
+          "MS.AAD.3.2v2"
         ]
       }
     },

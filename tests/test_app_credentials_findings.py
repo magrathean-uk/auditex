@@ -69,7 +69,7 @@ def test_findings_flag_expiring_secret_high() -> None:
     assert finding["severity"] == "high"
 
 
-def test_findings_flag_expired_secret_critical() -> None:
+def test_findings_flag_expired_secret_low() -> None:
     snapshot = _snapshot_with_apps(
         [
             {
@@ -89,7 +89,8 @@ def test_findings_flag_expired_secret_critical() -> None:
     findings = build_findings([], normalized_snapshot=snapshot)
     finding = next((f for f in findings if f["id"] == "app_credentials:app-1:secret_expired"), None)
     assert finding is not None
-    assert finding["severity"] == "critical"
+    # R050: an expired secret cannot authenticate; it is stale-credential hygiene, not a critical exposure.
+    assert finding["severity"] == "low"
 
 
 def test_findings_flag_http_redirect_uri() -> None:
@@ -211,7 +212,7 @@ def test_findings_flag_certificate_expired_distinct_from_secret() -> None:
         (f for f in findings if f["id"] == "app_credentials:app-1:secret_expired"), None
     )
     assert cert_finding is not None
-    assert cert_finding["severity"] == "high"
+    assert cert_finding["severity"] == "low"
     # Cert path must NOT bleed into the legacy secret_expired rule_id.
     assert secret_finding is None
 
@@ -418,3 +419,49 @@ def test_findings_skip_credential_dormant_for_recent_apps() -> None:
     findings = build_findings([], normalized_snapshot=snapshot)
     flagged = [f for f in findings if "credential_dormant" in f["id"]]
     assert flagged == []
+
+
+# ----- R050: expired credentials are hygiene and never hide expiring ones -----
+
+
+def _app(passwords: list[dict[str, object]], keys: list[dict[str, object]] | None = None) -> dict[str, object]:
+    return {
+        "id": "app-1",
+        "display_name": "Build Bot",
+        "app_id": "1",
+        "sign_in_audience": "AzureADMyOrg",
+        "password_credentials": passwords,
+        "key_credentials": keys or [],
+        "redirect_uris": [],
+        "owner_count": 1,
+        "federated_credentials": [],
+    }
+
+
+def test_r050_expired_secret_does_not_hide_an_expiring_one_or_drive_the_grade_critical() -> None:
+    from azure_tenant_audit.findings import build_risk_rollup
+
+    snapshot = _snapshot_with_apps(
+        [_app([{"key_id": "old", "end_date_time": _iso(-300)}, {"key_id": "new", "end_date_time": _iso(5)}])]
+    )
+    findings = {f["id"]: f for f in build_findings([], normalized_snapshot=snapshot) if f["id"].startswith("app_credentials:")}
+    assert findings["app_credentials:app-1:secret_expired"]["severity"] == "low"
+    assert findings["app_credentials:app-1:secret_expiring"]["severity"] == "high"
+    expired_only = [findings["app_credentials:app-1:secret_expired"]]
+    assert build_risk_rollup(expired_only)["grade"] != "critical"
+
+
+def test_r050_expired_certificate_does_not_hide_an_expiring_one() -> None:
+    snapshot = _snapshot_with_apps(
+        [_app([], [{"key_id": "c-old", "end_date_time": _iso(-30)}, {"key_id": "c-new", "end_date_time": _iso(10)}])]
+    )
+    ids = {f["id"] for f in build_findings([], normalized_snapshot=snapshot)}
+    assert {"app_credentials:app-1:certificate_expired", "app_credentials:app-1:certificate_expiring"} <= ids
+
+
+def test_r050_an_expired_long_lived_secret_is_not_long_validity() -> None:
+    snapshot = _snapshot_with_apps(
+        [_app([{"key_id": "old", "start_date_time": _iso(-1400), "end_date_time": _iso(-300)}])]
+    )
+    ids = {f["id"] for f in build_findings([], normalized_snapshot=snapshot)}
+    assert "app_credentials:app-1:secret_long_validity" not in ids

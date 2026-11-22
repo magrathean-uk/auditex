@@ -135,3 +135,22 @@ def test_cross_tenant_partner_no_mfa_has_t1199_attack_mapping() -> None:
     mappings = finding["framework_mappings"]
     assert "T1199" in mappings.get("mitre_attack", [])
     assert "soc2" in mappings
+
+
+def test_every_cisa_scuba_id_is_a_current_scuba_policy() -> None:
+    """R043: a mapping or catalog id must be the policy version the value rules and ScubaGear exports use."""
+    import json
+    from pathlib import Path
+
+    configs = Path(__file__).resolve().parent.parent / "configs"
+    policies = set(json.loads((configs / "scuba-policy-sections.json").read_text(encoding="utf-8"))["policies"])
+    mappings = json.loads((configs / "control-mappings.json").read_text(encoding="utf-8"))
+    mapped = {
+        (rule_id, control_id)
+        for rule_id, mapping in mappings.items()
+        if not rule_id.startswith("_") and isinstance(mapping, dict)
+        for control_id in mapping.get("cisa_scuba") or []
+    }
+    assert sorted(item for item in mapped if item[1] not in policies) == []
+    catalog = json.loads((configs / "framework-catalog.json").read_text(encoding="utf-8"))
+    assert sorted(set(catalog["frameworks"]["cisa_scuba"]["controls"]) - policies) == []

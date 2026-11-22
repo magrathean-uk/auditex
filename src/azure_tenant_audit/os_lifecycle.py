@@ -135,7 +135,7 @@ def _release_key(family: str, os_version: str) -> int | None:
     """The number the table matches on: the Windows build, or the major version of the other platforms."""
     if family == FAMILY_WINDOWS:
         match = _WINDOWS_VERSION.match(os_version)
-        # Windows 10 and 11 both report 10.0.<build>; any other kernel version is not in the table.
+        # Windows 10 and 11 both report 10.0.<build>; an older kernel is matched on a row's "kernel" instead.
         return int(match.group(3)) if match and (match.group(1), match.group(2)) == ("10", "0") else None
     match = _LEADING_NUMBER.match(os_version)
     return int(match.group(1)) if match else None
@@ -161,6 +161,14 @@ def lookup(operating_system: Any, os_version: Any, table: dict[str, Any] | None 
     if text.lower() in _NO_VERSION_WORDS:
         return family, None, REASON_VERSION_MISSING
     key = _release_key(family, text)
+    kernel = _WINDOWS_VERSION.match(text) if family == FAMILY_WINDOWS else None
+    if key is None and kernel is not None:
+        # Windows before 10 (8.1 reports 6.3.<build>) is described by a row keyed on its kernel version.
+        kernel_version = f"{int(kernel.group(1))}.{int(kernel.group(2))}"
+        for row in _releases(table, family):
+            if str(row.get("kernel") or "") == kernel_version:
+                return family, row, None
+        return family, None, REASON_NOT_IN_TABLE
     if key is None:
         # A Windows version that is not 10.0.<build> is a release the table does not describe, not garbage.
         return family, None, (REASON_NOT_IN_TABLE if family == FAMILY_WINDOWS and _WINDOWS_VERSION.match(text) else REASON_VERSION_UNPARSABLE)

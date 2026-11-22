@@ -98,12 +98,12 @@ Corrections compared with the old `cis_m365_v3` values:
 | `dns_posture.dmarc_*` | `4.6` | `2.1.10` |
 | `dns_posture.bimi_logo_insecure` | `4.5` | none (BIMI has no CIS control) |
 | `collector.issue.*`, `coverage.gap`, `service_health.active_service_issue` | `1.1.1` | none (diagnostic) |
-| `sharepoint.broad_link` | `7.2.5`, `7.2.7` | `7.2.3`, `7.2.7` |
-| `sharepoint.external_principal` | `7.2.5`, `7.2.7` | `7.2.3`, `7.2.6` |
-| `app_consent.high_privilege` | `5.1.6`, `5.2.5` | `5.1.5.1` |
+| `sharepoint.broad_link` | `7.2.5`, `7.2.7` | none (a per-link finding; the sharing settings are read by the setting rules) |
+| `sharepoint.external_principal` | `7.2.5`, `7.2.7` | none (a per-site finding; the sharing settings are read by the setting rules) |
+| `app_consent.high_privilege` | `5.1.6`, `5.2.5` | none (a per-grant finding; user consent is read by `consent_policy.user_consent_*`) |
 | `consent_policy.admin_consent_workflow_disabled` | `5.1.5`, `5.2.5` | `5.1.5.2` |
 | `external_identity.broad_guest_invite_policy` | `1.1.5` | `5.1.6.3` |
-| `mailbox_forwarding.external_inbox_rule` | `1.2.2`, `6.2.1` | `6.2.1` |
+| `mailbox_forwarding.external_inbox_rule` | `1.2.2`, `6.2.1` | none (a per-mailbox finding; forwarding settings are read by the setting rules) |
 | `mailbox_forwarding.hide_from_user` | `1.2.2`, `6.2.1` | none |
 | `identity.global_admin_singleton`, `identity.global_admin_sprawl` | `1.1.2`, `1.1.3` | `1.1.3` |
 | `identity.admin_holds_productivity_licence` | none | `1.1.4` |
@@ -262,7 +262,7 @@ verdict, caused by a blocked, truncated or missing policy read, raises the match
 (`ca.enforcement_unverified`, `consent_policy.user_consent_unverified`) instead. Those two rules
 claim no benchmark control, so an unreadable policy list is neither a pass nor a failure.
 
-- `ca.mfa_not_enforced` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v1` (MFA for all users).
+- `ca.mfa_not_enforced` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v2` (MFA for all users).
   ScubaGear requires every user, group and guest exclusion to be on an allow-list and no role to be
   excluded; the shipped rule reads the operator's break-glass list as that allow-list, so a policy that
   excludes the Global Administrator role, an all-staff group or all guests does not pass either control.
@@ -284,7 +284,7 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   own yet and is not mapped. It is also raised when the phishing-resistant policies do not cover ScubaGear's
   eight privileged roles (or exclude one), whoever holds them today, as ScubaGear requires; an all-users
   phishing-resistant policy still passes, which ScubaGear does not accept.
-- `ca.mfa_split_across_policies` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v1` (and the MCSB, Zero Trust, NIST, ISO,
+- `ca.mfa_split_across_policies` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v2` (and the MCSB, Zero Trust, NIST, ISO,
   SOC 2, NIS2, DORA and ATT&CK anchors of `ca.mfa_not_enforced`), not to Secure Score or Cyber Essentials. The
   `effective_mfa` verdict, which Cyber Essentials reads, counts an administrator role that an all-users policy excludes
   as covered when a role-targeted MFA policy includes it. The two benchmark controls look for a single policy that
@@ -301,7 +301,7 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
 - Security defaults and the benchmark controls: security defaults keep the three verdicts `enforced` or `blocked`
   with `basis: [security_defaults]`, and Cyber Essentials, Zero Trust and Secure Score read that as enforcement
   (Secure Score is Microsoft's own scoring, and the reconciliation compares Auditex with it as it stands). CIS `5.2.2.1` to
-  `5.2.2.3` and SCuBA `MS.AAD.3.2v1` and `MS.AAD.1.1v1` audit a Conditional Access policy (ScubaGear and Prowler
+  `5.2.2.3` and SCuBA `MS.AAD.3.2v2` and `MS.AAD.1.1v1` audit a Conditional Access policy (ScubaGear and Prowler
   evaluate policies only), so baseline alignment reads those controls `not_assessed` with
   `conditional_access_policy_required:basis_security_defaults` while no qualifying policy backs the verdict (security
   defaults beside a Conditional Access policy that has gaps list only `security_defaults` in `basis`). The table is
@@ -424,6 +424,13 @@ SCuBA conditions follow the ScubaGear v1.8.0 `SharepointConfig.rego`:
 So new and existing guests are a low finding that fails `MS.SHAREPOINT.1.1v1` and leaves CIS `7.2.3`
 passing; a block list is a low finding that fails `MS.SHAREPOINT.1.3v1` and leaves CIS `7.2.6` passing; a
 default link of `None`, organisation-wide or anyone fails both `7.2.7` and `MS.SHAREPOINT.2.1v1`.
+
+The per-item rules `sharepoint.broad_link` (one broad sharing link), `sharepoint.external_principal` (one
+external grantee on a site) and `mailbox_forwarding.external_inbox_rule` (one forwarding inbox rule) claim
+no CIS or SCuBA control. One link or one allow-listed guest does not show how the tenant setting is
+configured, so those controls are left to the setting rules above and to
+`exchange.remote_domain_auto_forward_enabled`; the per-item rules keep their Secure Score, Zero Trust,
+NIST, ISO, SOC 2, NIS2, DORA and ATT&CK mappings.
 
 `onedrive.external_sharing_enabled` and `teams.external_federation_open` keep their Zero Trust, NIST,
 ISO, SOC 2, NIS2 and DORA mappings and claim no CIS or SCuBA control. All three SharePoint rules use the

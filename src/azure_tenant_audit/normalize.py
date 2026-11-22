@@ -69,6 +69,18 @@ _DETECTION_SOURCE_COLLECTORS = (
     "exchange_policy",
 )
 
+# Cross-tenant partner settings that inherit the default policy when the partner leaves them null.
+_CROSS_TENANT_INHERITABLE_KEYS = (
+    "b2b_collaboration_outbound_access",
+    "b2b_collaboration_inbound_access",
+    "b2b_direct_connect_outbound_access",
+    "b2b_direct_connect_inbound_access",
+    "inbound_trust_mfa_accepted",
+    "inbound_trust_compliant_device_accepted",
+    "inbound_trust_hybrid_aad_joined_accepted",
+)
+
+
 def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     section = payload.get(key, {})
     values = section.get("value", []) if isinstance(section, dict) else []
@@ -2019,7 +2031,13 @@ def build_normalized_snapshot(
             scope=item.get("scope"),
             consent_type=item.get("consentType"),
             principal_id=item.get("principalId"),
-            owner_count=len(app_owners_by_sp_id.get(str(item.get("clientId")), [])),
+            # None when the client's owners were never read (fan-out limit or a failed read), so an unread
+            # owner list is never reported as an app with no owners.
+            owner_count=(
+                len(app_owners_by_sp_id[str(item.get("clientId"))] or [])
+                if str(item.get("clientId")) in app_owners_by_sp_id
+                else None
+            ),
             source_name="oauth2PermissionGrants",
         )
         for item in _values(app_consent_payload, "oauth2PermissionGrants")
@@ -2544,24 +2562,32 @@ def build_normalized_snapshot(
         )
         for item in _values(collector_payloads.get("cross_tenant_access", {}), "defaultPolicy")
     ]
-    cross_tenant_partner_objects = [
-        _record(
-            "cross_tenant_partner",
-            "cross_tenant_access.partnerConfigurations",
-            str(item.get("tenant_id") or item.get("id") or ""),
-            tenant_id=item.get("tenant_id"),
-            is_service_provider=bool(item.get("is_service_provider")),
-            b2b_collaboration_outbound_access=item.get("b2b_collaboration_outbound_access"),
-            b2b_collaboration_inbound_access=item.get("b2b_collaboration_inbound_access"),
-            b2b_direct_connect_outbound_access=item.get("b2b_direct_connect_outbound_access"),
-            b2b_direct_connect_inbound_access=item.get("b2b_direct_connect_inbound_access"),
-            inbound_trust_mfa_accepted=item.get("inbound_trust_mfa_accepted"),
-            inbound_trust_compliant_device_accepted=item.get("inbound_trust_compliant_device_accepted"),
-            inbound_trust_hybrid_aad_joined_accepted=item.get("inbound_trust_hybrid_aad_joined_accepted"),
+    # A partner setting left null inherits the default policy: resolve the effective value here, so the
+    # partner rule reads what Entra applies, and record which values came from the default.
+    cross_tenant_default = cross_tenant_default_objects[0] if cross_tenant_default_objects else {}
+    cross_tenant_partner_objects = []
+    for item in _values(collector_payloads.get("cross_tenant_access", {}), "partnerConfigurations"):
+        if not (item.get("tenant_id") or item.get("id")):
+            continue
+        effective: dict[str, Any] = {}
+        inherited: list[str] = []
+        for key in _CROSS_TENANT_INHERITABLE_KEYS:
+            value = item.get(key)
+            if value is None and cross_tenant_default.get(key) is not None:
+                value = cross_tenant_default.get(key)
+                inherited.append(key)
+            effective[key] = value
+        cross_tenant_partner_objects.append(
+            _record(
+                "cross_tenant_partner",
+                "cross_tenant_access.partnerConfigurations",
+                str(item.get("tenant_id") or item.get("id") or ""),
+                tenant_id=item.get("tenant_id"),
+                is_service_provider=bool(item.get("is_service_provider")),
+                inherited_from_default=inherited or None,
+                **effective,
+            )
         )
-        for item in _values(collector_payloads.get("cross_tenant_access", {}), "partnerConfigurations")
-        if item.get("tenant_id") or item.get("id")
-    ]
     inbox_rule_objects = [
         _record(
             "inbox_rule",
@@ -2726,6 +2752,7 @@ def build_normalized_snapshot(
         if any(collector_payloads.get(name) for name in _DETECTION_SOURCE_COLLECTORS)
         else []
     )
+    ediscovery_payload = collector_payloads.get("ediscovery", {}) or {}
     ediscovery_cases = [
         _record(
             "ediscovery_case",
@@ -2735,7 +2762,7 @@ def build_normalized_snapshot(
             status=item.get("status"),
             created_date_time=item.get("createdDateTime"),
         )
-        for item in _values(collector_payloads.get("ediscovery", {}), "caseOverview")
+        for item in _values(ediscovery_payload, "caseOverview")
         if item.get("id") or item.get("name")
     ]
     ediscovery_searches = [
@@ -2747,9 +2774,42 @@ def build_normalized_snapshot(
             case_id=item.get("caseId"),
             status=item.get("status"),
         )
-        for item in _values(collector_payloads.get("ediscovery", {}), "searchList")
+        for item in _values(ediscovery_payload, "searchList")
         if item.get("id") or item.get("name")
     ]
+    # The Graph reads: /security/cases/ediscoveryCases and each case's searches (section case_<id>). The CLI
+    # sections above are retired and stay only for old bundles.
+    seen_case_ids = {str(item.get("id")) for item in ediscovery_cases}
+    for item in _values(ediscovery_payload, "cases"):
+        case_id = str(item.get("id") or "")
+        if not case_id or case_id in seen_case_ids:
+            continue
+        seen_case_ids.add(case_id)
+        ediscovery_cases.append(
+            _record(
+                "ediscovery_case",
+                "ediscovery.cases",
+                case_id,
+                display_name=item.get("displayName"),
+                status=item.get("status"),
+                created_date_time=item.get("createdDateTime"),
+            )
+        )
+        case_section = ediscovery_payload.get(f"case_{case_id}")
+        searches = case_section.get("searches") if isinstance(case_section, dict) else None
+        for search in _values({"searches": searches}, "searches") if isinstance(searches, dict) else []:
+            if not search.get("id"):
+                continue
+            ediscovery_searches.append(
+                _record(
+                    "ediscovery_search",
+                    "ediscovery.caseSearches",
+                    str(search["id"]),
+                    display_name=search.get("displayName"),
+                    case_id=case_id,
+                    status=search.get("status"),
+                )
+            )
     ediscovery_export_jobs = [
         _record(
             "ediscovery_export_job",
