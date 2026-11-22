@@ -50,7 +50,12 @@ from .auth import (
     read_service_account_summary,
     safe_auth_summary,
 )
-from .client import GoogleWorkspaceClient, classify_google_error, gmail_settings_status
+from .client import (
+    GoogleWorkspaceClient,
+    classify_google_error,
+    gmail_settings_status,
+    is_token_refusal,
+)
 from .collectors import (
     COLLECTOR_SECTIONS,
     DEFAULT_ORDER,
@@ -210,7 +215,14 @@ def build_google_capability_rows(
             if classes & {"insufficient_permissions", "unauthenticated"}:
                 row_status = "blocked_by_scope"
                 row_reason = "runtime_permission_block"
-                missing_permissions = required
+                # A refused token whose scopes were checked one by one names only the ones actually missing.
+                named = [
+                    str(scope)
+                    for item in failures
+                    if isinstance(item.get("missing_permissions"), list)
+                    for scope in item["missing_permissions"]
+                ]
+                missing_permissions = list(dict.fromkeys(named)) or required
             else:
                 row_status = "partial"
                 row_reason = "runtime_endpoint_block"
@@ -303,6 +315,31 @@ def _collector_client(client: Any, collector: str) -> Any:
     return for_scopes(tuple(getattr(REGISTRY.get(collector), "required_scopes", ()) or ()))
 
 
+def name_missing_scopes(client: Any, coverage_rows: list[dict[str, Any]]) -> None:
+    """Add ``missing_permissions`` to each row whose token was refused, naming only the scopes the delegation lacks.
+
+    One token exchange per scope of each refused collector; nothing is changed when that cannot be told.
+    """
+    checker = getattr(client, "unauthorised_scopes", None)
+    if checker is None:
+        return
+    refused: dict[str, list[dict[str, Any]]] = {}
+    for row in coverage_rows:
+        if row.get("status") == "failed" and is_token_refusal(row.get("error")):
+            refused.setdefault(str(row.get("collector") or ""), []).append(row)
+    for collector, rows in refused.items():
+        required = tuple(getattr(REGISTRY.get(collector), "required_scopes", ()) or ())
+        if not required:
+            continue
+        try:
+            missing = checker(required)
+        except Exception:  # noqa: BLE001 - the capability row then lists every required scope, as before
+            missing = None
+        if missing:
+            for row in rows:
+                row["missing_permissions"] = list(missing)
+
+
 def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -351,6 +388,7 @@ def build_google_preflight_rows(
     rows: list[dict[str, Any]] = []
     for collector in selected:
         rows.extend(_collector_preflight_rows(_collector_client(client, collector), collector, domain=domain, top=top))
+    name_missing_scopes(client, rows)
     return rows
 
 
@@ -772,9 +810,8 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         writer.write_summary(dict(output.result_row))
         coverage_rows.extend(output.coverage_rows)
         collector_payloads[name] = output.result.payload
-        for row in output.coverage_rows:
-            if row.get("status") != "ok":
-                diagnostics.append(dict(row))
+    name_missing_scopes(client, coverage_rows)
+    diagnostics = [dict(row) for row in coverage_rows if row.get("status") != "ok"]
     capability_rows = _capability_rows(
         selected,
         auth_mode=config.auth,

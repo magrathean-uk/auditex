@@ -115,6 +115,22 @@ def classify_google_error(exc: Exception) -> tuple[str, str]:
     return "client_error", message
 
 
+# Token-exchange refusals: domain-wide delegation was not granted one of the scopes the token asked for.
+_TOKEN_REFUSAL_MARKERS = ("unauthorized_client", "invalid_scope", "not authorized for any of the scopes")
+
+
+def is_token_refusal(error: str | None) -> bool:
+    """Whether an error text is a refused token exchange (a scope missing from the delegation), not an API answer."""
+    text = str(error or "")
+    return any(marker in text for marker in _TOKEN_REFUSAL_MARKERS)
+
+
+def _token_request() -> Any:
+    from google.auth.transport.requests import Request
+
+    return Request()
+
+
 # Waits before each retry of a rate-limited (429) or transient (5xx, dropped connection) read; then the error stands.
 RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)
 _RETRYABLE_ERROR_CLASSES = frozenset({"rate_limited", "google_transient"})
@@ -241,6 +257,26 @@ class GoogleWorkspaceClient:
             return with_scopes(list(scopes))
         except Exception:  # noqa: BLE001 - fall back to the shared token rather than skip the read
             return self.credentials
+
+    def unauthorised_scopes(self, scopes: tuple[str, ...] | list[str]) -> list[str] | None:
+        """The scopes in ``scopes`` the domain-wide delegation does not grant, found by one token exchange per scope.
+
+        A refused token says only that some scope was not authorised; asking for each scope alone names the ones
+        actually missing. ``None`` when that cannot be told (credentials that cannot be narrowed, or an exchange
+        that failed for another reason).
+        """
+        if getattr(self.credentials, "with_scopes", None) is None:
+            return None
+        missing: list[str] = []
+        for scope in scopes:
+            try:
+                narrowed = self.credentials.with_scopes([scope])
+                narrowed.refresh(_token_request())
+            except Exception as exc:  # noqa: BLE001
+                if not is_token_refusal(str(exc)):
+                    return None
+                missing.append(scope)
+        return missing
 
     def _subject_service(self, subject: str, api: str, version: str, scopes: tuple[str, ...]) -> Any:
         """A service that acts as ``subject`` with only ``scopes``; the last few are cached, never one per user."""

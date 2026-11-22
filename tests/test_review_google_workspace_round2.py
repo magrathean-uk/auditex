@@ -99,7 +99,10 @@ def test_r055_a_partial_mailbox_read_is_partial_not_blocked_by_scope() -> None:
 
 def test_r055_oauth_mailbox_read_skips_the_delegation_only_delegates_list() -> None:
     from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
-    from auditex.google_workspace.run import build_google_capability_rows, build_google_preflight_rows
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
 
     # delegates.list answers 403 to anything but a delegated service account.
     settings = _Settings(_HttpError(403), ok=("getAutoForwarding", "filters", "forwardingAddresses", "sendAs",
@@ -126,3 +129,57 @@ def test_r055_delegated_mailbox_read_still_lists_delegates() -> None:
     client._subject_services["me@example.com", "gmail", "v1"] = client._services["gmail", "v1"]  # type: ignore[index]
     client.get_gmail_settings_for_user("me@example.com")
     assert "delegates" in settings.calls
+
+
+# ---- R056: a blocked collector names only the scope the delegation left out ---------------------------------------
+
+_DRIVE_META = "https://www.googleapis.com/auth/drive.metadata.readonly"
+_DRIVE_READ = "https://www.googleapis.com/auth/drive.readonly"
+_TOKEN_REFUSED = "unauthorized_client: Client is unauthorized to retrieve access tokens using this method"
+
+
+class _DelegatedCredentials:
+    """Service-account credentials whose token exchange is refused when it asks for a scope not authorised."""
+
+    def __init__(self, scopes: tuple[str, ...], authorised: frozenset[str]) -> None:
+        self.scopes = scopes
+        self.authorised = authorised
+
+    def with_scopes(self, scopes: list[str]) -> _DelegatedCredentials:
+        return _DelegatedCredentials(tuple(scopes), self.authorised)
+
+    def with_subject(self, _subject: str) -> _DelegatedCredentials:
+        return self
+
+    def refresh(self, _request: Any) -> None:
+        if not set(self.scopes) <= self.authorised:
+            raise Exception(_TOKEN_REFUSED)
+
+
+def test_r056_a_blocked_collector_names_only_the_missing_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
+
+    monkeypatch.setattr(google_client, "_token_request", lambda: None, raising=False)
+
+    class _Client(google_client.GoogleWorkspaceClient):
+        def _drive(self) -> list[dict[str, Any]]:
+            self.credentials.refresh(None)
+            return []
+
+        def list_drive_files(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            return self._drive()
+
+        def list_shared_drives(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            return self._drive()
+
+    client = _Client(_DelegatedCredentials((_DRIVE_META, _DRIVE_READ), frozenset({_DRIVE_META})), delegated=True)
+    preflight = build_google_preflight_rows(client, ["google_drive_posture"], domain=None)
+    row = build_google_capability_rows(
+        ["google_drive_posture"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=preflight,
+    )[0]
+    assert row["status"] == "blocked_by_scope"
+    assert row["missing_permissions"] == [_DRIVE_READ]
