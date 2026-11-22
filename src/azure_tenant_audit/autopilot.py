@@ -259,10 +259,12 @@ def build_auditor_score(
     unsupported = total - evidenced
     gaps = _rows(coverage_gaps)
 
-    evidence_depth = int(round((evidenced / total) * 100)) if total else 100
-    finding_confidence = int(round((high_confidence / total) * 100)) if total else 100
     coverage = 100 if overall_status == "ok" else 80
     coverage = max(0, coverage - len(gaps) * 15)
+    # No findings proves no weakness only as far as the collection reached: with gaps, evidence and confidence
+    # are no better than the coverage behind them.
+    evidence_depth = int(round((evidenced / total) * 100)) if total else coverage
+    finding_confidence = int(round((high_confidence / total) * 100)) if total else coverage
     report_usability = 100 if evidence_paths and (rows or not gaps) else 70
     false_positive_resistance = max(0, 100 - unsupported * 25)
     license_fit = 100
@@ -286,7 +288,7 @@ def build_auditor_score(
     )
     return {
         "score": score,
-        "grade": _score_grade(score),
+        "grade": "blocked" if coverage == 0 else _score_grade(score),
         "components": components,
         "finding_count": total,
         "unsupported_claim_count": unsupported,
@@ -394,6 +396,8 @@ def build_report_qa(findings: list[dict[str, Any]], coverage_gaps: list[dict[str
     unsupported = [str(item.get("id")) for item in rows if not _has_supported_ref(item)]
     low_confidence = [str(item.get("id")) for item in rows if item.get("confidence") != "high"]
     gaps = _rows(coverage_gaps)
+    # Zero findings beside coverage gaps is no evidence at all, not every finding evidenced.
+    no_evidence = not rows and bool(gaps)
     status = "pass"
     if unsupported:
         status = "fail"
@@ -405,9 +409,12 @@ def build_report_qa(findings: list[dict[str, Any]], coverage_gaps: list[dict[str
         "low_confidence_findings": low_confidence,
         "coverage_gap_count": len(gaps),
         "checks": {
-            "every_finding_has_evidence": not unsupported,
-            "all_findings_high_confidence": not low_confidence,
-            "limitations_declared": bool(gaps) or not gaps,
+            "every_finding_has_evidence": not unsupported and not no_evidence,
+            "all_findings_high_confidence": not low_confidence and not no_evidence,
+            "limitations_declared": all(
+                any(str(gap.get(key) or "").strip() for key in ("surface", "message", "collector", "reason"))
+                for gap in gaps
+            ),
         },
     }
 
@@ -582,7 +589,8 @@ def build_basic_license_intelligence(
         "tenant_name": tenant_name,
         "platform": platform or "m365",
         "license_profile": {
-            "minimum_live_access": "delegated_read_login",
+            # Microsoft 365 is read only by the reader app with a certificate (DEC-107).
+            "minimum_live_access": "delegated_read_login" if platform == "google_workspace" else "reader_app_certificate",
             "requires_premium_license": False,
             "works_from_saved_bundle": True,
             "supports_synthetic_evidence": True,
