@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import functools
 import hashlib
+import hmac
 import html
 import json
 import os
@@ -60,7 +62,7 @@ from azure_tenant_audit.run_files import (
     hash_run_file,
     read_run_file,
 )
-from azure_tenant_audit.waivers import accepted_risk_summary
+from azure_tenant_audit.waivers import accepted_risk_summary, has_expired_waiver, is_accepted_status
 
 from .run_bundle import RunBundle, summarize_recomputed_validation
 
@@ -3598,6 +3600,10 @@ def _sarif_finding_fingerprint(finding: Mapping[str, Any]) -> str:
     Excludes wall-clock and run-derived fields so a re-run against a
     static bundle yields byte-identical fingerprints.
     """
+    return hashlib.sha256(_sarif_fingerprint_payload(finding).encode("utf-8")).hexdigest()
+
+
+def _sarif_fingerprint_payload(finding: Mapping[str, Any]) -> str:
     rule_id = _text(finding.get("rule_id"))
     finding_id = _text(finding.get("id"))
     record_key = ""
@@ -3606,8 +3612,62 @@ def _sarif_finding_fingerprint(finding: Mapping[str, Any]) -> str:
         first = refs[0]
         if isinstance(first, Mapping):
             record_key = _text(first.get("record_key"))
-    payload = f"{rule_id}|{finding_id}|{record_key}"
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"{rule_id}|{finding_id}|{record_key}"
+
+
+def _affected_values(finding: Mapping[str, Any]) -> list[Any]:
+    affected = finding.get("affected_objects")
+    return affected if isinstance(affected, list) else []
+
+
+def stable_export_keys(findings: list[dict[str, Any]], tenant_id: str) -> list[dict[str, Any]]:
+    """Review R066: dedup keys for shareable SARIF and OSCAL, one per finding row, from the UNREDACTED finding.
+
+    A shareable export pseudonymises ids with the run's own key, so a fingerprint taken after redaction changes on
+    every run. These keys are HMAC-SHA256 digests keyed by the tenant id, taken before redaction: the same finding of
+    the same tenant gets the same keys in every run, and the digests carry no object id, domain or name. The tenant
+    id is a GUID that every shareable output masks, so a recipient cannot test guessed values against the digests.
+    """
+    secret = tenant_id.strip().lower().encode("utf-8")
+
+    def digest(label: str, text: str) -> str:
+        return hmac.new(secret, f"auditex|{label}|{text}".encode(), hashlib.sha256).hexdigest()
+
+    keys: list[dict[str, Any]] = []
+    for finding in findings:
+        affected = _affected_values(finding)
+        keys.append(
+            {
+                "fingerprint": digest("fingerprint", _sarif_fingerprint_payload(finding)),
+                "finding": digest("finding", _text(finding.get("id"))),
+                "affected": digest("affected", ",".join(_text(item) for item in affected)) if affected else None,
+                "subjects": [digest("subject", _text(item)) for item in affected if _text(item).strip()],
+            }
+        )
+    return keys
+
+
+# Review R125: how SARIF shows a finding the run did not leave open. An accepted risk is a suppressed result (Code
+# Scanning shows it as dismissed); a closed or resolved one is left out (the alert closes as fixed). A waiver that has
+# expired accepts nothing, so its finding stays an open result.
+_CLOSED_STATUSES = frozenset({"closed", "resolved"})
+
+
+def _export_disposition(finding: Mapping[str, Any]) -> str:
+    if has_expired_waiver(finding):
+        return "open"
+    status = _text(finding.get("status")).strip().lower()
+    if is_accepted_status(status):
+        return "accepted"
+    if status in _CLOSED_STATUSES:
+        return "closed"
+    return "open"
+
+
+def _waiver_justification(finding: Mapping[str, Any]) -> str:
+    waiver = finding.get("waiver") if isinstance(finding.get("waiver"), Mapping) else {}
+    reason = _text(waiver.get("reason") or waiver.get("comment")).strip()
+    return reason or f"Accepted risk (status {_text(finding.get('status'))})"
 
 
 def render_sarif(
@@ -3615,7 +3675,10 @@ def render_sarif(
     findings: list[dict[str, Any]] | None,
     summary: Mapping[str, Any] | None,
     manifest: Mapping[str, Any] | None,
+    stable_keys: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """SARIF 2.1.0 for the findings of a run. ``stable_keys`` (``stable_export_keys``, aligned with ``findings``)
+    replace the fingerprints a shareable export would otherwise take from pseudonymised ids."""
     findings_rows = [dict(item) for item in (findings or []) if isinstance(item, Mapping)]
     summary_dict = _mapping(summary)
     manifest_dict = _mapping(manifest)
@@ -3663,13 +3726,17 @@ def render_sarif(
         )
 
     results: list[dict[str, Any]] = []
-    for finding in findings_rows:
+    for position, finding in enumerate(findings_rows):
         rule_id = _text(finding.get("rule_id") or finding.get("id"))
         if not rule_id:
             continue
+        disposition = _export_disposition(finding)
+        if disposition == "closed":
+            continue
+        stable = stable_keys[position] if stable_keys is not None and position < len(stable_keys) else None
         affected = finding.get("affected_objects")
         if isinstance(affected, list) and affected:
-            partial_fingerprints = {"affected": ",".join(_text(item) for item in affected)}
+            partial_fingerprints = {"affected": stable["affected"] if stable else ",".join(_text(item) for item in affected)}
         else:
             partial_fingerprints = {}
         result_entry = {
@@ -3700,7 +3767,7 @@ def render_sarif(
             # across runs. Content-derived (rule_id + id + record_key); the
             # ``auditex/v1`` key is the version sentinel — bumping the
             # algorithm in a future release means a new key.
-            "fingerprints": {"auditex/v1": _sarif_finding_fingerprint(finding)},
+            "fingerprints": {"auditex/v1": stable["fingerprint"] if stable else _sarif_finding_fingerprint(finding)},
             "properties": {
                 "auditex.finding_id": _text(finding.get("id")),
                 "auditex.severity": _text(finding.get("severity")),
@@ -3710,6 +3777,10 @@ def render_sarif(
         }
         if partial_fingerprints:
             result_entry["partialFingerprints"] = partial_fingerprints
+        if disposition == "accepted":
+            result_entry["suppressions"] = [
+                {"kind": "external", "status": "accepted", "justification": _waiver_justification(finding)}
+            ]
         confidence = _text(finding.get("confidence"))
         if confidence:
             result_entry["properties"]["auditex.confidence"] = confidence
@@ -3816,8 +3887,13 @@ def render_oscal(
     findings: list[dict[str, Any]] | None,
     summary: Mapping[str, Any] | None,
     manifest: Mapping[str, Any] | None,
+    stable_keys: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """OSCAL Assessment Results 1.1.2 for the findings of a run.
+
+    ``stable_keys`` (``stable_export_keys``, aligned with ``findings``) name the observation, finding and subject
+    UUIDs of a shareable export, whose ids are pseudonymised per run. An accepted risk keeps the documented
+    not-satisfied target (the control is still not met) with an ``auditex.status`` property and a remark.
 
     The collection time is the run manifest's ``created_utc`` (an observation takes the earliest
     ``collected_at`` of its own evidence); only a bundle with no usable ``created_utc`` falls back
@@ -3848,10 +3924,12 @@ def render_oscal(
 
     observations: list[dict[str, Any]] = []
     findings_oscal: list[dict[str, Any]] = []
-    for finding in findings_rows:
+    for position, finding in enumerate(findings_rows):
         finding_key = _text(finding.get("id")) or _text(finding.get("rule_id"))
-        observation_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/observation/{_text(finding.get('id'))}"))
-        finding_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/finding/{_text(finding.get('id'))}"))
+        stable = stable_keys[position] if stable_keys is not None and position < len(stable_keys) else None
+        uuid_name = f"stable/{stable['finding']}" if stable else _text(finding.get("id"))
+        observation_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/observation/{uuid_name}"))
+        finding_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/finding/{uuid_name}"))
         framework_mappings = finding.get("framework_mappings") if isinstance(finding.get("framework_mappings"), Mapping) else {}
         control_props: list[dict[str, str]] = []
         for framework in sorted(framework_mappings):
@@ -3886,14 +3964,19 @@ def render_oscal(
                 ("auditex.confidence", _text(finding.get("confidence"))),
             ),
         }
+        subject_items = [item for item in _affected_values(finding) if _text(item).strip()]
+        subject_names = (
+            [f"stable/{name}" for name in stable["subjects"]]
+            if stable and len(stable["subjects"]) == len(subject_items)
+            else [_text(item) for item in subject_items]
+        )
         subjects = [
             {
-                "subject-uuid": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/subject/{_text(item)}")),
+                "subject-uuid": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/subject/{name}")),
                 "type": "inventory-item",
                 "title": _text(item),
             }
-            for item in (finding.get("affected_objects") or [])
-            if _text(item).strip()
+            for item, name in zip(subject_items, subject_names, strict=True)
         ]
         if subjects:
             observation["subjects"] = subjects
@@ -3910,6 +3993,7 @@ def render_oscal(
                     ("auditex.finding_id", _text(finding.get("id"))),
                     ("auditex.severity", _text(finding.get("severity"))),
                     ("auditex.rule_id", _text(finding.get("rule_id"))),
+                    ("auditex.status", _text(finding.get("status"))),
                 ),
                 *control_props,
             ],
@@ -3926,6 +4010,10 @@ def render_oscal(
         remediation = _text(finding.get("remediation")).strip()
         if remediation:
             finding_entry["remarks"] = remediation
+        if _export_disposition(finding) == "accepted":
+            finding_entry["target"]["status"]["remarks"] = (
+                f"Accepted risk: {_waiver_justification(finding)}. The control stays not satisfied."
+            )
         findings_oscal.append(finding_entry)
 
     result: dict[str, Any] = {
@@ -3969,18 +4057,18 @@ def render_oscal(
     }
 
 
-def _render_sarif(selected_sections: dict[str, Any]) -> str:
+def _render_sarif(selected_sections: dict[str, Any], stable_keys: list[dict[str, Any]] | None = None) -> str:
     findings = _dict_rows(selected_sections.get("findings"))
     summary = _mapping(selected_sections.get("summary"))
     manifest = _mapping(selected_sections.get("manifest"))
-    return _json(render_sarif(findings=findings, summary=summary, manifest=manifest))
+    return _json(render_sarif(findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys))
 
 
-def _render_oscal(selected_sections: dict[str, Any]) -> str:
+def _render_oscal(selected_sections: dict[str, Any], stable_keys: list[dict[str, Any]] | None = None) -> str:
     findings = _dict_rows(selected_sections.get("findings"))
     summary = _mapping(selected_sections.get("summary"))
     manifest = _mapping(selected_sections.get("manifest"))
-    return _json(render_oscal(findings=findings, summary=summary, manifest=manifest))
+    return _json(render_oscal(findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys))
 
 
 _STRUCTURED_FORMATS = frozenset({"json", "sarif", "oscal"})
@@ -4092,6 +4180,14 @@ def preview_report(
     # rules such as privileged-user names apply in every format) and the rendered text is passed through the
     # same function again (idempotent) as the last step. Citations above were built from the real paths.
     redaction = context_for_run(run_path)
+    render = renderers[format_name]
+    if format_name in {"sarif", "oscal"}:
+        # Review R066: dedup keys come from the unredacted findings, keyed by the tenant id, before redaction.
+        manifest = RunBundle(run_path).manifest()
+        tenant_id = _text(manifest.get("tenant_id") or _mapping(selected.get("summary")).get("tenant_id")).strip()
+        if tenant_id:
+            stable_keys = stable_export_keys(_dict_rows(selected.get("findings")), tenant_id)
+            render = functools.partial(renderers[format_name], stable_keys=stable_keys)
     # Masking can make two citations equal: every nested citation list, count and summary is re-derived after
     # redaction, before any format renders the sections.
     safe_sections = _settle_citations(redact_output(selected, profile=profile, context=redaction))
@@ -4100,7 +4196,7 @@ def preview_report(
     )
     content = _final_pass(
         _with_temporary_key_notice(
-            _with_unmatched_names_note(renderers[format_name](safe_sections), format_name, redaction), format_name, redaction
+            _with_unmatched_names_note(render(safe_sections), format_name, redaction), format_name, redaction
         ),
         format_name,
         redaction,

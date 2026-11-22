@@ -859,3 +859,26 @@ def test_sarif_validator_rejects_a_document_that_breaks_the_schema(sarif_validat
     errors = _schema_errors(sarif_validator, document)
 
     assert errors and any("level" in error for error in errors)
+
+
+def test_review_r066_r125_shareable_exports_with_accepted_risk_are_schema_valid(
+    oscal_validator, sarif_validator, tmp_path: Path
+) -> None:
+    """Stable shareable keys, a SARIF suppression and an OSCAL accepted-risk remark keep both documents valid."""
+    from auditex.reporting import render_oscal, render_sarif, stable_export_keys
+
+    finding = {
+        "id": "app_credentials:11111111-2222-4333-8444-555555555555:secret_expired",
+        "rule_id": "app_credentials.secret_expired",
+        "title": "Application secret is expired",
+        "severity": "critical",
+        "status": "accepted_risk",
+        "affected_objects": ["11111111-2222-4333-8444-555555555555"],
+        "waiver": {"finding_id": "x", "reason": "Retiring", "owner": "sec", "expires_on": "2999-01-01"},
+    }
+    keys = stable_export_keys([finding], "9a8b7c6d-1111-4222-8333-444455556666")
+    sarif = render_sarif(findings=[finding], summary={}, manifest={"run_id": "r"}, stable_keys=keys)
+    oscal = render_oscal(findings=[finding], summary={}, manifest={"run_id": "r"}, stable_keys=keys)
+    assert sarif["runs"][0]["results"][0]["suppressions"][0]["status"] == "accepted"
+    assert _schema_errors(sarif_validator, sarif) == []
+    assert _schema_errors(oscal_validator, oscal) == []
