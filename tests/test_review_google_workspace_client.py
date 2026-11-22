@@ -321,3 +321,87 @@ def test_r011_r058_dropping_deleted_alerts_keeps_a_page_error() -> None:
     alerts = client.list_alerts()
     assert [alert["alertId"] for alert in alerts] == ["a2"]
     assert getattr(alerts, "page_error", None) is not None and alerts.truncated is True
+
+
+# ---- bot review wave 2, group I: read completion, DNS-only preflight, scope refusals and quota 403s ---------------
+
+
+def _real_http_error(status: int, body: dict[str, Any]) -> Exception:
+    import json
+
+    from googleapiclient.errors import HttpError
+
+    resp = type("Resp", (), {"status": status, "reason": "Forbidden"})()
+    return HttpError(resp, json.dumps(body).encode("utf-8"), uri="https://admin.googleapis.com/admin/directory/v1/users")
+
+
+def _quota_403(reason: str) -> Exception:
+    return _real_http_error(403, {"error": {"code": 403, "message": "Quota exceeded.", "errors": [
+        {"domain": "usageLimits", "reason": reason, "message": "Quota exceeded."}]}})
+
+
+@pytest.mark.parametrize("reason", ["userRateLimitExceeded", "rateLimitExceeded"])
+def test_w2_20_quota_403_is_retried_with_backoff(reason: str, _no_backoff_sleep: list[float]) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    factory = _paged({None: [_quota_403(reason), {"users": [{"id": "u1"}]}]})
+    rows = client._collect_pages(factory, "users", limit=None)
+    assert [row["id"] for row in rows] == ["u1"]
+    assert len(_no_backoff_sleep) == 1
+    assert google_client.classify_google_error(_quota_403(reason))[0] == "rate_limited"
+
+
+def test_w2_20_a_permission_403_is_still_not_retried(_no_backoff_sleep: list[float]) -> None:
+    denied = _real_http_error(403, {"error": {"code": 403, "message": "Not Authorized to access this resource/api",
+                                              "errors": [{"domain": "global", "reason": "forbidden"}]}})
+    client = GoogleWorkspaceClient(credentials=None)
+    with pytest.raises(Exception, match="HttpError 403"):
+        client._collect_pages(_paged({None: [denied]}), "users", limit=None)
+    assert _no_backoff_sleep == []
+    assert google_client.classify_google_error(denied)[0] == "insufficient_permissions"
+
+
+def _refresh_error(error: str, description: str) -> Exception:
+    from google.auth.exceptions import RefreshError
+
+    return RefreshError(f"{error}: {description}", {"error": error, "error_description": description})
+
+
+def test_w2_19_a_delegated_access_denied_token_exchange_is_a_scope_refusal() -> None:
+    refused = _refresh_error("access_denied", "Requested client not authorized.")
+    assert google_client.is_token_refusal(str(refused))
+    assert google_client.classify_google_error(refused)[0] == "insufficient_permissions"
+
+
+def test_w2_19_other_token_and_api_failures_are_not_scope_refusals() -> None:
+    invalid_grant = _refresh_error("invalid_grant", "Invalid JWT Signature.")
+    assert not google_client.is_token_refusal(str(invalid_grant))
+    assert google_client.classify_google_error(invalid_grant)[0] == "client_error"
+    api_denied = _real_http_error(403, {"error": {"code": 403, "message": "access_denied by policy"}})
+    assert not google_client.is_token_refusal(str(api_denied))
+
+
+def test_w2_19_per_scope_check_names_each_access_denied_scope() -> None:
+    granted = {"https://www.googleapis.com/auth/a"}
+
+    class _Credentials:
+        def __init__(self, scopes: tuple[str, ...] = ()) -> None:
+            self.scopes = scopes
+
+        def with_scopes(self, scopes: list[str]) -> _Credentials:
+            return _Credentials(tuple(scopes))
+
+        def refresh(self, _request: Any) -> None:
+            if not set(self.scopes) <= granted:
+                raise _refresh_error("access_denied", "Requested client not authorized.")
+
+    client = GoogleWorkspaceClient(credentials=_Credentials())
+    original = google_client._token_request
+    google_client._token_request = lambda: None  # type: ignore[assignment]
+    try:
+        missing = client.unauthorised_scopes(
+            ("https://www.googleapis.com/auth/a", "https://www.googleapis.com/auth/b", "https://www.googleapis.com/auth/c")
+        )
+    finally:
+        google_client._token_request = original  # type: ignore[assignment]
+    assert missing == ["https://www.googleapis.com/auth/b", "https://www.googleapis.com/auth/c"]
+
