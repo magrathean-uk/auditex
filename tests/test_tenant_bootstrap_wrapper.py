@@ -34,6 +34,40 @@ exit 1
 """
 
 
+NO_NETWORK_SHIM = """
+import socket
+
+_MESSAGE = "network disabled in tenant-bootstrap wrapper tests"
+_connect = socket.socket.connect
+_connect_ex = socket.socket.connect_ex
+
+
+def _inet(sock):
+    return sock.family in (socket.AF_INET, socket.AF_INET6)
+
+
+def _deny_connect(self, address):
+    if _inet(self):
+        raise OSError(_MESSAGE)
+    return _connect(self, address)
+
+
+def _deny_connect_ex(self, address):
+    if _inet(self):
+        raise OSError(_MESSAGE)
+    return _connect_ex(self, address)
+
+
+def _deny_getaddrinfo(*args, **kwargs):
+    raise OSError(_MESSAGE)
+
+
+socket.socket.connect = _deny_connect
+socket.socket.connect_ex = _deny_connect_ex
+socket.getaddrinfo = _deny_getaddrinfo
+"""
+
+
 def test_run_audit_collector_prefers_repo_root_runtime() -> None:
     script = Path("tenant-bootstrap/scripts/run-audit-collector.sh").read_text(encoding="utf-8")
     repo_root_index = script.index('if [[ -f "${REPO_ROOT}/src/azure_tenant_audit/cli.py"')
@@ -52,6 +86,10 @@ def kit(tmp_path: Path):
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    # Python in the kit imports this before any script, so a real seeder can never reach Graph.
+    shim_dir = tmp_path / "no-network"
+    shim_dir.mkdir()
+    (shim_dir / "sitecustomize.py").write_text(NO_NETWORK_SHIM, encoding="utf-8")
     (bin_dir / "az").write_text(FAKE_AZ, encoding="utf-8")
     (bin_dir / "az").chmod(0o755)
     (bin_dir / "python3").write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
@@ -62,7 +100,7 @@ def kit(tmp_path: Path):
         "TMPDIR": str(tmp_path),
         "FAKE_AZ_LOG": str(tmp_path / "az.log"),
         "FAKE_AZ_TENANT": OTHER_TENANT,
-        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+        "PYTHONPATH": os.pathsep.join(filter(None, [str(shim_dir), os.environ.get("PYTHONPATH", "")])),
         "AUDITEX_M365_HOME": str(tmp_path / "m365-home"),
     }
 
@@ -209,3 +247,84 @@ def test_enterprise_lab_max_default_dry_run_exits_zero(kit):
     proc = kit.run("run-enterprise-lab-max.sh", "--run-name", "labmax-dry")
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
+
+
+def test_kit_python_cannot_open_network_connections(kit):
+    """Wrapper tests run real seeders; the kit's Python must never reach Graph or any other host."""
+    import socket
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    try:
+        proc = subprocess.run(
+            ["python3", "-c", f"import socket; socket.create_connection(('127.0.0.1', {port}), timeout=5); print('connected')"],
+            env=kit.env, capture_output=True, text=True, timeout=60,
+        )
+    finally:
+        server.close()
+    assert "connected" not in proc.stdout
+    assert "network disabled in tenant-bootstrap wrapper tests" in proc.stderr
+
+
+def _lab_max_config(kit, tenant_id: str) -> None:
+    path = kit.root / "config.enterprise-lab-max.json"
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    cfg["tenant"]["tenantId"] = tenant_id
+    path.write_text(json.dumps(cfg), encoding="utf-8")
+
+
+def test_enterprise_lab_max_live_reaches_the_seeder_guard_under_bash_3(kit):
+    _lab_max_config(kit, LAB_TENANT)
+    kit.env["FAKE_AZ_TENANT"] = LAB_TENANT
+    proc = kit.run("run-enterprise-lab-max.sh", "--live", "--run-name", "labmax-live", "--skip-workload", "--skip-verify")
+    output = proc.stdout + proc.stderr
+    assert "unbound variable" not in output
+    # The fake az returns no usable token, so the identity seeder must refuse before any write.
+    assert "identity_seed_az: refused before any write" in output
+    assert proc.returncode != 0
+
+
+def test_token_env_loader_never_puts_the_token_in_a_process_argv(kit):
+    import base64
+    import time
+
+    claims = base64.urlsafe_b64encode(json.dumps({"tid": LAB_TENANT, "exp": int(time.time()) + 3600}).encode()).decode().rstrip("=")
+    token = f"e30.{claims}.signature-part"
+    env_file = kit.tmp / "token.env"
+    env_file.write_text(f"AZURE_ACCESS_TOKEN={token}\n", encoding="utf-8")
+    argv_log = kit.tmp / "python-argv.log"
+    spy = kit.tmp / "bin" / "python3"
+    spy.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{argv_log}"\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    script = f'source "{kit.root / "scripts" / "token-env.sh"}"; load_token_env "{env_file}"; echo "rc=$?"; printf "%s" "$AZURE_ACCESS_TOKEN" > "{kit.tmp / "exported"}"'
+    proc = subprocess.run(["bash", "-c", script], env=kit.env, capture_output=True, text=True, timeout=60)
+    assert "rc=0" in proc.stdout, proc.stdout + proc.stderr
+    assert (kit.tmp / "exported").read_text(encoding="utf-8") == token
+    assert argv_log.exists()
+    assert token not in argv_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("script", ["run-bootstrap-azurecli.sh", "scripts/run-enterprise-audit.sh"])
+def test_both_certificate_password_sources_are_refused_before_seeding(kit, script):
+    config = kit.config(LAB_TENANT)
+    kit.env["FAKE_AZ_TENANT"] = LAB_TENANT
+    (kit.tmp / "pw.txt").write_text("x", encoding="utf-8")
+    proc = kit.run(
+        script, "--config", str(config), "--run-name", "pwboth", "--skip-login",
+        "--audit-client-id", "22222222-2222-2222-2222-222222222222",
+        "--audit-certificate-path", CERT_PATH,
+        "--audit-certificate-thumbprint", THUMBPRINT,
+        "--audit-certificate-password-env", "LAB_CERT_PASSWORD",
+        "--audit-certificate-password-file", str(kit.tmp / "pw.txt"),
+    )
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 2, output
+    assert "only one of --audit-certificate-password-env and --audit-certificate-password-file" in output
+    assert "identity_seed_az.py" not in kit.shell_log("pwboth")
+    assert "identity_seed_az" not in output
+
+
+def test_enterprise_dry_run_inspect_on_a_fresh_run_exits_zero(kit):
+    proc = kit.run("scripts/run-enterprise-audit.sh", "--dry-run", "--inspect", "--run-name", "ent-inspect")
+    assert proc.returncode == 0, proc.stdout + proc.stderr

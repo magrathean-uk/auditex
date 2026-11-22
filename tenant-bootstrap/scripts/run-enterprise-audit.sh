@@ -227,6 +227,10 @@ AUDIT_READY=0
 if [[ -n "$AUDIT_CLIENT_ID" && -n "$AUDIT_CERTIFICATE_PATH" && -n "$AUDIT_CERTIFICATE_THUMBPRINT" ]]; then
   AUDIT_READY=1
 fi
+if [[ "$SKIP_AUDIT" -eq 0 && -n "$AUDIT_CERTIFICATE_PASSWORD_ENV" && -n "$AUDIT_CERTIFICATE_PASSWORD_FILE" ]]; then
+  echo "Pass only one of --audit-certificate-password-env and --audit-certificate-password-file. Nothing was written." >&2
+  exit 2
+fi
 if [[ "$SKIP_AUDIT" -eq 0 && "$AUDIT_READY" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
   echo "The audit needs the reader app certificate (DEC-107): pass --audit-client-id, --audit-certificate-path and --audit-certificate-thumbprint, or --skip-audit. Nothing was written." >&2
   exit 2
@@ -334,7 +338,9 @@ fi
 if [[ "$INSPECT" -eq 1 ]]; then
   echo
   ./scripts/inspect-bootstrap-log.sh "$RUN_NAME"
-  if [[ "$SKIP_AUDIT" -eq 0 ]]; then
+  if [[ "$SKIP_AUDIT" -eq 0 && "$DRY_RUN" -eq 1 ]]; then
+    echo "Audit inspection skipped in dry-run: a dry run writes no audit evidence."
+  elif [[ "$SKIP_AUDIT" -eq 0 ]]; then
     if [[ -z "$OUT" ]]; then
       AUDIT_TARGET="${SCRIPT_DIR}/audit-output/${RUN_NAME}-evidence"
     else
