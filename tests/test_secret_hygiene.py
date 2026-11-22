@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,6 +17,7 @@ from azure_tenant_audit.secret_hygiene import (
     redact_text,
     sanitize_token_claims,
     secure_write_json,
+    secure_write_text,
     token_freshness,
     validate_token_claims,
 )
@@ -170,3 +173,85 @@ def test_redact_text_round2_cut_off_after_backslash_and_marker_prefix() -> None:
     assert redact_text('password="abc def\\') == "password=***redacted***"
     assert "TAILSECRET" not in redact_text("password=***redacted***TAILSECRET")
     assert redact_text("token: ***redacted-jwt***") == "token: ***redacted-jwt***"
+
+
+# ---- bot review wave 2 (items 22, 23): the secret write is anchored in a verified folder ---------------------------
+
+_posix_owner = pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="POSIX modes, not as root")
+
+
+def _write_mode(path) -> int:
+    return stat.S_IMODE(os.lstat(path).st_mode)
+
+
+@_posix_owner
+def test_folder_that_blocks_the_atomic_write_gives_a_fixed_actionable_error(tmp_path) -> None:
+    folder = tmp_path / "private-marker"
+    folder.mkdir()
+    target = folder / "token.json"
+    target.write_text("old", encoding="utf-8")
+    os.chmod(target, 0o600)
+    os.chmod(folder, 0o500)  # the file could be rewritten in place, but nothing can be created beside it
+    try:
+        with pytest.raises(PermissionError) as caught:
+            secure_write_text(target, "new")
+    finally:
+        os.chmod(folder, 0o700)
+    assert "secret_folder_refused" in str(caught.value) and "writable folder" in str(caught.value)
+    assert "private-marker" not in str(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+    assert target.read_text(encoding="utf-8") == "old"
+    assert sorted(path.name for path in folder.iterdir()) == ["token.json"]
+
+
+@_posix_owner
+def test_folder_other_accounts_can_change_is_refused(tmp_path) -> None:
+    folder = tmp_path / "shared"
+    folder.mkdir()
+    os.chmod(folder, 0o777)
+    with pytest.raises(PermissionError, match="secret_folder_refused"):
+        secure_write_text(folder / "token.json", "secret")
+    assert list(folder.iterdir()) == []
+
+
+@_posix_owner
+def test_sticky_shared_folder_is_accepted(tmp_path) -> None:
+    folder = tmp_path / "sticky"
+    folder.mkdir()
+    os.chmod(folder, 0o1777)
+    target = secure_write_text(folder / "token.json", "secret")
+    assert target.read_text(encoding="utf-8") == "secret" and _write_mode(target) == 0o600
+
+
+@_posix_owner
+def test_entry_swapped_after_the_write_is_neither_chmodded_nor_installed(tmp_path, monkeypatch) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    os.chmod(victim, 0o644)
+    real_fdopen = os.fdopen
+
+    class _SwapOnClose:
+        """Closes the descriptor, then puts a link where the temporary file was (another principal's move)."""
+
+        def __init__(self, handle) -> None:
+            self.handle = handle
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            self.handle.close()
+            (temporary,) = [path for path in folder.iterdir() if path.name.endswith(".tmp")]
+            temporary.unlink()
+            temporary.symlink_to(victim)
+
+    monkeypatch.setattr(os, "fdopen", lambda *a, **k: _SwapOnClose(real_fdopen(*a, **k)))
+    with pytest.raises(PermissionError, match="secret_folder_refused"):
+        secure_write_text(folder / "token.json", "secret")
+    assert _write_mode(victim) == 0o644 and victim.read_text(encoding="utf-8") == "keep"
+    assert not (folder / "token.json").exists() and not (folder / "token.json").is_symlink()

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
+import secrets
 import shlex
 import stat
 import tempfile
@@ -162,29 +164,86 @@ def _create_private_parents(directory: Path, *, mode: int = 0o700) -> None:
                 pass
 
 
+SECRET_FOLDER_REFUSED = (
+    "secret_folder_refused: a secret file is written to a new file beside it that then replaces it, so its folder "
+    "must be owned by you (or root), let you create and replace files, and not let other accounts replace them "
+    "(no group or world write unless the sticky bit is set). Choose an owner-controlled writable folder "
+    "(for example one created with chmod 700) and run again."
+)
+
+
+def _secret_folder_refused() -> PermissionError:
+    # A fixed message: never the folder or file path, which may be a sensitive argument such as --token-cache.
+    return PermissionError(errno.EACCES, SECRET_FOLDER_REFUSED)
+
+
+def _trusted_folder(info: os.stat_result) -> bool:
+    """Whether only the caller (or root) can create, rename or remove entries in this folder."""
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid not in {os.geteuid(), 0}:
+        return False
+    # A sticky folder (/tmp) lets an account remove or rename only the entries it owns.
+    return bool(info.st_mode & stat.S_ISVTX) or not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+
+
 def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> Path:
     """Write text without briefly creating world-readable secret files.
 
     The text goes to a new owner-only file beside the target (created exclusively, never through a link), which then
     replaces the target in one step: an old copy at a looser mode is never rewritten in place, and a link at the path
-    is replaced rather than followed.
+    is replaced rather than followed. On POSIX every step is anchored in the folder opened once and checked to be one
+    no other account can change; the mode is set on the open descriptor, and the entry is renamed only while it is
+    still the file just written. A folder that fails the check or blocks the write is refused with a fixed message.
     """
 
     target = Path(path).expanduser()
     _create_private_parents(target.parent)
-    fd, temporary = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-        if os.name == "posix":
-            os.chmod(temporary, mode)
-        os.replace(temporary, target)
-    except BaseException:
+    if os.name != "posix":  # no POSIX modes or folder descriptors (Windows): the same replace in one step
+        fd, path_name = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
         try:
-            os.unlink(temporary)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content)
+            os.replace(path_name, target)
+        except BaseException:
+            try:
+                os.unlink(path_name)
+            except OSError:
+                pass
+            raise
+        return target
+    try:
+        folder = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+    except PermissionError:
+        raise _secret_folder_refused() from None
+    try:
+        if not _trusted_folder(os.fstat(folder)):
+            raise _secret_folder_refused()
+        temporary = f".{target.name}.{secrets.token_hex(8)}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        try:
+            descriptor = os.open(temporary, flags, 0o600, dir_fd=folder)
+        except PermissionError:
+            raise _secret_folder_refused() from None
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                os.fchmod(handle.fileno(), mode)
+                handle.write(content)
+                handle.flush()
+                written = os.fstat(handle.fileno())
+            current = os.stat(temporary, dir_fd=folder, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != (written.st_dev, written.st_ino):
+                raise _secret_folder_refused()
+            try:
+                os.rename(temporary, target.name, src_dir_fd=folder, dst_dir_fd=folder)
+            except PermissionError:
+                raise _secret_folder_refused() from None
+        except BaseException:
+            try:
+                os.unlink(temporary, dir_fd=folder)
+            except OSError:
+                pass
+            raise
+    finally:
+        os.close(folder)
     return target
 
 

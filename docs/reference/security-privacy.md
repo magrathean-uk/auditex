@@ -945,7 +945,11 @@ local Git-excluded path. Do not place those paths in repository defaults.
 No command or MCP tool accepts a bearer token: Microsoft 365 tokens are minted in memory from the reader app's certificate.
 
 The Google OAuth token cache is written owner-only (0600); a folder Auditex creates for it is 0700, and an existing
-folder keeps its mode. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
+folder keeps its mode. The cache is replaced in one step: the new copy is written to a file beside it, which then takes
+its place. Its folder must therefore let you create and replace files there, be owned by you (or root) and not let other
+accounts replace entries (no group or world write unless the sticky bit is set, as on `/tmp`); otherwise the write is
+refused with `secret_folder_refused`. Point `--token-cache` at a file in an owner-controlled writable folder; the default
+`.secrets/` folder is created `0700`. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
 others can read, or a link, is refused with `service_account_key_refused`.
 
 `--verbose` raises Auditex's own logging to DEBUG but keeps `urllib3` and `msal` at WARNING, because their request
