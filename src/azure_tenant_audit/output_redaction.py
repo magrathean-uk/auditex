@@ -260,6 +260,10 @@ _ENCODED_EMAIL_RE = re.compile(
     re.IGNORECASE,
 )
 _IDENTITY_KEYS = ("onpremisesimmutableid", "immutableid")
+# A Google Workspace customer id (``C03az79cb``) under a tenant or customer id key: not a GUID, so the GUID pass misses
+# it. Masked like an immutable id; the ``my_customer`` alias and plain words (no digit) are kept.
+_CUSTOMER_ID_KEYS = frozenset({"customerid", "tenantid", "tenantidrequested"})
+_GOOGLE_CUSTOMER_ID_RE = re.compile(r"C(?=[0-9A-Za-z]*[0-9])[0-9A-Za-z]{6,12}")
 _ADMIN_FLAGS = ("isadmin", "isdelegatedadmin", "issuperadmin", "isprivileged")
 _NOT_USER_TYPES = frozenset({"group", "serviceprincipal", "application", "app", "device"})
 
@@ -2127,6 +2131,8 @@ class _Redactor:
                     item = TEXT_PLACEHOLDER
                 elif norm in _IDENTITY_KEYS:
                     item = item if _PSEUDONYM_RE.match(item) else _IMMUTABLE_PREFIX + pseudonym(self.key, item)
+                elif norm in _CUSTOMER_ID_KEYS and _GOOGLE_CUSTOMER_ID_RE.fullmatch(item):
+                    item = _IMMUTABLE_PREFIX + pseudonym(self.key, item)
                 elif person is not None and norm in _D5_NAME_FIELDS:
                     item = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.key, person[0])
                 elif person is not None and norm in _D5_NAME_PART_FIELDS:

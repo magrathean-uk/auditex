@@ -226,3 +226,35 @@ def test_r121_report_analyze_grades_a_run_with_no_completed_collector_blocked(tm
     result = analyze_report(run_dir)
 
     assert result["auditor_score"]["grade"] == "blocked"
+
+
+# Google customer ids (found by the reporting-exports-disclosure review): shareable output masks them like a tenant id.
+def test_google_customer_id_is_masked_in_shareable_output() -> None:
+    import json
+
+    from azure_tenant_audit.output_redaction import redact_payload
+
+    customer = "C03az79cb"
+    payload = {
+        "sections": {
+            "manifest": {"platform": "google_workspace", "tenant_id": customer, "customer_id": customer},
+            "summary": {"tenant_id": customer, "customerId": customer},
+        }
+    }
+
+    redacted = redact_payload(payload)
+
+    text = json.dumps(redacted)
+    assert customer not in text
+    manifest = redacted["sections"]["manifest"]
+    # One stable pseudonym per id, so the fields still agree with each other.
+    assert manifest["tenant_id"] == manifest["customer_id"] == redacted["sections"]["summary"]["tenant_id"]
+
+
+def test_google_customer_id_masking_keeps_the_alias_and_ordinary_words() -> None:
+    from azure_tenant_audit.output_redaction import redact_payload
+
+    redacted = redact_payload({"customer_id": "my_customer", "tenant_id": "Contoso", "status": "Completed"})
+
+    assert redacted["customer_id"] == "my_customer"
+    assert redacted["status"] == "Completed"
