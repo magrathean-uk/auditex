@@ -21,12 +21,14 @@ DEFAULT_DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query"
 DEFAULT_TIMEOUT_SECONDS = 5.0
 # Review R164: a customer that cannot send domain names to Cloudflare names its own DoH (JSON API) resolver.
 DOH_ENDPOINT_ENV = "AUDITEX_DOH_ENDPOINT"
+DNS_POSTURE_COLLECTORS = frozenset({"dns_posture", "google_dns_posture"})
 
 
 # Every character an RFC 3986 URL may carry. Anything else (a backslash, a space, a control or non-ASCII character)
 # is read differently by Requests (urllib3) and urllib.parse, so the host shown could differ from the host asked.
 _URL_CHARACTERS = re.compile(r"[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 _HOST_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
+_BRACKETED_HOST_PORT = re.compile(r"\[[^\]]+\](?::[0-9]+)?")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -52,6 +54,8 @@ def _display_host(host: str) -> str | None:
     except ValueError:
         pass
     else:
+        if address.version == 6 and address.scope_id is not None:
+            return None
         return f"[{address.compressed}]" if address.version == 6 else address.compressed
     name = host.lower().rstrip(".")
     if not name or len(name) > 253 or not all(_HOST_LABEL.fullmatch(label) for label in name.split(".")):
@@ -63,8 +67,13 @@ def doh_resolver_address(endpoint: object) -> ResolverAddress | None:
     """The safe display parts of a resolver URL, or None when the value is not an http(s) URL with a plain host.
 
     The one parser every place that shows or stores a resolver goes through: the run notices, data-handling.json,
-    DohClient errors, both providers' coverage rows and gap reasons built from older diagnostics.
+    DohClient errors, both providers' coverage rows and gap reasons.
     """
+    address = _display_url_address(endpoint)
+    return address if address and address.scheme in _DEFAULT_PORTS else None
+
+
+def _display_url_address(endpoint: object) -> ResolverAddress | None:
     text = str(endpoint or "").strip()
     if not _URL_CHARACTERS.fullmatch(text):
         return None
@@ -74,16 +83,16 @@ def doh_resolver_address(endpoint: object) -> ResolverAddress | None:
     except ValueError:
         return None
     scheme = parts.scheme.lower()
-    if scheme not in _DEFAULT_PORTS or not host:
+    if not scheme or not host:
         return None
     netloc_host = parts.netloc.rpartition("@")[2]
     # An IPv6 address only between brackets: "https://2001:db8::53:8443" is not a host and port.
-    if ":" in host and not netloc_host.startswith("["):
+    if (":" in host or netloc_host.startswith("[")) and not _BRACKETED_HOST_PORT.fullmatch(netloc_host):
         return None
     shown = _display_host(host)
     if shown is None:
         return None
-    return ResolverAddress(scheme, shown, None if port in (None, _DEFAULT_PORTS[scheme]) else port)
+    return ResolverAddress(scheme, shown, None if port == _DEFAULT_PORTS.get(scheme) else port)
 
 
 def doh_resolver_display(endpoint: object) -> str | None:
@@ -129,6 +138,62 @@ def doh_resolver_disclosure(endpoint: str) -> str:
         return f"the public Cloudflare DNS-over-HTTPS resolver ({DEFAULT_DOH_ENDPOINT})"
     address = doh_resolver_address(endpoint)
     return f"the configured DNS-over-HTTPS resolver at {address.host_port if address else 'a host that is not shown'}"
+
+
+_DIAGNOSTIC_URL = re.compile(
+    r'(?:(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)|(?<![\w/])(?:/(?!/)|\?|(?<!:)//))[^\s"<>]+'
+)
+# Only a URL with no path, query or fragment can have trailing prose punctuation restored.
+_PUNCTUATED_ORIGIN = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*://(?:[^/?#\[\]]*\[[^\]/?#]+\][^/?#\[\]]*?|[^/?#\[\]]+?))([.,;:)}'\]]+)"
+)
+_DIAGNOSTIC_FIELD = re.compile(r"(?:(?:error(?:_class)?|message|reason|diagnostic)s?|query_result)$", re.IGNORECASE)
+
+
+def safe_resolver_diagnostic(text: object) -> str:
+    """Keep diagnostic prose and URL origins. Withhold relative request targets from legacy transport errors."""
+    value = str(text or "")
+
+    def replace(match: re.Match[str]) -> str:
+        if match.group("scheme") is None:
+            # Consume the entire target, including any URL-like text inside it.
+            return "[request target withheld]"
+        token = match.group()
+        address = _display_url_address(token)
+        punctuation = _PUNCTUATED_ORIGIN.fullmatch(token)
+        if punctuation and (address is None or punctuation[2] == "."):
+            bare = _display_url_address(punctuation[1])
+            if bare:
+                return bare.origin + punctuation[2]
+        return address.origin if address else "[URL withheld]"
+
+    cleaned = _DIAGNOSTIC_URL.sub(replace, value)
+    if "://" in value and "@" in cleaned:
+        # A space or quote in userinfo makes the URL boundaries ambiguous.
+        return "[DNS diagnostic withheld]"
+    return cleaned
+
+
+def sanitise_resolver_fields(value: Any, *, dns: bool = False, diagnostic: bool = False) -> Any:
+    """Scrub DNS diagnostic fields at any depth when reading replay data, including failures without a class."""
+    if isinstance(value, list):
+        return [sanitise_resolver_fields(item, dns=dns, diagnostic=diagnostic) for item in value]
+    if isinstance(value, str) and diagnostic:
+        return safe_resolver_diagnostic(value)
+    if not isinstance(value, Mapping):
+        return value
+    dns = dns or value.get("error_class") == "dns_resolver_error"
+    cleaned: dict[Any, Any] = {}
+    for key, item in value.items():
+        if key == "doh_endpoint" and item:
+            cleaned[key] = doh_resolver_display(item)
+        else:
+            cleaned[key] = sanitise_resolver_fields(
+                item,
+                dns=dns or key in DNS_POSTURE_COLLECTORS,
+                diagnostic=diagnostic or key == "resolver_error" or (dns and bool(_DIAGNOSTIC_FIELD.search(str(key)))),
+            )
+    return cleaned
 
 
 # Requests and urllib3 log each request target (the resolver's path, which can hold a token, and the query) at DEBUG,
@@ -177,6 +242,9 @@ _RCODE_NAMES = {1: "FORMERR", 2: "SERVFAIL", 4: "NOTIMP", 5: "REFUSED"}
 
 class DohError(RuntimeError):
     """Raised when a DoH query cannot be completed."""
+
+    def __init__(self, message: str = "DNS-over-HTTPS query failed") -> None:
+        super().__init__(safe_resolver_diagnostic(message))
 
 
 class DnsAnswer(NamedTuple):
@@ -232,8 +300,8 @@ class DohClient:
             if status is None or isinstance(status, bool):
                 raise ValueError("no status")
             rcode = int(status)
-        except (TypeError, ValueError) as exc:
-            raise DohError(f"DoH response from {self._origin()} carried no usable status for {record_type} {name}") from exc
+        except (TypeError, ValueError):
+            raise DohError(f"DoH response from {self._origin()} carried no usable status for {record_type} {name}") from None
         if payload.get("TC") is True:
             # The resolver cut the answer short: records may be missing from it, so nothing can be called absent.
             raise DohError(f"DoH response from {self._origin()} was truncated (TC) for {record_type} {name}")
@@ -614,7 +682,7 @@ def collect_domain_posture(
                 records = resolver.query(f"{selector}._domainkey.{domain}", "TXT")
                 dkim_results[selector] = _summarize_dkim(records)
     except DohError as exc:
-        posture["resolver_error"] = str(exc)
+        posture["resolver_error"] = safe_resolver_diagnostic(exc)
         posture.update(unknown_posture(all_probed))
         return posture
 

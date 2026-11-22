@@ -51,7 +51,12 @@ from .data_handling import collector_activity_notices
 from .data_minimisation import minimise_user_text
 from .diagnostics import build_diagnostics as _build_diagnostics
 from .diagnostics import load_permission_hints as _load_permission_hints
-from .dns_lookup import DEFAULT_DOH_ENDPOINT, DOH_ENDPOINT_ENV, resolve_doh_endpoint
+from .dns_lookup import (
+    DEFAULT_DOH_ENDPOINT,
+    DOH_ENDPOINT_ENV,
+    resolve_doh_endpoint,
+    sanitise_resolver_fields,
+)
 from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
 from .graph import GraphClient, GraphError
@@ -362,6 +367,10 @@ def run_offline(
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     # The replayed tenant text enters the run here: each lone UTF-16 surrogate becomes U+FFFD, counted for the summary.
     sample = writer.valid_text(sample)
+    # Resolver diagnostics in the sample are untrusted: they may name the resolver by its full URL (user info, a path
+    # token, a query). Every copy below (sample_input.json, coverage, diagnostics, normalised records) sees only the
+    # safe form (review R164).
+    sample = sanitise_resolver_fields(sample)
     try:
         sensitive_binding = writer.write_sensitive_users(sensitive_users)
         writer.write_partner_domains(partner_domains)

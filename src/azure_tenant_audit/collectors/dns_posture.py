@@ -19,7 +19,9 @@ from ..dns_lookup import (
     DohClient,
     DohError,
     collect_domain_posture,
+    doh_resolver_display,
     resolve_doh_endpoint,
+    safe_resolver_diagnostic,
     scuba_dkim_record,
     scuba_dmarc_record,
     scuba_spf_record,
@@ -92,13 +94,17 @@ class DnsPostureCollector(Collector):
         client: GraphClient | None = context.get("client")
         log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
         injected = context.get("dns_resolver")
+        endpoint = context.get("doh_endpoint")
         if injected is None:
             # The run's resolver choice: the option, else AUDITEX_DOH_ENDPOINT, else Cloudflare (R164). A refused
             # choice is a configuration error of the run, recorded without the value (it may carry a token).
             try:
-                endpoint = resolve_doh_endpoint(context.get("doh_endpoint"))
+                endpoint = resolve_doh_endpoint(endpoint)
             except ValueError as exc:
-                return self._config_error(str(exc))
+                return self._config_error(safe_resolver_diagnostic(exc))
+        else:
+            endpoint = getattr(injected, "endpoint", endpoint)
+        resolver_origin = doh_resolver_display(endpoint)
         resolver = CachingResolver(injected if injected is not None else DohClient(endpoint=endpoint))
         dkim_selectors: Iterable[str] = context.get("dkim_selectors", DEFAULT_DKIM_SELECTORS)
         dkim_fallback_selectors: Iterable[str] = context.get(
@@ -127,6 +133,7 @@ class DnsPostureCollector(Collector):
         except Exception as exc:  # noqa: BLE001
             domains_status = "failed"
             domains_error_class, domains_error = _classify_graph_error(exc)
+            domains_error = safe_resolver_diagnostic(domains_error)
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
         coverage.append(
             {
@@ -188,12 +195,12 @@ class DnsPostureCollector(Collector):
                 posture = {
                     "domain": domain_name,
                     "managed_by_microsoft": domain_name.lower().endswith(".onmicrosoft.com"),
-                    "resolver_error": str(exc),
+                    "resolver_error": safe_resolver_diagnostic(exc),
                     **unknown_posture(attempted_selectors),
                 }
                 status = "failed"
                 error_class = "dns_resolver_error"
-                error = str(exc)
+                error = posture["resolver_error"]
             if (
                 https_fetcher is not None
                 and status == "ok"
@@ -241,6 +248,10 @@ class DnsPostureCollector(Collector):
         # Append after existing payload and coverage entries, including public HTTPS reads.
         payload.update(records)
         coverage.extend(record_coverage)
+        if resolver_origin:
+            for row in coverage:
+                if row.get("error_class") == "dns_resolver_error":
+                    row["doh_endpoint"] = resolver_origin
         partial = any(row.get("status") != "ok" for row in coverage)
         message = "DNS posture collection partially completed" if partial else ""
         return CollectorResult(
@@ -301,7 +312,7 @@ class DnsPostureCollector(Collector):
                         if record is not None:
                             rows.append(record)
                 except DohError as exc:
-                    status, error_class, error = "failed", "dns_resolver_error", str(exc)
+                    status, error_class, error = "failed", "dns_resolver_error", safe_resolver_diagnostic(exc)
             envelope: dict[str, Any] = {"value": rows, "status": status}
             row = {
                 "collector": self.name, "type": "dns", "name": operation,

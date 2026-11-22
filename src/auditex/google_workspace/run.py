@@ -21,6 +21,7 @@ from azure_tenant_audit.dns_lookup import (
     DOH_ENDPOINT_ENV,
     doh_resolver_disclosure,
     resolve_doh_endpoint,
+    sanitise_resolver_fields,
 )
 from azure_tenant_audit.offline_replay import (
     absent_section_rows,
@@ -660,6 +661,9 @@ def run_google_offline(
     if not isinstance(sample, dict):
         LOG.error("Google sample bundle must be a JSON object.")
         return 2
+    # Resolver diagnostics in the sample are untrusted (a full resolver URL may carry user info, a path token or a
+    # query): every copy below (raw payloads, coverage, diagnostics, normalised records) sees only the safe form.
+    sample = sanitise_resolver_fields(sample)
     fixture_provenance = _merged_fixture_provenance(
         sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
         fixture_provenance_override,
