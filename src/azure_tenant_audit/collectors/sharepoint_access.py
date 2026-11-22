@@ -243,6 +243,10 @@ class SharePointAccessCollector(Collector):
                     if page_error is not None:
                         # The permissions read so far stay, marked cut; the site's read is a failed, truncated gap.
                         entry["collection_truncated"] = True
+                        # The unread pages may hold more principals, so a cut list cannot show a site is orphaned
+                        # or weakly owned; two principals already seen stay a lower bound.
+                        if entry.get("ownershipState") in {"orphaned", "weak"}:
+                            entry["ownershipState"] = "unknown"
                         error_class, error = _classify_graph_error(page_error)
                         row.update(status="failed", error_class=error_class, error=error)
                         record_truncation(row, list_name="sitePermissions", rows=len(permissions), limit=None,

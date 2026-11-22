@@ -72,3 +72,20 @@ def test_a_falsey_injected_dns_resolver_is_used_not_a_crash() -> None:
     result = DnsPostureCollector().run({"client": _Client(), "dns_resolver": resolver, "public_lookups": False})
     assert result.status in {"ok", "partial"}
     assert ("example.com", "TXT") in resolver.asked or any(n.endswith("example.com") for n, _ in resolver.asked)
+
+
+def test_a_truncated_site_permission_list_gives_no_ownership_verdict() -> None:
+    """R045 repair: ownership worked out from a cut permission list is unknown, so no orphaned-site finding fires."""
+    from test_review_collectors_transport_fanout import _NextPageFails
+
+    from azure_tenant_audit.collectors.sharepoint_access import SharePointAccessCollector
+
+    fake = _NextPageFails(
+        "/sites/site-1/permissions",
+        lists={"/sites": [{"id": "site-1", "displayName": "Team", "webUrl": "https://contoso.sharepoint.com/sites/team"}]},
+        objects={"/admin/sharepoint/settings": {"sharingCapability": "externalUserSharingOnly"}},
+    )
+    result = SharePointAccessCollector().run({"client": fake, "top": None})
+    sites = [e for e in result.payload["sitePermissionsBySite"]["value"] if e.get("siteId") == "site-1"]
+    assert sites and sites[0]["collection_truncated"] is True
+    assert sites[0]["ownershipState"] == "unknown"
