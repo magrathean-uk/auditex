@@ -5,6 +5,9 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import Timeout
+
 from ..collection_gaps import (
     REASON_NEXT_LINK_REFUSED,
     REASON_OPERATOR_LIMIT,
@@ -77,6 +80,10 @@ def _classify_graph_error(exc: Exception) -> tuple[str, str]:
             return "next_link_refused", message
         status = exc.status
         lower = message.lower()
+        code = str(exc.error_code or "").lower()
+        # A licence error code (AadPremiumLicenseRequired) is enough on its own: its message may be generic (R004).
+        if status in {400, 401, 403} and ("license" in code or "licence" in code):
+            return "license_required", message
         if status in {400, 401, 403} and any(
             phrase in lower
             for phrase in (
@@ -113,6 +120,9 @@ def _classify_graph_error(exc: Exception) -> tuple[str, str]:
         if status and status >= 500:
             return "graph_transient", message
         return f"graph_http_{status}", message
+    if isinstance(exc, (Timeout, RequestsConnectionError)):
+        # The client retried the timeout or dropped connection and every attempt failed (R033).
+        return "graph_transient", message
     if "No reply address is registered" in message:
         return "app_missing_reply_url", message
     return "client_error", message
