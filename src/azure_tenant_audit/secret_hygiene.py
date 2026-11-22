@@ -100,7 +100,9 @@ INLINE_SECRET_WORDS = (
     r"|api[_-]?key|client[_-]?assertion|private[_-]?key|passphrase|token"
     r"|certificate[_-]?(?:path|thumbprint|password(?:[_-]?(?:env|file))?)"
 )
-INLINE_SECRET_VALUE = r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,;]+"
+# A quoted value runs to its closing quote, or to the end of the text when it was cut off before one. A value that is
+# already a redaction marker (``***redacted-jwt***``) is left as it is.
+INLINE_SECRET_VALUE = r"(?!\*\*\*redacted)(?:\"(?:[^\"\\]|\\.)*(?:\"|\Z)|'(?:[^'\\]|\\.)*(?:'|\Z)|[^\s,;]+)"
 INLINE_SECRET_RE = re.compile(
     rf"(?P<prefix>[\"']?(?:{INLINE_SECRET_WORDS})[\"']?\s*[=:]\s*)(?P<value>{INLINE_SECRET_VALUE})",
     re.IGNORECASE,
@@ -182,6 +184,10 @@ def collect_sensitive_argv_values(
             skip_next = False
             continue
         option, separator, value = item.partition("=")
+        words = str(item).split(maxsplit=1)
+        if len(words) == 2 and "=" not in words[0] and _sensitive_option(words[0], flags):
+            values.add(words[1])  # a single malformed token '--client-secret value', as redact_argv reads it
+            continue
         if _sensitive_option(option, flags):
             if separator:
                 if value:

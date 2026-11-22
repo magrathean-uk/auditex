@@ -145,3 +145,18 @@ def test_redact_argv_masks_single_token_flag_and_value() -> None:
 
     assert redact_argv(["tool", "--client-secret abc123"]) == ["tool", "--client-secret ***redacted***"]
     assert redact_argv(["tool", "--tenant-id contoso"]) == ["tool", "--tenant-id contoso"]
+
+
+def test_collect_sensitive_argv_values_reads_single_token_flag_and_value() -> None:
+    """R093 (review): child-output scrubbing collects the value of a malformed single token too."""
+    from azure_tenant_audit.secret_hygiene import collect_sensitive_argv_values
+
+    assert collect_sensitive_argv_values(["tool", "--client-secret abc123"]) == {"abc123"}
+
+
+def test_redact_text_masks_unterminated_quoted_secret_to_the_end() -> None:
+    """R093 (review): an opening quote with no closing quote (a cut-off diagnostic) is masked to the end."""
+    from azure_tenant_audit.secret_hygiene import redact_text
+
+    out = redact_text('error: {"password": "Pa\\"ss word Secret99')
+    assert out == 'error: {"password": ***redacted***'
