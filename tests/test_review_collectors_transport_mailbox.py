@@ -30,11 +30,6 @@ class _Client:
             return list(self.users)
         if path == "/domains":
             return list(DOMAINS)
-        if path.endswith("/mailFolders"):
-            assert params and set(params["$select"].split(",")) == {"id", "displayName"}
-            if self.folders_error:
-                raise self.folders_error
-            return [{"id": "AAMkADhmINBOX", "displayName": "Inbox"}, {"id": RSS_ID, "displayName": "RSS Feeds"}]
         raise AssertionError(path)
 
     def get_batch(self, requests):
@@ -45,6 +40,12 @@ class _Client:
         out = []
         for spec in requests:
             name = spec["path"].rsplit("/", 1)[-1]
+            if name == "mailFolders":
+                assert set(spec["params"]["$select"].split(",")) == {"id", "displayName"}
+                out.append({"status": 200, "body": {"value": [
+                    {"id": "AAMkADhmINBOX", "displayName": "Inbox"}, {"id": RSS_ID, "displayName": "RSS Feeds"},
+                ]}})
+                continue
             assert spec["params"] == {"$select": "id"}
             out.append({"status": 200, "body": {"id": ids[name]}} if name in ids
                        else {"status": 404, "body": {"error": {"code": "ErrorItemNotFound"}}})

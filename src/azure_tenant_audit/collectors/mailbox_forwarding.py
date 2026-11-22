@@ -54,6 +54,7 @@ class MailboxForwardingCollector(Collector):
 
         all_rules: list[dict[str, Any]] = []
         all_settings: list[dict[str, Any]] = []
+        folder_refusal: dict[str, Any] | None = None
         for user in users:
             mail = user.get("mail")
             user_id = user.get("id")
@@ -70,8 +71,16 @@ class MailboxForwardingCollector(Collector):
             # but only when a rule moves mail somewhere a display name does not already settle.
             hide_folder_ids: set[str] | None = set()
             if any(_needs_folder_resolution(rule) for rule in user_rules):
-                hide_folder_ids, folders_status = self._resolve_hide_folders(client, user_id)
-                coverage.append(folders_status)
+                if folder_refusal is not None:
+                    # The folder read was already refused for the run's credential: later users' move rules stay
+                    # unknown on that one gap row instead of sending the same refused read per user.
+                    hide_folder_ids = None
+                    folder_refusal["unresolved_user_count"] += 1
+                else:
+                    hide_folder_ids, folders_status = self._resolve_hide_folders(client, user_id)
+                    coverage.append(folders_status)
+                    if folders_status.get("error_class") in _FOLDER_REFUSAL_CLASSES:
+                        folder_refusal = folders_status
             for rule in user_rules:
                 classified = _classify_message_rule(rule, user, accepted_domains, hide_folder_ids)
                 all_rules.append(classified)
@@ -269,7 +278,8 @@ class MailboxForwardingCollector(Collector):
         """IDs of the user's hide-from-user folders, or None when they could not be read.
 
         Folder metadata only (``$select=id,displayName`` on the top-level list and ``$select=id`` on the well-known
-        folders); no message is read.
+        folders); no message is read. The reads go in one ``$batch``, so a refused folder read never counts toward the
+        per-family permission stop that guards the user's other reads.
         """
         start = time.perf_counter()
         path = f"/users/{user_id}/mailFolders"
@@ -277,30 +287,39 @@ class MailboxForwardingCollector(Collector):
         error_class: str | None = None
         error: str | None = None
         try:
-            if client is None or not hasattr(client, "get_all") or not hasattr(client, "get_batch"):
+            if client is None or not hasattr(client, "get_batch"):
                 raise GraphError("graph client unavailable", request=path)
-            for folder in client.get_all(path, params={"$select": "id,displayName", "$top": "100"}) or []:
-                if isinstance(folder, dict) and str(folder.get("displayName") or "").strip().lower() in _HIDE_FROM_USER_FOLDERS:
-                    ids.add(str(folder.get("id") or ""))
             answers = client.get_batch(
-                [{"path": f"{path}/{name}", "params": {"$select": "id"}} for name in _HIDE_FROM_USER_WELL_KNOWN]
+                [{"path": path, "params": {"$select": "id,displayName", "$top": "100"}}]
+                + [{"path": f"{path}/{name}", "params": {"$select": "id"}} for name in _HIDE_FROM_USER_WELL_KNOWN]
             )
-            for answer in answers:
+            if not isinstance(answers, list) or len(answers) != 1 + len(_HIDE_FROM_USER_WELL_KNOWN):
+                raise GraphError("folder lookup answer incomplete", request=path)
+            for index, answer in enumerate(answers):
                 status = answer.get("status") if isinstance(answer, dict) else None
                 body = answer.get("body") if isinstance(answer, dict) else None
-                if status == 200 and isinstance(body, dict) and body.get("id"):
+                if status == 200 and isinstance(body, dict) and index == 0:
+                    folders = body.get("value") if isinstance(body.get("value"), list) else []
+                    next_link = body.get("@odata.nextLink")
+                    if isinstance(next_link, str) and next_link:
+                        folders = folders + list(client.iter_items(next_link))
+                    for folder in folders:
+                        if isinstance(folder, dict) and str(folder.get("displayName") or "").strip().lower() in _HIDE_FROM_USER_FOLDERS:
+                            ids.add(str(folder.get("id") or ""))
+                elif status == 200 and isinstance(body, dict) and body.get("id"):
                     ids.add(str(body["id"]))
-                elif status != 404:  # 404: the mailbox has no such folder (an archive is optional)
+                elif not (status == 404 and index > 0):  # 404: the mailbox has no such folder (an archive is optional)
                     raise GraphError(
-                        str((answer or {}).get("error") or "well-known folder not read"),
+                        str((answer or {}).get("error") or "mail folder not read"),
                         status=status if isinstance(status, int) else None,
+                        error_code=(answer or {}).get("error_code"),
                         request=path,
                     )
             ids.discard("")
         except Exception as exc:  # noqa: BLE001
             ids = None
             error_class, error = _classify_graph_error(exc)
-        return ids, {
+        row: dict[str, Any] = {
             "collector": self.name,
             "type": "graph",
             "name": f"mailFolders:{user_id}",
@@ -311,6 +330,9 @@ class MailboxForwardingCollector(Collector):
             "error_class": error_class,
             "error": error,
         }
+        if ids is None:
+            row["unresolved_user_count"] = 1
+        return ids, row
 
     def _fetch_mailbox_settings(
         self,
@@ -367,6 +389,8 @@ class MailboxForwardingCollector(Collector):
 
 
 NO_MAILBOX = "no_mailbox"
+# A folder read refused for the run's credential (the mail-folder permission is not granted): it is not retried per user.
+_FOLDER_REFUSAL_CLASSES = frozenset({"insufficient_permissions", "unauthenticated", "permission_stop"})
 _NO_MAILBOX_CODES = frozenset({"mailboxnotenabledforrestapi", "errornonexistentmailbox"})
 
 
