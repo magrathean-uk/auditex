@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
+from explainer_checks.review_overlay import review_catalogue
 
 from azure_tenant_audit.explainer import collection
 
@@ -17,7 +18,10 @@ FIXTURES = ROOT / "tests/fixtures/explainer/collection"
 RESOURCE = ROOT / collection.RESOURCE_PATH
 RAW = json.loads(RESOURCE.read_text(encoding="utf-8"))
 # The spec's byte-exact v3.9.1 cell catalogue is the independent pin (stored compressed, shared with the renderer tests).
-CATALOGUE = json.loads(gzip.decompress((ROOT / "tests/fixtures/explainer/renderer/catalogue-v391-fixture.json.gz").read_bytes()))
+# Review lane rules-followup adds its documented SS 7.x Built-In deviation (explainer_checks/review_overlay.py).
+CATALOGUE = review_catalogue(
+    json.loads(gzip.decompress((ROOT / "tests/fixtures/explainer/renderer/catalogue-v391-fixture.json.gz").read_bytes())),
+    json.loads((ROOT / "configs/scuba-value-rules.json").read_text()))
 RECONCILIATION = json.loads(gzip.decompress((FIXTURES / "reconciliation.json.gz").read_bytes()))
 
 
@@ -75,15 +79,15 @@ def test_resource_errors_propagate_and_loads_do_not_share_state():
 def test_complete_v391_inventory_and_source_reconciliation(data):
     expected = {f"{p}/{cell}": c["verdict"] for p, policy in CATALOGUE.items() for cell, c in policy["cells"].items()}
     assert len(CATALOGUE) == 102
-    assert len(expected) == len(data["cells"]) == 1084
+    assert len(expected) == len(data["cells"]) == 1090
     assert data["cell_inventory"] == expected
     assert {r["id"]: r["verdict"] for r in data["cells"]} == expected
     assert data["policy_sections"] == {p: v["sections"] for p, v in CATALOGUE.items()}
     active = [r for r in data["cells"] if r["applies"]]
-    assert len(active) == 761
+    assert len(active) == 767
     assert len({r["cell"] for r in active}) == 122
-    assert len(data["cells"]) - len(RECONCILIATION["source_entry_sha256"]) == 165
-    assert len(CITATIONS) >= 1084
+    assert len(data["cells"]) - len(RECONCILIATION["source_entry_sha256"]) == 171
+    assert len(CITATIONS) >= 1090
     assert {(r["policy_id"], r["cell"]) for r in CITATIONS} == {
         (p, cell) for p, v in CATALOGUE.items() for cell in v["cells"]}
 

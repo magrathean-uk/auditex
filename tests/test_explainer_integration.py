@@ -13,6 +13,12 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+from explainer_checks.review_overlay import (
+    R003_ADDED,
+    R003_POLICIES,
+    R003_RETIRED,
+    review_catalogue,
+)
 
 from azure_tenant_audit import explainer, resources
 from azure_tenant_audit.explainer import textkit
@@ -24,6 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / "tests/fixtures/explainer"
 PIN = FIX / "renderer/catalogue-v391-fixture.json.gz"
 CAT = json.loads(gzip.decompress(PIN.read_bytes()))
+# The pin with review lane rules-followup's documented SS 7.x Built-In deviation (explainer_checks/review_overlay.py).
+REVIEWED = review_catalogue(CAT, json.loads((ROOT / "configs/scuba-value-rules.json").read_text()))
 T = textkit.expand_template(json.loads((ROOT / "configs/explainer-template.json").read_text()))
 
 
@@ -195,11 +203,16 @@ def test_residual_differences_are_only_the_documented_classes():
     """What the shipped catalogue keeps from product, each consistent with v3.9.1, A1 and A2."""
     from test_value_rules_replay import D29_PRODUCT_TEXT, D29_V391_TEXT
 
-    residual = catalogue_gap(json.loads((ROOT / "configs/scuba-value-rules.json").read_text()), CAT)
+    product = json.loads((ROOT / "configs/scuba-value-rules.json").read_text())
+    raw = catalogue_gap(product, CAT)
+    # Review R003/R099: the only cells the shipped catalogue adds to or retires from the pin.
+    assert raw["missing_cells"] == [[pid, cell] for pid in R003_POLICIES for cell in R003_RETIRED]
+    assert raw["extra_cells"] == [[pid, cell] for pid in R003_POLICIES for cell in R003_ADDED]
+    residual = catalogue_gap(product, REVIEWED)
     assert residual["product_spec"] == "v3.9.1" and residual["missing_policies"] == residual["extra_policies"] == []
     assert residual["missing_cells"] == residual["extra_cells"] == []
     assert residual["product_policies"] == residual["fixture_policies"] == 102
-    assert residual["product_cells"] == residual["fixture_cells"] == 1084
+    assert residual["product_cells"] == residual["fixture_cells"] == 1090
     kinds = {}
     for pid, entry in residual["changed_cells"].items():
         for cell, keys in entry["cells"].items():
@@ -232,7 +245,7 @@ def test_product_catalogue_is_v391_and_agrees_with_the_independent_pin_on_every_
     assert product["spec_version"] == "v3.9.1"
     assert set(product["policies"]) == set(CAT)
     assert "rule_failure" not in product and "cell_contracts" not in product
-    for pid, pin in CAT.items():
+    for pid, pin in REVIEWED.items():
         row = product["policies"][pid]
         assert row["sections"] == pin["sections"]
         assert set(row["cells"]) == set(pin["cells"])
