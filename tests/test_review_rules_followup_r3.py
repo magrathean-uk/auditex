@@ -181,8 +181,6 @@ def test_r106_output_contract_names_the_written_schema_version():
     assert "`2026-11-05`" in paragraph and "rule_view" in paragraph
 
 
-@pytest.mark.xfail(strict=True, reason="needs ruleview in output_redaction._D5_FIELD_NAMES (integrator-owned list); "
-                                       "remove this marker when it is added")
 def test_r106_rule_view_key_is_kept_when_a_person_is_named_rule_view():
     from test_redaction_person_names import _people
 
