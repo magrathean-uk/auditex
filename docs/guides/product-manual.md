@@ -407,6 +407,19 @@ A status counts only with a waiver behind it, and only while the waiver stands. 
 - An expired waiver (`expires_on` before today) does not match; a waiver that expires today still does. The applied waiver is recorded on the finding with `waiver.matched_fields`.
 - A waiver file that is missing, unreadable, not valid JSON, the wrong shape, or has an invalid row or date stops the run before any tenant call. A configured file that cannot be trusted never means "no waivers".
 
+## Notifications
+
+```bash
+auditex notify send <run-dir> --sink teams
+auditex notify send <run-dir> --sink teams --execute
+```
+
+Without `--execute` the command only prints the redacted notification it would send. The sinks are `teams`, `slack`
+(webhooks), `smtp`, `jira` and `github` (tickets, de-duplicated per run). Each is configured through environment
+variables, and `--execute` sends the redacted run summary, coverage gaps and action plan out of the machine; a GitHub
+issue in a public repository is public. Review the settings, the calls and the payload in
+[Notifications](../reference/security-privacy.md#notifications) before the first `--execute`.
+
 ## MCP
 
 Start the MCP server:

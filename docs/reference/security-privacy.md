@@ -270,6 +270,38 @@ HTTP verb scanner:
 | A parameter annotation is trusted, so an argument that contradicts it is not seen | named limit (v2 DEC-011) |
 | Send methods of clients the source does not use (such as an `httpx` `stream`), a verb chosen by `getattr` with a computed name, and `googleapiclient` request chains | named limit (v2 DEC-011) |
 
+## Notifications
+
+`auditex notify send <run-dir> --sink <sink>` builds the notification locally and prints it with `status: planned`;
+nothing leaves the machine. Only `--execute` sends it. The sinks are `teams`, `slack`, `smtp`, `jira` and `github`,
+each configured only through environment variables.
+
+What is sent: the run's tenant name, overall status, finding, open, accepted and blocker counts, the provider
+scorecard, live readiness, the coverage gaps, the action plan, the run, report and action-plan locations (relabelled,
+never a local path) and `run_fingerprint` (a one-way 16-hex digest of the tenant name and the resolved run folder).
+The citations stay in the printed result and are not sent. The payload, the citations and every service reply pass the customer-pack redaction with the run's pseudonym
+key before any send, and the run folder is checked unchanged before anything is sent.
+
+| Sink | Settings | Calls |
+| --- | --- | --- |
+| `teams`, `slack` | `AUDITEX_TEAMS_WEBHOOK_URL`, `AUDITEX_SLACK_WEBHOOK_URL` (a credential) | One HTTPS POST to the webhook URL: a text summary and the redacted payload. |
+| `smtp` | `AUDITEX_SMTP_HOST` and `AUDITEX_SMTP_TO` (required), `AUDITEX_SMTP_FROM` (default `auditex@localhost`), `AUDITEX_SMTP_PORT` (default 25), `AUDITEX_SMTP_USER` and `AUDITEX_SMTP_PASSWORD` (login only when both are set), `AUDITEX_SMTP_ALLOW_SELF_SIGNED` | One SMTP session with STARTTLS: a text summary and the whole payload JSON. A server that does not offer STARTTLS is refused; nothing is sent in plain text. |
+| `jira` | `AUDITEX_JIRA_BASE_URL`, `AUDITEX_JIRA_PROJECT_KEY`, `AUDITEX_JIRA_EMAIL`, `AUDITEX_JIRA_API_TOKEN` (required), `AUDITEX_JIRA_ISSUE_TYPE` (default `Task`) | `GET <base>/rest/api/3/search/jql` for an issue in the project with the run's `auditex-fp-<fingerprint>` label; when none is found, `POST <base>/rest/api/3/issue` with a summary, the labels `auditex` and the fingerprint label, and a description holding a text summary and the whole payload JSON. Basic authentication with the e-mail and API token. |
+| `github` | `AUDITEX_GITHUB_TOKEN` and `AUDITEX_GITHUB_REPO` (required), `AUDITEX_GITHUB_API_ROOT` (default `https://api.github.com`), `AUDITEX_GITHUB_LABELS` (default `auditex`, comma-separated) | `GET <api>/search/issues` for an open issue whose title carries `fp:<fingerprint>`; when one is found, `POST <api>/repos/<repo>/issues/<number>/comments`, otherwise `POST <api>/repos/<repo>/issues` with a title, the labels and a body holding a text summary and the whole payload JSON. Bearer token. |
+
+- SMTP verifies the server certificate and host name against the system CA store. `AUDITEX_SMTP_ALLOW_SELF_SIGNED=1`
+  turns both TLS checks off, for a lab relay with a private CA only; the send result then says
+  `tls_verification_relaxed: true`.
+- A GitHub issue in a public repository is public: anyone can read the payload, including the tenant name, the
+  coverage gaps and the action plan. Point `AUDITEX_GITHUB_REPO` at a private repository.
+- Ticket de-duplication keys on the tenant and the resolved run folder. Sending the same run again leaves a Jira issue
+  as it is (`status: deduped`) and adds a comment to an open GitHub issue; a closed GitHub issue is never commented on.
+  When the de-duplication search fails, the result says `dedup: skipped` (with `dedup_http_status` when the service
+  answered) and a new ticket is created.
+- A transport failure returns `status: failed` with `error_class` and no exception text, because that text can carry
+  the webhook URL. A failing webhook reply keeps only a short service code, otherwise `HTTP <status>`. The CLI still
+  exits 0 with a failed result.
+
 ## External lookups
 
 Live Microsoft 365 runs with the `dns_posture` collector make unauthenticated,
@@ -457,7 +489,8 @@ If verification fails, regenerate the pack from the original run directory.
 
 Notification preview is local by default. `auditex notify send --execute`
 sends the chosen notification to an external sink. Review the recipient and
-payload separately from pack verification before using `--execute`.
+payload separately from pack verification before using `--execute`; every sink,
+its settings and the calls it makes are listed under [Notifications](#notifications).
 
 ### Partner domains: customer-confidential operator input
 

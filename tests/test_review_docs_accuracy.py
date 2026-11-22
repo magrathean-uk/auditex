@@ -237,3 +237,40 @@ def test_product_manual_sends_client_output_through_the_shareable_route(monkeypa
     assert re.search(r"(?m)^auditex export run html <run-dir> --output \S*client", section)
     flat = _flat(section)
     assert "`auditex report render`" in flat and "local" in flat and "unredacted" in flat
+
+
+# R128 ------------------------------------------------------------------------------------------------------------
+
+
+def _notify_sinks() -> tuple[str, ...]:
+    import argparse
+
+    from auditex.cli import _build_notify_parser
+
+    parser = _build_notify_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    send = sub.choices["send"]
+    return tuple(next(a for a in send._actions if "--sink" in a.option_strings).choices)
+
+
+def test_every_notification_sink_its_settings_and_calls_are_documented():
+    sinks = _notify_sinks()
+    assert {"smtp", "jira", "github"} <= set(sinks)
+    source = _doc("src/auditex/notify.py")
+    env_vars = sorted(set(re.findall(r'"(AUDITEX_[A-Z_]+)"', source)))
+    paths = sorted(set(re.findall(r"(/rest/api/3/[a-z/]+|/search/issues|/comments|/issues)\"", source)))
+    assert env_vars and paths
+    privacy = _flat(_doc("docs/reference/security-privacy.md"))
+    section = privacy[privacy.index("## Notifications") :]
+    section = section[: section.index(" ## ")] if " ## " in section else section
+    for sink in sinks:
+        assert f"`{sink}`" in section, f"security-privacy.md notifications section must name the {sink} sink"
+    for name in env_vars:
+        assert f"`{name}`" in section, f"security-privacy.md must document {name}"
+    for path in paths:
+        assert path in section, f"security-privacy.md must list the {path} call"
+    assert "public" in section and "TLS" in section
+    manual = _flat(_section(_doc("docs/guides/product-manual.md"), "## Notifications"))
+    for sink in sinks:
+        assert f"`{sink}`" in manual, f"product-manual.md must name the {sink} sink"
+    assert "security-privacy.md#notifications" in manual
