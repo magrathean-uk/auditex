@@ -124,7 +124,46 @@ def _need_contacts(tags):
     return "bad", "agency_contact_missing" if rego_ok else "contacts_missing"
 
 
+def _need_reject_inherited(tags):
+    """An accepted subdomain that publishes no record of its own gets the parent's sp= (RFC 7489 6.3; p= only when sp is
+    absent). An sp that is not none, quarantine or reject acts as none (RFC 7489 6.6.3). Divergence from ScubaGear,
+    which reads p= of the inherited record (review R029)."""
+    s, v = _one(tags, "sp")
+    if s == "dup":
+        return "unusable", "tag_duplicated"
+    if s == "absent":
+        return _need_reject(tags)
+    return ("ok", "") if v.lower() == "reject" else ("bad", "p_not_reject")
+
+
 _NEEDS = {"dmarc_published": _need_published, "dmarc_reject": _need_reject, "dmarc_dhs_rua": _need_dhs, "dmarc_agency_contacts": _need_contacts}
+_AUTHOR_DMARC = re.compile(r"^v=DMARC1", re.IGNORECASE)        # the collector's author-record test (SG-P:674,730)
+
+
+def _inherited(entry, rd):
+    """True only when the entry's log shows the record came from a parent step of the tree walk: the first step is the
+    author query ``_dmarc.<domain>``, it did not answer exactly one DMARC record, and a later step answered the selected
+    record. An entry without such a log (an older bundle, a replay) is never read as inherited."""
+    log, domain = entry.get("log"), entry.get("domain")
+    if not isinstance(log, list) or len(log) < 2 or type(domain) is not str or not all(isinstance(x, dict) for x in log):
+        return False
+    first = log[0]
+    if str(first.get("query_name", "")).lower().rstrip(".") != f"_dmarc.{domain}".lower().rstrip("."):
+        return False
+    answers = first.get("query_answers")
+    if not isinstance(answers, list) or any(type(a) is not str for a in answers):
+        return False
+    if len([a for a in answers if _AUTHOR_DMARC.match(a)]) == 1:
+        return False
+    author = domain.lower().rstrip(".")
+    for step in log[1:]:
+        name = str(step.get("query_name", "")).lower().rstrip(".")
+        parent = name[len("_dmarc."):] if name.startswith("_dmarc.") else ""
+        # Only a strict parent of the domain passes its record down; an answer for any other name proves nothing.
+        if (parent and author.endswith("." + parent) and isinstance(step.get("query_answers"), list)
+                and rd[0] in step["query_answers"]):
+            return True
+    return False
 
 
 def _all_nxdomain(log):
@@ -150,7 +189,8 @@ def _dmarc_domain(entry, need):
         return "unusable", "multiple_records"
     if not cands[0]["syntax_ok"]:
         return "unusable", "record_syntax"
-    res, sub = _NEEDS[need](cands[0]["tags"])
+    check = _need_reject_inherited if need == "dmarc_reject" and _inherited(entry, rd) else _NEEDS[need]
+    res, sub = check(cands[0]["tags"])
     if res == "bad" and len(rd) > 1:
         return "unusable", "other_strings_present"       # a continuation chunk could hold the missing tag
     return res, sub

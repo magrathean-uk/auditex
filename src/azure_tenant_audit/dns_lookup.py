@@ -5,15 +5,52 @@ Used by the dns_posture collector to evaluate SPF, DKIM, DMARC, MTA-STS, TLS-RPT
 """
 from __future__ import annotations
 
+import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple, Protocol
+from urllib.parse import urlsplit
 
 import requests
 
 DEFAULT_DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query"
 DEFAULT_TIMEOUT_SECONDS = 5.0
+# Review R164: a customer that cannot send domain names to Cloudflare names its own DoH (JSON API) resolver.
+DOH_ENDPOINT_ENV = "AUDITEX_DOH_ENDPOINT"
+
+
+def resolve_doh_endpoint(value: str | None = None, environ: Mapping[str, str] | None = None) -> str:
+    """The DoH resolver for this run: an explicit option, else ``AUDITEX_DOH_ENDPOINT``, else Cloudflare.
+
+    Only a plain ``https://host/path`` URL is accepted: no other scheme, no user name or password and no fragment.
+    The error never repeats the value, which may carry a token.
+    """
+    chosen = value
+    if chosen is None:
+        chosen = (os.environ if environ is None else environ).get(DOH_ENDPOINT_ENV)
+        if chosen is None or not chosen.strip():
+            return DEFAULT_DOH_ENDPOINT                      # an unset or blank variable means the default
+    text = chosen.strip()
+    try:
+        parts = urlsplit(text)
+        host, _ = parts.hostname, parts.port                  # .port raises on a malformed port
+    except ValueError:
+        parts, host = None, None
+    # No query string either: the client adds its own parameters, and a token there would reach error messages.
+    if (parts is None or parts.scheme.lower() != "https" or not host or "@" in parts.netloc
+            or "?" in text or "#" in text):
+        raise ValueError("The DNS-over-HTTPS endpoint must be a plain https:// URL with a host and path "
+                         f"(option or {DOH_ENDPOINT_ENV}); no other scheme, credentials, query or fragment.")
+    return text
+
+
+def doh_resolver_disclosure(endpoint: str) -> str:
+    """Notice wording for the resolver that receives the tenant's domain names; a query string is never shown."""
+    if endpoint == DEFAULT_DOH_ENDPOINT:
+        return f"the public Cloudflare DNS-over-HTTPS resolver ({DEFAULT_DOH_ENDPOINT})"
+    parts = urlsplit(endpoint)
+    return f"the configured DNS-over-HTTPS resolver ({parts.scheme}://{parts.netloc}{parts.path})"
 
 
 # DNS response codes. NOERROR with no answer and NXDOMAIN are definite statements that the record is absent; every
@@ -43,7 +80,7 @@ class DohClient:
     """Minimal DNS-over-HTTPS client returning record data strings."""
 
     session: Any = field(default_factory=requests.Session)
-    endpoint: str = DEFAULT_DOH_ENDPOINT
+    endpoint: str = field(default_factory=resolve_doh_endpoint)
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
     def query(self, name: str, record_type: str) -> list[str]:
@@ -167,11 +204,25 @@ def _dmarc_log(name: str, answer: DnsAnswer) -> dict[str, Any]:
     return {**_dns_log(name, answer), "outcome": answer.outcome}
 
 
+def spf_fails_unapproved_senders(record: str) -> bool:
+    """RFC 7208 terms of one ``v=spf1`` record: the first ``all`` mechanism decides (``-all`` or ``~all``), and only a
+    record without one is judged by its ``redirect=`` modifier (section 6.1: redirect is ignored beside ``all``).
+
+    Divergence from SG-P:520-545, which tests raw substrings, so ``?all`` or ``+all`` beside a ``redirect`` or an
+    ``include:`` name holding "redirect" or "-all" passed (review R102). Names are case-insensitive (section 4.6.1).
+    """
+    for term in record.split()[1:]:
+        qualifier = term[0] if term[0] in "+-~?" else ""
+        if term[len(qualifier):].lower() == "all":
+            return qualifier in ("-", "~")
+    return any(term.lower().startswith("redirect=") for term in record.split()[1:])
+
+
 def scuba_spf_record(domain: str, resolver: DnsResolver) -> dict[str, Any]:
     answer = _record_ask(resolver, domain)
-    # SG-P:520-545: case-sensitive prefix and substring checks, all TXT answers retained.
+    # SG-P:520-545: case-sensitive prefix check, all TXT answers retained; compliance is tokenised (R102).
     spf = [r for r in answer.records if r.startswith("v=spf1 ")]
-    compliant = any(any(tag in r for tag in ("-all", "~all", "redirect")) for r in spf)
+    compliant = any(spf_fails_unapproved_senders(r) for r in spf)
     if compliant:
         message = "SPF record found."
     elif spf:
@@ -270,12 +321,11 @@ def parse_spf(record: str) -> dict[str, Any] | None:
     mechanisms = [token for token in tokens[1:] if not token.lower().startswith("v=")]
     all_qualifier = None
     for token in mechanisms:
-        if token.lower().endswith("all"):
-            qualifier = token[0]
-            if qualifier in {"+", "-", "~", "?"}:
-                all_qualifier = qualifier
-            elif token.lower() == "all":
-                all_qualifier = "+"
+        # The first term that is exactly an all mechanism with at most one qualifier, as spf_fails_unapproved_senders
+        # reads it; a name merely ending in "all" (include:spf.examplemall) is not one.
+        qualifier = token[0] if token[0] in "+-~?" else ""
+        if token[len(qualifier):].lower() == "all":
+            all_qualifier = qualifier or "+"
             break
     return {
         "version": "spf1",
@@ -483,10 +533,19 @@ def _summarize_spf(records: list[str]) -> dict[str, Any]:
     }
 
 
+_DMARC_RECORD_START = re.compile(r"^\s*v\s*=\s*DMARC1\s*(?:;|$)", re.IGNORECASE)
+
+
 def _summarize_dmarc(records: list[str]) -> dict[str, Any]:
-    parsed = next((parse_dmarc(rec) for rec in records if parse_dmarc(rec)), None)
-    if parsed is None:
+    parsed_records = [parsed for rec in records if (parsed := parse_dmarc(rec)) is not None]
+    if not parsed_records:
         return _absent("dmarc")
+    # RFC 7489 section 6.6.3: only strings that begin with v=DMARC1 are records; with more than one a receiver applies
+    # no DMARC policy at all, so the domain has no effective record (dmarc_missing fires) (review R109).
+    records_proper = [rec for rec in records if _DMARC_RECORD_START.match(rec)]
+    if len(records_proper) > 1:
+        return {**_absent("dmarc"), "multiple_records": True, "record_count": len(records_proper)}
+    parsed = (parse_dmarc(records_proper[0]) if records_proper else None) or parsed_records[0]
     pct = parsed.get("pct")
     pct_partial = isinstance(pct, int) and 0 <= pct < 100
     return {
@@ -500,6 +559,7 @@ def _summarize_dmarc(records: list[str]) -> dict[str, Any]:
         "forensic_addresses": parsed.get("forensic_addresses"),
         "forensic_addresses_invalid": parsed.get("forensic_addresses_invalid") or [],
         "raw": parsed.get("raw"),
+        "multiple_records": False,
     }
 
 

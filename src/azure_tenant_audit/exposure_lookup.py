@@ -21,13 +21,21 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import zlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import requests
 
 DEFAULT_TIMEOUT_SECONDS = 5.0
+# The requests timeout bounds each socket read, not the response: a host that sends a byte every few seconds could
+# hold one fetch for days. One fetch therefore stops at this wall-clock deadline (review R163).
+DEFAULT_FETCH_DEADLINE_SECONDS = 15.0
+_READ_CHUNK_BYTES = 8192
 MAX_POLICY_BYTES = 64 * 1024
+MAX_POLICY_AGE_SECONDS = 31557600  # RFC 8461 section 3.2: the largest max_age a sender accepts
 OIDC_AUTHORITY = "https://login.microsoftonline.com"
 _GUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 _DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.IGNORECASE)
@@ -45,19 +53,86 @@ class RequestsHttpsFetcher:
 
     session: Any = field(default_factory=requests.Session)
     timeout: float = DEFAULT_TIMEOUT_SECONDS
+    deadline: float = DEFAULT_FETCH_DEADLINE_SECONDS
+    clock: Callable[[], float] = time.monotonic
 
     def get_text(self, url: str) -> tuple[int | None, str, str | None]:
         if not url.lower().startswith("https://"):
             return None, "", "refused_non_https_url"
+        start = self.clock()
         try:
-            response = self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True)
-            raw = response.raw.read(MAX_POLICY_BYTES + 1, decode_content=True) if response.raw is not None else b""
-            if isinstance(raw, str):
-                raw = raw.encode("utf-8")
+            # identity encoding and a hook that drops any redirect body: requests otherwise reads a redirect body in
+            # full (resolve_redirects, even with allow_redirects=False) and urllib3 may loop raw reads inside one
+            # decoding read1, both outside the deadline below.
+            response = self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True,
+                                        headers={"Accept-Encoding": "identity"}, hooks={"response": _drop_redirect_body})
+            raw = self._read_body(response, start)
+            if raw is None:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+                return None, "", "fetch_deadline_exceeded"
+            raw = _decode_body(raw, (getattr(response, "headers", None) or {}).get("Content-Encoding"))
             body = raw[:MAX_POLICY_BYTES].decode("utf-8", errors="replace")
             return int(response.status_code), body, None
         except Exception as exc:  # noqa: BLE001
             return None, "", f"{type(exc).__name__}: {exc}"[:300]
+
+    def _read_body(self, response: Any, start: float) -> bytes | None:
+        """At most MAX_POLICY_BYTES + 1 bytes, or None once the deadline passes. ``read1`` returns what one socket read
+        delivers, so the deadline is overrun by at most one per-read timeout."""
+        stream = response.raw
+        if stream is None:
+            return b""
+        read = getattr(stream, "read1", None) or stream.read
+        chunks: list[bytes] = []
+        size = 0
+        while size <= MAX_POLICY_BYTES:
+            if self.clock() - start > self.deadline:
+                return None
+            chunk = read(min(_READ_CHUNK_BYTES, MAX_POLICY_BYTES + 1 - size), decode_content=False)
+            if isinstance(chunk, str):
+                chunk = chunk.encode("utf-8")
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        if self.clock() - start > self.deadline:
+            return None
+        return b"".join(chunks)
+
+
+def _drop_redirect_body(response: Any, *args: Any, **kwargs: Any) -> Any:
+    """Response hook: a redirect is never followed (RFC 8461 section 3.3), so its body is never read."""
+    if getattr(response, "is_redirect", False):
+        response._content = b""
+        response._content_consumed = True
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+    return response
+
+
+def _decode_body(raw: bytes, encoding: Any) -> bytes:
+    """Decode a gzip or deflate body after the bounded raw read, never past MAX_POLICY_BYTES + 1 bytes of output."""
+    name = str(encoding or "").strip().lower()
+    if name in {"gzip", "x-gzip"}:
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    elif name == "deflate":
+        decoder = zlib.decompressobj(zlib.MAX_WBITS if raw[:1] == b"\x78" else -zlib.MAX_WBITS)
+    else:
+        return raw
+    out = b""
+    try:
+        while True:
+            out += decoder.decompress(raw, MAX_POLICY_BYTES + 1 - len(out))
+            # gzip allows several members back to back (RFC 1952 section 2.2); read each, never past the cap
+            if len(out) > MAX_POLICY_BYTES or not decoder.eof or not decoder.unused_data or name == "deflate":
+                return out
+            raw = decoder.unused_data
+            decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    except zlib.error:
+        return out
 
 
 def is_safe_domain_name(domain: str) -> bool:
@@ -109,7 +184,24 @@ def fetch_mta_sts_policy(domain: str, fetcher: HttpsFetcher) -> dict[str, Any]:
     parsed = parse_mta_sts_policy(body)
     if parsed is None:
         return {"url": url, "fetch_status": "invalid_policy", "http_status": status}
+    reasons = mta_sts_policy_problems(parsed)
+    if reasons:
+        return {"url": url, "fetch_status": "invalid_policy", "http_status": status, **parsed, "invalid_reasons": reasons}
     return {"url": url, "fetch_status": "ok", "http_status": status, **parsed}
+
+
+def mta_sts_policy_problems(parsed: dict[str, Any]) -> list[str]:
+    """Why RFC 8461 section 3.2 senders would treat a parsed STSv1 policy as invalid (review R113): an unknown mode,
+    a missing or out-of-range max_age, or no mx line in enforce or testing mode. Empty when the policy is valid."""
+    reasons = []
+    if not parsed.get("mode_valid"):
+        reasons.append("mode_invalid")
+    max_age = parsed.get("max_age")
+    if not isinstance(max_age, int) or not 0 <= max_age <= MAX_POLICY_AGE_SECONDS:
+        reasons.append("max_age_invalid")
+    if parsed.get("mode") in {"enforce", "testing"} and not any(str(mx).strip() for mx in parsed.get("mx") or []):
+        reasons.append("mx_missing")
+    return reasons
 
 
 def parse_openid_configuration(payload: Any) -> dict[str, Any] | None:

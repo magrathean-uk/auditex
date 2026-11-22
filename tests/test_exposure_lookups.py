@@ -87,7 +87,8 @@ def test_parse_mta_sts_policy_modes() -> None:
 
 def test_fetch_mta_sts_policy_statuses() -> None:
     url = "https://mta-sts.contoso.com/.well-known/mta-sts.txt"
-    ok = fetch_mta_sts_policy("contoso.com", _Fetcher({url: (200, "version: STSv1\nmode: testing\n", None)}))
+    testing = "version: STSv1\nmode: testing\nmx: mail.contoso.com\nmax_age: 86400\n"
+    ok = fetch_mta_sts_policy("contoso.com", _Fetcher({url: (200, testing, None)}))
     assert ok["fetch_status"] == "ok" and ok["mode"] == "testing"
     assert fetch_mta_sts_policy("contoso.com", _Fetcher({}))["fetch_status"] == "http_error"
     assert fetch_mta_sts_policy("contoso.com", _Fetcher({url: (None, "", "timeout")}))["fetch_status"] == "unreachable"

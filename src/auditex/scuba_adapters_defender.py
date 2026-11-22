@@ -47,7 +47,8 @@ SECTION_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
     "admin_audit_log_config": ("adminAuditLogConfig", ("Identity", "UnifiedAuditLogIngestionEnabled")),
     "conn_filter": ("hostedConnectionFilterPolicy", ("Name", "IPAllowList", "EnableSafeList")),
     "atp_policy_for_o365": ("atpPolicyForO365", ("Identity", "EnableATPForSPOTeamsODB")),
-    "protection_policy_rules": ("eopProtectionPolicyRules", ("Identity", "State", *_SCOPE_KEYS)),
+    "protection_policy_rules": ("eopProtectionPolicyRules", (
+        "Identity", "State", "HostedContentFilterPolicy", "AntiPhishPolicy", "MalwareFilterPolicy", *_SCOPE_KEYS)),
     "atp_policy_rules": ("atpProtectionPolicyRules", ("Identity", "State", *_SCOPE_KEYS)),
     "built_in_protection_rules": ("atpBuiltInProtectionRules", (
         "Identity", "ExceptIfSentTo", "ExceptIfSentToMemberOf", "ExceptIfRecipientDomainIs")),

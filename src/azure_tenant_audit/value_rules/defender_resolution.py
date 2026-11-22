@@ -6,7 +6,15 @@ accepted_domains is optional and only informs domain-scope comparisons.
 """
 from __future__ import annotations
 
-from .helpers import BUILTIN, PRESET_RE, _accepted, _cover, _licence_cell
+from .helpers import (
+    BUILTIN,
+    EXCEPT_KEYS,
+    PRESET_RE,
+    _accepted,
+    _cover,
+    _empty3,
+    _licence_cell,
+)
 from .record import _A, BAD_SECTION_LIST, ITEM_VALUE, _rec
 
 
@@ -50,14 +58,20 @@ def _preset_states(rules, accepted, trace):
     return by, anyu
 
 
+BI = "built_in_protection_rules"
+
+
 def _safelinks_core(policy_id, sp, sections, trace):
-    for name in ("protection_policy_rules", "safe_links_policies", "safe_links_rules", "atp_policy_rules"):
+    # Review R003/R099: a row that lists built_in_protection_rules reads the Built-In Protection rule's exclusions and
+    # judges empty rule lists like any tenant where no rule covers everyone. The shipped 7.x rows do not list it yet.
+    builtin_scope = BI in sp.get("sections", ())
+    for name in ("protection_policy_rules", "safe_links_policies", "safe_links_rules", "atp_policy_rules", *((BI,) if builtin_scope else ())):
         if not isinstance(sections[name], list):
             return _A(policy_id, BAD_SECTION_LIST, f"Data unusable: {name} is not a list of objects; the policy was not assessed.", "section_not_a_list", [name])
     lic = _licence_cell(policy_id, sections, "defender_license")      # v3.7 (lens B DEF-F3, D101): Safe Links need Defender for Office 365; a false read can be a failed command
     if lic:
         return lic
-    if not sections["protection_policy_rules"] and not sections["safe_links_rules"]:
+    if not builtin_scope and not sections["protection_policy_rules"] and not sections["safe_links_rules"]:
         # v3.1 ruling 5 (D30): an empty rule list is not_met (no preset applies to anyone). Read as both lists empty (see the spec, Q11).
         return _rec(policy_id, "not_met", "no_rules_configured",
                     f"Requirement not met: no preset security policy rule and no Safe Links rule exists, so no Standard, Strict or custom Safe Links policy applies ({sp['what']}).",
@@ -128,6 +142,13 @@ def _safelinks_core(policy_id, sp, sections, trace):
             return _rec(policy_id, "not_met", "partial_scope_policy_flag_off",
                         f"Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable {sp['what']}, so those recipients get a non-compliant policy.",
                         "partial_rule_noncompliant", None, div="D98")
+    if builtin_scope and applied == BUILTIN:
+        # A preset whose both parts are enabled but scoped to some recipients may also cover the excluded recipients.
+        preset_partial = any(({"q", "x", "u"} & set(eop[t]) or eop_u) and ({"q", "x", "u"} & set(atp[t]) or atp_u)
+                             for t in ("Strict", "Standard"))
+        out = _builtin_exclusions(policy_id, sp, sections, partial or preset_partial)
+        if out:
+            return out
     pols = by_identity.get(applied, [])
     if not pols:
         return _A(policy_id, "data_unavailable_applied_policy_not_exported",
@@ -147,8 +168,28 @@ def _safelinks_core(policy_id, sp, sections, trace):
                 applied="built_in" if applied == BUILTIN else "custom")
 
 
+def _builtin_exclusions(policy_id, sp, sections, partial):
+    """As SS 1.3 reads the Built-In Protection rule (defender_cascade, attachment variant): None when it covers everyone,
+    else the record for recipients it excludes. The rule list exports no Priority; Built-In applies last."""
+    states = []
+    for rule in sections[BI]:
+        ex = [_empty3(rule, key) if isinstance(rule, dict) else None for key in EXCEPT_KEYS]
+        states.append("q" if all(x is True for x in ex) else ("x" if any(x is False for x in ex) else "u"))
+    if "q" in states:
+        return None
+    if not states or "u" in states:
+        return _A(policy_id, "data_unusable_builtin_rule", f"Data unusable: {BI} holds no rule with readable exclusions; the policy was not assessed.",
+                  "builtin_rule_unusable", [BI])
+    if partial:
+        return _A(policy_id, "data_unusable_partial_tier_may_cover", "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule "
+                  "exists that may cover the excluded recipients; the policy was not assessed.", "partial_tier_may_cover", [BI, "safe_links_rules"])
+    return _rec(policy_id, "not_met", "no_policy_covers_all_recipients",
+                f"Requirement not met: the Built-In Protection rule excludes some recipients and no Safe Links rule or preset covers them, so they get no Safe Links "
+                f"policy ({sp['what']}).", "no_policy_covers_all", None)
+
+
 def safelinks_resolution(policy_id: str, row: dict, sections: dict) -> dict:
-    return _safelinks(policy_id, row["params"], sections)
+    return _safelinks(policy_id, {**row["params"], "sections": row["sections"]}, sections)
 
 
 KINDS = {"safelinks_resolution": safelinks_resolution}
