@@ -25,13 +25,17 @@ def load_permission_hints(path: Path) -> dict[str, dict[str, Any]]:
     return {str(name): dict(value) if isinstance(value, dict) else {} for name, value in raw.items()}
 
 
-def _reader_roles(roles: Any) -> list[str]:
-    """Role hints without administrator roles: the reader app holds Global Reader and no other role, and every
-    administrator role can write (Privileged Role Administrator can grant Global Administrator). Order is kept."""
+def reader_roles(roles: Any) -> list[str]:
+    """Only the reader roles in ``roles`` (a name ending in ``Reader``), deduplicated, in order.
+
+    The reader app holds Global Reader and no other role. Any other role can write (Privileged Role Administrator can
+    grant Global Administrator, Exchange role groups can change mail flow), so no plan or blocker suggests one, even
+    when a custom permission-hint file names it.
+    """
     kept: list[str] = []
     for role in roles or []:
-        text = str(role).strip()
-        if text and text not in kept and "administrator" not in text.lower():
+        text = " ".join(str(role).split())
+        if text.lower().endswith(" reader") and text not in kept:
             kept.append(text)
     return kept
 
@@ -79,12 +83,12 @@ def build_diagnostics(
                     "evidence": {"message": row.get("message")},
                     "recommendations": {
                         "required_graph_scopes": sorted(set(recommended_scopes)),
-                        "recommended_roles": sorted(_reader_roles(minimum_roles)),
+                        "recommended_roles": sorted(reader_roles(minimum_roles)),
                         "command_tools": sorted(set(command_tools)),
                         "optional_commands": sorted(set(optional_commands)),
                         "notes": notes_detail,
                         "auditor_profile": auditor_profile,
-                        "profile_role_hints": _reader_roles(profile.delegated_role_hints),
+                        "profile_role_hints": reader_roles(profile.delegated_role_hints),
                         "optional_app_escalation_permissions": list(escalation_permissions),
                     },
                 }
@@ -112,15 +116,15 @@ def build_diagnostics(
                     "optional_app_escalation_permissions": list(escalation_permissions),
                     "notes": notes_detail,
                     "auditor_profile": auditor_profile,
-                    "profile_role_hints": _reader_roles(profile.delegated_role_hints),
+                    "profile_role_hints": reader_roles(profile.delegated_role_hints),
                 }
             elif item.get("type") == "graph":
                 failure["recommendations"] = {
                     "required_graph_scopes": sorted(set(recommended_scopes)),
-                    "recommended_roles": sorted(_reader_roles(minimum_roles)),
+                    "recommended_roles": sorted(reader_roles(minimum_roles)),
                     "notes": notes_detail,
                     "auditor_profile": auditor_profile,
-                    "profile_role_hints": _reader_roles(profile.delegated_role_hints),
+                    "profile_role_hints": reader_roles(profile.delegated_role_hints),
                     "optional_app_escalation_permissions": list(escalation_permissions),
                 }
             else:

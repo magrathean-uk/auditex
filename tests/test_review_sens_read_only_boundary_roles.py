@@ -66,3 +66,18 @@ def test_blocker_advice_never_recommends_an_administrator_role(tmp_path: Path) -
         assert roles, failure
         assert _admin_roles(roles) == [], failure
         assert _admin_roles(failure["recommendations"].get("profile_role_hints")) == []
+
+
+def test_only_reader_roles_survive_a_custom_hint_file(tmp_path: Path) -> None:
+    """Review round 1: a write-capable role whose name lacks 'Administrator' is dropped too."""
+    path = tmp_path / "collector-permissions.json"
+    path.write_text(json.dumps({"collector_permissions": {
+        "exchange_policy": {"graph_scopes": [], "minimum_role_hints": [
+            "Exchange Reader", "Application Mail.ReadWrite", "Recipient Management", "Organization Management", "Global Reader",
+        ]},
+    }}), encoding="utf-8")
+    guide = build_setup_guide(provider="m365", collectors="exchange_policy", permission_hints_path=path)
+    assert guide["minimum_role_hints"] == ["Global Reader", "Exchange Reader"]
+    hints = json.loads(path.read_text(encoding="utf-8"))["collector_permissions"]
+    failures = build_diagnostics([{"name": "exchange_policy", "status": "failed", "error": "403"}], [], hints, "global-reader")
+    assert failures[0]["recommendations"]["recommended_roles"] == ["Exchange Reader", "Global Reader"]

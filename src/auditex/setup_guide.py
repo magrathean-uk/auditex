@@ -8,6 +8,7 @@ from typing import Any
 
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.data_handling import collector_activity_notices
+from azure_tenant_audit.diagnostics import reader_roles
 from azure_tenant_audit.presets import load_collector_presets
 from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.scope_catalog import (
@@ -571,15 +572,6 @@ def _google_command(
     if extra:
         parts.extend(extra.split())
     return shlex.join(parts)
-
-
-def reader_roles(roles: Any) -> list[str]:
-    """``roles`` without any administrator role: the reader app holds Global Reader and no other role.
-
-    Every administrator role can write, and Privileged Role Administrator can grant Global Administrator, so a plan
-    or blocker never suggests one, even when a custom permission-hint file names it.
-    """
-    return [role for role in _dedupe(roles) if "administrator" not in role.lower()]
 
 
 def _load_permission_hints(path: str | Path) -> dict[str, Any]:
