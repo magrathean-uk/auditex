@@ -335,8 +335,10 @@ def digest_from_assessment(assessment: Mapping[str, Any]) -> dict[str, Any]:
         items.append({"item": number, "policy_id": item["policy_id"], "verdict": item["verdict"],
                       "severity": item["severity"], "values": values})
     counts = {verdict: sum(1 for item in items if item["verdict"] == verdict) for verdict in VERDICT_ORDER}
+    # R096: how much of the shipped catalogue the rows cover, so an answer over part of it says so.
+    coverage = {"policies": len(policies), "assessed": sum(1 for item in items if item["policy_id"] in policies)}
     return {"digest_version": DIGEST_VERSION, "run_id": assessment.get("run_id"), "counts": counts,
-            "skipped": skipped, "items": items}
+            "skipped": skipped, "catalogue": coverage, "items": items}
 
 
 def build_digest(run_dir: str | Path) -> dict[str, Any]:

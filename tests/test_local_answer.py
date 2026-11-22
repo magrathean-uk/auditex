@@ -355,7 +355,7 @@ class FakeResponse:
 
 def spec_for(data: bytes) -> la.ModelSpec:
     return la.ModelSpec("small", "Qwen", "owner/repo", "a" * 40, "tiny.gguf", len(data),
-                        hashlib.sha256(data).hexdigest())
+                        hashlib.sha256(data).hexdigest(), "apache-2.0")
 
 
 def test_first_use_downloads_the_pinned_file_with_a_size_line_then_runs_offline(monkeypatch, model_cache):

@@ -1,0 +1,102 @@
+"""Review lane compare-bundle-mcp: the local answer: catalogue coverage and model licences (R096, L5)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+# R096: catalogue coverage of the local answer
+
+
+def _assessment_row(policy_id: str, met: bool) -> dict[str, Any]:
+    return {
+        "policy_id": policy_id,
+        "claims": [
+            {"id": "requirement_met", "status": "confirmed", "value": met, "evidence_ids": ["e0"]},
+            {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]},
+        ],
+        "limitations": [], "recommendations": [], "reason": "rule_precheck", "validation_status": "valid",
+        "rule_precheck": {"class": "value_rule", "rule_id": f"{policy_id}.rule", "section": ["s"], "field": None,
+                          "value": None, "cell": "c", "reason_code": "code", "reason_text": f"Reason for {policy_id}."},
+    }
+
+
+def _answer_for(policy_ids: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    from auditex import local_answer as la
+    from auditex.answer_digest import digest_from_assessment
+
+    digest = digest_from_assessment({"run_id": "synthetic", "policies": [_assessment_row(pid, True) for pid in policy_ids]})
+    answer = la.assemble_answer(digest, {}, None, model=None, runtime=None, reason="runtime_missing")
+    return digest, answer
+
+
+def test_an_answer_over_part_of_the_catalogue_says_how_much_was_assessed() -> None:
+    from azure_tenant_audit.value_rules.catalogue import catalogue
+
+    total = len(catalogue()["policies"])
+    digest, answer = _answer_for(["MS.AAD.8.1v1", "MS.AAD.7.1v1", "MS.AAD.2.1v1"])
+
+    assert digest["catalogue"] == {"policies": total, "assessed": 3}
+    assert f"Partial: the rules assessed 3 of the {total} SCuBA checks in the shipped catalogue" in answer["text"]
+
+
+def test_a_stored_answer_without_the_partial_note_fails_its_check_against_the_run() -> None:
+    import pytest as _pytest
+
+    from auditex import local_answer as la
+
+    digest, answer = _answer_for(["MS.AAD.8.1v1"])
+    stored = dict(answer)
+    stored["text"] = "\n".join(line for line in answer["text"].split("\n") if not line.startswith("Partial:"))
+
+    with _pytest.raises(la.LocalAnswerError):
+        la.verify_answer(stored, digest)
+
+
+def test_an_answer_over_the_whole_catalogue_carries_no_partial_note() -> None:
+    from azure_tenant_audit.value_rules.catalogue import catalogue
+
+    _, answer = _answer_for(sorted(catalogue()["policies"]))
+
+    assert "Partial:" not in answer["text"]
+
+
+# L5: model licences
+
+
+def test_every_pinned_model_names_its_licence_and_the_download_notice_states_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import dataclasses
+    import hashlib
+
+    import requests
+
+    from auditex import local_answer as la
+
+    assert "licence" not in {field.name for field in dataclasses.fields(la.ModelSpec) if field.default is not dataclasses.MISSING}
+    assert all(spec.licence for spec in la.MODELS.values())
+    data = b"pretend gguf"
+    spec = dataclasses.replace(la.MODELS["mistral"], size=len(data), sha256=hashlib.sha256(data).hexdigest())
+
+    class Response:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_content(self, chunk_size: int = 0):
+            yield data
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: Response())
+    lines: list[str] = []
+    la.fetch_model(spec, tmp_path / spec.file, progress=lines.append)
+
+    assert f"licensed by its publisher under {spec.licence}; one time only, then Auditex answers offline." in lines[0]
