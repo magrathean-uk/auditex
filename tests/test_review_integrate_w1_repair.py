@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from azure_tenant_audit.baselines import BASELINE_FRAMEWORK_KEYS, build_baseline_alignment, rule_inputs_gap
+from azure_tenant_audit.baselines import (
+    BASELINE_FRAMEWORK_KEYS,
+    build_baseline_alignment,
+    rule_inputs_gap,
+)
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
