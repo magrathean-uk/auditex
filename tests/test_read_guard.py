@@ -689,3 +689,21 @@ def test_powershell_child_gets_no_credential_from_the_environment(monkeypatch) -
 def test_review_round_one_guard_bypasses_are_refused(command: str) -> None:
     with pytest.raises(CommandRefused):
         check_command("powershell_graph", command)
+
+
+def test_short_password_and_pin_names_never_reach_the_pwsh_child() -> None:
+    """Review round 1: credential names without SECRET or PASSWORD in them are dropped too."""
+    from azure_tenant_audit.adapters.powershell_graph import child_environment
+
+    source = {"PFX_PASS": "a", "CERT_PW": "b", "SMARTCARD_PIN": "c", "PW": "d", "PATH": "/bin", "PWD": "/work", "SPINNER": "x"}
+    assert child_environment(source) == {"PATH": "/bin", "PWD": "/work", "SPINNER": "x"}
+
+
+def test_the_certificate_password_variable_is_consumed_before_any_child_starts(monkeypatch) -> None:
+    """Impact prediction 3: an operator-named password variable (any name) is popped when the key is loaded."""
+    from azure_tenant_audit import certificate_auth
+    from azure_tenant_audit.adapters.powershell_graph import child_environment
+
+    monkeypatch.setenv("PFX_PIN", "key-password")
+    assert certificate_auth._password("PFX_PIN", None, __import__("os").environ) == b"key-password"
+    assert "PFX_PIN" not in child_environment()

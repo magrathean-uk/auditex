@@ -25,13 +25,13 @@ COMPLIANCE_AUDIENCES = frozenset({"https://ps.compliance.protection.outlook.com"
 # (which can name the tenant, the app or the token) is dropped inside PowerShell and never reaches stderr.
 IPPS_SESSION_NOT_OPENED = "ipps_session_not_opened"
 # The child pwsh never gets the auditor's credentials: any variable whose name marks a secret (client secrets,
-# passwords, tokens, keys, connection strings) is dropped, including a stale session token from the
+# passwords, PINs, tokens, keys, connection strings) is dropped, including a stale session token from the
 # parent; the connect prelude adds the one fresh token the session needs. The read guard already refuses every way a
 # checked script could read the environment ($env:, ${env:...}, Get-ChildItem env:, Get-Variable); this keeps the
-# secrets out of the child as well.
+# secrets out of the child as well. Proxy variables are kept: pwsh needs them to reach Microsoft.
 _SECRET_ENV_NAME = re.compile(
     r"SECRET|PASSWORD|PASSWD|PASSPHRASE|TOKEN|APIKEY|API_KEY|ACCESS_KEY|PRIVATE|CREDENTIAL|"
-    r"CONNECTION_STRING|CONNECTIONSTRING|SAS_|_SAS|_KEY$|^KEY_|_KEY_|AUTH",
+    r"CONNECTION_STRING|CONNECTIONSTRING|SAS_|_SAS|_KEY$|^KEY_|_KEY_|AUTH|PASS|(?:^|_)(?:PW|PIN)(?:_|$)",
     re.IGNORECASE,
 )
 
