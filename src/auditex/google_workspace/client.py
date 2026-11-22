@@ -477,6 +477,10 @@ class GoogleWorkspaceClient:
             # delegates.list answers only a service account with domain-wide delegation; an OAuth sign-in is always
             # refused, which is not a missing scope. It is recorded as not read, never as a failed read.
             payload["skippedSettings"] = ["delegates"]
+            payload["delegates_error"] = {
+                "error_class": "subject_scope",
+                "error": "Gmail delegates can be listed only under domain-wide delegation; they were not read.",
+            }
         return minimise_gmail_settings(payload)
 
     def list_drive_files(self, *, top: int | None = None) -> list[dict[str, Any]]:

@@ -112,7 +112,15 @@ def test_r055_oauth_mailbox_read_skips_the_delegation_only_delegates_list() -> N
     assert "delegates" not in settings.calls
     mailbox = next(row for row in result.coverage if row["name"] == "mailboxSettings:me")
     assert mailbox["status"] == "ok"
-    assert "delegates_error" not in result.payload["mailboxSettings"]["value"][0]
+    # Recorded as not read (never as no delegates), so the report names the gap.
+    payload = result.payload["mailboxSettings"]["value"][0]
+    assert payload["delegates_error"]["error_class"] == "subject_scope"
+    snapshot = build_google_normalized_snapshot(
+        tenant_name="Example", run_id="run-1", domain="example.com",
+        collector_payloads={"google_gmail_settings": result.payload},
+    )
+    issues = [item["id"] for item in build_google_findings(snapshot) if item.get("rule_id") == "google.collector_issue"]
+    assert any("delegates" in str(item) for item in issues)
 
     preflight = build_google_preflight_rows(client, ["google_gmail_settings"], domain="example.com")
     capability = build_google_capability_rows(
@@ -276,5 +284,28 @@ def test_x1_resolver_error_names_the_resolver_by_host_only() -> None:
     row = next(item for item in result.coverage if item["name"] == "posture:example.com")
     assert row["status"] == "failed"
     assert "dns.example.net" in str(row["error"])
+    assert "profile-abc123" not in json.dumps(result.coverage)
+    assert "profile-abc123" not in json.dumps(result.payload)
+
+
+def test_x1_unreachable_resolver_error_keeps_its_path_out_of_the_bundle() -> None:
+    import json
+
+    from auditex.google_workspace.collectors import GoogleDnsPostureCollector
+    from azure_tenant_audit.dns_lookup import DohError
+
+    class _UnreachableResolver:
+        endpoint = "https://dns.example.net/profile-abc123"
+
+        def query_detailed(self, name: str, record_type: str) -> Any:
+            # requests names the path without the scheme or host when the connection itself fails.
+            raise DohError(f"DoH query failed for {record_type} {name}: HTTPSConnectionPool(host='dns.example.net', "
+                           f"port=443): Max retries exceeded with url: /profile-abc123?name={name}&type={record_type} "
+                           "(Caused by NewConnectionError('Connection refused'))")
+
+        def query(self, name: str, record_type: str) -> list[str]:
+            return self.query_detailed(name, record_type)
+
+    result = GoogleDnsPostureCollector().run({"domain": "example.com", "dns_resolver": _UnreachableResolver()})
     assert "profile-abc123" not in json.dumps(result.coverage)
     assert "profile-abc123" not in json.dumps(result.payload)
