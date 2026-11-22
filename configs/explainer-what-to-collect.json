@@ -204,7 +204,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.1.1v1",
@@ -421,7 +421,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.2.1v1",
@@ -638,7 +638,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.2.3v1",
@@ -828,7 +828,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.1v1",
@@ -1043,7 +1043,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.2v2",
@@ -1906,7 +1906,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.6v1",
@@ -2096,7 +2096,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.7v1",
@@ -2286,7 +2286,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.8v1",
@@ -2476,7 +2476,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.3.9v1",
@@ -5813,7 +5813,7 @@
         "conditional_access_policies"
       ],
       "product_dependencies": [],
-      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57)",
+      "input_condition": "no object passes and at least two objects carry the control (enabled, every control conjunct true, no foreign restriction) while failing a scope conjunct or exemptions (D57), and they share no gap a union cannot close: the same excluded role where the row requires no excluded role answers no_policy_meets, the same user, group or application not on the exemption list answers near_miss_exclusions (R027)",
       "source": {
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.AAD.9.1v1",
@@ -17711,6 +17711,7 @@
       },
       "collect": [
         "atp_policy_rules",
+        "built_in_protection_rules",
         "protection_policy_rules",
         "safe_links_policies",
         "safe_links_rules"
@@ -17742,6 +17743,7 @@
       },
       "collect": [
         "atp_policy_rules",
+        "built_in_protection_rules",
         "defender_license",
         "protection_policy_rules",
         "safe_links_policies",
@@ -17757,6 +17759,61 @@
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.SECURITYSUITE.7.1v1",
         "cell": "section_not_collected"
+      }
+    },
+    {
+      "id": "MS.SECURITYSUITE.7.1v1/builtin_rule_unusable",
+      "policy_id": "MS.SECURITYSUITE.7.1v1",
+      "cell": "builtin_rule_unusable",
+      "verdict": "not_assessed",
+      "applies": true,
+      "recommendations": [
+        "recollect_unusable_evidence"
+      ],
+      "text": "Check that every field this policy reads in the {sections} evidence has a readable value, none missing, empty or of the wrong type, then export it again.",
+      "rerun_text": "Run the assessment again once the {sections} evidence is complete.",
+      "placeholders": {
+        "sections": "record.cited_sections"
+      },
+      "collect": [
+        "built_in_protection_rules"
+      ],
+      "product_dependencies": [
+        "P2"
+      ],
+      "input_condition": "7.x (review R003): no Safe Links rule or preset covers all recipients and `built_in_protection_rules` holds no object or only rules with unreadable exclusion fields",
+      "source": {
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.1v1",
+        "cell": "builtin_rule_unusable"
+      }
+    },
+    {
+      "id": "MS.SECURITYSUITE.7.1v1/partial_tier_may_cover",
+      "policy_id": "MS.SECURITYSUITE.7.1v1",
+      "cell": "partial_tier_may_cover",
+      "verdict": "not_assessed",
+      "applies": true,
+      "recommendations": [
+        "review_policy_against_baseline_text"
+      ],
+      "text": "Check the {sections} evidence for the recipients each partly scoped policy covers, then export it again so the exclusions are clear.",
+      "rerun_text": "Run the assessment again once the {sections} evidence is complete.",
+      "placeholders": {
+        "sections": "record.cited_sections"
+      },
+      "collect": [
+        "built_in_protection_rules",
+        "safe_links_rules"
+      ],
+      "product_dependencies": [
+        "P2"
+      ],
+      "input_condition": "7.x (review R003): no Safe Links rule or preset covers all recipients, the built-in rule has exclusions and a partly scoped Safe Links rule or preset exists that may cover the excluded recipients",
+      "source": {
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.1v1",
+        "cell": "partial_tier_may_cover"
       }
     },
     {
@@ -18023,6 +18080,7 @@
       },
       "collect": [
         "atp_policy_rules",
+        "built_in_protection_rules",
         "protection_policy_rules",
         "safe_links_policies",
         "safe_links_rules"
@@ -18054,6 +18112,7 @@
       },
       "collect": [
         "atp_policy_rules",
+        "built_in_protection_rules",
         "defender_license",
         "protection_policy_rules",
         "safe_links_policies",
@@ -18069,6 +18128,61 @@
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.SECURITYSUITE.7.2v1",
         "cell": "section_not_collected"
+      }
+    },
+    {
+      "id": "MS.SECURITYSUITE.7.2v1/builtin_rule_unusable",
+      "policy_id": "MS.SECURITYSUITE.7.2v1",
+      "cell": "builtin_rule_unusable",
+      "verdict": "not_assessed",
+      "applies": true,
+      "recommendations": [
+        "recollect_unusable_evidence"
+      ],
+      "text": "Check that every field this policy reads in the {sections} evidence has a readable value, none missing, empty or of the wrong type, then export it again.",
+      "rerun_text": "Run the assessment again once the {sections} evidence is complete.",
+      "placeholders": {
+        "sections": "record.cited_sections"
+      },
+      "collect": [
+        "built_in_protection_rules"
+      ],
+      "product_dependencies": [
+        "P2"
+      ],
+      "input_condition": "7.x (review R003): no Safe Links rule or preset covers all recipients and `built_in_protection_rules` holds no object or only rules with unreadable exclusion fields",
+      "source": {
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.2v1",
+        "cell": "builtin_rule_unusable"
+      }
+    },
+    {
+      "id": "MS.SECURITYSUITE.7.2v1/partial_tier_may_cover",
+      "policy_id": "MS.SECURITYSUITE.7.2v1",
+      "cell": "partial_tier_may_cover",
+      "verdict": "not_assessed",
+      "applies": true,
+      "recommendations": [
+        "review_policy_against_baseline_text"
+      ],
+      "text": "Check the {sections} evidence for the recipients each partly scoped policy covers, then export it again so the exclusions are clear.",
+      "rerun_text": "Run the assessment again once the {sections} evidence is complete.",
+      "placeholders": {
+        "sections": "record.cited_sections"
+      },
+      "collect": [
+        "built_in_protection_rules",
+        "safe_links_rules"
+      ],
+      "product_dependencies": [
+        "P2"
+      ],
+      "input_condition": "7.x (review R003): no Safe Links rule or preset covers all recipients, the built-in rule has exclusions and a partly scoped Safe Links rule or preset exists that may cover the excluded recipients",
+      "source": {
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.2v1",
+        "cell": "partial_tier_may_cover"
       }
     },
     {
@@ -18335,6 +18449,7 @@
       },
       "collect": [
         "atp_policy_rules",
+        "built_in_protection_rules",
         "protection_policy_rules",
         "safe_links_policies",
         "safe_links_rules"
@@ -18366,6 +18481,7 @@
       },
       "collect": [
         "atp_policy_rules",
+        "built_in_protection_rules",
         "defender_license",
         "protection_policy_rules",
         "safe_links_policies",
@@ -18381,6 +18497,61 @@
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.SECURITYSUITE.7.3v1",
         "cell": "section_not_collected"
+      }
+    },
+    {
+      "id": "MS.SECURITYSUITE.7.3v1/builtin_rule_unusable",
+      "policy_id": "MS.SECURITYSUITE.7.3v1",
+      "cell": "builtin_rule_unusable",
+      "verdict": "not_assessed",
+      "applies": true,
+      "recommendations": [
+        "recollect_unusable_evidence"
+      ],
+      "text": "Check that every field this policy reads in the {sections} evidence has a readable value, none missing, empty or of the wrong type, then export it again.",
+      "rerun_text": "Run the assessment again once the {sections} evidence is complete.",
+      "placeholders": {
+        "sections": "record.cited_sections"
+      },
+      "collect": [
+        "built_in_protection_rules"
+      ],
+      "product_dependencies": [
+        "P2"
+      ],
+      "input_condition": "7.x (review R003): no Safe Links rule or preset covers all recipients and `built_in_protection_rules` holds no object or only rules with unreadable exclusion fields",
+      "source": {
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.3v1",
+        "cell": "builtin_rule_unusable"
+      }
+    },
+    {
+      "id": "MS.SECURITYSUITE.7.3v1/partial_tier_may_cover",
+      "policy_id": "MS.SECURITYSUITE.7.3v1",
+      "cell": "partial_tier_may_cover",
+      "verdict": "not_assessed",
+      "applies": true,
+      "recommendations": [
+        "review_policy_against_baseline_text"
+      ],
+      "text": "Check the {sections} evidence for the recipients each partly scoped policy covers, then export it again so the exclusions are clear.",
+      "rerun_text": "Run the assessment again once the {sections} evidence is complete.",
+      "placeholders": {
+        "sections": "record.cited_sections"
+      },
+      "collect": [
+        "built_in_protection_rules",
+        "safe_links_rules"
+      ],
+      "product_dependencies": [
+        "P2"
+      ],
+      "input_condition": "7.x (review R003): no Safe Links rule or preset covers all recipients, the built-in rule has exclusions and a partly scoped Safe Links rule or preset exists that may cover the excluded recipients",
+      "source": {
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.3v1",
+        "cell": "partial_tier_may_cover"
       }
     },
     {
@@ -25446,25 +25617,6 @@
       }
     },
     {
-      "id": "MS.SECURITYSUITE.7.1v1/no_rules_configured",
-      "policy_id": "MS.SECURITYSUITE.7.1v1",
-      "cell": "no_rules_configured",
-      "verdict": "not_met",
-      "applies": false,
-      "text": null,
-      "collect": [],
-      "product_dependencies": [],
-      "input_condition": "The rule reached this not_met cell; collection wording does not apply.",
-      "note": "Not needed: not_met remediation comes from baseline Instructions.",
-      "rerun_text": null,
-      "placeholders": {},
-      "source": {
-        "file": "value-rules-v391/cell-catalogue.json",
-        "policy_id": "MS.SECURITYSUITE.7.1v1",
-        "cell": "no_rules_configured"
-      }
-    },
-    {
       "id": "MS.SECURITYSUITE.7.1v1/partial_rule_noncompliant",
       "policy_id": "MS.SECURITYSUITE.7.1v1",
       "cell": "partial_rule_noncompliant",
@@ -25503,9 +25655,9 @@
       }
     },
     {
-      "id": "MS.SECURITYSUITE.7.2v1/no_rules_configured",
-      "policy_id": "MS.SECURITYSUITE.7.2v1",
-      "cell": "no_rules_configured",
+      "id": "MS.SECURITYSUITE.7.1v1/no_policy_covers_all",
+      "policy_id": "MS.SECURITYSUITE.7.1v1",
+      "cell": "no_policy_covers_all",
       "verdict": "not_met",
       "applies": false,
       "text": null,
@@ -25516,9 +25668,9 @@
       "rerun_text": null,
       "placeholders": {},
       "source": {
-        "file": "value-rules-v391/cell-catalogue.json",
-        "policy_id": "MS.SECURITYSUITE.7.2v1",
-        "cell": "no_rules_configured"
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.1v1",
+        "cell": "no_policy_covers_all"
       }
     },
     {
@@ -25560,9 +25712,9 @@
       }
     },
     {
-      "id": "MS.SECURITYSUITE.7.3v1/no_rules_configured",
-      "policy_id": "MS.SECURITYSUITE.7.3v1",
-      "cell": "no_rules_configured",
+      "id": "MS.SECURITYSUITE.7.2v1/no_policy_covers_all",
+      "policy_id": "MS.SECURITYSUITE.7.2v1",
+      "cell": "no_policy_covers_all",
       "verdict": "not_met",
       "applies": false,
       "text": null,
@@ -25573,9 +25725,9 @@
       "rerun_text": null,
       "placeholders": {},
       "source": {
-        "file": "value-rules-v391/cell-catalogue.json",
-        "policy_id": "MS.SECURITYSUITE.7.3v1",
-        "cell": "no_rules_configured"
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.2v1",
+        "cell": "no_policy_covers_all"
       }
     },
     {
@@ -25614,6 +25766,25 @@
         "file": "value-rules-v391/cell-catalogue.json",
         "policy_id": "MS.SECURITYSUITE.7.3v1",
         "cell": "policy_flag_off"
+      }
+    },
+    {
+      "id": "MS.SECURITYSUITE.7.3v1/no_policy_covers_all",
+      "policy_id": "MS.SECURITYSUITE.7.3v1",
+      "cell": "no_policy_covers_all",
+      "verdict": "not_met",
+      "applies": false,
+      "text": null,
+      "collect": [],
+      "product_dependencies": [],
+      "input_condition": "The rule reached this not_met cell; collection wording does not apply.",
+      "note": "Not needed: not_met remediation comes from baseline Instructions.",
+      "rerun_text": null,
+      "placeholders": {},
+      "source": {
+        "file": "configs/scuba-value-rules.json",
+        "policy_id": "MS.SECURITYSUITE.7.3v1",
+        "cell": "no_policy_covers_all"
       }
     },
     {
@@ -27186,15 +27357,21 @@
     "MS.SECURITYSUITE.6.2v1/custom_noncompliant": "not_met",
     "MS.SECURITYSUITE.6.2v1/default_noncompliant": "not_met",
     "MS.SECURITYSUITE.6.2v1/preset_noncompliant": "not_met",
-    "MS.SECURITYSUITE.7.1v1/no_rules_configured": "not_met",
     "MS.SECURITYSUITE.7.1v1/partial_rule_noncompliant": "not_met",
     "MS.SECURITYSUITE.7.1v1/policy_flag_off": "not_met",
-    "MS.SECURITYSUITE.7.2v1/no_rules_configured": "not_met",
+    "MS.SECURITYSUITE.7.1v1/builtin_rule_unusable": "not_assessed",
+    "MS.SECURITYSUITE.7.1v1/no_policy_covers_all": "not_met",
+    "MS.SECURITYSUITE.7.1v1/partial_tier_may_cover": "not_assessed",
     "MS.SECURITYSUITE.7.2v1/partial_rule_noncompliant": "not_met",
     "MS.SECURITYSUITE.7.2v1/policy_flag_off": "not_met",
-    "MS.SECURITYSUITE.7.3v1/no_rules_configured": "not_met",
+    "MS.SECURITYSUITE.7.2v1/builtin_rule_unusable": "not_assessed",
+    "MS.SECURITYSUITE.7.2v1/no_policy_covers_all": "not_met",
+    "MS.SECURITYSUITE.7.2v1/partial_tier_may_cover": "not_assessed",
     "MS.SECURITYSUITE.7.3v1/partial_rule_noncompliant": "not_met",
     "MS.SECURITYSUITE.7.3v1/policy_flag_off": "not_met",
+    "MS.SECURITYSUITE.7.3v1/builtin_rule_unusable": "not_assessed",
+    "MS.SECURITYSUITE.7.3v1/no_policy_covers_all": "not_met",
+    "MS.SECURITYSUITE.7.3v1/partial_tier_may_cover": "not_assessed",
     "MS.SECURITYSUITE.8.1v1/flag_bad": "not_met",
     "MS.SECURITYSUITE.8.2v1/flag_bad": "not_met",
     "MS.SHAREPOINT.1.1v1/value_noncompliant": "not_met",
@@ -27544,6 +27721,7 @@
     ],
     "MS.SECURITYSUITE.7.1v1": [
       "atp_policy_rules",
+      "built_in_protection_rules",
       "defender_license",
       "protection_policy_rules",
       "safe_links_policies",
@@ -27551,6 +27729,7 @@
     ],
     "MS.SECURITYSUITE.7.2v1": [
       "atp_policy_rules",
+      "built_in_protection_rules",
       "defender_license",
       "protection_policy_rules",
       "safe_links_policies",
@@ -27558,6 +27737,7 @@
     ],
     "MS.SECURITYSUITE.7.3v1": [
       "atp_policy_rules",
+      "built_in_protection_rules",
       "defender_license",
       "protection_policy_rules",
       "safe_links_policies",

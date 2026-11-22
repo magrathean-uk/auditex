@@ -2,7 +2,7 @@
   "fixture_sha256": {
     "catalogue-v391-fixture.json.gz": "a34fdf51b09a3b5bef2708c4aba669462d9470a07c3ed03d4126c51c867f5d7e",
     "fault-vectors.jsonl": "eccdac84d8ae19acd594bf44b03bccfe49115f9c18c9992e338202d5b1c4a56a",
-    "source-step-pins.json.gz": "84105d499b45b96c3114a1dca921aa894b8504acce676a84dec02ca53c29f08f"
+    "source-step-pins.json.gz": "9fc69df687bbf117e7911118c7b30dcbaed7b6ae012b082f34936099c8cea8b2"
   },
   "fixture_sha256_note": "sha256 of the logical (decompressed) bytes of each stored fixture.",
   "historical_counts": {

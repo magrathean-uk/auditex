@@ -104,8 +104,8 @@ def test_every_closed_reason_and_citation_variant(rec):
 
 
 def test_inventory_and_compact_schema():
-    assert len(T["cells"]) == 1084 and len(T["policies"]) == 102
-    assert len({(r["policy_id"], r["cell"]) for r in CASES}) == 1084
+    assert len(T["cells"]) == 1090 and len(T["policies"]) == 102          # review R003: SS 7.x Built-In cells
+    assert len({(r["policy_id"], r["cell"]) for r in CASES}) == 1090
     validator = jsonschema.Draft202012Validator(SCHEMA)
     for rec in CASES:
         validator.validate(baseline_case(rec)[1])
@@ -453,5 +453,7 @@ def test_all_source_self_test_planted_controls_on_every_applicable_case():
             applied[name] += 1
     assert len(applied) == 19 and all(applied.values())
     # 28,964 over the fixture-built template (1,771 catalogue texts); the product catalogue's closed text sets also hold
-    # every reachable subset text (2,209 texts), which adds 6,036 applicable mutants.
-    assert sum(applied.values()) == 35000
+    # every reachable subset text (2,209 texts), which adds 6,036 applicable mutants. Review R003 adds 1,806: SS 7.1 to
+    # 7.3 read built_in_protection_rules (32 more missing-section texts and one not-a-list text and variant each) and
+    # trade no_rules_configured for the three Built-In cells.
+    assert sum(applied.values()) == 36806

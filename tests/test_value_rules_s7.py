@@ -92,7 +92,8 @@ def test_optional_full_final_source():
         pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     from azure_tenant_audit.resources import open_text_resource
     items = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
-    grouped = _grouped(Path(source))
+    from test_value_rules_replay import review_relabel
+    grouped = {p: [review_relabel(r)[0] for r in rows] for p, rows in _grouped(Path(source)).items()}
     assert sum(len(grouped[p]) for p in STAGE7_POLICIES) == 8126
     for policy in sorted(STAGE7_POLICIES):
         _check_rows(policy, [{"criticality": items[policy]["policy_item"]["criticality"], **r}
