@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,10 @@ ISOLATED_GOOGLE_SCOPES: frozenset[str] = frozenset({POLICIES_SCOPE})
 GMAIL_SETTINGS_SCOPES: tuple[str, ...] = (
     "https://www.googleapis.com/auth/gmail.settings.basic",
 )
+
+# The scopes Google's token endpoint actually granted (on the last refresh or consent), kept in the token cache beside
+# google-auth's own fields: google-auth serialises only the scopes asked for, which never prove a grant.
+VERIFIED_SCOPES_KEY = "auditex_verified_scopes"
 
 _DEPENDENCIES = {
     "google.auth": "google-auth",
@@ -123,11 +128,14 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
 
         token_cache = config.token_cache.expanduser()
         credentials = None
+        cached: Any = None
         try:
             if token_cache.exists():
+                # Read once: the grant recorded beside the credentials is the one these credentials were saved with.
+                cached = json.loads(token_cache.read_text(encoding="utf-8"))
                 # Loaded with the scopes it was granted (not this run's), so a run that needs more signs in again
                 # rather than reusing a token its new collectors cannot use.
-                credentials = Credentials.from_authorized_user_file(str(token_cache))
+                credentials = Credentials.from_authorized_user_info(cached)
                 if not _has_scopes(credentials, config.scopes) or not credentials.refresh_token:
                     credentials = None
             if credentials is not None:
@@ -138,20 +146,21 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                 except (RefreshError, TransportError) as exc:
                     if isinstance(exc, TransportError) or not _is_grant_error(exc):
                         # The token endpoint is down or busy: that says nothing about the grant. A token still in
-                        # date is used as it is; an expired one cannot be, and signing in again would not help.
-                        if not credentials.valid:
-                            raise RuntimeError(
-                                "Google sign-in could not be refreshed (temporary error); run again later."
-                            ) from None
-                    else:
-                        # Revoked, expired (Testing-status clients expire refresh tokens after 7 days) or narrower
-                        # than asked: sign in again.
-                        credentials = None
-                    refreshed = False
-                else:
-                    refreshed = True
-                if refreshed and not _granted(credentials, config.scopes):
+                        # date whose recorded grant covers this run is used as it is, and the cache is left as it is
+                        # (another run may have replaced it meanwhile). An expired token, or a cache that cannot show
+                        # the grant (an older one records only the scopes asked for), cannot be used, and signing in
+                        # again would not help while the endpoint is down.
+                        if credentials.valid and _verified_cover(cached, config.scopes):
+                            return credentials
+                        raise RuntimeError(
+                            "Google sign-in could not be refreshed (temporary error); run again later."
+                        ) from None
+                    # Revoked, expired (Testing-status clients expire refresh tokens after 7 days) or narrower than
+                    # asked: sign in again.
                     credentials = None
+                else:
+                    if not _granted(credentials, config.scopes):
+                        credentials = None
             if not credentials or not credentials.valid:
                 flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
                 try:
@@ -161,8 +170,11 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         except GoogleAuthError as exc:
             # A fixed message: the library's text can carry token material.
             raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
+        # Only a successful refresh or a fresh consent is saved, with the grant Google reported for it.
+        saved = json.loads(credentials.to_json())
+        saved[VERIFIED_SCOPES_KEY] = sorted(_grant(credentials))
         # Creates any missing folder owner-only; an existing folder (the working directory, a shared one) keeps its mode.
-        secure_write_text(token_cache, credentials.to_json(), mode=0o600)
+        secure_write_text(token_cache, json.dumps(saved), mode=0o600)
         return credentials
 
     raise ValueError(f"unsupported Google auth mode: {config.auth_mode}")
@@ -217,31 +229,52 @@ def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:
 
 
 # Token endpoint errors that say the grant itself is gone or narrower (RFC 6749 5.2); a fresh consent fixes those.
-# Anything else (a 5xx page, a timeout, a busy endpoint) is temporary and says nothing about the grant.
-_GRANT_ERRORS = ("invalid_grant", "invalid_scope", "invalid_client", "unauthorized_client", "necessary fields")
+# Anything else (a 5xx page, a timeout, a busy endpoint, another error code) is temporary and says nothing about the grant.
+_GRANT_ERRORS = frozenset({"invalid_grant", "invalid_scope", "invalid_client", "unauthorized_client"})
+# google-auth's fixed local text when the cached entry lacks what a refresh needs; only a new consent supplies it.
+_MISSING_REFRESH_FIELDS = "The credentials do not contain the necessary fields"
 
 
 def _is_grant_error(exc: Exception) -> bool:
-    """Whether a failed refresh means the user must consent again (matched only; the text is never kept)."""
+    """Whether a failed refresh means the user must consent again (matched only; the text is never kept).
+
+    google-auth raises ``RefreshError(details, response_data)`` for a token endpoint error; only the parsed OAuth
+    ``error`` field decides, never a word in the description or an unparsed body.
+    """
     if getattr(exc, "retryable", False):
         return False
-    text = str(exc)
-    return any(code in text for code in _GRANT_ERRORS)
+    args = getattr(exc, "args", ())
+    if len(args) > 1 and isinstance(args[1], Mapping):
+        code = args[1].get("error")
+        return isinstance(code, str) and code in _GRANT_ERRORS
+    return len(args) == 1 and isinstance(args[0], str) and args[0].startswith(_MISSING_REFRESH_FIELDS)
 
 
-def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
-    """Whether the last refresh granted every scope this run asks for.
+def _grant(credentials: Any) -> set[str]:
+    """The scopes the last refresh or consent granted.
 
     Google reports the grant in the token response's ``scope`` field, which RFC 6749 (5.1) lets it leave out when
-    the grant is exactly the scopes the refresh asked for (the cache's own); google-auth then sets no
-    ``granted_scopes``, so the scopes asked for are the grant. A refresh asking for a scope never granted fails.
+    the grant is exactly the scopes the request asked for; google-auth then sets no ``granted_scopes``, so the scopes
+    asked for are the grant. A refresh asking for a scope never granted fails.
     """
     granted = getattr(credentials, "granted_scopes", None)
     if granted is None:
         granted = getattr(credentials, "scopes", None)
-    if not granted:
+    return {str(scope) for scope in granted or ()}
+
+
+def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
+    """Whether the last refresh granted every scope this run asks for."""
+    granted = _grant(credentials)
+    return bool(granted) and set(scopes).issubset(granted)
+
+
+def _verified_cover(cached: Any, scopes: tuple[str, ...]) -> bool:
+    """Whether the grant recorded in the token cache covers this run (an older cache records none)."""
+    recorded = cached.get(VERIFIED_SCOPES_KEY) if isinstance(cached, Mapping) else None
+    if not isinstance(recorded, list) or not all(isinstance(scope, str) for scope in recorded):
         return False
-    return set(scopes).issubset(set(granted))
+    return set(scopes).issubset(recorded)
 
 
 def user_delegated_credentials(credentials: Any, subject: str, *, scopes: tuple[str, ...] | None = None) -> Any:

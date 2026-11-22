@@ -949,7 +949,12 @@ folder keeps its mode. The cache is replaced in one step: the new copy is writte
 its place. Its folder must therefore let you create and replace files there, be owned by you (or root) and not let other
 accounts replace entries (no group or world write unless the sticky bit is set, as on `/tmp`); otherwise the write is
 refused with `secret_folder_refused`. Point `--token-cache` at a file in an owner-controlled writable folder; the default
-`.secrets/` folder is created `0700`. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
+`.secrets/` folder is created `0700`. The cache is refreshed every run and saved only after a successful refresh or a
+fresh consent, together with the scopes Google actually granted (`auditex_verified_scopes`). When Google's token endpoint
+is down, a cached token still in date is used without rewriting the cache, and only when its recorded grant covers the
+run; an older cache that records no grant, or one whose grant is narrower, stops the run with "run again later". Only
+the token endpoint's own grant errors (`invalid_grant`, `invalid_scope`, `invalid_client`, `unauthorized_client`) or a
+cache missing the fields a refresh needs start a new consent. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
 others can read, or a link, is refused with `service_account_key_refused`.
 
 `--verbose` raises Auditex's own logging to DEBUG but keeps `urllib3` and `msal` at WARNING, because their request
