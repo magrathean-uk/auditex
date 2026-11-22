@@ -16,7 +16,7 @@ if ($DryRun) {
 
 function Ensure-TeamFromGroup {
   param([string]$GroupDisplayName)
-  $group = Get-MgGroup -Filter "displayName eq '$($GroupDisplayName.Replace(\"'\", \"''\"))'" -ErrorAction SilentlyContinue
+  $group = Get-MgGroup -Filter "displayName eq '$($GroupDisplayName.Replace("'", "''"))'" -ErrorAction SilentlyContinue
   if (-not $group) { throw "Missing M365 group $GroupDisplayName." }
 
   if ($DryRun) {

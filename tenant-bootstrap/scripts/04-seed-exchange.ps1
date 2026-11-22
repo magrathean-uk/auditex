@@ -19,19 +19,17 @@ if ($DryRun) {
 function Ensure-MailboxUser {
   param([string]$Alias, [string]$DisplayName, [switch]$Room)
   $upn = Get-Upn -Alias $Alias
-  if (-not (Get-MgUser -Filter "userPrincipalName eq '$($upn.Replace(\"'\", \"''\"))'" -ErrorAction SilentlyContinue)) {
-    if ($DryRun) {
-      Write-BootstrapEvent -Message "mailbox.user.wouldCreate" -Status "success" -Step "exchange" -Details @{upn=$upn}
-    } else {
-      Invoke-BootstrapCommand -Name "create-exchange-owner-user-$Alias" -Module "graph" -Step "exchange" -Action {
-        New-MgUser -DisplayName $DisplayName -GivenName $DisplayName.Split(" ")[0] -Surname $DisplayName.Split(" ")[-1] -UserPrincipalName $upn -MailNickName $Alias.Replace(".", "") -UsageLocation $cfg.tenant.usageLocation -AccountEnabled $true -PasswordProfile @{password = New-SamplePassword; forceChangePasswordNextSignIn = $true}
-      } | Out-Null
-    }
+  # A dry run has no tenant-checked Graph session, so it plans without any tenant lookup.
+  if ($DryRun) {
+    Write-BootstrapEvent -Message "mailbox.user.wouldEnsure" -Status "success" -Step "exchange" -Details @{upn=$upn}
+    Write-BootstrapEvent -Message "mailbox.wouldCreate" -Status "success" -Step "exchange" -Details @{type=$(if ($Room) { "room" } else { "shared" }); alias=$Alias}
+    return
   }
 
-  if ($DryRun) {
-    Write-BootstrapEvent -Message "mailbox.wouldCreate" -Status "success" -Step "exchange" -Details @{type=(if ($Room) { "room" } else { "shared" }); alias=$Alias}
-    return
+  if (-not (Get-MgUser -Filter "userPrincipalName eq '$($upn.Replace("'", "''"))'" -ErrorAction SilentlyContinue)) {
+    Invoke-BootstrapCommand -Name "create-exchange-owner-user-$Alias" -Module "graph" -Step "exchange" -Action {
+      New-MgUser -DisplayName $DisplayName -GivenName $DisplayName.Split(" ")[0] -Surname $DisplayName.Split(" ")[-1] -UserPrincipalName $upn -MailNickName $Alias.Replace(".", "") -UsageLocation $cfg.tenant.usageLocation -AccountEnabled $true -PasswordProfile @{password = New-SamplePassword; forceChangePasswordNextSignIn = $true}
+    } | Out-Null
   }
 
   if ($Room) {
@@ -58,7 +56,10 @@ Invoke-BootstrapCommand -Name "seed-shared-mailboxes" -Module "exchange" -Step "
   }
 }
 
-if (-not (Get-Command New-SafeLinksPolicy -ErrorAction SilentlyContinue)) {
+if ($DryRun) {
+  Write-BootstrapEvent -Message "exchange.defender.wouldSeed" -Status "success" -Step "exchange" -Details @{policies="DEF-Standard-SafeLinks,DEF-Standard-SafeAttachment,DEF-Standard-AntiPhish"}
+}
+elseif (-not (Get-Command New-SafeLinksPolicy -ErrorAction SilentlyContinue)) {
   Write-BootstrapEvent -Message "exchange.cmdlet.missing" -Status "warn" -Step "exchange" -Details @{cmdlets="SafeLinks/SafeAttachment cmdlets"}
 }
 else {

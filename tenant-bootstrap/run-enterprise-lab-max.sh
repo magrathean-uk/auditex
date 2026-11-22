@@ -115,7 +115,7 @@ if [[ "$SKIP_IDENTITY" -eq 0 ]]; then
   python3 "${ROOT_DIR}/scripts/identity_seed_az.py" \
     --config "$CONFIG" \
     --run-name "${RUN_NAME}-identity" \
-    "${MODE_ARGS[@]}"
+    ${MODE_ARGS[@]+"${MODE_ARGS[@]}"}
 fi
 
 if [[ "$SKIP_WORKLOAD" -eq 0 ]]; then
@@ -136,7 +136,7 @@ if [[ "$SKIP_WORKLOAD" -eq 0 ]]; then
   if [[ -n "$CLIENT_ID" ]]; then
     WORKLOAD_ARGS+=(--client-id "$CLIENT_ID")
   fi
-  python3 "${ROOT_DIR}/scripts/seed-workload-az.py" "${WORKLOAD_ARGS[@]}" "${MODE_ARGS[@]}"
+  python3 "${ROOT_DIR}/scripts/seed-workload-az.py" "${WORKLOAD_ARGS[@]}" ${MODE_ARGS[@]+"${MODE_ARGS[@]}"}
 fi
 
 if [[ "$SKIP_VERIFY" -eq 0 ]]; then
@@ -146,7 +146,7 @@ if [[ "$SKIP_VERIFY" -eq 0 ]]; then
     --run-dir "${ROOT_DIR}/runs/${RUN_NAME}"
     --bootstrap-root "$ROOT_DIR"
   )
-  python3 "${ROOT_DIR}/scripts/verify-population-az.py" "${VERIFY_ARGS[@]}" "${MODE_ARGS[@]}"
+  python3 "${ROOT_DIR}/scripts/verify-population-az.py" "${VERIFY_ARGS[@]}" ${MODE_ARGS[@]+"${MODE_ARGS[@]}"}
 fi
 
 echo "enterprise lab max run: ${RUN_NAME}"

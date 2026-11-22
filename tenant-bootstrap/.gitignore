@@ -1,3 +1,4 @@
 runs/
 audit-output/
 .secrets/
+fixture-output/

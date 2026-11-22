@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import importlib.util
 import json
 import os
@@ -45,9 +46,10 @@ class JsonlLogger:
 
 
 class GraphClient:
-    def __init__(self, logger: JsonlLogger, dry_run: bool) -> None:
+    def __init__(self, logger: JsonlLogger, dry_run: bool, tenant_id: str | None = None) -> None:
         self.logger = logger
         self.dry_run = dry_run
+        self.tenant_id = tenant_id
         self.session = requests.Session()
         if dry_run:
             return
@@ -63,18 +65,21 @@ class GraphClient:
         if env_token:
             self.logger.event("auth.token.source", "success", source="AZURE_ACCESS_TOKEN", hint="env")
             return env_token
+        command = [
+            "az",
+            "account",
+            "get-access-token",
+            "--resource",
+            "https://graph.microsoft.com",
+            "--query",
+            "accessToken",
+            "--output",
+            "tsv",
+        ]
+        if self.tenant_id:
+            command[3:3] = ["--tenant", self.tenant_id]
         proc = subprocess.run(
-            [
-                "az",
-                "account",
-                "get-access-token",
-                "--resource",
-                "https://graph.microsoft.com",
-                "--query",
-                "accessToken",
-                "--output",
-                "tsv",
-            ],
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -85,6 +90,21 @@ class GraphClient:
             raise RuntimeError("Azure CLI did not return a Graph access token.")
         self.logger.event("auth.token.source", "success", source="azure_cli", command="az account get-access-token")
         return token
+
+    def access_token(self) -> str:
+        return str(self.session.headers.get("Authorization", "")).removeprefix("Bearer ").strip()
+
+    def organization_for_tenant_check(self) -> dict:
+        """Read-only GET of /organization; an error body is never logged or raised, only the status."""
+        response = self.session.request("GET", f"{GRAPH_ROOT}/organization?$select=id", timeout=60)
+        self.logger.event("graph.request", "success" if response.ok else "error", method="GET",
+                          path="/organization?$select=id", statusCode=response.status_code)
+        if not response.ok:
+            raise RuntimeError(f"tenant check failed: HTTP {response.status_code}")
+        try:
+            return response.json()
+        except ValueError:
+            return {}
 
     def request(
         self,
@@ -418,7 +438,39 @@ def _resolve_windows365_managed_device_evidence(run_dir: Path) -> dict[str, Any]
     }
 
 
-def verify(cfg: dict, run_dir: Path, bootstrap_root: Path, *, dry_run: bool, logger: JsonlLogger) -> tuple[dict, int]:
+@functools.cache
+def _tenant_guard():
+    """The named-tenant guard shared with the az seeders (code, so always next to this script)."""
+    return _load_module(Path(__file__).resolve().parent / "identity_seed_az.py")
+
+
+def verified_client(cfg: dict, logger: JsonlLogger) -> GraphClient:
+    """Return a Graph client whose token tid and /organization id both equal the config tenant.
+
+    Raises the guard's TenantGuardError with tenant_id_required, tenant_mismatch or tenant_check_failed.
+    """
+    guard = _tenant_guard()
+    tenant_id = guard.configured_tenant_id(cfg)
+    try:
+        client = GraphClient(logger, dry_run=False, tenant_id=tenant_id)
+        guard.verify_named_tenant(tenant_id, client.access_token(), client.organization_for_tenant_check)
+    except guard.TenantGuardError:
+        raise
+    except (RuntimeError, OSError, subprocess.SubprocessError, requests.RequestException) as exc:
+        raise guard.TenantGuardError("tenant_check_failed") from exc
+    logger.event("tenant.verified", "success", tenantId=tenant_id)
+    return client
+
+
+def verify(
+    cfg: dict,
+    run_dir: Path,
+    bootstrap_root: Path,
+    *,
+    dry_run: bool,
+    logger: JsonlLogger,
+    client: GraphClient | None = None,
+) -> tuple[dict, int]:
     scripts_dir = bootstrap_root / "scripts"
     policy_root = bootstrap_root / "policies"
     expected = _load_expected_definitions(cfg, scripts_dir, policy_root)
@@ -439,7 +491,8 @@ def verify(cfg: dict, run_dir: Path, bootstrap_root: Path, *, dry_run: bool, log
             "devices": {"directory": expected["expectedCounts"]["devices"], "managed": expected["expectedCounts"]["managedDevicesPhase1"]},
         }
     else:
-        client = GraphClient(logger, dry_run=False)
+        if client is None:
+            client = verified_client(cfg, logger)
         all_users_count, all_users = _count_and_collect(client, "/users?$select=id,userPrincipalName,userType&$top=999")
         guest_users = [user for user in all_users if user.get("userType") == "Guest"]
         internal_users = [user for user in all_users if user.get("userType") != "Guest"]
@@ -766,7 +819,7 @@ def verify(cfg: dict, run_dir: Path, bootstrap_root: Path, *, dry_run: bool, log
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Verify tenant population after bootstrap seeding.")
+    parser = argparse.ArgumentParser(description="Verify tenant population after bootstrap seeding.", allow_abbrev=False)
     parser.add_argument("--config", type=Path, default=(Path(__file__).resolve().parent.parent / "config.example.json"))
     parser.add_argument("--run-name", required=True)
     parser.add_argument("--run-dir", type=Path, default=None, help="Bootstrap run directory to validate")
@@ -792,7 +845,27 @@ def main(argv: list[str]) -> int:
     logger = JsonlLogger(log_path)
 
     logger.event("verification.started", "started", runName=args.run_name, dryRun=args.dry_run, bootstrapRoot=str(bootstrap_root))
-    manifest, failing = verify(cfg, run_dir=run_dir, bootstrap_root=bootstrap_root, dry_run=args.dry_run, logger=logger)
+    client = None
+    if not args.dry_run:
+        guard = _tenant_guard()
+        try:
+            client = verified_client(cfg, logger)
+        except guard.TenantGuardError as exc:
+            refused = {
+                "runName": run_dir.name,
+                "tenantId": cfg.get("tenant", {}).get("tenantId", ""),
+                "dryRun": False,
+                "generatedAt": utc_now(),
+                "status": "failed",
+                "error": exc.reason,
+            }
+            manifest_path.write_text(json.dumps(refused, indent=2, sort_keys=True), encoding="utf-8")
+            logger.event("verification.refused", "error", reason=exc.reason)
+            print(f"verify-population-az: refused before any read: {exc.reason}", file=sys.stderr)
+            return 1
+    manifest, failing = verify(
+        cfg, run_dir=run_dir, bootstrap_root=bootstrap_root, dry_run=args.dry_run, logger=logger, client=client
+    )
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     logger.event("verification.completed", "finished", runName=args.run_name, failures=failing)
     print(json.dumps(manifest, indent=2, sort_keys=True))
