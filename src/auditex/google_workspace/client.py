@@ -387,7 +387,12 @@ class GoogleWorkspaceClient:
         kept = [alert for alert in rows if alert.get("deleted") is not True]
         if len(kept) == len(rows):
             return rows
-        return CollectedRows(kept, truncated=getattr(rows, "truncated", False), result_limit=getattr(rows, "result_limit", None))
+        return CollectedRows(
+            kept,
+            truncated=getattr(rows, "truncated", False),
+            result_limit=getattr(rows, "result_limit", None),
+            page_error=getattr(rows, "page_error", None),
+        )
 
     def get_gmail_settings_for_user(self, user_email: str) -> dict[str, Any]:
         """Settings of one mailbox, read as that user when the credentials are delegated.
@@ -463,7 +468,7 @@ class GoogleWorkspaceClient:
             if "permissions" in drive_file or not file_id:
                 continue
             try:
-                drive_file["permissions"] = self._collect_pages(
+                permissions = self._collect_pages(
                     lambda page_token, file_id=file_id: service.permissions().list(
                         fileId=file_id,
                         pageSize=100,
@@ -474,6 +479,10 @@ class GoogleWorkspaceClient:
                     "permissions",
                     limit=None,
                 )
+                drive_file["permissions"] = permissions
+                if permissions.page_error is not None:
+                    # Only some pages were read: what is there is kept, but the file's sharing is not complete.
+                    raise permissions.page_error
                 files.permission_reads += 1
             except Exception as exc:  # noqa: BLE001 - recorded as a coverage gap, never as no sharing
                 error_class, error = classify_google_error(exc)

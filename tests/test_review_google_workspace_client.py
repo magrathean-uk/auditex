@@ -279,3 +279,43 @@ def test_r055_offline_replay_of_failed_gmail_settings_reads_is_partial(tmp_path:
     assert rc == 1
     summary = json.loads((tmp_path / "out" / "T-r" / "summary.json").read_text(encoding="utf-8"))
     assert summary["collectors"][0]["status"] != "ok"
+
+
+# ---- in-session review follow-ups ---------------------------------------------------------------------------------
+
+
+def test_r057_a_failed_later_permissions_page_is_a_gap_not_complete_sharing() -> None:
+    owner = {"id": "p0", "type": "user", "role": "owner", "emailAddress": "owner@example.com"}
+    pages = {None: [{"permissions": [owner], "nextPageToken": "p2"}], "p2": [_HttpError(503)] * 10}
+
+    class _Permissions:
+        def list(self, **kwargs: Any) -> _Request:
+            return _Request(pages[kwargs.get("pageToken")].pop(0))
+
+    class _Files:
+        def list(self, **_kwargs: Any) -> _Request:
+            return _Request({"files": [{"id": "f1", "driveId": "d1"}]})
+
+    client = GoogleWorkspaceClient(credentials=None)
+    assert client._services is not None
+    client._services[("drive", "v3")] = type("D", (), {"files": lambda self: _Files(), "permissions": lambda self: _Permissions()})()
+    files = client.list_drive_files()
+    assert files.permission_reads == 0
+    assert [error["fileId"] for error in files.permission_errors or []] == ["f1"]
+    assert files.permission_errors[0]["error_class"] == "google_transient"
+
+
+def test_r011_r058_dropping_deleted_alerts_keeps_a_page_error() -> None:
+    pages = {None: [{"alerts": [{"alertId": "a1", "deleted": True}, {"alertId": "a2"}], "nextPageToken": "p2"}],
+             "p2": [_HttpError(503)] * 10}
+
+    class _Alerts:
+        def list(self, **kwargs: Any) -> _Request:
+            return _Request(pages[kwargs.get("pageToken")].pop(0))
+
+    client = GoogleWorkspaceClient(credentials=None)
+    assert client._services is not None
+    client._services[("alertcenter", "v1beta1")] = type("S", (), {"alerts": lambda self: _Alerts()})()
+    alerts = client.list_alerts()
+    assert [alert["alertId"] for alert in alerts] == ["a2"]
+    assert getattr(alerts, "page_error", None) is not None and alerts.truncated is True
