@@ -577,3 +577,17 @@ def test_review2_multi_member_gzip_policy_is_decoded_whole():
     assert exposure_lookup._decode_body(gzip.compress(first) + gzip.compress(second), "gzip") == first + second
     bomb = gzip.compress(b"a" * (exposure_lookup.MAX_POLICY_BYTES * 4)) * 3
     assert len(exposure_lookup._decode_body(bomb, "gzip")) == exposure_lookup.MAX_POLICY_BYTES + 1
+
+
+# ---- Impact prediction 2: the posture SPF parser reads the all mechanism the same way ----
+
+@pytest.mark.parametrize("record,qualifier", [
+    ("v=spf1 include:spf.examplemall +all", "+"),
+    ("v=spf1 include:spf.examplemall -all", "-"),
+    ("v=spf1 -ALL", "-"),
+    ("v=spf1 all", "+"),
+    ("v=spf1 --all +all", "+"),
+    ("v=spf1 redirect=_spf.contoso.example", None),
+])
+def test_impact_parse_spf_reads_the_first_all_mechanism(record, qualifier):
+    assert dns_lookup.parse_spf(record)["all_qualifier"] == qualifier

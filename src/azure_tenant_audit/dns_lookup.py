@@ -321,12 +321,11 @@ def parse_spf(record: str) -> dict[str, Any] | None:
     mechanisms = [token for token in tokens[1:] if not token.lower().startswith("v=")]
     all_qualifier = None
     for token in mechanisms:
-        if token.lower().endswith("all"):
-            qualifier = token[0]
-            if qualifier in {"+", "-", "~", "?"}:
-                all_qualifier = qualifier
-            elif token.lower() == "all":
-                all_qualifier = "+"
+        # The first term that is exactly an all mechanism with at most one qualifier, as spf_fails_unapproved_senders
+        # reads it; a name merely ending in "all" (include:spf.examplemall) is not one.
+        qualifier = token[0] if token[0] in "+-~?" else ""
+        if token[len(qualifier):].lower() == "all":
+            all_qualifier = qualifier or "+"
             break
     return {
         "version": "spf1",
