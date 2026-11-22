@@ -16,6 +16,7 @@ from test_review_value_rules_defender_dns import (
 )
 
 from azure_tenant_audit.value_rules import assess
+from azure_tenant_audit.value_rules.catalogue import row_for
 
 SL_POLICIES = ["MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1"]
 OTHER_GROUP = {**SCOPE_ALL, "SentToMemberOf": ["other"]}
@@ -79,3 +80,57 @@ def test_r100_many_shadowed_orphan_rules_stay_fast():
     answer = _answer("MS.SECURITYSUITE.7.3v1", _safelinks(rules, policies, BI_ALL))
     assert time.perf_counter() - start < 5.0
     assert answer == ("met", "policy_flags_ok")       # p0 names u0..u2 first; every later rule names a subset of them
+
+
+# ---- R003: the Built-In Protection rule is read only when no covering rule applies ----
+
+BI = "built_in_protection_rules"
+BI_MISSING = [pytest.param(None, id="absent"), pytest.param({"collection_status": "not_collected"}, id="marked")]
+
+
+def _without_built_in(sections, marker):
+    sections = {k: v for k, v in sections.items() if k != BI}
+    if marker is not None:
+        sections[BI] = dict(marker)
+    return sections
+
+
+@pytest.mark.parametrize("marker", BI_MISSING)
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_r003_covering_rule_decides_without_the_built_in_section(policy_id, marker):
+    rules = [_sl_rule("cover", SCOPE_ALL)]
+    sections = _without_built_in(_safelinks(rules, [{"Identity": "cover", **SL_FLAGS}]), marker)
+    assert _answer(policy_id, sections) == ("met", "policy_flags_ok")
+    flag = row_for(policy_id)["params"]["flags"][0]
+    sections = _without_built_in(_safelinks(rules, [{"Identity": "cover", **SL_FLAGS, flag: False}]), marker)
+    assert _answer(policy_id, sections) == ("not_met", "policy_flag_off")
+
+
+@pytest.mark.parametrize("marker", BI_MISSING)
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_r003_built_in_fallback_without_the_built_in_section_is_not_collected(policy_id, marker):
+    for rules in ([], [_sl_rule("x", GROUP_ONLY)]):
+        record = assess(policy_id, _without_built_in(_safelinks(rules, [SL_BUILTIN, {"Identity": "x", **SL_FLAGS}]), marker))
+        assert (record["verdict"], record["cell"], record["cited_sections"], record["reason_text"]) == (
+            "not_assessed", "section_not_collected", [BI],
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules.")
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_r003_built_in_missing_beside_another_section_still_cites_both(policy_id):
+    sections = _safelinks([_sl_rule("cover", SCOPE_ALL)], [{"Identity": "cover", **SL_FLAGS}])
+    del sections["safe_links_rules"]
+    record = assess(policy_id, sections)
+    assert (record["cell"], record["cited_sections"]) == ("section_not_collected", ["built_in_protection_rules", "safe_links_rules"])
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_r003_shipped_explainer_template_carries_the_built_in_cells(policy_id):
+    import json
+    from pathlib import Path
+
+    template = json.loads((Path(__file__).resolve().parents[1] / "configs/explainer-template.json").read_text(encoding="utf-8"))
+    cells = {c["cell"] for c in template["cells"] if c["policy_id"] == policy_id}
+    assert {"builtin_rule_unusable", "no_policy_covers_all", "partial_tier_may_cover"} <= cells
+    assert "no_rules_configured" not in cells
+    assert template["policies"][policy_id]["sections"] == row_for(policy_id)["sections"]

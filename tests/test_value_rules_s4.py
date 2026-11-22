@@ -182,6 +182,10 @@ def test_every_missing_section_combination_is_catalogued(policy, missing_state, 
                 else:
                     sections.pop(name, None)
             record = checked(_evaluate(policy, sections))
+            if missing == ["built_in_protection_rules"] and record["cell"] != "section_not_collected":
+                # Review R003 (repair): a late section; a rule that decides without it still answers.
+                assert record == checked(_evaluate(policy, base))
+                continue
             assert (record["verdict"], record["cell"], record["reason_code"], record["reason_text"],
                     record["cited_sections"]) == (
                 "not_assessed", "section_not_collected", "required_evidence_section_not_collected", text, missing)

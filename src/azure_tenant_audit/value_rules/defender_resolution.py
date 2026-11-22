@@ -15,7 +15,7 @@ from .helpers import (
     _empty3,
     _licence_cell,
 )
-from .record import _A, BAD_SECTION_LIST, ITEM_VALUE, _rec
+from .record import _A, BAD_SECTION_LIST, ITEM_VALUE, _not_collected, _rec
 
 
 def _is_num(value):
@@ -59,13 +59,17 @@ def _preset_states(rules, accepted, trace):
 
 
 BI = "built_in_protection_rules"
+LATE_SECTIONS = {"safelinks_resolution": frozenset({BI})}
 
 
 def _safelinks_core(policy_id, sp, sections, trace):
     # Review R003/R099: a row that lists built_in_protection_rules reads the Built-In Protection rule's exclusions and
     # judges empty rule lists like any tenant where no rule covers everyone. The shipped 7.x rows list it (lane rules-followup).
     builtin_scope = BI in sp.get("sections", ())
-    for name in ("protection_policy_rules", "safe_links_policies", "safe_links_rules", "atp_policy_rules", *((BI,) if builtin_scope else ())):
+    # Review R003 (repair): the Built-In rule is a late section. A covering rule decides without it; the Built-In fallback
+    # answers section_not_collected when it is missing or marked (assess lets it through when it alone is missing).
+    builtin_missing = _not_collected(policy_id, sections, [BI]) if builtin_scope else None
+    for name in ("protection_policy_rules", "safe_links_policies", "safe_links_rules", "atp_policy_rules", *((BI,) if builtin_scope and not builtin_missing else ())):
         if not isinstance(sections[name], list):
             return _A(policy_id, BAD_SECTION_LIST, f"Data unusable: {name} is not a list of objects; the policy was not assessed.", "section_not_a_list", [name])
     lic = _licence_cell(policy_id, sections, "defender_license")      # v3.7 (lens B DEF-F3, D101): Safe Links need Defender for Office 365; a false read can be a failed command
@@ -157,6 +161,8 @@ def _safelinks_core(policy_id, sp, sections, trace):
         # duplicated or lacks a boolean flag, those recipients are unjudged (as data_unusable_partial_tier in SS 1.x).
         partial_unread = "missing" if not pp else ("duplicated" if len(pp) > 1 else "flag")
     if builtin_scope and applied == BUILTIN:
+        if builtin_missing:
+            return builtin_missing
         # A preset whose both parts are enabled but scoped to some recipients may also cover the excluded recipients.
         preset_partial = any(({"q", "x", "u"} & set(eop[t]) or eop_u) and ({"q", "x", "u"} & set(atp[t]) or atp_u)
                              for t in ("Strict", "Standard"))
