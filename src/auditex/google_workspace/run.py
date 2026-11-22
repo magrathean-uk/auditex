@@ -213,10 +213,13 @@ def build_google_capability_rows(
         elif failures:
             # Only a read refused outright is a scope block; a read that partly succeeded proves the scopes work.
             classes = {str(item.get("error_class") or "") for item in failures if item.get("status") == "failed"}
-            # A read of this collector that returned data proves its token carries the collector's scopes (one
-            # token per collector), so another read refused beside it is a role limit, not a missing scope.
+            # A Google read of this collector that returned data proves its token carries the collector's scopes
+            # (one token per collector), so another read refused beside it is a role limit, not a missing scope. A
+            # DNS lookup uses no Google token and proves nothing.
             scopes_proven = any(
-                item.get("status") in {"ok", "partial"} and int(item.get("item_count") or 0) > 0
+                str(item.get("type") or "google") == "google"
+                and item.get("status") in {"ok", "partial"}
+                and int(item.get("item_count") or 0) > 0
                 for item in seen_by_collector.get(name, [])
             )
             if classes & {"insufficient_permissions", "unauthenticated"} and not scopes_proven:

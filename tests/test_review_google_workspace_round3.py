@@ -222,3 +222,21 @@ def test_x1_resolver_answer_errors_keep_their_wording() -> None:
     result = GoogleDnsPostureCollector().run({"domain": "example.com", "dns_resolver": _Resolver()})
     row = next(item for item in result.coverage if item["name"] == "posture:example.com")
     assert "SERVFAIL" in str(row["error"])
+
+
+def test_r055_a_dns_lookup_never_proves_a_google_scope() -> None:
+    from auditex.google_workspace.run import build_google_capability_rows
+
+    # The domains list is refused, the --domain fallback is looked up over DNS without any Google token.
+    coverage = [
+        {"collector": "google_dns_posture", "type": "google", "name": "domains", "status": "failed", "item_count": 0,
+         "endpoint": "admin.directory.domains.list", "error_class": "insufficient_permissions", "error": "HTTP 403"},
+        {"collector": "google_dns_posture", "type": "dns", "name": "posture:example.com", "status": "ok",
+         "item_count": 1, "endpoint": "doh://example.com"},
+    ]
+    row = build_google_capability_rows(
+        ["google_dns_posture"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=coverage,
+    )[0]
+    assert row["status"] == "blocked_by_scope"
+    assert row["missing_permissions"] == ["https://www.googleapis.com/auth/admin.directory.domain.readonly"]
