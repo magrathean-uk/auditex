@@ -133,9 +133,8 @@ def test_r083_google_run_prints_its_dns_notice_before_collection(tmp_path, monke
 
 
 def test_r083_google_run_without_dns_prints_no_dns_notice(tmp_path, monkeypatch, capsys) -> None:  # noqa: ANN001
-    from azure_tenant_audit.collectors.base import CollectorResult
-
     from auditex.google_workspace import run as google_run
+    from azure_tenant_audit.collectors.base import CollectorResult
 
     class _Collector:
         name = "google_directory"
@@ -153,3 +152,25 @@ def test_r083_google_run_without_dns_prints_no_dns_notice(tmp_path, monkeypatch,
                                                           collectors="google_directory"))
 
     assert "DNS" not in capsys.readouterr().err
+
+
+# X1 (collector half): the M365 DNS collector queries the resolver AUDITEX_DOH_ENDPOINT names when its caller passes
+# none, so the data-handling notice (which names that resolver) matches the lookups.
+def test_x1_dns_posture_uses_the_configured_resolver_when_the_context_names_none(monkeypatch) -> None:  # noqa: ANN001
+    from azure_tenant_audit.collectors import dns_posture
+    from azure_tenant_audit.dns_lookup import DOH_ENDPOINT_ENV
+
+    endpoints: list[str] = []
+
+    class _Doh:
+        def __init__(self, endpoint, **kwargs):  # noqa: ANN001
+            endpoints.append(endpoint)
+
+    monkeypatch.setenv(DOH_ENDPOINT_ENV, "https://dns.example.net/dns-query")
+    monkeypatch.setattr(dns_posture, "DohClient", _Doh)
+    try:
+        dns_posture.DnsPostureCollector().run({"client": None, "public_lookups": False})
+    except Exception:  # noqa: BLE001 - only the resolver the collector built matters here
+        pass
+
+    assert endpoints == ["https://dns.example.net/dns-query"]

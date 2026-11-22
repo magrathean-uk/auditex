@@ -14,12 +14,12 @@ from typing import Any
 
 from ..collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
 from ..dns_lookup import (
-    DEFAULT_DOH_ENDPOINT,
     CachingResolver,
     DnsResolver,
     DohClient,
     DohError,
     collect_domain_posture,
+    resolve_doh_endpoint,
     scuba_dkim_record,
     scuba_dmarc_record,
     scuba_spf_record,
@@ -69,8 +69,10 @@ class DnsPostureCollector(Collector):
         client: GraphClient | None = context.get("client")
         log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
         resolver = CachingResolver(
+            # No endpoint from the caller: the same resolver the data-handling notice names (AUDITEX_DOH_ENDPOINT,
+            # else Cloudflare), never a silent Cloudflare default behind a notice naming another resolver.
             context.get("dns_resolver") or DohClient(
-                endpoint=context.get("doh_endpoint", DEFAULT_DOH_ENDPOINT)
+                endpoint=context.get("doh_endpoint") or resolve_doh_endpoint()
             )
         )
         dkim_selectors: Iterable[str] = context.get("dkim_selectors", DEFAULT_DKIM_SELECTORS)
