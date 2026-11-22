@@ -322,6 +322,22 @@ def build_m365_setup_guide(
             }
         )
 
+    # R006: optional Graph scopes stay out of the default grant; each is listed apart with its blast radius.
+    optional_graph_permissions: list[dict[str, str]] = []
+    for permission in aggregate["optional_permissions"]:
+        if permission in graph_permissions:
+            continue
+        for name in selected:
+            row = _mapping(catalog.get(name))
+            if permission in (row.get("optional_permissions") or []):
+                optional_graph_permissions.append(
+                    {
+                        "permission": permission,
+                        "collector": name,
+                        "note": str(_mapping(row.get("optional_permission_notes")).get(permission) or ""),
+                    }
+                )
+
     tool_requirements = _dedupe([*profile.adapter_requirements, *aggregate["tool_requirements"]])
     if "exchange_policy" in selected:
         tool_requirements = _dedupe([*tool_requirements, "pwsh", "ExchangeOnlineManagement"])
@@ -425,6 +441,7 @@ def build_m365_setup_guide(
         "collector_permissions": collector_rows,
         "graph_permissions": graph_permissions,
         "graph_permissions_csv": ",".join(graph_permissions),
+        "optional_graph_permissions": optional_graph_permissions,
         "exchange_application_permissions": exchange_permissions,
         "sharepoint_application_permissions": sharepoint_permissions,
         "minimum_role_hints": role_hints,
@@ -481,6 +498,12 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
         lines.extend(["", "## Microsoft Graph Permissions", ""])
         for permission in payload.get("graph_permissions") or []:
             lines.append(f"- `{permission}`")
+        optional = [_mapping(row) for row in payload.get("optional_graph_permissions") or []]
+        if optional:
+            lines.extend(["", "## Optional Microsoft Graph Permissions (not part of the default grant)", ""])
+            for row in optional:
+                note = f": {row['note']}" if row.get("note") else ""
+                lines.append(f"- `{row.get('permission')}` (only for `{row.get('collector')}`){note}")
         if payload.get("exchange_application_permissions"):
             lines.extend(["", "## Exchange Application Permissions", ""])
             for permission in payload["exchange_application_permissions"]:
