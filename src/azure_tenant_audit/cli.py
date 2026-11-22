@@ -186,18 +186,25 @@ _IGNORED_PATH_VARIABLES = (("AUDIT_OUTPUT_DIR", "--out"), ("AUDIT_SAMPLE_FILE", 
 def apply_run_defaults(args: argparse.Namespace) -> argparse.Namespace:
     """Replace options the command line left out with the environment's value (an --env file is loaded into it
     first); a typed flag always wins. Idempotent."""
-    fallbacks = (
-        ("authority", "AZURE_AUTHORITY"),
-        ("graph_scope", "AZURE_GRAPH_SCOPE"),
-        ("collectors", "AUDIT_COLLECTORS"),
-    )
-    for attribute, variable in fallbacks:
-        current = getattr(args, attribute, None)
-        if current is None or isinstance(current, _BuiltInDefault):
-            value = (os.environ.get(variable) or "").strip()
-            if value:
-                setattr(args, attribute, value)
+    # Literal attribute stores, not a computed setattr: the HTTP verb allow-list scan cannot resolve any opener
+    # once a module calls setattr with a computed name.
+    authority = _environment_override(getattr(args, "authority", None), "AZURE_AUTHORITY")
+    if authority is not None:
+        args.authority = authority
+    graph_scope = _environment_override(getattr(args, "graph_scope", None), "AZURE_GRAPH_SCOPE")
+    if graph_scope is not None:
+        args.graph_scope = graph_scope
+    collectors = _environment_override(getattr(args, "collectors", None), "AUDIT_COLLECTORS")
+    if collectors is not None:
+        args.collectors = collectors
     return args
+
+
+def _environment_override(current: object, variable: str) -> str | None:
+    """The environment's value for an option the command line left out (absent or a built-in default), else None."""
+    if current is None or isinstance(current, _BuiltInDefault):
+        return (os.environ.get(variable) or "").strip() or None
+    return None
 
 
 def build_parser() -> argparse.ArgumentParser:
