@@ -189,7 +189,7 @@
     "expected_value": "Sensitive app grants are approved, current, and owned."
   },
   "app_credentials.secret_expired": {
-    "risk_rating": "critical",
+    "risk_rating": "low",
     "description": "An application credential (secret or certificate) has already expired.",
     "impact": "An expired credential indicates either an unmaintained app or a credential that should be rotated and removed; leaving expired material attached invites stale state and reuse risk.",
     "remediation": "Remove the expired credential, rotate to a fresh secret or certificate, and confirm the application is still required.",
@@ -255,7 +255,7 @@
     "expected_value": "Sign-in audience is 'AzureADMyOrg' for tenant-owned apps unless multi-tenant is justified."
   },
   "app_credentials.certificate_expired": {
-    "risk_rating": "high",
+    "risk_rating": "low",
     "description": "An application certificate (keyCredential) has already expired.",
     "impact": "Once a cert expires, downstream Microsoft and partner authentication fails; lingering expired certs also indicate weak rotation hygiene and unmaintained apps.",
     "remediation": "Remove the expired certificate, issue a fresh one with a documented validity window, and confirm the application is still required.",
