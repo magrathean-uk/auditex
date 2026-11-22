@@ -64,7 +64,8 @@ def run_capability_gated_endpoints(
 
     if client is None or not hasattr(client, "get_json"):
         for name, endpoint in endpoints:
-            payload[name] = {"value": []}
+            # The section names its skip, so a reader of the payload never mistakes it for an empty read (R019).
+            payload[name] = {"value": [], "status": "skipped", "error_class": "service_not_available", "error": skip_reason}
             coverage.append(
                 _coverage_row(
                     collector_name,
@@ -116,6 +117,10 @@ def run_capability_gated_endpoints(
             error_class, error = _classify_graph_error(exc)
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
         payload[name] = {"value": rows}
+        if status == "failed":
+            # A failed read keeps its error in the section, as other collectors do (R019): an empty list with no
+            # error reads as 'collected' to detection coverage and normalisation.
+            payload[name].update({"error": error or "read failed", "error_class": error_class})
         row = _coverage_row(
             collector_name,
             name,
