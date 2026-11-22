@@ -124,6 +124,21 @@ def test_resume_removes_post_finalisation_answers_whatever_their_name_case(tmp_p
     assert [relative for relative in stale if relative in left] == []
 
 
+def test_resume_removes_post_finalisation_answers_under_a_case_folded_name(tmp_path: Path) -> None:
+    # Review of repair round 1 (R052): APFS folds the long s (U+017F) to s, which str.lower() does not.
+    import os
+
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    stale = "model_a\u017f\u017fessment.json"
+    (run_dir / stale).write_text("{}", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    assert stale not in os.listdir(run_dir)
+
+
 def test_resume_under_another_tenant_name_keeps_one_run_id(tmp_path: Path) -> None:
     from azure_tenant_audit.output import AuditWriter
 

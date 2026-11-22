@@ -29,6 +29,7 @@ import json
 import os
 import re
 import stat
+import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,12 @@ def is_post_finalization_output(relative: str) -> bool:
     )
 
 
+def _folded(name: str) -> str:
+    """``name`` as a case- and normalisation-insensitive volume may match it (``MODEL_ASSESSMENT.json``, a long s).
+    Folding more widely than a volume does only removes more stale look-alikes on resume."""
+    return unicodedata.normalize("NFKC", name).casefold()
+
+
 def post_finalization_outputs(run_dir: str | Path) -> list[str]:
     """The post-finalisation outputs present in ``run_dir`` (root files and ``reports/``), as relative paths.
 
@@ -106,7 +113,7 @@ def post_finalization_outputs(run_dir: str | Path) -> list[str]:
             continue
         for entry in entries:
             relative = f"{directory}/{entry.name}" if directory else entry.name
-            if is_post_finalization_output(relative.lower()) and entry.is_file(follow_symlinks=False):
+            if is_post_finalization_output(_folded(relative)) and entry.is_file(follow_symlinks=False):
                 found.append(relative)
     return found
 
