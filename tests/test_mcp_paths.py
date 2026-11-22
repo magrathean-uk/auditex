@@ -468,3 +468,20 @@ def test_empty_optional_credential_paths_still_mean_not_given(root: Path) -> Non
     confine_handler(entries["auditex_compare_external_assessments"], auditex_compare_external_assessments)(["a.json"], run_dir="")
 
     assert seen == {"service_account_key": "", "oauth_client": "", "token_cache": "", "run_dir": ""}
+
+
+def test_an_empty_resource_override_is_refused_when_the_root_is_not_the_working_directory(
+    root: Path, registered: _FakeFastMCP, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review round 1: an empty resource argument is not its shipped default; it would list the working directory."""
+    elsewhere = tmp_path / "server-cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    for name, arguments in (
+        ("auditex_contract_schema_manifest", {"schema_dir": ""}),
+        ("auditex_list_collectors", {"config_path": ""}),
+        ("auditex_run_offline_validation", {"tenant_name": "acme", "sample_path": ""}),
+    ):
+        tool, _ = registered.tools[name]
+        with pytest.raises(McpPathError, match="must not be empty"):
+            tool(**arguments)

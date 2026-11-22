@@ -131,6 +131,8 @@ def confine_handler(entry: McpToolEntry, handler: Callable[..., Any]) -> Callabl
         for name in entry.resource_args:
             value = bound.arguments[name]
             if value != signature.parameters[name].default:
+                if value == "":
+                    raise McpPathError(f"{name} must not be empty; omit it for the shipped default or give a path under {root}")
                 bound.arguments[name] = confine_value(value, argument=name, root=root)
         return handler(*bound.args, **bound.kwargs)
 
