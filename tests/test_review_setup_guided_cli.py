@@ -390,3 +390,29 @@ def test_r121_m365_licence_profile_names_the_reader_app_certificate() -> None:
                                             evidence_paths=["x"], coverage_gaps=[])
 
     assert pack["license_profile"]["minimum_live_access"] == "reader_app_certificate"
+
+
+# R124: a default global-reader or auto run is not shown as skipping expected surfaces.
+
+@pytest.mark.parametrize("profile_name", ["global-reader", "app-readonly-full"])
+def test_r124_default_profile_run_misses_no_expected_collector(profile_name) -> None:  # noqa: ANN001
+    from azure_tenant_audit.autopilot import build_audit_autopilot_plan
+    from azure_tenant_audit.profiles import get_profile
+
+    plan = build_audit_autopilot_plan(
+        platform="m365",
+        selected_collectors=list(get_profile(profile_name).default_collectors),
+        capability_rows=[],
+    )
+
+    assert plan["missing_expected_collectors"] == []
+
+
+def test_r124_auto_profile_reports_only_the_surface_it_really_skips() -> None:
+    from azure_tenant_audit.autopilot import build_audit_autopilot_plan
+    from azure_tenant_audit.profiles import get_profile
+
+    plan = build_audit_autopilot_plan(platform="m365", selected_collectors=list(get_profile("auto").default_collectors),
+                                      capability_rows=[])
+
+    assert plan["missing_expected_collectors"] == ["sharepoint_access"]

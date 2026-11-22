@@ -8,6 +8,8 @@ from .evidence_refs import confidence_for, ref_proof_status, refs_checked
 
 SCHEMA_VERSION = "2026-04-21"
 
+# The surfaces a default audit covers. Opt-in collectors (exchange, mailbox_forwarding, app_credentials) are not
+# listed: no profile selects them by default, so listing them would mark every default run as incomplete.
 _EXPECTED_COLLECTORS = {
     "m365": (
         "identity",
@@ -16,13 +18,10 @@ _EXPECTED_COLLECTORS = {
         "security",
         "reports_usage",
         "intune",
-        "exchange",
         "exchange_policy",
-        "mailbox_forwarding",
         "sharepoint_access",
         "onedrive_posture",
         "app_consent",
-        "app_credentials",
         "consent_policy",
         "dns_posture",
     ),
