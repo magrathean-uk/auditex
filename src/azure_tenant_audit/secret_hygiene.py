@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import errno
+import functools
 import json
 import os
 import re
 import secrets
 import shlex
 import stat
+import sys
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -178,12 +180,150 @@ def _secret_folder_refused() -> PermissionError:
     return PermissionError(errno.EACCES, SECRET_FOLDER_REFUSED)
 
 
-def _trusted_folder(info: os.stat_result) -> bool:
-    """Whether only the caller (or root) can create, rename or remove entries in this folder."""
+SECRET_FILE_REFUSED = (
+    "secret_file_refused: a secret file is read only when it is a regular file (not a link) owned by you that other "
+    "accounts cannot change. Remove it so it is written again, and run again."
+)
+
+
+def _secret_file_refused() -> PermissionError:
+    return PermissionError(errno.EACCES, SECRET_FILE_REFUSED)
+
+
+# macOS extended ACLs (sys/acl.h): an entry can let another account add, remove or read entries whatever the mode
+# bits say, and a folder entry marked to inherit reaches every file created in it. Linux POSIX ACLs need no check of
+# their own: a named entry sets the group bits of the mode to its mask, so the mode check below already sees it.
+_ACL_TYPE_EXTENDED = 0x00000100
+_ACL_FIRST_ENTRY = 0
+_ACL_NEXT_ENTRY = -1
+_ACL_EXTENDED_ALLOW = 1
+
+
+@functools.cache
+def _darwin_acl_api() -> Any:
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.acl_get_fd_np.restype = ctypes.c_void_p
+    libc.acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
+    libc.acl_get_entry.restype = ctypes.c_int
+    libc.acl_get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+    libc.acl_get_tag_type.restype = ctypes.c_int
+    libc.acl_get_tag_type.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+    libc.acl_free.restype = ctypes.c_int
+    libc.acl_free.argtypes = [ctypes.c_void_p]
+    return ctypes, libc
+
+
+def _acl_grants_access(descriptor: int) -> bool:
+    """Whether an extended ACL on this open file or folder allows anything (macOS); deny-only entries grant nothing.
+
+    Read with the C library's ACL calls through ``ctypes`` (standard library, no command). A failure to read the ACL
+    counts as a grant, so an unknown ACL is refused rather than trusted.
+    """
+    if sys.platform != "darwin":
+        return False
+    try:
+        ctypes, libc = _darwin_acl_api()
+    except (OSError, AttributeError, ImportError):
+        return True
+    acl = libc.acl_get_fd_np(descriptor, _ACL_TYPE_EXTENDED)
+    if not acl:
+        # No ACL at all, or a file system without ACLs.
+        return ctypes.get_errno() not in {errno.ENOENT, errno.ENOTSUP, errno.EOPNOTSUPP}
+    try:
+        entry = ctypes.c_void_p()
+        tag = ctypes.c_int()
+        entry_id = _ACL_FIRST_ENTRY
+        while libc.acl_get_entry(acl, entry_id, ctypes.byref(entry)) == 0:
+            if libc.acl_get_tag_type(entry, ctypes.byref(tag)) != 0 or tag.value == _ACL_EXTENDED_ALLOW:
+                return True
+            entry_id = _ACL_NEXT_ENTRY
+        return False
+    finally:
+        libc.acl_free(acl)
+
+
+def _trusted_folder(folder: int) -> bool:
+    """Whether only the caller (or root) can create, rename or remove entries in this open folder.
+
+    The folder's extended ACL must allow nothing either: an allow entry can let another account replace entries in an
+    owner-only folder, or pass read access on to the secret file written into it.
+    """
+    info = os.fstat(folder)
     if not stat.S_ISDIR(info.st_mode) or info.st_uid not in {os.geteuid(), 0}:
         return False
     # A sticky folder (/tmp) lets an account remove or rename only the entries it owns.
-    return bool(info.st_mode & stat.S_ISVTX) or not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    if not (info.st_mode & stat.S_ISVTX) and info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        return False
+    return not _acl_grants_access(folder)
+
+
+def _open_secret_folder(directory: Path) -> int:
+    """The folder opened once and checked; a fixed refusal (no path) when it cannot be opened or is not trusted."""
+    try:
+        folder = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        raise _secret_folder_refused() from None
+    try:
+        trusted = _trusted_folder(folder)
+    except BaseException:
+        os.close(folder)
+        raise
+    if not trusted:
+        os.close(folder)
+        raise _secret_folder_refused()
+    return folder
+
+
+# A token cache or key file is a few KB; anything this large is not one.
+_SECRET_READ_LIMIT = 1024 * 1024
+
+
+def secure_read_text(path: str | Path, *, limit: int = _SECRET_READ_LIMIT) -> str | None:
+    """Read a secret file only from a folder and file no other account can change; ``None`` when there is none.
+
+    The same folder check as :func:`secure_write_text`, so what is read is what this account wrote: the folder is opened
+    once and checked, and the file is opened in it without following a link and checked on its descriptor (a regular
+    file you own, no group or world write, no ACL that allows anything). Refusals carry a fixed message, never the path.
+    """
+    target = Path(path).expanduser()
+    if os.name != "posix":
+        try:
+            return target.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+    if not os.path.isdir(target.parent):
+        return None
+    folder = _open_secret_folder(target.parent)
+    try:
+        try:
+            descriptor = os.open(
+                target.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0), dir_fd=folder
+            )
+        except FileNotFoundError:
+            return None
+        except OSError:  # a link (ELOOP) or a file this account cannot open
+            raise _secret_file_refused() from None
+        try:
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+                or info.st_size > limit
+                or _acl_grants_access(descriptor)
+            ):
+                raise _secret_file_refused()
+            with os.fdopen(descriptor, "rb", closefd=False) as handle:
+                data = handle.read(limit + 1)
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(folder)
+    if len(data) > limit:
+        raise _secret_file_refused()
+    return data.decode("utf-8")
 
 
 def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> Path:
@@ -197,7 +337,10 @@ def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> P
     """
 
     target = Path(path).expanduser()
-    _create_private_parents(target.parent)
+    try:
+        _create_private_parents(target.parent)
+    except OSError:  # the OS message names the folder, which may be a sensitive argument such as --token-cache
+        raise _secret_folder_refused() from None
     if os.name != "posix":  # no POSIX modes or folder descriptors (Windows): the same replace in one step
         fd, path_name = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
         try:
@@ -211,13 +354,8 @@ def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> P
                 pass
             raise
         return target
+    folder = _open_secret_folder(target.parent)
     try:
-        folder = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
-    except PermissionError:
-        raise _secret_folder_refused() from None
-    try:
-        if not _trusted_folder(os.fstat(folder)):
-            raise _secret_folder_refused()
         temporary = f".{target.name}.{secrets.token_hex(8)}.tmp"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         try:

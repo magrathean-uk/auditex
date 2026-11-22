@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -255,3 +257,107 @@ def test_entry_swapped_after_the_write_is_neither_chmodded_nor_installed(tmp_pat
         secure_write_text(folder / "token.json", "secret")
     assert _write_mode(victim) == 0o644 and victim.read_text(encoding="utf-8") == "keep"
     assert not (folder / "token.json").exists() and not (folder / "token.json").is_symlink()
+
+
+# ---- repair round 1 for group H (items 22, 23, 26): every refusal is the fixed message, ACLs count, reads are checked ----
+
+
+@_posix_owner
+def test_item22_blocked_creation_of_a_missing_cache_folder_gives_the_fixed_refusal(tmp_path) -> None:
+    locked = tmp_path / "locked-marker"
+    locked.mkdir()
+    os.chmod(locked, 0o500)  # owner can enter, but nothing can be created inside
+    try:
+        with pytest.raises(PermissionError) as caught:
+            secure_write_text(locked / "sub-marker" / "token.json", "secret")
+    finally:
+        os.chmod(locked, 0o700)
+    assert "secret_folder_refused" in str(caught.value)
+    assert "locked-marker" not in str(caught.value) and "sub-marker" not in str(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+    assert list(locked.iterdir()) == []
+
+
+_macos_owner = pytest.mark.skipif(sys.platform != "darwin" or os.geteuid() == 0, reason="macOS ACLs, not as root")
+
+
+def _add_acl(path, entry: str) -> None:
+    subprocess.run(["chmod", "+a", entry, str(path)], check=True)
+
+
+def _clear_acl(path) -> None:
+    subprocess.run(["chmod", "-N", str(path)], check=False)
+
+
+@_macos_owner
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "everyone allow add_file,delete_child",  # another account can replace the cache in an 0700 folder
+        "everyone allow read,file_inherit",  # a new 0600 cache would inherit read access for another account
+    ],
+)
+def test_item23_folder_whose_acl_grants_other_accounts_is_refused(tmp_path, entry: str) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    _add_acl(folder, entry)
+    try:
+        with pytest.raises(PermissionError, match="secret_folder_refused") as caught:
+            secure_write_text(folder / "token.json", "secret")
+        assert list(folder.iterdir()) == []
+    finally:
+        _clear_acl(folder)
+    assert "cache" not in str(caught.value).split("secret_folder_refused", 1)[0]
+
+
+@_macos_owner
+def test_item23_deny_only_acl_like_the_desktop_folder_is_accepted(tmp_path) -> None:
+    folder = tmp_path / "desktop-like"
+    folder.mkdir(mode=0o700)
+    _add_acl(folder, "everyone deny delete")
+    try:
+        target = secure_write_text(folder / "token.json", "secret")
+        assert target.read_text(encoding="utf-8") == "secret" and _write_mode(target) == 0o600
+    finally:
+        _clear_acl(folder)
+
+
+@_posix_owner
+def test_item26_secure_read_returns_an_owner_written_secret_and_none_when_missing(tmp_path) -> None:
+    from azure_tenant_audit import secret_hygiene
+
+    target = secure_write_text(tmp_path / "cache" / "token.json", "secret")
+    assert secret_hygiene.secure_read_text(target) == "secret"
+    assert secret_hygiene.secure_read_text(tmp_path / "cache" / "absent.json") is None
+    assert secret_hygiene.secure_read_text(tmp_path / "missing-folder" / "token.json") is None
+
+
+@_posix_owner
+def test_item26_secure_read_refuses_a_folder_other_accounts_can_change(tmp_path) -> None:
+    from azure_tenant_audit import secret_hygiene
+
+    folder = tmp_path / "shared-marker"
+    folder.mkdir()
+    (folder / "token.json").write_text("planted", encoding="utf-8")
+    os.chmod(folder, 0o777)
+    with pytest.raises(PermissionError, match="secret_folder_refused") as caught:
+        secret_hygiene.secure_read_text(folder / "token.json")
+    assert "shared-marker" not in str(caught.value) and caught.value.__cause__ is None
+
+
+@_posix_owner
+def test_item26_secure_read_refuses_a_link_or_a_file_others_can_write(tmp_path) -> None:
+    from azure_tenant_audit import secret_hygiene
+
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text("planted", encoding="utf-8")
+    (folder / "linked.json").symlink_to(elsewhere)
+    with pytest.raises(PermissionError, match="secret_file_refused"):
+        secret_hygiene.secure_read_text(folder / "linked.json")
+    writable = folder / "writable.json"
+    writable.write_text("planted", encoding="utf-8")
+    os.chmod(writable, 0o666)
+    with pytest.raises(PermissionError, match="secret_file_refused"):
+        secret_hygiene.secure_read_text(writable)
