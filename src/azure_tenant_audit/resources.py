@@ -36,7 +36,14 @@ def _repo_root() -> Path:
 
 
 def _looks_like_dev_root(root: Path) -> bool:
-    return (root / "pyproject.toml").exists() and any((root / directory).exists() for directory in shipped_directories())
+    """Only this package's own source checkout is a dev root: the engine must be imported from its src tree."""
+    try:
+        own_tree = (root / "src" / "azure_tenant_audit" / "resources.py").resolve() == Path(__file__).resolve()
+    except OSError:
+        return False
+    return own_tree and (root / "pyproject.toml").is_file() and any(
+        (root / directory).exists() for directory in shipped_directories()
+    )
 
 
 def _looks_like_installed_root(root: Path) -> bool:
@@ -61,9 +68,11 @@ def _resource_adapters() -> list[ResourceAdapter]:
     if configured:
         adapters.append(ResourceAdapter("env", Path(configured).expanduser()))
 
-    cwd = Path.cwd()
-    dev_candidates = _unique_paths([cwd, *cwd.parents, _repo_root()])
-    adapters.extend(ResourceAdapter("dev", root) for root in dev_candidates if _looks_like_dev_root(root))
+    # The working directory never supplies resources: a foreign or older checkout above it would
+    # silently replace shipped configs and rule catalogues. Overrides go through the env root.
+    repo_root = _repo_root()
+    if _looks_like_dev_root(repo_root):
+        adapters.append(ResourceAdapter("dev", repo_root))
 
     installed_candidates: list[Path] = []
     data_path = sysconfig.get_paths().get("data")
@@ -92,7 +101,18 @@ def resolve_resource_path(path: str | Path) -> Path:
         if candidate is not None:
             return candidate
 
+    # Not a resource any root holds: an operator's own relative path (a sample, a config) means the cwd. A path
+    # shaped like shipped content never does, so a wheel missing a shipped file cannot pick up a same-named file.
+    in_cwd = Path.cwd() / target
+    if not _matches_shipped_pattern(target) and in_cwd.exists():
+        return in_cwd
     return _repo_root() / target
+
+
+def _matches_shipped_pattern(relative: Path) -> bool:
+    return ".." not in relative.parts and any(
+        relative.match(pattern) for area in SHIPPED_CONTENT_AREAS for pattern in area.package_patterns
+    )
 
 
 def read_selected_resource(path: str | Path, *, default: str, field: str) -> bytes:
@@ -110,6 +130,8 @@ def is_shipped_resource(path: str | Path) -> bool:
     """Whether a lexical path belongs to a shipped-content area of a resource root."""
     target = Path(path).expanduser()
     for adapter in _resource_adapters():
+        if not target.is_absolute() and adapter.resolve(target) is None:
+            continue  # a relative path counts only when this root holds it, never a same-named cwd file
         try:
             relative = target.relative_to(adapter.root) if target.is_absolute() else target
         except ValueError:

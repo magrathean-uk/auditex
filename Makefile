@@ -41,7 +41,7 @@ sample:
 # The reader app with its certificate (docs/guides/reader-app-permissions.md); no sign-in window opens.
 .PHONY: audit-full
 audit-full:
-	@./scripts/tenant-audit-full --tenant-id "$(TENANT_ID)" --tenant-name "$(TENANT_NAME)" --client-id "$(CLIENT_ID)" \
+	@AUDITEX_PYTHON="$(PYTHON)" ./scripts/tenant-audit-full --tenant-id "$(TENANT_ID)" --tenant-name "$(TENANT_NAME)" --client-id "$(CLIENT_ID)" \
 		--certificate-path "$(CERTIFICATE_PATH)" --certificate-thumbprint "$(CERTIFICATE_THUMBPRINT)"
 
 .PHONY: install
@@ -65,8 +65,9 @@ doctor:
 AUDIT_DEPS_DIR ?= build/audit-deps
 AUDIT_DEPS_IGNORE ?= scripts/audit-deps-ignore.json
 
-# Resolves the base install and every extra to a pinned list with uv (metadata only: --no-build
-# forbids source distribution builds; no install into $(VENV)), then audits each list with
+# Resolves the base install and every extra declared in pyproject.toml (read from it, so a new extra
+# is never skipped) to a pinned list with uv for the running interpreter and platform (metadata only:
+# --no-build forbids source distribution builds; no install into $(VENV)), then audits each list with
 # pip-audit --no-deps --disable-pip. pip-audit lives in the dev extra and runs from a tool
 # environment under $(AUDIT_DEPS_DIR), never from $(VENV). Stale lists are removed first
 # so earlier pins never steer resolution; ignore entries need id, package, reason and decision (a DECISIONS.md id).
@@ -79,7 +80,9 @@ audit-deps:
 		rm -f "$$out"/*.txt; \
 		resolve() { name=$$1; shift; uv pip compile --quiet --no-build --no-header --no-annotate --python "$(PYTHON)" "$$@" pyproject.toml -o "$$out/$$name.txt" || { echo "audit-deps: metadata-only resolution of $$name failed (--no-build forbids source builds; a dependency without a wheel needs a pin change)" >&2; exit 1; }; }; \
 		resolve base; \
-		for extra in mcp test google dev; do resolve "$$extra" --extra "$$extra"; done; \
+		extras=$$($(PYTHON) -c 'import tomllib; print(" ".join(tomllib.load(open("pyproject.toml", "rb"))["project"]["optional-dependencies"]))'); \
+		test -n "$$extras" || { echo "audit-deps: no extras read from pyproject.toml" >&2; exit 1; }; \
+		for extra in $$extras; do resolve "$$extra" --extra "$$extra"; done; \
 		test -x "$$out/tool/bin/python" || uv venv --quiet --python "$(PYTHON)" "$$out/tool"; \
 		uv pip install --quiet --python "$$out/tool/bin/python" -r "$$out/dev.txt"; \
 		ignores=$$($(PYTHON) -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]); rows = json.loads(p.read_text(encoding="utf-8")) if p.exists() else []; [sys.exit("ignore entry needs id, package, reason, decision: %r" % r) for r in rows if not all(r.get(k) for k in ("id", "package", "reason", "decision"))]; print(" ".join("--ignore-vuln " + r["id"] for r in rows))' "$(AUDIT_DEPS_IGNORE)"); \
@@ -92,6 +95,7 @@ audit-deps:
 
 .PHONY: release-check
 release-check:
+	@test -z "$$(git status --porcelain)" || { echo "make release-check: uncommitted changes or untracked files; the checks run on the working tree but release-archive and dist package HEAD, so commit them first" >&2; exit 2; }
 	$(MAKE) lint
 	$(MAKE) test
 	$(MAKE) contract-smoke
@@ -100,9 +104,15 @@ release-check:
 	./scripts/oss-taint-scan.sh
 	gitleaks dir . --no-banner --redact
 
+# The setuptools pin in the `test` extra (installed by make install) is the only builder release-archive and dist use.
+SETUPTOOLS_VERSION = $(shell sed -n 's/^ *"setuptools==\([0-9.]*\)".*/\1/p' pyproject.toml)
+CHECK_SETUPTOOLS = found=$$($(PYTHON) -c 'import setuptools; print(setuptools.__version__)' 2>/dev/null) || found=; \
+	test -n "$(SETUPTOOLS_VERSION)" && test "$$found" = "$(SETUPTOOLS_VERSION)" || { echo "make $@: setuptools $(SETUPTOOLS_VERSION) is required in $(PYTHON), found '$${found:-none}'; run make install" >&2; exit 2; }
+
 .PHONY: release-archive
 release-archive:
 	@set -eu; \
+		$(CHECK_SETUPTOOLS); \
 		dir=$$(mktemp -d "$${TMPDIR:-/tmp}/auditex-archive.XXXXXX"); \
 		trap 'rm -rf "$$dir" 2>/dev/null || echo "warning: could not remove $$dir" >&2' 0; \
 		trap 'exit 1' HUP INT TERM; \
@@ -116,15 +126,22 @@ release-archive:
 		$(PYTHON) -m pip wheel --no-deps --no-build-isolation --no-index --wheel-dir "$$dir/wheel" "$$dir/source"; \
 		$(PYTHON) scripts/check-archive-wheel.py "$$dir/source/src" "$$dir"/wheel/*.whl
 
+# The artefacts land in $(DIST_DIR); earlier auditex wheels and sdists there are removed first, so the
+# folder holds only this build (release smoke and the gh release command take every file in it).
+DIST_DIR ?= dist
+
 .PHONY: dist
 dist:
 	@set -eu; \
+		$(CHECK_SETUPTOOLS); \
 		dir=$$(mktemp -d "$${TMPDIR:-/tmp}/auditex-dist.XXXXXX"); \
 		trap 'rm -rf "$$dir" 2>/dev/null || echo "warning: could not remove $$dir" >&2' 0; \
 		trap 'exit 1' HUP INT TERM; \
 		git archive HEAD > "$$dir/source.tar"; \
 		mkdir "$$dir/source" "$$dir/artifacts"; \
+		umask 022; \
 		tar -xf "$$dir/source.tar" -C "$$dir/source"; \
+		chmod -R u=rwX,go=rX "$$dir/source"; \
 		: "$${SOURCE_DATE_EPOCH:=$$(git show -s --format=%ct HEAD)}"; export SOURCE_DATE_EPOCH; \
 		cd "$$dir/source"; \
 		$(abspath $(PYTHON)) -c 'import setuptools.build_meta as b, sys; b.build_sdist(sys.argv[1])' "$$dir/artifacts"; \
@@ -132,8 +149,9 @@ dist:
 		$(abspath $(PYTHON)) -c 'import setuptools.build_meta as b, sys; b.build_wheel(sys.argv[1])' "$$dir/artifacts"; \
 		set -- "$$dir"/artifacts/*.whl; test -f "$$1"; \
 		set -- "$$dir"/artifacts/*.tar.gz; test -f "$$1"; \
-		mkdir -p "$(CURDIR)/dist"; \
-		cp "$$dir"/artifacts/*.whl "$$dir"/artifacts/*.tar.gz "$(CURDIR)/dist/"
+		mkdir -p "$(abspath $(DIST_DIR))"; \
+		rm -f "$(abspath $(DIST_DIR))"/auditex-*.whl "$(abspath $(DIST_DIR))"/auditex-*.tar.gz; \
+		cp "$$dir"/artifacts/*.whl "$$dir"/artifacts/*.tar.gz "$(abspath $(DIST_DIR))/"
 
 # contract-smoke only: each sample run's collection made a private 32-byte pseudonym key; this asserts it and
 # replaces it with a fixed seed derived from the run folder name, through the file the product reads, so pseudonyms in

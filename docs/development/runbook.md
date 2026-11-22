@@ -14,7 +14,7 @@ auditex doctor --json
 auditex --help
 ```
 
-`make install` does the same in `.venv` (or the folder named by `VENV=`), creating it when missing, and never installs into a system Python. It installs the `test` extra too (pytest and jsonschema), so a fresh `make test` has what the export-schema tests need. Google Workspace needs `python -m pip install -e '.[google]'`; MCP needs `python -m pip install -e '.[mcp]'`. `auditex setup` installs local tools. Its `--mcp`, `--exchange`, and `--pwsh` options install optional tooling, so use them only for the intended scope.
+`make install` does the same in `.venv` (or the folder named by `VENV=`), creating it when missing, and never installs into a system Python. It installs the `test` extra too (pytest, jsonschema and the pinned setuptools that `make dist` and `make release-archive` build with), so a fresh `make test` has what the export-schema tests need. Google Workspace needs `python -m pip install -e '.[google]'`; MCP needs `python -m pip install -e '.[mcp]'`. `auditex setup` installs local tools in a source checkout; in an installed wheel or sdist it prints the manual steps instead, since the Python it runs in is already set up. Its `--mcp`, `--exchange`, and `--pwsh` options install optional tooling, so use them only for the intended scope.
 
 ## Plan access and probe
 
@@ -47,7 +47,7 @@ Google Workspace commands and credential choices are in the [product manual](../
 
 ## Offline fixtures
 
-`auditex demo` is the guided walkthrough for demonstrations and recordings. It replays the synthetic demo tenant into `outputs/demo` (recreated on each run), pauses between steps unless `--no-pause` is given, and writes `outputs/demo/explorer.html`. `--sample` replays another offline fixture instead.
+`auditex demo` is the guided walkthrough for demonstrations and recordings. It replays the synthetic demo tenant into `outputs/demo` under the current folder, which must be empty or absent (to run it again, remove the folder or pass another `--out`), pauses between steps unless `--no-pause` is given, and writes `outputs/demo/explorer.html`. `--sample` replays another offline fixture instead.
 
 ```bash
 auditex run --offline --sample examples/sample_audit_bundle/sample_result.json --tenant-name demo --run-name sample --out outputs/offline
@@ -96,11 +96,11 @@ Install the test dependencies for development: `python -m pip install -e '.[test
 | `python3 scripts/generate-rule-packs.py --check` | Fails when `configs/rule-packs.json` differs from the packs generated from the rule templates and mappings; without `--check` it rewrites the file. |
 | `gitleaks dir .` | Secret scan of the working tree. `.gitleaks.toml` skips the git-ignored local and generated directories (`.venv`, `.secrets`, `outputs` and similar). |
 | `make release-archive` | Builds a wheel from `git archive HEAD` with no build isolation and no index, rejects `build/` and `egg-info` entries, and runs `scripts/check-archive-wheel.py` against the archived source. |
-| `make dist` | Builds the sdist and wheel from `git archive HEAD` in a temporary folder and copies them to `dist/`. When `SOURCE_DATE_EPOCH` is unset it uses the commit time of `HEAD`, and it normalises the sdist (gzip header time, member times, owner, group, mode, order), so the wheel and sdist bytes depend only on the commit. |
-| `make audit-deps` | Resolves the base install and every extra from `pyproject.toml` with `uv` (metadata only, no source builds) and audits the result. Needs `uv`. |
-| `bash scripts/release-smoke.sh dist <work-dir>` | Wheel and sdist smoke: installs the artefacts in `dist/` into isolated environments for base, Google and MCP checks. |
+| `make dist` | Builds the sdist and wheel from `git archive HEAD` in a temporary folder and copies them to `dist/`. When `SOURCE_DATE_EPOCH` is unset it uses the commit time of `HEAD`, and it normalises the sdist (gzip header time, member times, owner, group, mode, order) and the file modes of the tree the wheel is built from, so with the pinned toolchain (the `setuptools` pin in the `test` extra, which it checks) the wheel and sdist bytes depend only on the commit, not on the builder's umask. Earlier `auditex-*` wheels and sdists in the output folder are removed first; `DIST_DIR=` names another folder. |
+| `make audit-deps` | Resolves the base install and every extra declared in `pyproject.toml` (read from it, `local-answer` included) with `uv` for the running interpreter and platform (metadata only, no source builds) and audits the result. Needs `uv`. |
+| `bash scripts/release-smoke.sh dist <work-dir>` | Wheel and sdist smoke: needs exactly one wheel and one sdist in `dist/`, both of the `pyproject.toml` version, and installs them into isolated environments for base, Google and MCP checks. Installed commands run from an empty folder, never the checkout, and it checks that resources come only from the installed package, that `auditex doctor` reports core ready, that `auditex setup` succeeds and that `auditex demo` runs. |
 | `python3 scripts/check-reproducible-build.py` | Builds the current commit twice through plain `make dist` and compares the wheel bytes and the sdist bytes; it exits non-zero and names the artefact that differs. |
-| `make release-check` | Runs `lint`, `test`, `contract-smoke`, `release-archive`, the rule-pack drift check, the taint scan and the gitleaks scan in that order and stops at the first failure. Needs `gitleaks` on `PATH`. |
+| `make release-check` | Refuses to start while tracked files have uncommitted changes (the checks run on the working tree, the archive and dist builds package `HEAD`). Then runs `lint`, `test`, `contract-smoke`, `release-archive`, the rule-pack drift check, the taint scan and the gitleaks scan in that order and stops at the first failure. Needs `gitleaks` on `PATH`. |
 
 `.pre-commit-config.yaml` runs Ruff, the trailing-whitespace and final-newline checks, a staged-file gitleaks scan and the generic file checks on every commit once the hook is installed with `pre-commit install`. The typos, shellcheck and shfmt hooks stay manual: run one with `pre-commit run --hook-stage manual <hook-id> --all-files`. Use focused tests for changed behavior. Contract changes need contract smoke. See [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) for contribution scope and check reporting.
 
