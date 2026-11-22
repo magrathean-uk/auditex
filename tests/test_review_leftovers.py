@@ -183,3 +183,32 @@ def test_r164_docs_name_the_google_doh_option() -> None:
     setup = " ".join((root / "docs/guides/setup-guide.md").read_text(encoding="utf-8").split())
     google = setup[setup.index("Google DNS posture (`google_dns_posture`"):]
     assert "--doh-endpoint" in google[: google.index("--exclude google_dns_posture")]
+
+
+# Compare/diff/MCP and local-answer wording the November docs pass could not add before that code landed.
+
+def _flat_doc(relative: str) -> str:
+    return " ".join((Path(__file__).resolve().parents[1] / relative).read_text(encoding="utf-8").split())
+
+
+def test_output_contract_states_the_diff_gate_and_undated_runs() -> None:
+    text = _flat_doc("docs/reference/output-contract.md")
+    for needle in ("`auditex diff`", "`auditex_diff_runs`", "same_tenant_required", "tenant_id_mismatch",
+                   "run_unverified:<baseline|current>:<problem>", "run_created_utc_missing"):
+        assert needle in text, needle
+
+
+def test_output_contract_states_the_mcp_summary_cap_and_command_timeout() -> None:
+    from auditex.command_runner import COMMAND_TIMEOUT_ENV, DEFAULT_COMMAND_TIMEOUT_SECONDS
+    from auditex.mcp_server import SUMMARY_RESPONSE_BUDGET_BYTES
+
+    text = _flat_doc("docs/reference/output-contract.md")
+    assert SUMMARY_RESPONSE_BUDGET_BYTES == 48_000 and "48,000 bytes" in text
+    for needle in ("`summary_truncated`", "`omitted_sections`", "`read_with`", COMMAND_TIMEOUT_ENV, "`partial_run_dir`"):
+        assert needle in text, needle
+    assert DEFAULT_COMMAND_TIMEOUT_SECONDS == 4 * 3600 and "four hours" in text
+
+
+def test_local_answer_guide_states_the_licence_in_the_notice_and_record() -> None:
+    text = _flat_doc("docs/guides/local-answer.md")
+    assert "names the model's licence" in text and "`local_answer.json`" in text
