@@ -111,18 +111,18 @@ function Invoke-BootstrapCommand {
     [string]$Module = "unknown"
   )
   $start = Get-Date
-  Write-BootstrapEvent -Message "$Module:$Name.started" -Status "started" -Step $Step -Details @{module=$Module}
+  Write-BootstrapEvent -Message "${Module}:$Name.started" -Status "started" -Step $Step -Details @{module=$Module}
   try {
     $result = & $Action
     $durationMs = [int]((Get-Date) - $start).TotalMilliseconds
-    Write-BootstrapEvent -Message "$Module:$Name.completed" -Status "success" -Step $Step -Details @{
+    Write-BootstrapEvent -Message "${Module}:$Name.completed" -Status "success" -Step $Step -Details @{
       module = $Module
       durationMs = $durationMs
     }
     return $result
   } catch {
     $durationMs = [int]((Get-Date) - $start).TotalMilliseconds
-    Write-BootstrapEvent -Message "$Module:$Name.failed" -Status "error" -Step $Step -Details @{
+    Write-BootstrapEvent -Message "${Module}:$Name.failed" -Status "error" -Step $Step -Details @{
       module = $Module
       durationMs = $durationMs
       error = $_.Exception.Message
@@ -131,16 +131,27 @@ function Invoke-BootstrapCommand {
   }
 }
 
+# Returns the config tenant GUID; refuses a missing, malformed or all-zero placeholder value.
+function Get-BootstrapTenantId {
+  $raw = [string]$global:BootstrapSession.Config.tenant.tenantId
+  $parsed = [guid]::Empty
+  if (-not [guid]::TryParseExact($raw.Trim(), "D", [ref]$parsed) -or $parsed -eq [guid]::Empty) {
+    throw "tenant_id_required: set tenant.tenantId in the config to the lab tenant GUID (the all-zero placeholder is refused)."
+  }
+  return $parsed.ToString()
+}
+
 function Connect-BootstrapGraph {
   $cfg = $global:BootstrapSession.Config
   $auth = $cfg.authentication
+  $tenantId = Get-BootstrapTenantId
 
   if ($auth.mode -eq "app") {
     if (-not $auth.app.clientId) {
       throw "App mode requires authentication.app.clientId in config."
     }
     Invoke-BootstrapCommand -Name "connect-mggraph-app" -Module "graph" -Step "auth" -Action {
-      Connect-MgGraph -TenantId $cfg.tenant.tenantId -ClientId $auth.app.clientId -CertificateThumbprint $auth.app.certificateThumbprint -NoWelcome
+      Connect-MgGraph -TenantId $tenantId -ClientId $auth.app.clientId -CertificateThumbprint $auth.app.certificateThumbprint -NoWelcome
       Select-MgProfile -Name "beta"
     }
   } else {
@@ -148,10 +159,8 @@ function Connect-BootstrapGraph {
       if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
         throw "Azure CLI is required when using azure_cli auth mode."
       }
-      $tenant = $cfg.authentication.azureCli.tenant
-      if (-not $tenant) { $tenant = $cfg.tenant.tenantId }
-      & az account show --output none *> $null 2>&1
-      $tokenResponse = az account get-access-token --resource $cfg.authentication.azureCli.resource --tenant $tenant --query accessToken -o tsv
+      # Always the named lab tenant: a hint such as "organizations" would take the az default tenant.
+      $tokenResponse = az account get-access-token --resource $cfg.authentication.azureCli.resource --tenant $tenantId --query accessToken -o tsv
       if (-not $tokenResponse) {
         throw "No Azure CLI access token was returned."
       }
@@ -161,12 +170,17 @@ function Connect-BootstrapGraph {
   }
 
   Invoke-BootstrapCommand -Name "graph-context" -Module "graph" -Step "auth" -Action {
+    # Every later step writes through this Graph session, so prove it is the named lab tenant first.
+    $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?`$select=id,displayName" -OutputType PSObject -ErrorAction Stop
+    $orgs = @($org.value)
+    if ($orgs.Count -ne 1 -or ([string]$orgs[0].id).ToLowerInvariant() -ne $tenantId) {
+      throw "tenant_mismatch: the Graph session is not in tenant $tenantId. Nothing was written."
+    }
     $sessionUser = $null
     try {
       $sessionUser = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me" -OutputType PSObject -ErrorAction Stop
     } catch {
-      $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?`$select=id,displayName" -OutputType PSObject -ErrorAction Stop
-      $sessionUser = $org.value[0]
+      $sessionUser = $orgs[0]
     }
 
     $global:BootstrapSession.Context.signedInUser = $sessionUser
@@ -182,11 +196,22 @@ function Connect-BootstrapExchange {
     return
   }
 
+  $organization = [string]$global:BootstrapSession.Config.tenant.tenantDomain
+  if ([string]::IsNullOrWhiteSpace($organization)) {
+    throw "tenant_domain_required: set tenant.tenantDomain in the config to the lab tenant domain."
+  }
   Invoke-BootstrapCommand -Name "connect-exchange-online" -Module "exchange" -Step "exchange" -Action {
     if ($global:BootstrapSession.Config.authentication.mode -eq "app" -and $global:BootstrapSession.Config.authentication.app.clientId) {
-      Connect-ExchangeOnline -AppId $global:BootstrapSession.Config.authentication.app.clientId -CertificateThumbprint $global:BootstrapSession.Config.authentication.app.certificateThumbprint -Organization $global:BootstrapSession.Config.tenant.tenantDomain -ShowBanner:$false
+      Connect-ExchangeOnline -AppId $global:BootstrapSession.Config.authentication.app.clientId -CertificateThumbprint $global:BootstrapSession.Config.authentication.app.certificateThumbprint -Organization $organization -ShowBanner:$false
     } else {
       Connect-ExchangeOnline -ShowBanner:$false
+    }
+    # A delegated sign-in lands in the account's own tenant, so prove it is the named lab tenant.
+    $tenantId = Get-BootstrapTenantId
+    $connection = @(Get-ConnectionInformation) | Select-Object -Last 1
+    if (-not $connection -or ([string]$connection.TenantID).ToLowerInvariant() -ne $tenantId) {
+      Disconnect-ExchangeOnline -Confirm:$false
+      throw "tenant_mismatch: the Exchange Online session is not in tenant $tenantId. Nothing was written."
     }
   }
 }

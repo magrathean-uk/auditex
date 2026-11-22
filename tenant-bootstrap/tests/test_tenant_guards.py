@@ -169,3 +169,81 @@ def test_dry_run_with_placeholder_tenant_still_plans(kind, tmp_path, graph, az_c
     config = lab_config(tmp_path, ZERO_TENANT)
     assert module.main(["--config", str(config), "--run-name", "guard", "--dry-run", *extra]) == 0
     assert recorder.calls == []
+
+
+PWSH_DRIVER = r"""
+$ErrorActionPreference = "Stop"
+. (Join-Path $env:KIT_SCRIPTS "00-shared.ps1") -ConfigPath $env:KIT_CONFIG
+function Write-BootstrapEvent { param($Message, $Status, $Details, $Step) }
+function Connect-MgGraph { }
+function Select-MgProfile { }
+function az { $global:AzCalls += ,($args -join " "); "fake-token" }
+function Invoke-MgGraphRequest {
+  param($Method, $Uri, $OutputType, $ErrorAction)
+  if ($Uri -like "*/me*") { return [pscustomobject]@{ userPrincipalName = "operator@lab.example" } }
+  return [pscustomobject]@{ value = @([pscustomobject]@{ id = $env:ORG_ID; displayName = "Org" }) }
+}
+function Get-Module { param([switch]$ListAvailable, $Name) [pscustomobject]@{ Name = $Name } }
+function Connect-ExchangeOnline { $global:ExoArgs = ($args | ForEach-Object { "$_" }) -join " " }
+function Get-ConnectionInformation { [pscustomobject]@{ TenantID = $env:EXO_TENANT; State = "Connected" } }
+function Disconnect-ExchangeOnline { $global:ExoDisconnected = $true }
+$global:ExoDisconnected = $false
+$global:AzCalls = @()
+$global:ExoArgs = ""
+$global:BootstrapSession = @{ Config = (Get-Content $env:KIT_CONFIG -Raw | ConvertFrom-Json); Context = @{} }
+$result = [ordered]@{ graphError = ""; exchangeError = "" }
+try { Connect-BootstrapGraph } catch { $result.graphError = $_.Exception.Message }
+try { Connect-BootstrapExchange } catch { $result.exchangeError = $_.Exception.Message }
+$result.azCalls = @($global:AzCalls)
+$result.exchangeArgs = $global:ExoArgs
+$result.exchangeDisconnected = $global:ExoDisconnected
+$result | ConvertTo-Json -Compress
+"""
+
+
+def run_shared_ps1(tmp_path: Path, tenant_id: str, org_id: str, exo_tenant: str | None = None) -> dict:
+    import os
+    import subprocess
+
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("pwsh is not installed")
+    config = lab_config(tmp_path, tenant_id)
+    driver = tmp_path / "driver.ps1"
+    driver.write_text(PWSH_DRIVER, encoding="utf-8")
+    env = {**os.environ, "KIT_SCRIPTS": str(ROOT / "scripts"), "KIT_CONFIG": str(config), "ORG_ID": org_id,
+           "EXO_TENANT": exo_tenant or org_id}
+    proc = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(driver)],
+                          capture_output=True, text=True, timeout=120, env=env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_powershell_graph_context_refuses_another_tenant(tmp_path):
+    result = run_shared_ps1(tmp_path, LAB_TENANT, OTHER_TENANT)
+    assert "tenant_mismatch" in result["graphError"]
+
+
+def test_powershell_graph_token_is_requested_for_the_named_tenant(tmp_path):
+    result = run_shared_ps1(tmp_path, LAB_TENANT, LAB_TENANT)
+    assert result["graphError"] == ""
+    token_calls = [call for call in result["azCalls"] if "get-access-token" in call]
+    assert token_calls and all(f"--tenant {LAB_TENANT}" in call for call in token_calls)
+
+
+def test_powershell_placeholder_tenant_is_refused_before_auth(tmp_path):
+    result = run_shared_ps1(tmp_path, ZERO_TENANT, ZERO_TENANT)
+    assert "tenant_id_required" in result["graphError"]
+    assert not [call for call in result["azCalls"] if "get-access-token" in call]
+
+
+def test_powershell_exchange_session_in_another_tenant_is_refused(tmp_path):
+    result = run_shared_ps1(tmp_path, LAB_TENANT, LAB_TENANT, exo_tenant=OTHER_TENANT)
+    assert "tenant_mismatch" in result["exchangeError"]
+    assert result["exchangeDisconnected"] is True
+
+
+def test_powershell_exchange_session_in_the_lab_tenant_is_accepted(tmp_path):
+    result = run_shared_ps1(tmp_path, LAB_TENANT, LAB_TENANT)
+    assert result["exchangeError"] == ""
+    assert result["exchangeDisconnected"] is False
