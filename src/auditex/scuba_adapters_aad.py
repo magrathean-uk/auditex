@@ -246,6 +246,7 @@ def _ca_rule(bundle: Bundle) -> Any:
                          "applicationFilter", "includeServicePrincipals", "excludeServicePrincipals",
                          "servicePrincipalFilter", "id", "displayName"}
     found = False
+    _copy_whole = object()
 
     def restriction(value: Any) -> Any:
         if isinstance(value, dict):
@@ -275,7 +276,8 @@ def _ca_rule(bundle: Bundle) -> Any:
                     check = _pascal
                 if check is None and path == "grantControls." and key not in {"id", "displayName"} and not _blank(value):
                     # Review R001: an unknown populated grant control reaches the rule, which reads it as unknown.
-                    check = _pascal
+                    # Copied whole: stripping id and displayName would empty a control carried only by those.
+                    check = _copy_whole
                 if check is None:
                     # _restricted also reads unknown keys inside these two
                     # containers. Dropping a populated one could broaden a pass.
@@ -292,6 +294,8 @@ def _ca_rule(bundle: Bundle) -> Any:
                 output[target] = None if value is None else convert(value, check, path + key + ".", variant=variant)
             elif check is _pascal:
                 output[target] = restriction(value)
+            elif check is _copy_whole:
+                output[target] = _pascal(value)
             else:
                 if value is None and check is _strings:
                     value = []
