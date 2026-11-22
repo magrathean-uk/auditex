@@ -34,6 +34,29 @@ def test_live_resume_of_an_offline_replay_folder_is_refused(tmp_path: Path) -> N
     assert _manifest(writer.run_dir)["replay_source"] == {"file": "sample_result.json"}
 
 
+def test_the_engine_cli_refuses_a_live_resume_of_a_replay_with_exit_2_and_no_traceback(
+    tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
+    # The refusal goes through the CLI guard: a fixed, path-free message and exit 2, before any tenant contact.
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, "lab", "r1")
+    writer.write_bundle({"collectors": [], "mode": "offline", "replay_source": {"file": "sample_result.json"}})
+
+    def refuse_resume(**_: Any) -> int:
+        AuditWriter(tmp_path, "lab", run_dir=writer.run_dir)
+        return 0
+
+    monkeypatch.setattr(cli, "run_live", lambda args, **kwargs: refuse_resume())
+    code = cli.main(["--tenant-name", "lab", "--out", str(tmp_path), "--resume-from", str(writer.run_dir)])
+
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "offline replay" in err and "Traceback" not in err
+    assert str(tmp_path) not in err
+
+
 def test_resume_drops_the_earlier_sessions_waiver_and_sampling_keys(tmp_path: Path) -> None:
     from azure_tenant_audit.output import AuditWriter
 

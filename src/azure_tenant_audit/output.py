@@ -26,6 +26,7 @@ from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
 from .evidence_db import register_run_log
 from .findings import apply_coverage_gaps_to_report_pack
+from .guarded_io import UnsafeRunFileError
 from .partner_domains import (
     BUNDLE_PATH as PARTNER_DOMAINS_PATH,
 )
@@ -190,8 +191,17 @@ SESSION_SCOPED_MANIFEST_KEYS = frozenset(
 )
 
 
-class ResumeRefusedError(ValueError):
-    """A run folder that cannot be resumed (an offline replay's folder)."""
+class ResumeRefusedError(UnsafeRunFileError):
+    """A run folder that cannot be resumed (an offline replay's folder).
+
+    An ``UnsafeRunFileError``, so the CLI guard prints this fixed, path-free refusal and exits 2.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("resume-from", reason="offline_replay")
+
+    def __str__(self) -> str:
+        return "Refusing resume-from: the folder is an offline replay, which cannot be resumed as a live run. Start a new run."
 
 
 class AuditWriter:
@@ -254,9 +264,7 @@ class AuditWriter:
             if existing_manifest.get("mode") == "offline" or existing_manifest.get("replay_source"):
                 # R051: only a live session resumes a folder, and an offline replay's folder would label the live
                 # evidence as replayed with no tenant contact (its audit log keeps the replay's run.started).
-                raise ResumeRefusedError(
-                    f"{run_dir.name} is an offline replay, not a live run; a replay cannot be resumed. Start a new run."
-                )
+                raise ResumeRefusedError()
             # R114: a resumed run keeps the identity its manifest recorded, whatever the folder is called now or the
             # tenant name this session was given, so the manifest, summary and checkpoints name one run.
             recorded_run_id = existing_manifest.get("run_id")
