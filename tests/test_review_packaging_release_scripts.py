@@ -109,3 +109,13 @@ def test_relative_operator_file_resolves_against_the_cwd(tmp_path, monkeypatch):
     assert resources.resolve_resource_path("configs/collector-definitions.json") != tmp_path / "configs" / "collector-definitions.json"
     assert not resources.is_shipped_resource("configs/not-shipped-here.json")
     assert run_offline(Path("mine.json"), tmp_path / "out", "t", "r") == 0
+
+
+def test_a_shipped_path_missing_from_every_root_never_falls_back_to_the_cwd(tmp_path, monkeypatch):
+    # Review of R069: a wheel that lacks a shipped file must not pick up a same-named file in the operator's folder.
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    (tmp_path / "configs").mkdir()
+    planted = tmp_path / "configs" / "missing-from-the-wheel.json"
+    planted.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert resources.resolve_resource_path("configs/missing-from-the-wheel.json") != planted

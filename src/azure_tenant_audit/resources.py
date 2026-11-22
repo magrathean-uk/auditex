@@ -101,11 +101,18 @@ def resolve_resource_path(path: str | Path) -> Path:
         if candidate is not None:
             return candidate
 
-    # Not a resource any root holds: an operator's own relative path (a sample, a config) means the cwd.
+    # Not a resource any root holds: an operator's own relative path (a sample, a config) means the cwd. A path
+    # shaped like shipped content never does, so a wheel missing a shipped file cannot pick up a same-named file.
     in_cwd = Path.cwd() / target
-    if in_cwd.exists():
+    if not _matches_shipped_pattern(target) and in_cwd.exists():
         return in_cwd
     return _repo_root() / target
+
+
+def _matches_shipped_pattern(relative: Path) -> bool:
+    return ".." not in relative.parts and any(
+        relative.match(pattern) for area in SHIPPED_CONTENT_AREAS for pattern in area.package_patterns
+    )
 
 
 def read_selected_resource(path: str | Path, *, default: str, field: str) -> bytes:
