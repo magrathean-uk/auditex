@@ -174,6 +174,22 @@ class AuditLogger:
                 LOG.exception("Failed to dispatch audit event listener.")
 
 
+# Manifest keys that describe one session (a replay source, the waiver file, sampling limits, a probe): a resumed run
+# does not inherit them from the earlier session's manifest (R051).
+SESSION_SCOPED_MANIFEST_KEYS = frozenset(
+    {
+        "replay_source",
+        "fixture_provenance",
+        "waiver_path",
+        "top_limit",
+        "sample_truncated",
+        "truncated_sections",
+        "probe_mode",
+        "probe_surface",
+    }
+)
+
+
 class AuditWriter:
     # A class default as well, so a writer made without __init__ (a test double) can still count.
     lone_surrogates_replaced = 0
@@ -230,6 +246,16 @@ class AuditWriter:
         self.checkpoint_state_path = self.checkpoints_dir / "checkpoint-state.json"
         existing_manifest_path = self.run_dir / "run-manifest.json"
         existing_manifest = self._safe_load_json(existing_manifest_path)
+        if run_dir is not None and isinstance(existing_manifest, dict):
+            # R114: a resumed run keeps the identity its manifest recorded, whatever the folder is called now or the
+            # tenant name this session was given, so the manifest, summary and checkpoints name one run.
+            recorded_run_id = existing_manifest.get("run_id")
+            if isinstance(recorded_run_id, str) and recorded_run_id.strip():
+                self.run_id = recorded_run_id
+            recorded_tenant = existing_manifest.get("tenant_name")
+            if isinstance(recorded_tenant, str) and recorded_tenant.strip():
+                tenant_name = recorded_tenant
+            self._remove_post_finalization_outputs()
         self._checkpoint_state: dict[str, dict[str, Any]] = self._load_checkpoint_state()
         self.coverage_index_path = self.index_dir / "coverage.jsonl"
         self.summary: dict[str, Any] = {"schema_version": SUMMARY_SCHEMA_VERSION, "tenant_name": tenant_name, "run_id": self.run_id, "collectors": []}
@@ -264,9 +290,24 @@ class AuditWriter:
             for key, value in existing_manifest.items():
                 if key in {"created_utc", "run_dir", "audit_log_path", "audit_command_log_path", "debug_log_path", "collectors"}:
                     continue
+                if key in SESSION_SCOPED_MANIFEST_KEYS:
+                    # R051: these describe the session that wrote them; this session records its own or none.
+                    continue
                 self._manifest[key] = value
             if existing_manifest.get("tenant_name"):
                 self._manifest["tenant_name"] = existing_manifest["tenant_name"]
+
+    def _remove_post_finalization_outputs(self) -> None:
+        """Remove the answers, previews and reports written after an earlier session was finalised (R052).
+
+        They were built from that session's evidence; a resumed run changes the evidence, so keeping them would let
+        ``auditex explain``, report previews and the MCP local answer show the incomplete first session's verdicts.
+        """
+        from .bundle_integrity import post_finalization_outputs
+        from .guarded_io import remove_guarded_output
+
+        for relative in post_finalization_outputs(self.run_dir):
+            remove_guarded_output(self.run_dir / relative)
 
     def _mkdir_private(self, path: Path) -> None:
         """Create and tighten owned run directories through admitted, no-follow descriptors."""
