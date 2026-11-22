@@ -173,3 +173,13 @@ def test_r164_doh_endpoint_is_redacted_by_every_command_line_scrubber() -> None:
         assert "--doh-endpoint" in flags
         assert secret not in scrub(["auditex", "google", "run", "--doh-endpoint", secret])
         assert secret not in scrub(["auditex", "google", "run", f"--doh-endpoint={secret}"])
+
+
+def test_r164_docs_name_the_google_doh_option() -> None:
+    root = Path(__file__).resolve().parents[1]
+    privacy = " ".join((root / "docs/reference/security-privacy.md").read_text(encoding="utf-8").split())
+    assert "it has no `--doh-endpoint` option" not in privacy
+    assert "`auditex google run`" in privacy
+    setup = " ".join((root / "docs/guides/setup-guide.md").read_text(encoding="utf-8").split())
+    google = setup[setup.index("Google DNS posture (`google_dns_posture`"):]
+    assert "--doh-endpoint" in google[: google.index("--exclude google_dns_posture")]

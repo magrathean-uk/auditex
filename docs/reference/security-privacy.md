@@ -361,8 +361,8 @@ can pass `public_lookups: False` in the collector
 context to skip the HTTPS reads.
 
 The DNS-over-HTTPS resolver is `https://cloudflare-dns.com/dns-query` unless
-`--doh-endpoint URL` (on `auditex run`, `azure-tenant-audit` and
-`auditex guided-run`) or the environment variable `AUDITEX_DOH_ENDPOINT` names
+`--doh-endpoint URL` (on `auditex run`, `azure-tenant-audit`,
+`auditex guided-run` and `auditex google run`) or the environment variable `AUDITEX_DOH_ENDPOINT` names
 another; the option wins over the variable, and a blank variable means the
 default. Only a plain `https://host[:port]/path` is accepted: no credentials,
 query string or fragment, and a refused value is never repeated in messages
@@ -375,8 +375,9 @@ Google Workspace runs with the `google_dns_posture` collector (in the
 `core-security`, `mail` and `everything` presets) send each verified domain
 name to the same resolver: SPF, DMARC, MTA-STS, TLS-RPT and BIMI TXT lookups
 and up to six DKIM selector names. Only domain names are sent, and a Google run
-makes no HTTPS read of the domains. A Google run reads the resolver only from
-`AUDITEX_DOH_ENDPOINT`; it has no `--doh-endpoint` option. Deselect the
+makes no HTTPS read of the domains. A Google run takes the resolver from
+`--doh-endpoint URL`, else `AUDITEX_DOH_ENDPOINT`, and names only its host in
+the notice and `data-handling.json`. Deselect the
 collector with `--exclude google_dns_posture`; the `identity` and
 `collaboration` presets omit it. The run prints the notice on stderr before
 collection and writes it to `data-handling.json` and the report.
