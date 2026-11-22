@@ -157,7 +157,7 @@ def test_audit_deps_resolves_every_declared_extra(tmp_path: Path) -> None:
     fake_bin.mkdir()
     (fake_bin / "uv").write_text(
         "#!/usr/bin/env bash\n"
-        f"printf '%s\\n' \"$*\" >> {log}\n"
+        f"printf '%s\\n' \"$*\" >> {_quote(str(log))}\n"
         "if [[ \"$1 $2\" == 'pip compile' ]]; then\n"
         "  while [[ $# -gt 0 ]]; do if [[ \"$1\" == -o ]]; then : > \"$2\"; fi; shift; done\n"
         "elif [[ \"$1\" == venv ]]; then\n"
@@ -187,7 +187,7 @@ def test_audit_full_uses_the_selected_python(tmp_path: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     for name in ("python3", "selected-python"):
-        (fake_bin / name).write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' \"{name} $*\" >> {log}\n", encoding="utf-8")
+        (fake_bin / name).write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' \"{name} $*\" >> {_quote(str(log))}\n", encoding="utf-8")
         (fake_bin / name).chmod(0o755)
     env = _env(PATH=f"{fake_bin}:{os.environ['PATH']}")
     run = _make("audit-full", f"PYTHON={fake_bin / 'selected-python'}", "TENANT_ID=contoso.onmicrosoft.com",
