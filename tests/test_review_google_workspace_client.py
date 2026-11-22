@@ -261,3 +261,21 @@ def test_r057_unreadable_shared_drive_permissions_are_a_coverage_gap_not_clean()
     assert row["status"] == "failed"
     assert row["error_class"] == "insufficient_permissions"
     assert result.status == "partial"
+
+
+def test_r055_offline_replay_of_failed_gmail_settings_reads_is_partial(tmp_path: Any) -> None:
+    import json
+
+    from auditex.google_workspace.run import run_google_offline
+
+    error = {"error_class": "insufficient_permissions", "error": "denied"}
+    failed = {"userEmail": "a@example.com", **{f"{name}_error": error for name in google_client.GMAIL_SETTING_NAMES}}
+    sample = tmp_path / "sample.json"
+    sample.write_text(json.dumps({"google_gmail_settings": {"mailboxSettings": {"value": [failed]}}}), encoding="utf-8")
+
+    rc = run_google_offline(sample_path=sample, out=tmp_path / "out", tenant_name="T", run_name="r",
+                            domain="example.com", customer_id=None)
+
+    assert rc == 1
+    summary = json.loads((tmp_path / "out" / "T-r" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["collectors"][0]["status"] != "ok"

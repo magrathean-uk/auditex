@@ -519,6 +519,35 @@ def _write_google_bundle(
     return 1 if overall_status == "partial" else 0
 
 
+def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Mailboxes in a sample whose Gmail settings reads failed replay as the failed or partial reads they were."""
+    if collector != "google_gmail_settings":
+        return []
+    section = payload.get("mailboxSettings")
+    mailboxes = section.get("value") if isinstance(section, dict) else None
+    rows: list[dict[str, Any]] = []
+    for mailbox in mailboxes if isinstance(mailboxes, list) else []:
+        if not isinstance(mailbox, dict):
+            continue
+        status, error_class, error = gmail_settings_status(mailbox)
+        if status == "ok":
+            continue
+        rows.append(
+            {
+                "collector": collector,
+                "type": "google",
+                "name": f"mailboxSettings:{mailbox.get('userEmail') or 'unknown'}",
+                "endpoint": "gmail.users.settings",
+                "status": status,
+                "item_count": 0 if status == "failed" else 1,
+                "duration_ms": 0,
+                "error_class": error_class,
+                "error": error,
+            }
+        )
+    return rows
+
+
 def run_google_offline(
     *,
     sample_path: Path,
@@ -593,7 +622,11 @@ def run_google_offline(
         for section in payload.values():
             if isinstance(section, dict) and isinstance(section.get("value"), list):
                 item_count += len(section["value"])
-        replayed = [*replay_coverage_rows(name, payload), *absent_section_rows(name, held, COLLECTOR_SECTIONS.get(name, ()))]
+        replayed = [
+            *replay_coverage_rows(name, payload),
+            *absent_section_rows(name, held, COLLECTOR_SECTIONS.get(name, ())),
+            *_replayed_mailbox_rows(name, payload),
+        ]
         coverage_rows.extend(replayed)
         diagnostics.extend(dict(row) for row in replayed if row.get("status") != "ok")
         row = {
