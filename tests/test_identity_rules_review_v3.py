@@ -1160,6 +1160,27 @@ def test_the_ga_role_split_passes_cyber_essentials_and_fails_the_single_policy_b
     assert "cyber_essentials" not in finding["framework_mappings"] and "ms_secure_score" not in finding["framework_mappings"]
 
 
+def test_split_user_exclusions_raise_the_split_finding_and_fail_the_single_policy_benchmarks(tmp_path: Path) -> None:
+    """R036: two all-users policies that each exclude a different user cover everyone only combined."""
+    first = _policy("ca-1", users=_all_users(excludeUsers=["u-001"]))
+    second = _policy("ca-2", users=_all_users(excludeUsers=["u-002"]))
+
+    snapshot, findings, controls = _run(tmp_path, [first, second])
+
+    mfa = _verdicts(snapshot)["effective_mfa"]
+    assert mfa["verdict"] == "enforced" and mfa["single_policy_verdict"] == "enforced_with_exclusions"
+    rules = _rules(findings)
+    assert "ca.mfa_not_enforced" not in rules
+    finding = rules["ca.mfa_split_across_policies"]
+    assert finding["severity"] == "low"
+    assert "each all-users policy excludes someone the other policies cover" in finding["description"]
+    per_policy = {row["policy_id"]: [item["id"] for item in row["exclusions"]] for row in finding["returned_value"]["policy_exclusions"]}
+    assert per_policy == {"ca-1": ["u-001"], "ca-2": ["u-002"]}
+    assert _rule_row(controls, "cyber_essentials", "ce.uac.mfa_cloud_services", "ca.mfa_not_enforced")["status"] == "pass"
+    for framework, control_id in (("cis_m365_v7", "5.2.2.2"), ("cisa_scuba", "MS.AAD.3.2v2")):
+        assert _status(controls, framework, control_id) == "fail", (framework, control_id)
+
+
 def test_an_incomplete_set_does_not_let_a_role_nobody_is_known_to_hold_read_not_enforced() -> None:
     excludes_exchange = _policy("all", users=_all_users(excludeRoles=[EXCHANGE_ADMIN]))
     scope = _scope({ADMIN_A: (GLOBAL_ADMIN,)}, complete=False)

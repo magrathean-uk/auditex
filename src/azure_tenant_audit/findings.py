@@ -1698,16 +1698,38 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
         and mfa.get("verdict") == "enforced"
         and "conditional_access_policy" in (mfa.get("basis") or [])
         and mfa.get("single_policy_verdict") == "enforced_with_exclusions"
-        and covered
     ):
         rows = _exclusion_rows({"covered": covered}, "covered")
+        # Each qualifying policy's own exclusions other than the operator's emergency-access accounts: split
+        # exclusions (policy A leaves out one user, policy B another) share no principal, so no row is "covered".
+        policy_exclusions = [
+            {
+                "policy_id": policy.get("id"),
+                "display_name": policy.get("display_name"),
+                "exclusions": _exclusion_rows({"rows": [row for row in policy.get("exclusions") or [] if not row.get("sanctioned")]}, "rows"),
+            }
+            for policy in mfa.get("qualifying_policies") or []
+        ]
         metadata = _metadata_for("ca.mfa_split_across_policies")
-        metadata["description"] = (
-            "Everyone is required to use MFA, but only by combining policies: the all-users policy excludes "
-            f"{_exclusion_text(rows, len(covered))}, and a separate policy for the administrator roles requires MFA of "
-            "them. CIS 5.2.2.2 and ScubaGear MS.AAD.3.2v2 look for one all-users policy that excludes nobody but "
-            "documented emergency access accounts, so they are not met. Cyber Essentials reads the combined result."
-        )
+        if covered:
+            metadata["description"] = (
+                "Everyone is required to use MFA, but only by combining policies: the all-users policy excludes "
+                f"{_exclusion_text(rows, len(covered))}, and a separate policy for the administrator roles requires MFA "
+                "of them. CIS 5.2.2.2 and ScubaGear MS.AAD.3.2v2 look for one all-users policy that excludes nobody but "
+                "documented emergency access accounts, so they are not met. Cyber Essentials reads the combined result."
+            )
+        else:
+            listed = "; ".join(
+                f"{row['display_name'] or row['policy_id']} excludes "
+                f"{_exclusion_text(row['exclusions'], len(row['exclusions'])) if row['exclusions'] else 'nobody else'}"
+                for row in policy_exclusions[:5]
+            )
+            metadata["description"] = (
+                "Everyone is required to use MFA, but only by combining policies: each all-users policy excludes someone "
+                f"the other policies cover ({listed}). CIS 5.2.2.2 and ScubaGear MS.AAD.3.2v2 look for one all-users "
+                "policy that excludes nobody but documented emergency access accounts, so they are not met. Cyber "
+                "Essentials reads the combined result."
+            )
         findings.append(
             _finalize_finding(
                 {
@@ -1728,6 +1750,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                             {**row_summary, "covered_by_policy_ids": item["covered_by_policy_ids"]}
                             for row_summary, item in zip(rows, covered, strict=False)
                         ],
+                        "policy_exclusions": policy_exclusions,
                     },
                     "evidence_refs": [
                         *_verdict_ref("effective_mfa", "conditional_access"),
