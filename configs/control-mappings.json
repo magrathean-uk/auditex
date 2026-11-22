@@ -261,26 +261,14 @@
     ]
   },
   "ca.break_glass_exclusion_unverified": {
-    "ms_zero_trust": [
-      "identities"
-    ],
     "nist_800_53": [
-      "AC-2",
-      "CP-2"
+      "CA-7"
     ],
     "iso_27001": [
-      "A.5.18",
-      "A.5.30"
+      "A.8.16"
     ],
     "soc2": [
-      "CC6.2",
-      "A1.2"
-    ],
-    "nis2": [
-      "Article 21(2)(c)"
-    ],
-    "dora": [
-      "Article 11(1)"
+      "CC7.2"
     ]
   },
   "ca.break_glass_exclusion_missing": {

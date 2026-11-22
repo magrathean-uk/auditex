@@ -32,6 +32,7 @@ _TEMPLATES = json.loads((_REPO / "configs" / "finding-templates.json").read_text
 _DIAGNOSTIC_RULES = {
     "collector.issue.permission",
     "ca.enforcement_unverified",
+    "ca.break_glass_exclusion_unverified",
     "consent_policy.user_consent_unverified",
     "identity.admin_set_unverified",
     "reports_usage.concealed_names",
