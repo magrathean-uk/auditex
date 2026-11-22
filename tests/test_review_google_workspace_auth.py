@@ -112,7 +112,8 @@ class _UserCredentials:
     """google.oauth2.credentials.Credentials as the library builds it: explicit scopes win over the cached ones."""
 
     def __init__(self, scopes: list[str], *, valid: bool = True, refresh_error: bool = False, tag: str = "cached",
-                 granted: list[str] | None = None, failure: str | None = None, omit_scope: bool = False) -> None:
+                 granted: list[str] | None = None, failure: str | None = None, omit_scope: bool = False,
+                 empty_scope: bool = False) -> None:
         self.scopes = list(scopes)
         self.valid = valid
         self.expired = not valid
@@ -126,13 +127,15 @@ class _UserCredentials:
         self.failure = failure
         # RFC 6749 5.1: a refresh granting exactly the scopes asked for may leave the ``scope`` field out.
         self.omit_scope = omit_scope
+        self.empty_scope = empty_scope
 
     @classmethod
     def from_authorized_user_file(cls, path: str, scopes: list[str] | None = None) -> _UserCredentials:
         info = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(scopes if scopes is not None else info.get("scopes") or [], valid=info.get("valid", True),
                    refresh_error=info.get("refresh_error", False), granted=info.get("granted"),
-                   failure=info.get("failure"), omit_scope=info.get("omit_scope", False))
+                   failure=info.get("failure"), omit_scope=info.get("omit_scope", False),
+                   empty_scope=info.get("empty_scope", False))
 
     def has_scopes(self, scopes: list[str]) -> bool:
         return set(scopes).issubset(self.scopes)
@@ -144,8 +147,13 @@ class _UserCredentials:
             raise _RefreshError("internal_failure", retryable=True)
         if self.failure == "transport":
             raise _TransportError("connection refused")
+        if self.failure == "bad_gateway":
+            # google-auth retries only 500, 503, 504, 408 and 429: a 502 HTML page is a non-retryable RefreshError.
+            raise _RefreshError("Unexpected response", "<html>502 Bad Gateway</html>")
         self.valid, self.expired = True, False
-        if not self.omit_scope:
+        if self.empty_scope:
+            self.granted_scopes = []
+        elif not self.omit_scope:
             self.granted_scopes = list(self.grant)
 
     def to_json(self) -> str:
@@ -410,7 +418,7 @@ def test_r059_refresh_granting_fewer_scopes_is_re_consented(tmp_path: Path, oaut
 # ---- repair round 2: a temporary token-endpoint failure or an unreported grant never opens consent (R059, R022) ---
 
 
-@pytest.mark.parametrize("failure", ["retryable", "transport"])
+@pytest.mark.parametrize("failure", ["retryable", "transport", "bad_gateway"])
 def test_r059_temporary_refresh_failure_on_a_valid_cache_keeps_the_sign_in(
     tmp_path: Path, oauth_modules: dict[str, Any], failure: str
 ) -> None:
@@ -437,6 +445,13 @@ def test_r059_refresh_that_leaves_out_the_scope_field_keeps_the_sign_in(
     credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a", "scope://b")))
     assert oauth_modules["flows"] == 0
     assert credentials.tag == "cached"
+
+
+def test_r059_refresh_reporting_an_empty_grant_is_re_consented(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    _write_cache(tmp_path, scopes=["scope://a"], empty_scope=True)
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+    assert oauth_modules["flows"] == 1
+    assert credentials.tag == "consented"
 
 
 def test_r092_credentials_come_from_the_bytes_that_passed_the_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

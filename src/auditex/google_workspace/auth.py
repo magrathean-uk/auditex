@@ -136,7 +136,7 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                 try:
                     credentials.refresh(Request())
                 except (RefreshError, TransportError) as exc:
-                    if isinstance(exc, TransportError) or getattr(exc, "retryable", False):
+                    if isinstance(exc, TransportError) or not _is_grant_error(exc):
                         # The token endpoint is down or busy: that says nothing about the grant. A token still in
                         # date is used as it is; an expired one cannot be, and signing in again would not help.
                         if not credentials.valid:
@@ -216,6 +216,19 @@ def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:
         return False
 
 
+# Token endpoint errors that say the grant itself is gone or narrower (RFC 6749 5.2); a fresh consent fixes those.
+# Anything else (a 5xx page, a timeout, a busy endpoint) is temporary and says nothing about the grant.
+_GRANT_ERRORS = ("invalid_grant", "invalid_scope", "invalid_client", "unauthorized_client", "necessary fields")
+
+
+def _is_grant_error(exc: Exception) -> bool:
+    """Whether a failed refresh means the user must consent again (matched only; the text is never kept)."""
+    if getattr(exc, "retryable", False):
+        return False
+    text = str(exc)
+    return any(code in text for code in _GRANT_ERRORS)
+
+
 def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
     """Whether the last refresh granted every scope this run asks for.
 
@@ -223,7 +236,9 @@ def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
     the grant is exactly the scopes the refresh asked for (the cache's own); google-auth then sets no
     ``granted_scopes``, so the scopes asked for are the grant. A refresh asking for a scope never granted fails.
     """
-    granted = getattr(credentials, "granted_scopes", None) or getattr(credentials, "scopes", None)
+    granted = getattr(credentials, "granted_scopes", None)
+    if granted is None:
+        granted = getattr(credentials, "scopes", None)
     if not granted:
         return False
     return set(scopes).issubset(set(granted))
