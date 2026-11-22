@@ -171,7 +171,7 @@ def test_the_install_guide_shows_the_website_commands_and_is_linked_and_shipped(
         assert command in command_lines, command
     for section in ("Linux", "macOS", "WSL2", "Upgrade", "Uninstall", "Troubleshooting", "Where run folders go"):
         assert section in guide, section
-    assert "](docs/guides/install-guide.md)" in (root / "README.md").read_text(encoding="utf-8")
+    assert "](https://github.com/magrathean-uk/auditex/blob/main/docs/guides/install-guide.md)" in (root / "README.md").read_text(encoding="utf-8")
     assert "](guides/install-guide.md)" in (root / "docs/index.md").read_text(encoding="utf-8")
     patterns = [p for area in SHIPPED_CONTENT_AREAS for p in area.package_patterns]
     assert any(fnmatch("docs/guides/install-guide.md", p) for p in patterns)
@@ -234,3 +234,72 @@ def test_a_wheel_install_hint_names_the_wheel_not_the_package_index(installed_pa
     assert shlex.split(bootstrap.extra_install_command("mcp")) == ["pipx", "install", "--force", f"{wheel}[mcp]"]
     # What a run bundle may hold names no local path.
     assert "/home/me" not in bootstrap.extra_install_command("mcp", for_record=True)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+GITHUB_BLOB = "https://github.com/magrathean-uk/auditex/blob/main/"
+GITHUB_RAW = "https://raw.githubusercontent.com/magrathean-uk/auditex/main/"
+
+
+def _section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    following = [text.find(mark, start + len(heading)) for mark in ("\n## ", "\n### ")]
+    ends = [pos for pos in following if pos != -1]
+    return text[start:min(ends) if ends else len(text)]
+
+
+# Review blocker 3: after the base install, `pipx install "auditex[google,mcp]"` stops at "already installed" and
+# leaves the extras out. Both documents must give the command that installs extras over an existing install.
+def test_readme_and_guide_add_extras_over_an_existing_install() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert 'pipx install --force "auditex[google,mcp]"' in readme
+    step7 = _section((ROOT / "docs/guides/install-guide.md").read_text(encoding="utf-8"), "## Step 7")
+    first_command = next(line.strip() for line in step7.splitlines() if line.strip().startswith("pipx install"))
+    assert first_command == 'pipx install --force "auditex[google,mcp]"'
+
+
+# Review blocker 4: PyPI shows the README as the project page, where repository-relative links break.
+def test_every_readme_link_resolves_on_the_pypi_project_page() -> None:
+    import re
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    targets = re.findall(r"\]\(([^)\s]+)\)", readme) + re.findall(r'(?:href|src)="([^"]+)"', readme)
+    relative = [t for t in targets if not re.match(r"[a-z][a-z0-9+.-]*:", t) and not t.startswith("#")]
+    assert relative == []
+    for target in targets:
+        for prefix in (GITHUB_BLOB, GITHUB_RAW):
+            if target.startswith(prefix):
+                assert (ROOT / target[len(prefix):].split("#", 1)[0]).exists(), target
+
+
+# Review blocker 5: on Ubuntu 22.04 pipx is called before it is on PATH, and the macOS uninstall step named the
+# Linux model cache.
+def test_the_ubuntu_2204_steps_never_call_pipx_before_it_is_on_path() -> None:
+    section = _section((ROOT / "docs/guides/install-guide.md").read_text(encoding="utf-8"), "### Ubuntu 22.04")
+    commands = [line.strip() for line in section.splitlines() if line.strip() and not line.startswith(("`", " "))
+                and line.strip().split()[0] in {"pipx", "python3", "sudo"}]
+    assert "python3 -m pipx ensurepath" in commands
+    assert not [c for c in commands if c.startswith("pipx ")]
+
+
+def test_the_uninstall_steps_name_the_model_cache_local_answer_uses(monkeypatch) -> None:
+    from auditex import local_answer
+
+    uninstall = _section((ROOT / "docs/guides/install-guide.md").read_text(encoding="utf-8"), "## Uninstall")
+    monkeypatch.delenv("AUDITEX_MODEL_DIR", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/HOME")))
+    for system in ("darwin", "linux"):
+        monkeypatch.setattr(sys, "platform", system)
+        cache = local_answer.model_cache().as_posix().replace("/HOME", "~")
+        assert f"`{cache}`" in uninstall, (system, cache)
+
+
+# Small: the fixed local-answer reason pointed every user at the editable source-checkout install.
+def test_the_local_answer_reasons_give_the_installed_package_command() -> None:
+    from auditex import local_answer
+
+    for key in ("runtime_missing", "runtime_version"):
+        text = local_answer.REASONS[key]
+        assert 'pipx install --force "auditex[local-answer]"' in text, key
+        assert "/Users/" not in text and "/home/" not in text

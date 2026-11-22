@@ -98,7 +98,11 @@ Python for Auditex in Step 4:
 sudo apt update
 sudo apt install -y python3-pip python3-venv
 python3 -m pip install --user pipx
+python3 -m pipx ensurepath
 ```
+
+The `pipx` command is not on your `PATH` until you **close the terminal and open a new one**; do that now, before
+the check below. (Until then, `python3 -m pipx` works in its place.)
 
 ### Check
 
@@ -194,18 +198,23 @@ Some features need extra libraries, called extras. Install only the ones you nee
 | `mcp` | The local MCP server for AI assistants (`auditex-mcp`) | `auditex-mcp --help` |
 | `local-answer` | The optional local language-model summary (`auditex explain`); see the [local answer guide](local-answer.md) | `auditex explain --help` |
 
-Name the extras in square brackets, separated by commas, inside quotes:
+Auditex is already installed from Step 4, so reinstall it with the extras. Name them in square brackets, separated
+by commas, inside quotes, and add `--force`:
+
+```bash
+pipx install --force "auditex[google,mcp]"
+```
+
+List **every** extra you want to keep, because pipx installs exactly the extras named on its last install. Without
+`--force`, pipx only reports that Auditex is already installed and adds nothing. On a computer without Auditex yet,
+you can install it with the extras in one step instead of Step 4:
 
 ```bash
 pipx install "auditex[google,mcp]"
 ```
 
-If Auditex is already installed, add `--force` and list **every** extra you want to keep, because pipx installs
-exactly the extras named on its last install:
-
-```bash
-pipx install --force "auditex[google,mcp]"
-```
+If you installed with `--python` in Step 4 (Ubuntu 22.04, RHEL or Rocky Linux 9), add the same `--python` option
+here.
 
 The `local-answer` extra compiles llama.cpp while it installs, so it needs CMake and a C and C++ compiler first
 (`xcode-select --install` and `brew install cmake` on macOS; `sudo apt install -y build-essential cmake` on Ubuntu
@@ -286,8 +295,14 @@ pipx uninstall auditex
 ```
 
 This removes Auditex and its private environment. Your run folders are not touched: delete them yourself when you
-no longer need them. If you used the `local-answer` extra, its downloaded models are in `~/.cache/auditex/models`
-(or the folder named by `AUDITEX_MODEL_DIR`); delete that folder too.
+no longer need them. If you used the `local-answer` extra, delete its downloaded models too. They are in
+`~/Library/Caches/auditex/models` on macOS and `~/.cache/auditex/models` on Linux and WSL2 (or
+`$XDG_CACHE_HOME/auditex/models` when that is set), unless `AUDITEX_MODEL_DIR` named another folder:
+
+```bash
+rm -rf ~/Library/Caches/auditex/models   # macOS
+rm -rf ~/.cache/auditex/models           # Linux and WSL2
+```
 
 ## Troubleshooting
 

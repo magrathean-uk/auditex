@@ -68,6 +68,7 @@ RUNTIME_PACKAGE = "llama-cpp-python"
 RUNTIME_VERSION = "0.3.36"
 EXTRA = "local-answer"
 INSTALL_COMMAND = f"python -m pip install -e '.[{EXTRA}]'"
+PIPX_INSTALL_COMMAND = f'pipx install --force "auditex[{EXTRA}]"'
 MODEL_DIR_ENV = "AUDITEX_MODEL_DIR"
 HUB = "https://huggingface.co"
 PARALLEL = 4                      # items answered at once in one context (M10-T01: 4 at once)
@@ -122,11 +123,12 @@ DEFAULT_MODEL = "qwen"
 # Why no model, or not every item, answered. Fixed text only, so the answer stays a function of the run and the
 # model's selections; the operator's terminal gets the detail.
 REASONS = {
-    "runtime_missing": (f"the local answer runtime is not installed. Install it with {INSTALL_COMMAND} in the "
-                        f"Auditex folder (or 'auditex[{EXTRA}]' for an installed wheel); it builds llama.cpp "
-                        f"({RUNTIME_PACKAGE} {RUNTIME_VERSION}) and needs CMake and a C and C++ compiler."),
+    "runtime_missing": (f"the local answer runtime is not installed. Install it with {PIPX_INSTALL_COMMAND} (name "
+                        f"every extra you keep inside the brackets; in a source checkout, {INSTALL_COMMAND}); it "
+                        f"builds llama.cpp ({RUNTIME_PACKAGE} {RUNTIME_VERSION}) and needs CMake and a C and C++ "
+                        "compiler."),
     "runtime_version": (f"the installed {RUNTIME_PACKAGE} is not version {RUNTIME_VERSION}. Install the pinned one "
-                        f"with {INSTALL_COMMAND} in the Auditex folder."),
+                        f"with {PIPX_INSTALL_COMMAND} (in a source checkout, {INSTALL_COMMAND})."),
     "download_failed": ("the model download did not finish (no network, not enough disk space or the hub refused "
                         "it); run the command again to resume it."),
     "model_unverified": ("the model file did not match its pinned SHA-256, so it was deleted and not used; run the "
