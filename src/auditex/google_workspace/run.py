@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.assurance import build_live_readiness_summary
@@ -18,6 +19,7 @@ from azure_tenant_audit.collector_runner import (
     CollectorRunner,
 )
 from azure_tenant_audit.dns_lookup import (
+    DEFAULT_DOH_ENDPOINT,
     DOH_ENDPOINT_ENV,
     doh_resolver_disclosure,
     resolve_doh_endpoint,
@@ -666,11 +668,18 @@ def run_google_offline(
     )
 
 
+def _resolver_label(doh_endpoint: str) -> str:
+    """The resolver as the notice and run log name it: a configured one by host only, since a path can hold a profile id."""
+    if doh_endpoint == DEFAULT_DOH_ENDPOINT:
+        return doh_resolver_disclosure(doh_endpoint)
+    return f"the configured DNS-over-HTTPS resolver at {urlsplit(doh_endpoint).netloc}"
+
+
 def google_dns_notice(doh_endpoint: str) -> str:
     """The data-handling notice for the Google DNS posture lookups, with how to turn them off."""
     return (
         "Selected Google DNS posture collection sends the customer's verified domain names to "
-        f"{doh_resolver_disclosure(doh_endpoint)}. Only domain names, no user data, are sent to the resolver. "
+        f"{_resolver_label(doh_endpoint)}. Only domain names, no user data, are sent to the resolver. "
         "Deselect it with --exclude google_dns_posture (the identity and collaboration presets omit it); "
         f"set {DOH_ENDPOINT_ENV} to use another DNS-over-HTTPS resolver."
     )
@@ -732,7 +741,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     if doh_endpoint is not None:
         notice = google_dns_notice(doh_endpoint)
         LOG.info("%s", notice)
-        writer.log_event("run.notice", notice, {"collector": "google_dns_posture", "resolver": doh_resolver_disclosure(doh_endpoint)})
+        writer.log_event("run.notice", notice, {"collector": "google_dns_posture", "resolver": _resolver_label(doh_endpoint)})
     start = time.time()
     writer_adapter = AuditWriterCollectorAdapter(writer)
     runner = CollectorRunner(writer_adapter)

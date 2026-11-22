@@ -87,7 +87,7 @@ def test_l6_google_dns_lookups_carry_the_notice_and_off_switch(
     with caplog.at_level(logging.INFO, logger="auditex.google_workspace"):
         run_google_live(GoogleRunConfig(tenant_name="Example", out=tmp_path, run_name="dns", collectors="google_dns_posture"))
     notice = " ".join(record.getMessage() for record in caplog.records)
-    assert "https://dns.example.net/dns-query" in notice
+    assert "resolver at dns.example.net" in notice
     assert "--exclude google_dns_posture" in notice
     assert contexts[0]["doh_endpoint"] == "https://dns.example.net/dns-query"
     events = (tmp_path / "Example-dns" / "audit-log.jsonl").read_text(encoding="utf-8")
@@ -114,3 +114,15 @@ def test_l6_no_notice_when_dns_posture_is_not_selected(
         rc = run_google_live(GoogleRunConfig(tenant_name="Example", out=tmp_path, collectors="google_directory"))
     assert rc == 0
     assert "DNS-over-HTTPS" not in " ".join(record.getMessage() for record in caplog.records)
+
+
+def test_l6_notice_names_only_the_host_of_a_configured_resolver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _fake_dns_run(monkeypatch)
+    monkeypatch.setenv(DOH_ENDPOINT_ENV, "https://dns.example.net/profile-abc123")
+    with caplog.at_level(logging.INFO, logger="auditex.google_workspace"):
+        run_google_live(GoogleRunConfig(tenant_name="Example", out=tmp_path, run_name="dns", collectors="google_dns_posture"))
+    notice = " ".join(record.getMessage() for record in caplog.records)
+    assert "dns.example.net" in notice and "profile-abc123" not in notice
+    assert "profile-abc123" not in (tmp_path / "Example-dns" / "audit-log.jsonl").read_text(encoding="utf-8")
