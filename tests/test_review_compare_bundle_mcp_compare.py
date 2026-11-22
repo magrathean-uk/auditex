@@ -189,6 +189,22 @@ def test_diff_reports_duplicate_row_keys_instead_of_overwriting_them(tmp_path: P
     assert len(policies["changed"]) == 1
 
 
+def test_diff_duplicate_suffix_never_overwrites_a_real_key(tmp_path: Path) -> None:
+    # Repair round 1 (R053/R068): a real key equal to a generated duplicate suffix must not hide a row.
+    run_a = _run(tmp_path, "run-a", created_utc="2026-10-01T00:00:00Z", findings=[], coverage={})
+    run_b = _run(tmp_path, "run-b", created_utc="2026-10-02T00:00:00Z", findings=[], coverage={})
+    before = [{"key": "item", "v": 1}, {"key": "item", "v": 2}, {"key": "item#2", "v": 3}]
+    after = [{"key": "item", "v": 1}, {"key": "item", "v": 20}, {"key": "item#2", "v": 3}]
+    _write(run_a / "normalized" / "things.json", {"kind": "things", "records": before})
+    _write(run_b / "normalized" / "things.json", {"kind": "things", "records": after})
+
+    things = diff_run_directories(run_a, run_b)["changes"]["things"]
+
+    assert things["duplicate_keys"] == ["item"]
+    assert len(things["changed"]) == 1
+    assert things["added"] == [] and things["removed"] == []
+
+
 # R132: missing or empty run directories
 
 

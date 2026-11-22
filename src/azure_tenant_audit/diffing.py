@@ -269,17 +269,23 @@ def _record_index(records: list[dict[str, Any]], kind: str) -> tuple[dict[str, d
     """Rows by key, and the keys more than one row carries.
 
     A repeated key is reported, not overwritten: its later rows get ``#2``, ``#3`` suffixes so every row is compared.
+    A suffix that is also some row's real key is skipped, so a generated key never replaces a real one.
     """
+    keys = [_record_key(record, kind, position) for position, record in enumerate(records)]
+    taken = set(keys)
     index: dict[str, dict[str, Any]] = {}
     duplicates: list[str] = []
     seen: Counter[str] = Counter()
-    for position, record in enumerate(records):
-        key = _record_key(record, kind, position)
+    for key, record in zip(keys, records, strict=True):
         seen[key] += 1
         if seen[key] > 1:
             if seen[key] == 2:
                 duplicates.append(key)
-            key = f"{key}#{seen[key]}"
+            suffix = seen[key]
+            while f"{key}#{suffix}" in taken:
+                suffix += 1
+            key = f"{key}#{suffix}"
+            taken.add(key)
         index[key] = record
     return index, duplicates
 
