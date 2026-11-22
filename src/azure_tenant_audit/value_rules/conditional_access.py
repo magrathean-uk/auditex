@@ -561,6 +561,9 @@ def _ca_exists(policy_id, sp, sections):
     ctl = [r for r in res if r[1]]
     if len(ctl) >= 2 and not restricted_pass:
         if _shared_gap(c, [p for p, r in zip(objs, res, strict=True) if r[1]], sections, allowed_sets):
+            if policy_id == "MS.AAD.3.2v2" and _v2_key(sections):
+                return _A(policy_id, ITEM_VALUE, "Data unusable: the exemption entry is written under MS.AAD.3.2v2, which ScubaGear ignores (it reads MS.AAD.3.2v1); the policy was not assessed.",
+                          "exemption_key_ambiguous", ["scuba_config"])
             return _rec(policy_id, "not_met", "exclusions_not_configured", "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list.",
                         "near_miss_exclusions", None)
     if len(ctl) >= 2:

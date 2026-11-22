@@ -196,3 +196,11 @@ def test_r028_unreadable_targets_are_unknown():
 def test_r028_lifetime_is_moot_where_the_custom_policy_blocks_password_addition():
     custom = custom_policy(password=[entry("passwordAddition")])
     assert cell("MS.AAD.5.6v1", app_sections([custom])) == ("not_applicable", "moot_addition_blocked")
+
+
+def test_r027_shared_exclusion_keeps_the_3_2v2_key_guard():
+    """Impact note: an exemption written under MS.AAD.3.2v2 (which ScubaGear ignores) stays ambiguous, never a shared-gap not met."""
+    one = ca(MFA, users={"ExcludeUsers": ["synthetic-break-glass"], "ExcludeRoles": ["synthetic-role-a"]})
+    two = ca(MFA, users={"ExcludeUsers": ["synthetic-break-glass"], "ExcludeRoles": ["synthetic-role-b"]})
+    config = {"Aad": {"MS.AAD.3.2v2": {"CapExclusions": {"Users": ["synthetic-break-glass"]}}}}
+    assert cell("MS.AAD.3.2v2", ca_sections(one, two, config=config)) == ("not_assessed", "exemption_key_ambiguous")
