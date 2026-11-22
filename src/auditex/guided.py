@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import stat
 import sys
 import time
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Any
 
 from azure_tenant_audit import cli as tenant_cli
 from azure_tenant_audit.output_redaction import PROFILE_LOCAL
-from azure_tenant_audit.profiles import profile_choices
+from azure_tenant_audit.profiles import get_profile, profile_choices
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 
 from .bootstrap import build_doctor_report, run_setup
@@ -18,6 +19,8 @@ from .operator_flow import flow_choices, flow_plan
 REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
 # Where the tenant administrator finds every permission, role and setting the reader app needs (DEC-107).
 READER_APP_GUIDE = "docs/guides/reader-app-permissions.md"
+# Collectors that run through PowerShell 7 and ExchangeOnlineManagement; only these need the Exchange tools.
+POWERSHELL_COLLECTORS = frozenset({"exchange_policy", "targeted_users_coverage"})
 
 
 def _read_prompt(prompt: str) -> str:
@@ -120,6 +123,57 @@ def _certificate_argv(args: argparse.Namespace) -> list[str]:
     return argv
 
 
+def _selected_collectors(args: argparse.Namespace) -> set[str]:
+    if args.collectors:
+        return {name.strip() for name in str(args.collectors).split(",") if name.strip()}
+    return set(get_profile(args.auditor_profile).default_collectors)
+
+
+def _ensure_local_tools(args: argparse.Namespace, readiness: dict[str, Any]) -> int:
+    """Check the local tools this run needs; install them only on an explicit request (prompt or --install-tools)."""
+    needs_exchange = bool(_selected_collectors(args) & POWERSHELL_COLLECTORS)
+    missing = [*(readiness.get("core_missing") or ([] if readiness.get("core_ready") else ["core"]))]
+    if needs_exchange and not readiness.get("exchange_ready"):
+        missing.extend(name for name in (readiness.get("exchange_missing") or ["exchange_online_module"])
+                       if name not in missing)
+    if not missing:
+        return 0
+    print(f"Local tools missing: {', '.join(missing)}")
+    if args.install_tools:
+        install = True
+    elif args.non_interactive:
+        print("Not installing in a non-interactive run. Run auditex setup, pass --install-tools to install them, "
+              "or --skip-tool-check to run without them.")
+        return 2
+    else:
+        install = _confirm("Run setup now?", default=True)
+    if not install:
+        return 2
+    setup_kwargs: dict[str, bool] = {"with_mcp": args.with_mcp}
+    if needs_exchange and not readiness.get("exchange_ready"):
+        setup_kwargs["with_exchange"] = True
+        setup_kwargs["with_pwsh"] = True
+    return run_setup(**setup_kwargs)
+
+
+def _run_folder_marks(base: Path) -> dict[str, tuple[Path, tuple[int, ...]]]:
+    """Run folders under ``base`` keyed by real path, with the identity of their ``run-manifest.json``."""
+    marks: dict[str, tuple[Path, tuple[int, ...]]] = {}
+    try:
+        children = sorted(entry for entry in base.iterdir() if entry.is_dir() and not entry.is_symlink())
+    except OSError:
+        return marks
+    for folder in children:
+        try:
+            info = (folder / "run-manifest.json").lstat()
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode):
+            marks[os.path.realpath(folder)] = (folder, (info.st_dev, info.st_ino, info.st_size,
+                                                        info.st_mtime_ns, info.st_ctime_ns))
+    return marks
+
+
 def build_guided_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(allow_abbrev=False, prog="auditex guided-run", description="Interactive guided tenant audit.")
     parser.add_argument("--flow", choices=flow_choices(), default="auto")
@@ -150,8 +204,13 @@ def build_guided_parser() -> argparse.ArgumentParser:
     parser.add_argument("--throttle-mode", choices=("fast", "safe", "ultra-safe"), default="safe")
     parser.add_argument("--include-blocked", action="store_true")
     parser.add_argument("--with-mcp", action="store_true")
-    parser.add_argument("--non-interactive", action="store_true")
+    parser.add_argument("--non-interactive", action="store_true",
+                        help="Never prompt; missing local tools stop the run unless --install-tools is given.")
     parser.add_argument("--skip-tool-check", action="store_true")
+    parser.add_argument("--install-tools", action="store_true", help=(
+        "Install missing local tools without asking (scripts/bootstrap-local-tools.sh: may use sudo with the "
+        "system package manager and install ExchangeOnlineManagement from PSGallery)."
+    ))
     parser.add_argument("--report-format", choices=REPORT_FORMAT_CHOICES, default=None)
     parser.add_argument("--probe-first", dest="probe_first", action="store_true", default=True)
     parser.add_argument("--no-probe-first", dest="probe_first", action="store_false")
@@ -205,19 +264,10 @@ def run_guided(args: argparse.Namespace) -> int:
 
     doctor = build_doctor_report()
     print(f"Machine: {doctor['system']['os']} {doctor['system']['machine']}")
-    readiness = doctor.get("readiness") or {}
-    if not args.skip_tool_check and not (readiness.get("core_ready") and readiness.get("exchange_ready")):
-        print("Local tools missing")
-        if args.non_interactive or _confirm("Run setup now?", default=True):
-            setup_kwargs: dict[str, bool] = {"with_mcp": args.with_mcp}
-            if not readiness.get("exchange_ready"):
-                setup_kwargs["with_exchange"] = True
-                setup_kwargs["with_pwsh"] = True
-            setup_rc = run_setup(**setup_kwargs)
-            if setup_rc != 0:
-                return setup_rc
-        else:
-            return 2
+    if not args.skip_tool_check:
+        tool_rc = _ensure_local_tools(args, doctor.get("readiness") or {})
+        if tool_rc != 0:
+            return tool_rc
 
     argv = [
         "--tenant-name",
@@ -249,13 +299,19 @@ def run_guided(args: argparse.Namespace) -> int:
     input_kwargs = {"sensitive_users": sensitive_users} if sensitive_users.addresses else {}
     if partner_domains.domains:
         input_kwargs["partner_domains"] = partner_domains
+    out_dir = Path(args.out).expanduser()
+    before = _run_folder_marks(out_dir)
     rc = tenant_cli.main(argv, event_listener=renderer, **input_kwargs)
     duration = round(time.time() - started, 2)
     print(f"Done in {duration}s")
-    if args.report_format:
+    if args.report_format and rc in (0, 1):  # 1 is a partial run: it still wrote a bundle
         from .reporting import render_report
 
-        latest = sorted(Path(args.out).expanduser().resolve().glob(f"{tenant_name}-*"))
-        if latest:
-            render_report(run_dir=str(latest[-1]), format_name=args.report_format, profile=PROFILE_LOCAL)
+        after = _run_folder_marks(out_dir)
+        written = [folder for key, (folder, mark) in sorted(after.items()) if before.get(key, (None, None))[1] != mark]
+        if len(written) == 1:
+            render_report(run_dir=str(written[0]), format_name=args.report_format, profile=PROFILE_LOCAL)
+            print(f"Report: {written[0]}")
+        else:
+            print("Could not tell which run folder this run wrote; render it with auditex report render <run folder>.")
     return rc
