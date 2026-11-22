@@ -6,8 +6,10 @@ Tenant administrators: every permission, role and setting the reader app needs i
 
 Runs with the `auto` or `global-reader` profile select `exchange_policy`
 and `dns_posture` by default, as does the `full` preset. `app-readonly-full` also
-includes both. Only an explicit `--collectors` list or the `config-only` and
-`power-platform` presets change that. Power Platform and Power BI remain opt-in.
+includes both. Every other preset (`config-only`, `identity-only`, `security-only`
+and `power-platform`) replaces the profile defaults with its own list and omits
+both, as does an explicit `--collectors` list; `--exclude` drops either one after
+selection. Power Platform and Power BI remain opt-in.
 
 A default run opens an Exchange Online PowerShell session for read-only
 `Get-*` policy reads, with an Exchange token minted silently from the reader app's

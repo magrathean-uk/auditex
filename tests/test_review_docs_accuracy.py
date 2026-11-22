@@ -146,3 +146,21 @@ def test_ai_assessment_guide_names_the_current_assessment_schema():
     guide = _flat(_doc("docs/guides/ai-assessment.md"))
     sentence = guide[guide.index("the cell inventory and reason codes") :][:220]
     assert f"`{SCHEMA_VERSION}`" in sentence, sentence
+
+
+# R147 ------------------------------------------------------------------------------------------------------------
+
+
+def test_setup_guide_names_every_preset_that_drops_the_exchange_and_dns_defaults():
+    presets = json.loads(_doc("configs/collector-presets.json"))
+    presets = presets.get("presets", presets)
+    dropping = [
+        name for name, preset in presets.items()
+        if not {"exchange_policy", "dns_posture"} & set(preset.get("include") or [])
+    ]
+    assert dropping, "no preset drops the defaults; the test would be vacuous"
+    section = _flat(_section(_doc("docs/guides/setup-guide.md"), "## Default Exchange and public DNS collection"))
+    opening = section[: section.index("A default run opens")]
+    for name in dropping:
+        assert f"`{name}`" in opening, f"setup guide must say the `{name}` preset omits exchange_policy and dns_posture"
+    assert "Only an explicit `--collectors` list or the `config-only` and `power-platform` presets change that" not in opening
