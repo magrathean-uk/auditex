@@ -562,3 +562,31 @@ def test_x1_guided_run_passes_the_doh_endpoint_to_the_engine(monkeypatch, tmp_pa
 
     assert rc == 0
     assert seen["argv"][seen["argv"].index("--doh-endpoint") + 1] == "https://dns.corp.example/q"
+
+
+# X2: native Windows (no descriptor-relative no-follow opens) gets a clear platform message, not "unsafe input".
+
+WINDOWS_MESSAGE = "Auditex needs Linux, macOS or WSL2; native Windows is not supported yet."
+
+
+def test_x2_unsupported_platform_names_the_supported_systems(monkeypatch) -> None:  # noqa: ANN001
+    from azure_tenant_audit import guarded_io
+
+    monkeypatch.setattr(guarded_io, "_supported", lambda: False)
+
+    with pytest.raises(guarded_io.UnsafeRunFileError) as exc:
+        with guarded_io.GuardContext():
+            pass
+
+    assert str(exc.value) == WINDOWS_MESSAGE
+
+
+def test_x2_guarded_cli_prints_the_platform_message(monkeypatch, capsys) -> None:  # noqa: ANN001
+    from azure_tenant_audit import guarded_io
+    from azure_tenant_audit.cli_guard import guarded_cli
+
+    monkeypatch.setattr(guarded_io, "_supported", lambda: False)
+
+    assert guarded_cli(lambda: 0)() == 2
+    err = capsys.readouterr().err
+    assert WINDOWS_MESSAGE in err and "unsafe input" not in err
