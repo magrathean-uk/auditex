@@ -269,3 +269,27 @@ def test_the_evidence_block_drops_empty_fields() -> None:
     assert evidence["state"] == STATE_PAST_END_OF_LIFE and evidence["release"] == "Windows 10 22H2"
     assert "reason" not in evidence and evidence["sources"]
     assert classify("Linux", "6.1", _TODAY).evidence() == {"state": "unknown", "reason": REASON_PLATFORM_NOT_COVERED}
+
+
+# ---- R111: a Windows release before 10.0 can be described by its kernel version ------------------------------------
+
+
+def test_r111_a_windows_kernel_row_classifies_windows_8_1() -> None:
+    table = {
+        "platforms": {
+            "windows": {
+                "match": "build",
+                "releases": [
+                    {"id": "windows-8-1", "name": "Windows 8.1", "kernel": "6.3", "end_of_support": "2023-01-10"},
+                    {"id": "windows-10-22h2", "name": "Windows 10 22H2", "build": 19045, "end_of_support": "2025-10-14"},
+                ],
+            }
+        }
+    }
+    result = classify("Windows", "6.3.9600", date(2026, 11, 21), table=table)
+    assert result.state == STATE_PAST_END_OF_LIFE
+    assert result.release_id == "windows-8-1" and result.end_of_support == "2023-01-10"
+    # A kernel the table does not list stays unknown, never supported.
+    assert classify("Windows", "6.1.7601", date(2026, 11, 21), table=table).reason == REASON_NOT_IN_TABLE
+    # A 10.0 build never matches a kernel row.
+    assert classify("Windows", "10.0.19045.1", date(2026, 11, 21), table=table).release_id == "windows-10-22h2"
