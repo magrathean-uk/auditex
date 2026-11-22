@@ -124,8 +124,10 @@ def _certificate_argv(args: argparse.Namespace) -> list[str]:
 
 
 def _selected_collectors(args: argparse.Namespace) -> set[str]:
-    if args.collectors:
-        return {name.strip() for name in str(args.collectors).split(",") if name.strip()}
+    # The same order the engine uses: --collectors, else AUDIT_COLLECTORS, else the profile's defaults.
+    chosen = args.collectors or (os.environ.get("AUDIT_COLLECTORS") or "").strip()
+    if chosen:
+        return {name.strip() for name in str(chosen).split(",") if name.strip()}
     return set(get_profile(args.auditor_profile).default_collectors)
 
 

@@ -250,7 +250,9 @@ def build_auditor_score(
     overall_status: str,
     evidence_paths: list[str],
     coverage_gaps: list[dict[str, Any]] | None = None,
+    completed_collectors: int | None = None,
 ) -> dict[str, Any]:
+    """``completed_collectors`` (when the caller knows it): 0 means no collector finished, which is graded blocked."""
     rows = enrich_findings_for_autopilot(findings)
     total = len(rows)
     evidenced = sum(1 for item in rows if _has_supported_ref(item))
@@ -287,7 +289,7 @@ def build_auditor_score(
     )
     return {
         "score": score,
-        "grade": "blocked" if coverage == 0 else _score_grade(score),
+        "grade": "blocked" if coverage == 0 or completed_collectors == 0 else _score_grade(score),
         "components": components,
         "finding_count": total,
         "unsupported_claim_count": unsupported,

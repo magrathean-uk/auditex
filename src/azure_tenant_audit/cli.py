@@ -25,6 +25,7 @@ from .break_glass import load_accounts_argument as load_break_glass_accounts
 from .capability_gate import relabel_intune_license_blockers
 from .certificate_auth import (
     CertificateAuthError,
+    certificate_authority,
     load_certificate_credential,
     refuse_sources_in_output,
 )
@@ -177,14 +178,17 @@ DEFAULT_OUT = _BuiltInDefault("audit-output")
 DEFAULT_SAMPLE = _BuiltInDefault("examples/sample_audit_bundle/sample_result.json")
 
 
+# Path options are not taken from the environment: the guarded argument admission checks only typed --out and
+# --sample values, so an environment path (a link to another folder, say) would bypass it.
+_IGNORED_PATH_VARIABLES = (("AUDIT_OUTPUT_DIR", "--out"), ("AUDIT_SAMPLE_FILE", "--sample"))
+
+
 def apply_run_defaults(args: argparse.Namespace) -> argparse.Namespace:
     """Replace options the command line left out with the environment's value (an --env file is loaded into it
     first); a typed flag always wins. Idempotent."""
     fallbacks = (
         ("authority", "AZURE_AUTHORITY"),
         ("graph_scope", "AZURE_GRAPH_SCOPE"),
-        ("out", "AUDIT_OUTPUT_DIR"),
-        ("sample", "AUDIT_SAMPLE_FILE"),
         ("collectors", "AUDIT_COLLECTORS"),
     )
     for attribute, variable in fallbacks:
@@ -225,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"Identity authority URL (else AZURE_AUTHORITY, else {DEFAULT_AUTHORITY}).")
     parser.add_argument("--graph-scope", default=DEFAULT_GRAPH_SCOPE,
                         help=f"Graph scope (else AZURE_GRAPH_SCOPE, else {DEFAULT_GRAPH_SCOPE}).")
-    parser.add_argument("--out", default=DEFAULT_OUT, help=f"Base output directory (else AUDIT_OUTPUT_DIR, else {DEFAULT_OUT}).")
+    parser.add_argument("--out", default=DEFAULT_OUT, help=f"Base output directory (default {DEFAULT_OUT}).")
     parser.add_argument("--config", default="configs/collector-definitions.json", help="Collector configuration file.")
     parser.add_argument(
         "--collector-preset",
@@ -308,7 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sensitive-users", metavar="FILE", help="Local sensitive-user list (else AUDITEX_SENSITIVE_USERS_FILE); never uploaded or logged.")
     parser.add_argument("--partner-domains", metavar="FILE", help="Local partner-domain list (else AUDITEX_PARTNER_DOMAINS_FILE); never uploaded or logged.")
     parser.add_argument("--sample", default=DEFAULT_SAMPLE,
-                        help=f"Sample bundle path when offline (else AUDIT_SAMPLE_FILE, else {DEFAULT_SAMPLE}).")
+                        help=f"Sample bundle path when offline (default {DEFAULT_SAMPLE}).")
     parser.add_argument(
         "--permission-hints",
         default="configs/collector-permissions.json",
@@ -720,6 +724,9 @@ def run_live(
         LOG.error("Certificate authentication needs both --certificate-path and --certificate-thumbprint. %s.", CERTIFICATE_WAY)
         return 2
     try:
+        # Before anything is written: an authority outside the Entra allowlist (a flag or AZURE_AUTHORITY) is
+        # refused with the fixed message, so its text never reaches a log or the run folder.
+        certificate_authority(args.authority, args.tenant_id)
         # Before the key is read or the run folder exists: a source inside the output or resume folder,
         # or linked from one, would be swept into the bundle or overwritten by an output file.
         refuse_sources_in_output(
@@ -1261,6 +1268,9 @@ def main(
         if os.environ.get(ignored) is not None:
             LOG.warning("Ignoring %s: Microsoft 365 audits authenticate only with the reader app's certificate.", ignored)
     apply_run_defaults(args)
+    for variable, flag in _IGNORED_PATH_VARIABLES:
+        if (os.environ.get(variable) or "").strip():
+            LOG.warning("Ignoring %s: give the path with %s.", variable, flag)
     if args.offline:
         try:
             offline_break_glass = load_break_glass_accounts(args.break_glass_accounts)

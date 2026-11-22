@@ -216,7 +216,8 @@ def test_r094_env_file_values_reach_the_live_run(monkeypatch, tmp_path) -> None:
     assert rc == 0
     assert seen["authority"] == "https://login.microsoftonline.us/"
     assert seen["graph_scope"] == "https://graph.microsoft.us/.default"
-    assert seen["out"] == str(out)
+    # Path values from the environment would bypass the guarded admission of --out, so they are not honoured.
+    assert seen["out"] == "audit-output"
     assert seen["collectors"] == "identity,security"
 
 
@@ -458,15 +459,62 @@ def test_r162_bootstrap_json_command_has_a_timeout_and_maps_it_to_blocked(monkey
     assert result["status"] == "blocked" and result["error"] == "command_timeout"
 
 
-def test_r094_run_explain_looks_for_the_run_under_audit_output_dir(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    from auditex import cli as product_cli
+def test_r094_env_output_dir_does_not_bypass_out_admission(monkeypatch, tmp_path, caplog) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS
+
+    from azure_tenant_audit import cli
 
     _clear_run_env(monkeypatch)
     monkeypatch.setenv("AUDIT_OUTPUT_DIR", str(tmp_path / "env-out"))
+    monkeypatch.setenv("AUDIT_SAMPLE_FILE", str(tmp_path / "env-sample.json"))
+    seen: dict = {}
+    monkeypatch.setattr(cli, "run_live", lambda args, **_: seen.update(vars(args)) or 0)
 
-    bases, _ = product_cli._engine_run_places(["--tenant-name", "acme"])
+    with caplog.at_level("WARNING"):
+        assert cli.main(["--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+                         *FAKE_CERTIFICATE_ARGS]) == 0
 
-    assert Path(tmp_path / "env-out") in bases
+    assert seen["out"] == "audit-output" and seen["sample"] == "examples/sample_audit_bundle/sample_result.json"
+    assert "AUDIT_OUTPUT_DIR" in caplog.text and "--out" in caplog.text
+
+
+def test_r089_authority_outside_entra_is_refused_before_the_run_folder_exists(monkeypatch, tmp_path, caplog) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    from azure_tenant_audit import cli
+
+    use_fake_certificate(monkeypatch)
+    _clear_run_env(monkeypatch)
+    monkeypatch.setenv("AZURE_AUTHORITY", "https://not-entra.invalid/private-marker")
+    monkeypatch.setattr(cli, "GraphClient", lambda *_a, **_k: pytest.fail("no client"))
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+        *FAKE_CERTIFICATE_ARGS, "--out", str(tmp_path),
+    ])
+
+    with caplog.at_level("INFO"):
+        assert cli.run_live(args) == 2
+    assert "private-marker" not in caplog.text
+    assert not list(tmp_path.glob("acme-*"))
+
+
+def test_r061_guided_tool_check_follows_audit_collectors(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    setup_calls = _setup_spy(monkeypatch, _doctor(exchange=False))
+    seen = _engine_spy(monkeypatch)
+    monkeypatch.setenv("AUDIT_COLLECTORS", "identity")
+
+    rc = guided.run_guided(build_guided_parser().parse_args([*_guided_args(tmp_path), "--non-interactive"]))
+
+    assert (rc, setup_calls) == (0, []) and "argv" in seen
+
+
+def test_r121_no_completed_collector_is_graded_blocked() -> None:
+    from azure_tenant_audit.autopilot import build_auditor_score
+
+    score = build_auditor_score(findings=[], overall_status="partial", evidence_paths=["x"],
+                                coverage_gaps=[{"collector": "identity", "status": "blocked"}], completed_collectors=0)
+
+    assert score["grade"] == "blocked"
 
 
 # X1 (R164 wiring): --doh-endpoint reaches the dns_posture context, is checked before any read, is never abbreviated
