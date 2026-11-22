@@ -66,3 +66,43 @@ def test_customer_pack_markdown_files_render_hostile_title_literally(tmp_path: P
     assert markdown
     for path in markdown:
         _assert_literal(path.read_text(encoding="utf-8"), str(path.relative_to(target)))
+
+
+def test_markdown_inline_keeps_only_known_placeholders_as_tags() -> None:
+    from auditex.reporting import markdown_inline
+
+    assert markdown_inline("<redacted-guid> <redacted-segment-3> <run-dir>") == "<redacted-guid> <redacted-segment-3> <run-dir>"
+    assert markdown_inline("<redacted-x onclick=1>") == "&lt;redacted-x onclick=1>"
+    assert markdown_inline("<redacted-script>") == "&lt;redacted-script>"
+
+
+def test_safety_lines_escape_the_replay_source() -> None:
+    from auditex.reporting import _replay_text
+
+    text = _replay_text({"replay_source": "sample.json\n# Forged heading [x](https://evil.example)"})
+    _assert_literal(text, "replay")
+
+
+def test_customer_pack_readme_and_handoff_render_hostile_tenant_name_literally(tmp_path: Path) -> None:
+    from auditex.reporting import write_enterprise_handoff_pack
+
+    run = offline_run(tmp_path, "r064tenant")
+    manifest_path = run / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    hostile = "contoso\n# Forged heading <img src=x> [Verify here](https://evil.example)"
+    manifest["tenant_name"] = hostile
+    manifest_path.write_text(json.dumps(manifest))
+    for relative in ("summary.json", "reports/report-pack.json"):
+        path = run / relative
+        payload = json.loads(path.read_text())
+        payload["tenant_name"] = hostile
+        if isinstance(payload.get("summary"), dict):
+            payload["summary"]["tenant_name"] = hostile
+        path.write_text(json.dumps(payload))
+    rehash(run)
+    target = tmp_path / "pack"
+    write_enterprise_handoff_pack(run, target)
+    readme = (target / "README.md").read_text(encoding="utf-8")
+    assert "Forged heading" in readme, "the planted name must reach the README for this test to mean anything"
+    for path in sorted(target.rglob("*.md")):
+        _assert_literal(path.read_text(encoding="utf-8"), str(path.relative_to(target)))

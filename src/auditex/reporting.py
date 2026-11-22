@@ -227,7 +227,8 @@ def _observation_basis(safety: Mapping[str, Any]) -> str:
 
 def _replay_text(safety: Mapping[str, Any]) -> str:
     """What an offline replay says about itself: where the evidence came from and that no tenant was contacted."""
-    source = _text(safety.get("replay_source")).strip()
+    # The sample's file name is operator input printed into Markdown (README, handoff, ledger): escaped (R064).
+    source = markdown_inline(_text(safety.get("replay_source")))
     origin = f"replayed from {source}" if source else "replayed from an offline sample file"
     return f"{origin}, no tenant contact"
 
@@ -2877,7 +2878,7 @@ def _offline_live_readiness(*sources: Mapping[str, Any]) -> str | None:
 # value would let tenant text start a new Markdown line (a forged heading, list item or table row).
 _MARKDOWN_BREAKS = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 # The fixed placeholders the redaction writes, kept verbatim so readers and checks still recognise them.
-_MARKDOWN_PLACEHOLDER = re.compile(r"(<(?:redacted-[a-z0-9-]+|run-dir|local-path)>)")
+_MARKDOWN_PLACEHOLDER = re.compile(r"(<(?:redacted-text|redacted-guid|redacted-segment-[0-9]+|run-dir|local-path)>)")
 # A backslash that would escape the next punctuation character (it could cancel the pipe escape), link brackets and
 # the table cell separator.
 _MARKDOWN_INLINE_SPECIAL = re.compile(r"\\(?=[!-/:-@\[-`{-~])|[\[\]|]")
