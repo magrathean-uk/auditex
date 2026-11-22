@@ -372,7 +372,10 @@
         "Global Reader",
         "Security Reader"
       ],
-      "notes": "Inbox rules (messageRules) and mailbox settings are read with the MailboxSettings.Read permission (application or delegated). Mail.Read is never requested: the audit does not read message content."
+      "optional_graph_scopes": [
+        "Mail.ReadBasic.All"
+      ],
+      "notes": "Inbox rules (messageRules) and mailbox settings are read with the MailboxSettings.Read permission (application or delegated). Mail.Read is never requested: the audit does not read message content. A rule that moves mail names its target folder by ID; to tell whether that folder hides mail from the user (Junk Email, Deleted Items, Archive, Conversation History, RSS Feeds) the collector reads folder metadata only (GET /users/{id}/mailFolders?$select=id,displayName and the well-known folders with $select=id), and only for users with such a rule. Microsoft documents Mail.ReadBasic.All as the least-privileged application permission for these routes (MailboxFolder.Read.All covers only the separate beta /admin/exchange/mailboxes/{mailboxId}/folders API, which Auditex does not call), so that is the optional permission. Blast radius: by the permission's nature, read access to the folder list and to basic message properties (subject, sender, recipients, dates, flags) of every mailbox, never a body, preview, attachment or extended property; Auditex calls only the mailFolders routes above, never a message route, and stores folder IDs and names only. Without it the folder lookup is refused, the rule's hide-from-user state is recorded as unknown (never false) and the collector is partial with one mailFolders gap row."
     },
     "exchange_policy": {
       "graph_scopes": [],

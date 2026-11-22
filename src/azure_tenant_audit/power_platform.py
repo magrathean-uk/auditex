@@ -1,6 +1,9 @@
 """Thin, commercial-cloud client for Power Platform admin metadata reads: GET, plus the one body-free POST read."""
 from __future__ import annotations
 
+import math
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlsplit
@@ -10,6 +13,12 @@ import requests
 POWER_PLATFORM_ROOT = "https://api.bap.microsoft.com"
 POWER_PLATFORM_DEFAULT_API_VERSION = "2020-10-01"
 POWER_PLATFORM_DEFAULT_TIMEOUT = 15.0
+# A throttled (429) or unavailable (503) answer is re-sent at most twice after its Retry-After, capped like the
+# SharePoint admin client's, or a short back-off when it has none (R110).
+RETRY_STATUSES = frozenset({429, 503})
+MAX_ATTEMPTS = 3
+MAX_RETRY_AFTER_SECONDS = 30.0
+DEFAULT_BACKOFF_SECONDS = 2.0
 BAP_SCOPE = "https://service.powerapps.com//.default"
 ALLOWED_METHODS = frozenset({"GET"})
 # The one documented body-free POST read: Power Platform "List tenant settings" (Microsoft Learn, Power Platform API
@@ -52,6 +61,7 @@ class PowerPlatformClient:
     session: Any = field(default_factory=requests.Session, repr=False)
     timeout: float = POWER_PLATFORM_DEFAULT_TIMEOUT
     root: str = POWER_PLATFORM_ROOT
+    sleep: Callable[[float], None] = field(default=time.sleep, repr=False)
 
     def get(self, path: str, *, api_version: str | None = None) -> Any:
         return self.request("GET", path, api_version=api_version)
@@ -60,26 +70,31 @@ class PowerPlatformClient:
         if method not in ALLOWED_METHODS:
             raise PowerPlatformError("method refused")
         url, params = self._target(path, api_version)
-        try:
-            response = self.session.request(
-                method, url, params=params, headers=self._headers(), timeout=self.timeout, allow_redirects=False,
-            )
-        except Exception:  # Transport exceptions can contain headers; never retain their text.
-            raise PowerPlatformError("Power Platform transport error") from None
-        return self._decode(response)
+        return self._decode(self._send(lambda: self.session.request(
+            method, url, params=params, headers=self._headers(), timeout=self.timeout, allow_redirects=False,
+        )))
 
     def post_read(self, path: str, *, api_version: str | None = None) -> Any:
         """Send the one documented body-free POST read (List tenant settings); refuse every other path."""
         if not isinstance(path, str) or urlsplit(path).path not in POST_READ_PATHS:
             raise PowerPlatformError("POST read refused")
         url, params = self._target(path, api_version)
-        try:
-            response = self.session.post(
-                url, params=params, headers=self._headers(), timeout=self.timeout, allow_redirects=False,
-            )
-        except Exception:  # Transport exceptions can contain headers; never retain their text.
-            raise PowerPlatformError("Power Platform transport error") from None
-        return self._decode(response)
+        return self._decode(self._send(lambda: self.session.post(
+            url, params=params, headers=self._headers(), timeout=self.timeout, allow_redirects=False,
+        )))
+
+    def _send(self, send: Callable[[], Any]) -> Any:
+        """Send once, re-sending a 429 or 503 answer within MAX_ATTEMPTS; the last answer is returned."""
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                response = send()
+            except Exception:  # Transport exceptions can contain headers; never retain their text.
+                raise PowerPlatformError("Power Platform transport error") from None
+            if response.status_code not in RETRY_STATUSES or attempt >= MAX_ATTEMPTS:
+                return response
+            self.sleep(_retry_after(response, attempt))
 
     def _target(self, path: str, api_version: str | None) -> tuple[str, dict[str, str] | None]:
         if not self.token:
@@ -105,6 +120,18 @@ class PowerPlatformClient:
             return response.json()
         except ValueError:
             raise PowerPlatformError("invalid JSON from Power Platform") from None
+
+def _retry_after(response: Any, attempt: int) -> float:
+    headers = getattr(response, "headers", None) or {}
+    value = next((str(v) for k, v in headers.items() if str(k).lower() == "retry-after"), None)
+    try:
+        seconds = float(value) if value is not None else math.nan
+    except ValueError:
+        seconds = math.nan  # an HTTP date is not used; the back-off applies
+    if not math.isfinite(seconds):
+        seconds = DEFAULT_BACKOFF_SECONDS * attempt
+    return min(MAX_RETRY_AFTER_SECONDS, max(0.0, seconds))
+
 
 def http_error_class(status: int | None) -> str:
     if status in (401, 403):

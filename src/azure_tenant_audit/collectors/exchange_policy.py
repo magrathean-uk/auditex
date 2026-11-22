@@ -112,6 +112,10 @@ from .exchange_defender_commands import (
 )
 
 EXCHANGE_ONLINE_SCOPE = "https://outlook.office365.com/.default"
+# Whole-tenant mailbox aggregates enumerate every mailbox before counting (R047): the adapter gives a -ResultSize
+# Unlimited read its longer timeout, and a timeout that still happens is named as a large-tenant gap.
+AGGREGATE_READS = frozenset({"casMailboxSmtpAuth", "mailboxAuditBypass"})
+REASON_LARGE_TENANT_AGGREGATE_TIMEOUT = "large_tenant_aggregate_timeout"
 # Security & Compliance PowerShell: the Microsoft Exchange Online Protection resource (Exchange.ManageAsApp on it).
 COMPLIANCE_SCOPE = "https://ps.compliance.protection.outlook.com/.default"
 
@@ -367,6 +371,8 @@ class ExchangePolicyCollector(Collector):
                     row.update(status="skipped", reason=response.get("reason"))
                 elif response.get("error_class") == REASON_IPPS_SESSION_NOT_OPENED:
                     row["reason"] = REASON_IPPS_SESSION_NOT_OPENED
+            if name in AGGREGATE_READS and response.get("error_class") == "command_timeout":
+                row["reason"] = REASON_LARGE_TENANT_AGGREGATE_TIMEOUT
             if cut:
                 # More forwarding mailboxes exist than were kept: a coverage gap, so the rule never reads this list as clean.
                 row.update(

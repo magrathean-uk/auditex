@@ -5,13 +5,32 @@ from typing import Any
 
 from ..collection_gaps import (
     FANOUT_OBJECT_LIMIT,
+    REASON_PAGINATION_FAILED,
     SECTION_SCOPED,
     fanout_gap_row,
     section_total,
 )
 from ..graph import GraphClient, GraphError
 from ..normalize import _iter_permission_targets
-from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
+from .base import (
+    Collector,
+    CollectorResult,
+    _classify_graph_error,
+    record_truncation,
+    run_graph_endpoints,
+)
+
+
+def _follow_next_link(client: Any, rows: list[Any], next_link: str) -> tuple[list[Any], Exception | None]:
+    """Rows of a fan-out item plus its later pages; a failed page ends the list with the rows read so far and the error
+    (R045), so one page never crashes the collector and loses the sections already read."""
+    rows = list(rows)
+    try:
+        for item in client.iter_items(next_link):
+            rows.append(item)
+    except Exception as exc:  # noqa: BLE001
+        return rows, exc
+    return rows, None
 
 
 def _site_kind_from_web_url(web_url: Any) -> str:
@@ -196,34 +215,44 @@ class SharePointAccessCollector(Collector):
                     if not isinstance(permissions, list):
                         permissions = []
                     next_link = body.get("@odata.nextLink")
+                    page_error: Exception | None = None
                     if isinstance(next_link, str) and next_link:
-                        permissions = permissions + list(client.iter_items(next_link))
+                        permissions, page_error = _follow_next_link(client, permissions, next_link)
                     summary = _summarize_permissions(permissions)
-                    sampled_permissions.append(
-                        {
-                            "siteId": site_id,
-                            "siteName": site.get("displayName") or site.get("name"),
-                            "webUrl": site.get("webUrl"),
-                            "siteKind": _site_kind_from_web_url(site.get("webUrl")),
-                            "sharingCapability": sharing_capability,
-                            "permissions": permissions,
-                            **summary,
-                        }
-                    )
-                    coverage.append(
-                        {
-                            "collector": self.name,
-                            "type": "graph",
-                            "name": "sitePermissions",
-                            "endpoint": endpoint,
-                            "site_id": site_id,
-                            "status": "ok",
-                            "item_count": len(permissions),
-                            "duration_ms": round((time.perf_counter() - batch_start) * 1000, 2),
-                            "error_class": None,
-                            "error": None,
-                        }
-                    )
+                    entry = {
+                        "siteId": site_id,
+                        "siteName": site.get("displayName") or site.get("name"),
+                        "webUrl": site.get("webUrl"),
+                        "siteKind": _site_kind_from_web_url(site.get("webUrl")),
+                        "sharingCapability": sharing_capability,
+                        "permissions": permissions,
+                        **summary,
+                    }
+                    row = {
+                        "collector": self.name,
+                        "type": "graph",
+                        "name": "sitePermissions",
+                        "endpoint": endpoint,
+                        "site_id": site_id,
+                        "status": "ok",
+                        "item_count": len(permissions),
+                        "duration_ms": round((time.perf_counter() - batch_start) * 1000, 2),
+                        "error_class": None,
+                        "error": None,
+                    }
+                    if page_error is not None:
+                        # The permissions read so far stay, marked cut; the site's read is a failed, truncated gap.
+                        entry["collection_truncated"] = True
+                        # The unread pages may hold more principals, so a cut list cannot show a site is orphaned
+                        # or weakly owned; two principals already seen stay a lower bound.
+                        if entry.get("ownershipState") in {"orphaned", "weak"}:
+                            entry["ownershipState"] = "unknown"
+                        error_class, error = _classify_graph_error(page_error)
+                        row.update(status="failed", error_class=error_class, error=error)
+                        record_truncation(row, list_name="sitePermissions", rows=len(permissions), limit=None,
+                                          reason=REASON_PAGINATION_FAILED)
+                    sampled_permissions.append(entry)
+                    coverage.append(row)
                     continue
 
                 error_code = result.get("error_code") if isinstance(result, dict) else None

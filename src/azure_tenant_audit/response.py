@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .adapters import ADAPTERS, get_adapter
+from .adapters.powershell_graph import exchange_session_connectable
 from .ai_context import build_privacy_block
+from .auth_context import inspect_token_claims
 from .finalize import finalize_bundle_contract, seal_run_findings
 from .findings import build_report_pack
 from .output import AuditWriter
@@ -17,9 +19,15 @@ from .secret_hygiene import redact_argv
 LAB_TENANT_ENV = "AUDITEX_LAB_TENANT_IDS"
 DEFAULT_LAB_TENANT_IDS: tuple[str, ...] = ()
 RESPONSE_SENSITIVE_ARGS = {"--sensitive-users", "--partner-domains", "--command-override", "--adapter-override", "--access-token", "--client-secret", "--token"}
-ALLOWED_RESPONSE_ADAPTERS = tuple(sorted(ADAPTERS.keys()))
+# Only adapters that run a command (R086): teams_admin_rest has no run() and m365_cli is retired (DEC-108 D2).
+ALLOWED_RESPONSE_ADAPTERS = tuple(sorted(name for name in ADAPTERS if name in {"m365dsc", "powershell_graph"}))
+RETIRED_RESPONSE_ADAPTERS = frozenset({"m365_cli"})
 SAFE_RESPONSE_FIELD_BLACKLIST = frozenset("\x00\r\n\t;&|`$<>\"'")
 MAX_RESPONSE_FIELD_LENGTH = 512
+# The product toggle (auditex.features.RESPONSE_ENABLE_ENV), read here too: the engine never imports the product layer.
+RESPONSE_ENABLE_ENV = "AUDITEX_ENABLE_RESPONSE"
+# Command output a response read returns is evidence (raw/, normalized/), never copied into the run's logs (R086).
+_RESPONSE_LOG_OUTPUT_KEYS = frozenset({"stdout", "stderr", "stdout_sample", "stderr_sample"})
 
 
 def _is_safe_response_field(value: str | None) -> bool:
@@ -53,6 +61,8 @@ class ResponseAction:
     adapter: str
     commands: tuple[str, ...]
     required_fields: tuple[str, ...] = ()
+    # Exchange Online cmdlets exist only inside a connected session, so execution needs one (R086).
+    needs_exchange_session: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,6 +87,9 @@ class ResponseConfig:
     command_override: str | None = None
     allow_adapter_override: bool = False
     allow_command_override: bool = False
+    # The lab Exchange Online session (kind exchange_online, app-only token, initial domain) the Exchange actions run
+    # in; without one they are blocked before any command runs. Never printed: it holds a token.
+    exchange_session: dict[str, Any] | None = field(default=None, repr=False)
 
 
 RESPONSE_ACTIONS: dict[str, ResponseAction] = {
@@ -89,6 +102,7 @@ RESPONSE_ACTIONS: dict[str, ResponseAction] = {
             'Get-MessageTrace -RecipientAddress "{target}"',
         ),
         required_fields=("target",),
+        needs_exchange_session=True,
     ),
     "user_audit_history": ResponseAction(
         name="user_audit_history",
@@ -99,6 +113,7 @@ RESPONSE_ACTIONS: dict[str, ResponseAction] = {
             'Search-UnifiedAuditLog -UserIds "{target}"',
         ),
         required_fields=("target",),
+        needs_exchange_session=True,
     ),
     "purview_audit_export": ResponseAction(
         name="purview_audit_export",
@@ -115,6 +130,31 @@ RESPONSE_ACTIONS: dict[str, ResponseAction] = {
 
 def response_actions() -> list[str]:
     return sorted(RESPONSE_ACTIONS.keys())
+
+
+def _response_enabled() -> bool:
+    return os.environ.get(RESPONSE_ENABLE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _session_tenant(exchange_session: Any) -> str | None:
+    """The tenant the session's access token was minted for (its ``tid`` claim), or None when it cannot be read."""
+    token = exchange_session.get("access_token") if isinstance(exchange_session, dict) else None
+    if not isinstance(token, str):
+        return None
+    try:
+        tenant = inspect_token_claims(token).get("tenant_id")
+    except (ValueError, TypeError):
+        return None
+    return str(tenant) if tenant else None
+
+
+def _log_without_output(log_event: Any) -> Any:
+    def log(kind: str, message: str, details: dict[str, Any] | None = None) -> None:
+        if isinstance(details, dict):
+            details = {key: value for key, value in details.items() if key not in _RESPONSE_LOG_OUTPUT_KEYS}
+        log_event(kind, message, details)
+
+    return log
 
 
 def _lab_tenant_ids() -> set[str]:
@@ -214,6 +254,19 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
             }
         )
 
+    if config.execute and not _response_enabled():
+        blockers.append(
+            {
+                "collector": "response",
+                "item": "response.feature_toggle",
+                "status": "failed",
+                "error_class": "lab_guard",
+                "reason": "response_disabled",
+                "error": f"Response execution is disabled; {RESPONSE_ENABLE_ENV} is not set.",
+                "recommendations": {"notes": f"Set {RESPONSE_ENABLE_ENV}=1 for lab-only development."},
+            }
+        )
+
     action = _resolve_action(config.action)
     if action is None:
         blockers.append(
@@ -301,7 +354,36 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                 "recommendations": {"notes": f"Use one of: {', '.join(ALLOWED_RESPONSE_ADAPTERS)}"},
             }
         )
-    if action is not None:
+    if (action is not None and action.needs_exchange_session and config.adapter_override
+            and config.adapter_override != action.adapter):
+        # Only the action's own adapter carries the checked Exchange session into its connect step; any other adapter
+        # would run the cmdlet without it (R086).
+        blockers.append(
+            {
+                "collector": "response",
+                "item": f"response.adapter:{config.adapter_override}",
+                "status": "failed",
+                "error_class": "response_invalid_adapter_override",
+                "error": (
+                    f"Response action '{action.name}' needs an Exchange Online session, which adapter "
+                    f"'{config.adapter_override}' cannot carry."
+                ),
+                "recommendations": {"notes": f"Run '{action.name}' on its own adapter, {action.adapter}."},
+            }
+        )
+    if action is not None and (adapter_name or action.adapter) in RETIRED_RESPONSE_ADAPTERS:
+        blockers.append(
+            {
+                "collector": "response",
+                "item": f"response.action:{action.name}",
+                "status": "failed",
+                "error_class": "toolchain_unavailable",
+                "reason": "response_action_retired",
+                "error": f"Response action '{action.name}' needs the retired '{adapter_name or action.adapter}' adapter.",
+                "recommendations": {"notes": "This action cannot run until it has a supported adapter."},
+            }
+        )
+    elif action is not None:
         try:
             adapter = get_adapter(adapter_name or action.adapter)
         except KeyError:
@@ -343,7 +425,41 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                     }
                 )
 
-        missing = [field for field in action.required_fields if not getattr(config, field, None)]
+        exchange_session = config.exchange_session
+        if (config.execute and action.needs_exchange_session
+                and not exchange_session_connectable(exchange_session)):
+            blockers.append(
+                {
+                    "collector": "response",
+                    "item": f"response.session:{action.name}",
+                    "status": "failed",
+                    "error_class": "session_not_connected",
+                    "error": (
+                        f"Response action '{action.name}' needs a connected Exchange Online session: an access token "
+                        "and the lab tenant's onmicrosoft organisation."
+                    ),
+                    "recommendations": {"notes": (
+                        "The auditex CLI cannot open an Exchange Online session for response actions yet; run the "
+                        "dry-run plan, or call run_response with the lab tenant's exchange_session."
+                    )},
+                }
+            )
+        elif config.execute and action.needs_exchange_session and _session_tenant(exchange_session) != tenant_id:
+            # The lab guard checked the configured tenant ID; the session must be that tenant's, or the read would
+            # run in whichever organisation the token belongs to.
+            blockers.append(
+                {
+                    "collector": "response",
+                    "item": f"response.session:{action.name}",
+                    "status": "failed",
+                    "error_class": "lab_guard",
+                    "reason": "session_tenant_mismatch",
+                    "error": "The Exchange Online session does not belong to the allow-listed lab tenant.",
+                    "recommendations": {"notes": "Supply a session minted for the lab tenant named by --tenant-id."},
+                }
+            )
+
+        missing = [name for name in action.required_fields if not getattr(config, name, None)]
         if missing:
             blockers.append(
                 {
@@ -419,8 +535,12 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
             )
         else:
             last_failure: dict[str, Any] | None = None
+            command_log = _log_without_output(writer.log_event)
             for index, command in enumerate(planned_commands, start=1):
-                command_payload = adapter.run(command, log_event=writer.log_event)
+                if action.needs_exchange_session and adapter.name == "powershell_graph":
+                    command_payload = adapter.run(command, log_event=command_log, session=config.exchange_session)
+                else:
+                    command_payload = adapter.run(command, log_event=command_log)
                 command_payload.setdefault("command", command)
                 command_payload.setdefault("plan_position", index)
                 executed = command_payload.get("error") is None

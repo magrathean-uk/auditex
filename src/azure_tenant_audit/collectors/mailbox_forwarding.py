@@ -4,7 +4,9 @@ Targets the #1 BEC indicator: rules that forward to external recipients or
 hide messages from the user (move to RSS Feeds, Junk, or Deleted Items with a
 broad subject filter). Reads via Microsoft Graph so a Global Reader / Global
 Admin with `MailboxSettings.Read` can audit a tenant without Exchange Online
-PowerShell. Message content is never read, so `Mail.Read` is not requested. Auto-reply message
+PowerShell. Message content is never read, so `Mail.Read` is not requested. Rule move targets are folder IDs,
+resolved from folder metadata (mailFolders routes only) with the optional `Mail.ReadBasic.All`, the grant Microsoft
+documents for those routes. Auto-reply message
 bodies come back with mailboxSettings and are dropped before they reach raw or normalized output.
 """
 from __future__ import annotations
@@ -27,6 +29,9 @@ _HIDE_FROM_USER_FOLDERS = {
     "archive",
     "conversation history",
 }
+# Well-known folder names Graph resolves in any mailbox language (R006). RSS Feeds has none, so it is matched by its
+# display name in the top-level folder list.
+_HIDE_FROM_USER_WELL_KNOWN = ("junkemail", "deleteditems", "archive", "conversationhistory")
 
 
 class MailboxForwardingCollector(Collector):
@@ -36,6 +41,8 @@ class MailboxForwardingCollector(Collector):
         "User.Read.All",
         "MailboxSettings.Read",
     ]
+    # Folder metadata for inbox-rule move targets (R006); without it those rules read unknown, never clean.
+    optional_permissions = ["Mail.ReadBasic.All"]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient | None = context.get("client")
@@ -51,20 +58,45 @@ class MailboxForwardingCollector(Collector):
 
         all_rules: list[dict[str, Any]] = []
         all_settings: list[dict[str, Any]] = []
+        folder_refusal: dict[str, Any] | None = None
         for user in users:
             mail = user.get("mail")
             user_id = user.get("id")
             if not user_id or not mail:
                 continue
+            if str(user.get("userType") or "").strip().lower() == "guest":
+                # A B2B guest's mail is its home address: it has no mailbox in this tenant to read (R046).
+                continue
             user_rules, rules_status = self._fetch_inbox_rules(
                 client, user_id, log_event=log_event
             )
-            for rule in user_rules:
-                classified = _classify_message_rule(rule, user, accepted_domains)
-                all_rules.append(classified)
             coverage.append(rules_status)
+            # Graph returns moveToFolder as a folder ID, so the user's hide-from-user folders are resolved to IDs,
+            # but only when a rule moves mail somewhere a display name does not already settle.
+            hide_folder_ids: set[str] | None = set()
+            if any(_needs_folder_resolution(rule) for rule in user_rules):
+                if folder_refusal is not None:
+                    # The folder read was already refused for the run's credential: later users' move rules stay
+                    # unknown on that one gap row instead of sending the same refused read per user.
+                    hide_folder_ids = None
+                    folder_refusal["unresolved_user_count"] += 1
+                else:
+                    hide_folder_ids, folders_status = self._resolve_hide_folders(client, user_id)
+                    coverage.append(folders_status)
+                    if folders_status.get("error_class") in _FOLDER_REFUSAL_CLASSES:
+                        folder_refusal = folders_status
+            for rule in user_rules:
+                classified = _classify_message_rule(rule, user, accepted_domains, hide_folder_ids)
+                all_rules.append(classified)
 
-            user_settings, settings_status = self._fetch_mailbox_settings(client, user_id)
+            if rules_status.get("reason") == NO_MAILBOX:
+                # The rules read already showed there is no mailbox; its settings are not requested.
+                user_settings, settings_status = None, {
+                    **rules_status, "name": f"mailboxSettings:{user_id}", "endpoint": f"/users/{user_id}/mailboxSettings",
+                    "duration_ms": 0.0,
+                }
+            else:
+                user_settings, settings_status = self._fetch_mailbox_settings(client, user_id)
             if user_settings is not None:
                 all_settings.append(
                     {
@@ -79,7 +111,8 @@ class MailboxForwardingCollector(Collector):
         payload["messageRules"] = {"value": all_rules}
         payload["mailboxSettings"] = {"value": all_settings}
 
-        partial = any(row.get("status") != "ok" for row in coverage)
+        # A user without a mailbox is a skipped row, not a failed read, so it does not make the collection partial.
+        partial = any(row.get("status") not in {"ok", "skipped"} for row in coverage)
         return CollectorResult(
             name=self.name,
             status="partial" if partial else "ok",
@@ -213,8 +246,9 @@ class MailboxForwardingCollector(Collector):
                 if isinstance(values, list):
                     rules = [item for item in values if isinstance(item, dict)]
         except Exception as exc:  # noqa: BLE001
-            status = "failed"
-            error_class, error = _classify_graph_error(exc)
+            status = "skipped" if _no_mailbox(exc) else "failed"
+            if status == "failed":
+                error_class, error = _classify_graph_error(exc)
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
         coverage_row = {
             "collector": self.name,
@@ -227,6 +261,8 @@ class MailboxForwardingCollector(Collector):
             "error_class": error_class,
             "error": error,
         }
+        if status == "skipped":
+            coverage_row["reason"] = NO_MAILBOX
         if log_event:
             log_event(
                 "collector.endpoint.finished",
@@ -242,6 +278,66 @@ class MailboxForwardingCollector(Collector):
             )
         return rules, coverage_row
 
+    def _resolve_hide_folders(self, client: GraphClient | None, user_id: str) -> tuple[set[str] | None, dict[str, Any]]:
+        """IDs of the user's hide-from-user folders, or None when they could not be read.
+
+        Folder metadata only (``$select=id,displayName`` on the top-level list and ``$select=id`` on the well-known
+        folders); no message is read. The reads go in one ``$batch``, so a refused folder read never counts toward the
+        per-family permission stop that guards the user's other reads.
+        """
+        start = time.perf_counter()
+        path = f"/users/{user_id}/mailFolders"
+        ids: set[str] | None = set()
+        error_class: str | None = None
+        error: str | None = None
+        try:
+            if client is None or not hasattr(client, "get_batch"):
+                raise GraphError("graph client unavailable", request=path)
+            answers = client.get_batch(
+                [{"path": path, "params": {"$select": "id,displayName", "$top": "100"}}]
+                + [{"path": f"{path}/{name}", "params": {"$select": "id"}} for name in _HIDE_FROM_USER_WELL_KNOWN]
+            )
+            if not isinstance(answers, list) or len(answers) != 1 + len(_HIDE_FROM_USER_WELL_KNOWN):
+                raise GraphError("folder lookup answer incomplete", request=path)
+            for index, answer in enumerate(answers):
+                status = answer.get("status") if isinstance(answer, dict) else None
+                body = answer.get("body") if isinstance(answer, dict) else None
+                if status == 200 and isinstance(body, dict) and index == 0:
+                    folders = body.get("value") if isinstance(body.get("value"), list) else []
+                    next_link = body.get("@odata.nextLink")
+                    if isinstance(next_link, str) and next_link:
+                        folders = folders + list(client.iter_items(next_link))
+                    for folder in folders:
+                        if isinstance(folder, dict) and str(folder.get("displayName") or "").strip().lower() in _HIDE_FROM_USER_FOLDERS:
+                            ids.add(str(folder.get("id") or ""))
+                elif status == 200 and isinstance(body, dict) and body.get("id"):
+                    ids.add(str(body["id"]))
+                elif not (status == 404 and index > 0):  # 404: the mailbox has no such folder (an archive is optional)
+                    raise GraphError(
+                        str((answer or {}).get("error") or "mail folder not read"),
+                        status=status if isinstance(status, int) else None,
+                        error_code=(answer or {}).get("error_code"),
+                        request=path,
+                    )
+            ids.discard("")
+        except Exception as exc:  # noqa: BLE001
+            ids = None
+            error_class, error = _classify_graph_error(exc)
+        row: dict[str, Any] = {
+            "collector": self.name,
+            "type": "graph",
+            "name": f"mailFolders:{user_id}",
+            "endpoint": path,
+            "status": "ok" if ids is not None else "failed",
+            "item_count": len(ids or ()),
+            "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+            "error_class": error_class,
+            "error": error,
+        }
+        if ids is None:
+            row["unresolved_user_count"] = 1
+        return ids, row
+
     def _fetch_mailbox_settings(
         self,
         client: GraphClient | None,
@@ -255,6 +351,19 @@ class MailboxForwardingCollector(Collector):
             response = client.get_json(path)
         except Exception as exc:  # noqa: BLE001
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            if _no_mailbox(exc):
+                return None, {
+                    "collector": self.name,
+                    "type": "graph",
+                    "name": f"mailboxSettings:{user_id}",
+                    "endpoint": path,
+                    "status": "skipped",
+                    "reason": NO_MAILBOX,
+                    "item_count": 0,
+                    "duration_ms": duration_ms,
+                    "error_class": None,
+                    "error": None,
+                }
             error_class, error = _classify_graph_error(exc)
             return None, {
                 "collector": self.name,
@@ -283,10 +392,34 @@ class MailboxForwardingCollector(Collector):
         }
 
 
+NO_MAILBOX = "no_mailbox"
+# A folder read refused for the run's credential (the mail-folder permission is not granted): it is not retried per user.
+_FOLDER_REFUSAL_CLASSES = frozenset({"insufficient_permissions", "unauthenticated", "permission_stop"})
+_NO_MAILBOX_CODES = frozenset({"mailboxnotenabledforrestapi", "errornonexistentmailbox"})
+
+
+def _no_mailbox(exc: Exception) -> bool:
+    """Graph's answer for a mail-enabled user with no Exchange Online mailbox (a 404 with a named code)."""
+    return (
+        isinstance(exc, GraphError)
+        and exc.status == 404
+        and str(exc.error_code or "").lower() in _NO_MAILBOX_CODES
+    )
+
+
+def _needs_folder_resolution(rule: dict[str, Any]) -> bool:
+    actions = rule.get("actions") if isinstance(rule, dict) else None
+    if not isinstance(actions, dict):
+        return False
+    target = str(actions.get("moveToFolder") or "").strip().lower()
+    return bool(target) and target not in _HIDE_FROM_USER_FOLDERS and not target.endswith(":\\rss feeds")
+
+
 def _classify_message_rule(
     rule: dict[str, Any],
     user: dict[str, Any],
     accepted_domains: Iterable[str],
+    hide_folder_ids: set[str] | None = frozenset(),
 ) -> dict[str, Any]:
     accepted_set = {item.lower() for item in accepted_domains}
     actions = rule.get("actions") or {}
@@ -322,6 +455,13 @@ def _classify_message_rule(
         broad_filter = _is_broad_filter(conditions)
         if not broad_filter and move_target not in _HIDE_FROM_USER_FOLDERS and not delete_action:
             hide_from_user = False
+    hide_state = "resolved"
+    if not hide_from_user and _needs_folder_resolution(rule):
+        if hide_folder_ids is None:
+            # The folder ID could not be resolved: the rule is not reported as clean (R006).
+            hide_from_user, hide_state = None, "unknown"
+        elif str(actions.get("moveToFolder")).strip() in hide_folder_ids:
+            hide_from_user = True
 
     return {
         "rule_id": str(rule.get("id") or ""),
@@ -341,6 +481,7 @@ def _classify_message_rule(
         "move_to_folder": actions.get("moveToFolder"),
         "delete_action": delete_action,
         "hide_from_user": hide_from_user,
+        "hide_from_user_state": hide_state,
     }
 
 

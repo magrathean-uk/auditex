@@ -7,6 +7,7 @@ from ..chunk_reader import iter_endpoint_records
 from ..collection_gaps import (
     REASON_FANOUT_LIMIT,
     REASON_INPUT_LIMITED,
+    REASON_PAGINATION_FAILED,
     fanout_gap_row,
     section_total,
     section_was_cut,
@@ -18,11 +19,24 @@ from .base import (
     _classify_graph_error,
     _InvalidCollectionPage,
     _validated_collection,
+    record_truncation,
     run_graph_endpoints,
 )
 
 _MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 _SERVICE_PRINCIPAL_FANOUT_LIMIT = 10
+
+
+def _follow_next_link(client: Any, rows: list[Any], next_link: str) -> tuple[list[Any], Exception | None]:
+    """Rows of a fan-out item plus its later pages; a failed page ends the list with the rows read so far and the error
+    (R030, R045), so one page never crashes the collector and loses the sections already read."""
+    rows = list(rows)
+    try:
+        for item in client.iter_items(next_link):
+            rows.append(item)
+    except Exception as exc:  # noqa: BLE001
+        return rows, exc
+    return rows, None
 
 # Resource identifiers from ScubaGear's RiskyAppPermissions.json, revision 2446ad72.
 RISKY_RESOURCE_APP_IDS = (
@@ -234,29 +248,35 @@ class AppConsentCollector(Collector):
                     if not isinstance(rows, list):
                         rows = []
                     next_link = body.get("@odata.nextLink")
+                    page_error: Exception | None = None
                     if isinstance(next_link, str) and next_link:
-                        rows = rows + list(client.iter_items(next_link))
-                    target_list.append(
-                        {
-                            "servicePrincipalId": spec["service_principal_id"],
-                            "displayName": spec["displayName"],
-                            spec["property_name"]: rows,
-                        }
-                    )
-                    coverage.append(
-                        {
-                            "collector": self.name,
-                            "type": "graph",
-                            "name": spec["name"],
-                            "endpoint": endpoint,
-                            "service_principal_id": spec["service_principal_id"],
-                            "status": "ok",
-                            "item_count": len(rows),
-                            "duration_ms": round((time.perf_counter() - batch_start) * 1000, 2),
-                            "error_class": None,
-                            "error": None,
-                        }
-                    )
+                        rows, page_error = _follow_next_link(client, rows, next_link)
+                    entry = {
+                        "servicePrincipalId": spec["service_principal_id"],
+                        "displayName": spec["displayName"],
+                        spec["property_name"]: rows,
+                    }
+                    row = {
+                        "collector": self.name,
+                        "type": "graph",
+                        "name": spec["name"],
+                        "endpoint": endpoint,
+                        "service_principal_id": spec["service_principal_id"],
+                        "status": "ok",
+                        "item_count": len(rows),
+                        "duration_ms": round((time.perf_counter() - batch_start) * 1000, 2),
+                        "error_class": None,
+                        "error": None,
+                    }
+                    if page_error is not None:
+                        # The rows read so far stay, marked cut; the object's read is a failed, truncated gap.
+                        entry["collection_truncated"] = True
+                        error_class, error = _classify_graph_error(page_error)
+                        row.update(status="failed", error_class=error_class, error=error)
+                        record_truncation(row, list_name=spec["name"], rows=len(rows), limit=None,
+                                          reason=REASON_PAGINATION_FAILED)
+                    target_list.append(entry)
+                    coverage.append(row)
                     continue
 
                 error_code = result.get("error_code") if isinstance(result, dict) else None

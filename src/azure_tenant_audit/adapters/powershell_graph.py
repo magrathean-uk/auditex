@@ -158,6 +158,14 @@ def _run_bounded(
     return run
 
 
+
+def exchange_session_connectable(exo: Any) -> bool:
+    """True when the session ``exo`` gives the adapter an Exchange Online connect step; without one a cmdlet runs
+    unconnected."""
+    if not isinstance(exo, dict) or exo.get("kind") != "exchange_online" or not exo.get("access_token"):
+        return False
+    return bool(_ORGANIZATION_PATTERN.fullmatch(str(exo.get("organization") or "")))
+
 class PowerShellGraphAdapter(Adapter):
     metadata = AdapterMetadata(
         name="powershell_graph",
@@ -247,14 +255,9 @@ class PowerShellGraphAdapter(Adapter):
                 f"-Organization '{organization}' -ShowBanner:$false -ErrorAction Stop | Out-Null }} "
                 f"catch {{ throw '{IPPS_SESSION_NOT_OPENED}' }}; "
             )
-        if not session or session.get("kind") != "exchange_online":
+        if not exchange_session_connectable(session):
             return ""
-        token = session.get("access_token")
-        if not token:
-            return ""
-        organization = str(session.get("organization") or "")
-        if not _ORGANIZATION_PATTERN.fullmatch(organization):
-            return ""
+        token, organization = session["access_token"], str(session["organization"])
         env["AUDITEX_EXO_ACCESS_TOKEN"] = str(token)
         return (
             "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "
@@ -274,6 +277,9 @@ class PowerShellGraphAdapter(Adapter):
         response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Run one checked read. ``response_transform`` is honoured only for the sensitive anti-phish read.
+
+        The process timeout is 180 s with a connect step, else 120 s; a whole-tenant enumeration (``-ResultSize
+        Unlimited``) gets UNBOUNDED_READ_TIMEOUT_SECONDS, as it walks every mailbox before answering (R047).
 
         ``Get-AntiPhishPolicy`` is recognised as sensitive from the command itself, so a caller that passes no
         transform still gets rows without targeted users (summarised ``not_collected``) and no output text.
@@ -329,9 +335,11 @@ class PowerShellGraphAdapter(Adapter):
                 )
             return {"error": IPPS_SESSION_NOT_OPENED, "error_class": IPPS_SESSION_NOT_OPENED, "command": safe_command}
         prepared = f"$ErrorActionPreference = 'Stop'; {prelude}{self._json_pipeline(script)}"
+        process_timeout = (UNBOUNDED_READ_TIMEOUT_SECONDS if "-resultsize unlimited" in script.lower()
+                           else 180 if prelude else 120)
         if _sensitive(script):
             return self._run_sensitive(
-                exe=exe, prepared=prepared, env=env, timeout=180 if prelude else 120, script=script,
+                exe=exe, prepared=prepared, env=env, timeout=process_timeout, script=script,
                 adapter_label=adapter_label, safe_command=safe_command, command_words=command_words,
                 has_session=session is not None, prelude=bool(prelude), log_event=log_event,
                 response_transform=response_transform,
@@ -354,7 +362,7 @@ class PowerShellGraphAdapter(Adapter):
                 [exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prepared],
                 text=True,
                 capture_output=True,
-                timeout=180 if prelude else 120,
+                timeout=process_timeout,
                 env=env,
             )
             duration_ms = round((time.time() - start) * 1000, 2)
@@ -383,6 +391,10 @@ class PowerShellGraphAdapter(Adapter):
                         },
                     )
 
+            if _json_success(result.returncode, stdout):
+                # Tenant rows are never searched for refusal text (R020): a zero exit with JSON is classified from
+                # stderr alone, which still names a refused or missing command.
+                combined = stderr.lower()
             if (result.returncode != 0 or self._looks_like_not_found(combined)
                     or self._looks_like_auth_required(combined)):
                 module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
@@ -534,6 +546,8 @@ class PowerShellGraphAdapter(Adapter):
                     "stdout_bytes": numbers["stdout_bytes"], "stderr_bytes": numbers["stderr_bytes"],
                 })
 
+            if _json_success(run.returncode, stdout):
+                combined = stderr.lower()  # never the tenant rows (R020)
             if run.returncode != 0 or self._looks_like_not_found(combined) or self._looks_like_auth_required(combined):
                 module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
                 if module_missing:
@@ -602,6 +616,22 @@ class PowerShellGraphAdapter(Adapter):
         except Exception:  # noqa: BLE001 - fixed class only: no str(exc), repr or traceback for this command
             event("command.failed", "PowerShell command exception", {"error_class": "command_exception", **numbers})
             return failure("command_exception", "command_exception", numbers)
+
+
+# A read that enumerates every mailbox in the tenant before answering outlasts the default timeout on a large tenant.
+UNBOUNDED_READ_TIMEOUT_SECONDS = 600
+
+
+def _json_success(returncode: int | None, stdout: str | None) -> bool:
+    """A zero exit whose stdout parses as JSON is a read that ran (R020): tenant rows such as a rule named 'Block
+    unauthorized sharing' must never be searched for refusal text, so only stderr is."""
+    if returncode != 0 or not stdout or not stdout.strip():
+        return False
+    try:
+        json.loads(stdout)
+    except (ValueError, RecursionError):
+        return False
+    return True
 
 
 def _session_kind(value: Any) -> str | None:

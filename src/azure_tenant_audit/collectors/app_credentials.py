@@ -37,6 +37,44 @@ _SERVICE_PRINCIPAL_SELECT = (
 )
 
 
+class _Fanout:
+    """Outcome of one per-object read across every object: counts, and the first failure's class and text."""
+
+    def __init__(self, name: str, endpoint: str) -> None:
+        self.name, self.endpoint = name, endpoint
+        self.ok = self.failures = 0
+        self.error_class: str | None = None
+        self.error: str | None = None
+        self.started = time.perf_counter()
+
+    @property
+    def attempted(self) -> bool:
+        return bool(self.ok or self.failures)
+
+    def succeeded(self) -> None:
+        self.ok += 1
+
+    def failed(self, exc: Exception) -> None:
+        self.failures += 1
+        if self.error_class is None:
+            self.error_class, self.error = _classify_graph_error(exc)
+
+    def row(self, collector: str) -> dict[str, Any]:
+        return {
+            "collector": collector,
+            "type": "graph",
+            "name": self.name,
+            "endpoint": self.endpoint,
+            "status": "failed" if self.failures else "ok",
+            "item_count": self.ok,
+            "duration_ms": round((time.perf_counter() - self.started) * 1000, 2),
+            "error_class": self.error_class,
+            "error": self.error,
+            "requested_operation_count": self.ok + self.failures,
+            "failed_operation_count": self.failures,
+        }
+
+
 class AppCredentialsCollector(Collector):
     name = "app_credentials"
     description = (
@@ -92,14 +130,24 @@ class AppCredentialsCollector(Collector):
             )
         last_signin_by_app = _last_signin_by_app_id(signin_rows) if signin_data_available else {}
 
+        # Per-object reads: each failure is counted on an aggregated fan-out row (R032), so a throttled or refused
+        # owner or federated-credential read is a recorded gap, never an 'ok' collector with an empty answer.
+        fanouts = {name: _Fanout(name, endpoint) for name, endpoint in (
+            ("applicationOwners", "/applications/{id}/owners"),
+            ("applicationFederatedCredentials", "/applications/{id}/federatedIdentityCredentials"),
+            ("servicePrincipalOwners", "/servicePrincipals/{id}/owners"),
+        )}
         application_records: list[dict[str, Any]] = []
         for app in applications:
             normalized = self._normalize_application(app)
-            owner_count, owners = self._fetch_owners(client, "/applications", app.get("id"))
+            owner_count, owners = self._fetch_owners(client, "/applications", app.get("id"), fanouts["applicationOwners"])
             normalized["owner_count"] = owner_count
             if owners:
                 normalized["owners"] = owners
-            normalized["federated_credentials"] = self._fetch_federated_credentials(client, app.get("id"))
+            # None, not [], when the read failed: 'none configured' must not stand for 'not read'.
+            normalized["federated_credentials"] = self._fetch_federated_credentials(
+                client, app.get("id"), fanouts["applicationFederatedCredentials"]
+            )
             normalized["signin_data_available"] = signin_data_available
             if signin_data_available:
                 normalized["last_signin_at"] = last_signin_by_app.get(str(app.get("appId") or "").lower())
@@ -108,7 +156,9 @@ class AppCredentialsCollector(Collector):
         service_principal_records: list[dict[str, Any]] = []
         for sp in service_principals:
             normalized = self._normalize_service_principal(sp)
-            owner_count, owners = self._fetch_owners(client, "/servicePrincipals", sp.get("id"))
+            owner_count, owners = self._fetch_owners(
+                client, "/servicePrincipals", sp.get("id"), fanouts["servicePrincipalOwners"]
+            )
             normalized["owner_count"] = owner_count
             if owners:
                 normalized["owners"] = owners
@@ -117,6 +167,7 @@ class AppCredentialsCollector(Collector):
         payload["applicationCredentials"] = {"value": application_records}
         payload["servicePrincipalCredentials"] = {"value": service_principal_records}
 
+        coverage.extend(fanout.row(self.name) for fanout in fanouts.values() if fanout.attempted)
         partial = any(row.get("status") != "ok" for row in coverage)
         return CollectorResult(
             name=self.name,
@@ -188,15 +239,19 @@ class AppCredentialsCollector(Collector):
 
     @staticmethod
     def _fetch_owners(
-        client: GraphClient | None, prefix: str, object_id: Any
+        client: GraphClient | None, prefix: str, object_id: Any, fanout: _Fanout | None = None
     ) -> tuple[int | None, list[dict[str, Any]]]:
         """Return the owner count (None when unreadable) and owner ids with types."""
         if client is None or not hasattr(client, "get_json") or not object_id:
             return None, []
         try:
             response = client.get_json(f"{prefix}/{object_id}/owners", params={"$select": "id"})
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            if fanout is not None:
+                fanout.failed(exc)
             return None, []
+        if fanout is not None:
+            fanout.succeeded()
         if isinstance(response, dict):
             value = response.get("value")
             if isinstance(value, list):
@@ -209,13 +264,19 @@ class AppCredentialsCollector(Collector):
         return None, []
 
     @staticmethod
-    def _fetch_federated_credentials(client: GraphClient | None, object_id: Any) -> list[dict[str, Any]]:
+    def _fetch_federated_credentials(
+        client: GraphClient | None, object_id: Any, fanout: _Fanout | None = None
+    ) -> list[dict[str, Any]] | None:
         if client is None or not hasattr(client, "get_json") or not object_id:
             return []
         try:
             response = client.get_json(f"/applications/{object_id}/federatedIdentityCredentials")
-        except Exception:  # noqa: BLE001
-            return []
+        except Exception as exc:  # noqa: BLE001
+            if fanout is not None:
+                fanout.failed(exc)
+            return None
+        if fanout is not None:
+            fanout.succeeded()
         if not isinstance(response, dict):
             return []
         rows: list[dict[str, Any]] = []

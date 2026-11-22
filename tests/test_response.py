@@ -17,7 +17,7 @@ class _FakeAdapter:
     def dependency_check(self) -> bool:
         return True
 
-    def run(self, command: str, log_event=None):  # noqa: ANN001, ARG002
+    def run(self, command: str, log_event=None, session=None):  # noqa: ANN001, ARG002
         self.run_calls.append(command)
         return {
             "command": command,
@@ -59,7 +59,17 @@ def test_response_execute_requires_matching_lab_tenant_even_with_allow_flag(tmp_
     assert validation["valid"] is True
 
 
+def _lab_token(tenant_id: str) -> str:
+    import base64
+
+    def part(value: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    return f"{part({'alg': 'none'})}.{part({'tid': tenant_id})}.constructed"
+
+
 def test_response_execute_runs_when_lab_guard_is_satisfied(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
     adapter = _FakeAdapter()
     monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
     monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"lab-tenant"})
@@ -76,6 +86,8 @@ def test_response_execute_runs_when_lab_guard_is_satisfied(tmp_path: Path, monke
             execute=True,
             allow_lab_response=True,
             run_name="response-allowed",
+            exchange_session={"kind": "exchange_online", "access_token": _lab_token("lab-tenant"),
+                              "organization": "lab.onmicrosoft.com"},
         )
     )
 
