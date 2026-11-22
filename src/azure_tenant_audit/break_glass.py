@@ -140,6 +140,7 @@ class BreakGlassAccounts:
         global_admin_role_ids: set[str] | None = None,
         group_members: Mapping[str, set[str]] | None = None,
         unread_groups: Mapping[str, str] | None = None,
+        active_roles_held: Mapping[str, set[str]] | None = None,
     ) -> None:
         self.source = source
         self.state = state
@@ -157,6 +158,9 @@ class BreakGlassAccounts:
         self.unverified = unverified or []
         # Lower-case user ID -> lower-case ids of the directory roles the user holds (any route the run read).
         self.roles_held = {key: set(value) for key, value in (roles_held or {}).items()}
+        # The same, active assignments only: a role exclusion leaves out its active holders, and an account that is
+        # only eligible for the role signs in without it.
+        self.active_roles_held = {key: set(value) for key, value in (active_roles_held or {}).items()}
         # True when an account is a group or an object the run did not collect: its roles cannot be listed.
         self.roles_unknown = roles_unknown
         self.global_admin_role_ids = global_admin_role_ids or set()
@@ -184,9 +188,11 @@ class BreakGlassAccounts:
             for identifier in sorted(self.label_of)
             if identifier in excluded
             or identifier in member_of_excluded
-            or self.roles_held.get(identifier, set()) & excluded_roles
+            or self.active_roles_held.get(identifier, set()) & excluded_roles
         ]
-        if self.role_ids & excluded_roles:
+        if self.role_ids & excluded_roles and not any(
+            self.active_roles_held.get(identifier, set()) & excluded_roles for identifier in self.label_of
+        ):
             hits.append("a role the policy excludes")
         return hits
 
@@ -242,10 +248,12 @@ def resolve_accounts(
         str(role["id"]).lower() for role in role_definitions if str(role.get("displayName") or "").lower() == _GLOBAL_ADMINISTRATOR
     }
     roles_by_principal: dict[str, set[str]] = {}
+    active_by_principal: dict[str, set[str]] = {}
     for assignment in role_assignments:
         principal, role_id = assignment.get("principalId"), assignment.get("roleDefinitionId")
         if isinstance(principal, str) and principal and role_id:
             roles_by_principal.setdefault(principal.lower(), set()).add(str(role_id).lower())
+            active_by_principal.setdefault(principal.lower(), set()).add(str(role_id).lower())
     for row in admin_rows:
         principal = row.get("principal_id")
         if not principal:
@@ -253,6 +261,10 @@ def resolve_accounts(
         for role in row.get("roles") or []:
             if role.get("role_definition_id"):
                 roles_by_principal.setdefault(str(principal).lower(), set()).add(str(role["role_definition_id"]).lower())
+                if role.get("route") != "pim_eligible" and role.get("group_assignment") != "eligible":
+                    active_by_principal.setdefault(str(principal).lower(), set()).add(
+                        str(role["role_definition_id"]).lower()
+                    )
             if role.get("global_administrator") and role.get("role_definition_id"):
                 global_admin_role_ids.add(str(role["role_definition_id"]).lower())
     group_members: dict[str, set[str]] = {}
@@ -272,6 +284,8 @@ def resolve_accounts(
         user_ids = {str(user["id"]).lower() for user in users if user.get("id")}
         held = {key: roles_by_principal.get(key, set()) for key in label_of if key in user_ids}
         return held, any(key not in user_ids for key in label_of)
+
+    active_held = {key: set(value) for key, value in active_by_principal.items()}
 
     label_of: dict[str, str] = {}
     if configured:
@@ -319,6 +333,7 @@ def resolve_accounts(
             global_admin_role_ids=global_admin_role_ids,
             group_members=group_members,
             unread_groups=unread_groups,
+            active_roles_held=active_held,
         )
 
     for user in users:
@@ -351,6 +366,7 @@ def resolve_accounts(
         global_admin_role_ids=global_admin_role_ids,
         group_members=group_members,
         unread_groups=unread_groups,
+        active_roles_held=active_held,
     )
 
 

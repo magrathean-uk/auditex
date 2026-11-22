@@ -533,3 +533,20 @@ def test_an_exclusion_through_a_group_whose_members_were_not_read_is_unverified_
     assert assessment["missing"] is False
     assert assessment["exclusion_unverified"] is True
     assert assessment["unverified_exclusion_groups"] == ["CA Exclusions"]
+
+
+def test_a_role_the_account_is_only_eligible_for_does_not_exclude_it() -> None:
+    """R039 review: a Conditional Access role exclusion applies to active holders; an eligible account signs in without it."""
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeRoles": [GLOBAL_ADMIN_ROLE]})
+    payloads = _role_payloads([policy], held={})
+    payloads["identity_governance"] = {
+        "roleEligibilitySchedules": {"value": [
+            {"id": "elig-bg1", "principalId": BG1, "roleDefinitionId": GLOBAL_ADMIN_ROLE, "directoryScopeId": "/"}
+        ]}
+    }
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="r", collector_payloads=payloads, break_glass_accounts=["bg1@example.com"]
+    )
+
+    assert _finding(snapshot) is not None
+    assert snapshot["break_glass_assessment"]["records"][0]["policies_missing_exclusion"] == 1
