@@ -82,8 +82,10 @@ def _message(exc: pytest.ExceptionInfo[redaction.ContextIncompleteError], root: 
     return message
 
 
-@pytest.mark.usefixtures("low_limits")
-def test_a_file_over_the_per_file_cap_still_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_file_over_the_real_per_file_cap_still_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # R090 raised the caps; the real cap (not a lowered test limit) still refuses a larger file.
+    assert redaction._MAX_FILE_BYTES >= max(_PROJECTED_250K)
+    assert redaction._MAX_SCAN_BYTES >= sum(_PROJECTED_250K)
     root = tmp_path / "run"
     _sparse_run(root, (redaction._MAX_FILE_BYTES + 1,))
     monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: None)
@@ -95,6 +97,7 @@ def test_a_file_over_the_per_file_cap_still_fails_closed(tmp_path: Path, monkeyp
     assert redaction.context_for_run(root).incomplete
 
 
+@pytest.mark.usefixtures("low_limits")
 def test_scan_accepts_exact_file_and_aggregate_limits(tmp_path: Path) -> None:
     root = tmp_path / "run"
     _sparse_run(root, (100, 50))
