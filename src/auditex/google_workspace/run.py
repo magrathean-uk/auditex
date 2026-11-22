@@ -53,6 +53,7 @@ from .auth import (
 from .client import (
     GoogleWorkspaceClient,
     classify_google_error,
+    classify_page_error,
     gmail_settings_status,
     is_token_refusal,
 )
@@ -365,7 +366,7 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
     if status == "ok" and isinstance(page_error, Exception):
         # A later page failed after its retries: what was read is real, but the list is cut short.
         status = "partial"
-        error_class, error = classify_google_error(page_error)
+        error_class, error = classify_page_error(page_error)
     permission_errors = [item for item in getattr(rows, "permission_errors", None) or [] if isinstance(item, dict)]
     if status == "ok" and permission_errors:
         # Drive files whose sharing could not be read: their exposure is unknown, so the read is not complete.

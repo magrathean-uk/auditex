@@ -26,6 +26,7 @@ from azure_tenant_audit.dns_lookup import (
 from .auth import POLICIES_SCOPE
 from .client import (
     classify_google_error,
+    classify_page_error,
     gmail_settings_status,
     minimise_gmail_settings,
 )
@@ -136,7 +137,7 @@ def _call(
         if page_error is not None:
             # A later page failed: the rows read before it are kept, and the list is a partial read.
             status = "partial"
-            error_class, error = classify_google_error(page_error)
+            error_class, error = classify_page_error(page_error)
     except Exception as exc:  # noqa: BLE001
         rows = []
         status = "failed"

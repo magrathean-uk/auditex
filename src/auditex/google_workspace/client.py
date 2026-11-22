@@ -97,6 +97,18 @@ def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str
     return status, error_class, f"{error}: {example}" if example else error
 
 
+def classify_page_error(exc: Exception) -> tuple[str, str]:
+    """Class and a fixed description of a later page that failed after its retries.
+
+    The library's text names the request URL, whose query carries the customer and the opaque page cursor, so it is
+    never copied: only the HTTP status (when there is one) is kept.
+    """
+    error_class, _message = classify_google_error(exc)
+    status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
+    detail = f"HTTP {status}" if isinstance(status, int) else error_class
+    return error_class, f"A later page failed after its retries ({detail}); the rows read before it are kept."
+
+
 class GoogleWorkspaceError(RuntimeError):
     def __init__(self, message: str, *, surface: str | None = None) -> None:
         super().__init__(message)
