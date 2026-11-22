@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.secret_hygiene import secure_write_text
+from azure_tenant_audit.secret_hygiene import secure_read_text, secure_write_text
 
 DEFAULT_GOOGLE_SCOPES: tuple[str, ...] = (
     "https://www.googleapis.com/auth/admin.directory.user.readonly",
@@ -129,14 +129,17 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         token_cache = config.token_cache.expanduser()
         credentials = None
         cached: Any = None
+        # Read once, through the same folder and file checks as the write: the grant recorded beside the credentials
+        # is then one this account saved, never one planted by another account (a fixed refusal otherwise).
+        raw_cache = secure_read_text(token_cache)
         try:
-            if token_cache.exists():
-                # Read once: the grant recorded beside the credentials is the one these credentials were saved with.
-                cached = json.loads(token_cache.read_text(encoding="utf-8"))
+            if raw_cache is not None:
+                cached = json.loads(raw_cache)
                 # Loaded with the scopes it was granted (not this run's), so a run that needs more signs in again
-                # rather than reusing a token its new collectors cannot use.
+                # rather than reusing a token its new collectors cannot use. A cache lacking a field a refresh needs is
+                # found here, on the credentials, so no refresh error text is ever read to decide it.
                 credentials = Credentials.from_authorized_user_info(cached)
-                if not _has_scopes(credentials, config.scopes) or not credentials.refresh_token:
+                if not _has_scopes(credentials, config.scopes) or not _can_refresh(credentials):
                     credentials = None
             if credentials is not None:
                 # The cache's scopes are what was asked for (an older cache may claim scopes never granted), so it is
@@ -167,6 +170,13 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                     credentials = flow.run_local_server(port=0)
                 except Exception as exc:  # noqa: BLE001 - oauthlib's denial and scope-change errors are not GoogleAuthError
                     raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
+                # With oauthlib's scope relaxation a consent can return a narrower grant; it is neither used nor saved.
+                missing = sorted(set(config.scopes) - _grant(credentials))
+                if missing:
+                    raise RuntimeError(
+                        "Google sign-in did not grant every permission this run needs (missing scopes: "
+                        f"{', '.join(missing)}); run again and approve every requested permission."
+                    )
         except GoogleAuthError as exc:
             # A fixed message: the library's text can carry token material.
             raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
@@ -231,15 +241,22 @@ def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:
 # Token endpoint errors that say the grant itself is gone or narrower (RFC 6749 5.2); a fresh consent fixes those.
 # Anything else (a 5xx page, a timeout, a busy endpoint, another error code) is temporary and says nothing about the grant.
 _GRANT_ERRORS = frozenset({"invalid_grant", "invalid_scope", "invalid_client", "unauthorized_client"})
-# google-auth's fixed local text when the cached entry lacks what a refresh needs; only a new consent supplies it.
-_MISSING_REFRESH_FIELDS = "The credentials do not contain the necessary fields"
+# The fields google-auth needs to refresh a user token; a cache lacking one is signed in again without a refresh.
+_REFRESH_FIELDS = ("refresh_token", "token_uri", "client_id", "client_secret")
+
+
+def _can_refresh(credentials: Any) -> bool:
+    """Whether the cached credentials hold every field a refresh needs (decided locally, before any refresh)."""
+    return all(getattr(credentials, field, None) for field in _REFRESH_FIELDS)
 
 
 def _is_grant_error(exc: Exception) -> bool:
     """Whether a failed refresh means the user must consent again (matched only; the text is never kept).
 
     google-auth raises ``RefreshError(details, response_data)`` for a token endpoint error; only the parsed OAuth
-    ``error`` field decides, never a word in the description or an unparsed body.
+    ``error`` field decides, never a word in the description or an unparsed body. A one-argument error (a plain-text
+    endpoint body, or google-auth's own text) is never a grant error: missing local fields are found by
+    :func:`_can_refresh` before the refresh.
     """
     if getattr(exc, "retryable", False):
         return False
@@ -247,7 +264,7 @@ def _is_grant_error(exc: Exception) -> bool:
     if len(args) > 1 and isinstance(args[1], Mapping):
         code = args[1].get("error")
         return isinstance(code, str) and code in _GRANT_ERRORS
-    return len(args) == 1 and isinstance(args[0], str) and args[0].startswith(_MISSING_REFRESH_FIELDS)
+    return False
 
 
 def _grant(credentials: Any) -> set[str]:
