@@ -198,3 +198,63 @@ def test_r115_users_list_names_only_the_fields_the_audit_reads() -> None:
         assert name in fields
     for name in ("recoveryEmail", "recoveryPhone", "phones", "addresses", "notes", "organizations"):
         assert name not in fields
+
+
+# ---- R057: files whose sharing files.list does not return (shared drives) get their permissions read ----------
+
+
+def _drive_client(files: list[dict[str, Any]], permissions: Any, calls: list[dict[str, Any]]) -> GoogleWorkspaceClient:
+    class _Files:
+        def list(self, **kwargs: Any) -> _Request:
+            calls.append({"files.list": kwargs})
+            return _Request({"files": [dict(item) for item in files]})
+
+    class _Permissions:
+        def list(self, **kwargs: Any) -> _Request:
+            calls.append({"permissions.list": kwargs})
+            return _Request(permissions)
+
+    drive = type("Drive", (), {"files": lambda self: _Files(), "permissions": lambda self: _Permissions()})()
+    client = GoogleWorkspaceClient(credentials=None)
+    assert client._services is not None
+    client._services[("drive", "v3")] = drive
+    return client
+
+
+def test_r057_shared_drive_file_permissions_are_read_and_public_sharing_is_found() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    calls: list[dict[str, Any]] = []
+    anyone = {"id": "anyoneWithLink", "type": "anyone", "role": "reader", "allowFileDiscovery": False}
+    client = _drive_client(
+        [{"id": "f1", "name": "Budget", "driveId": "d1", "permissionIds": ["anyoneWithLink"]},
+         {"id": "f2", "name": "Mine", "permissions": []}],
+        {"permissions": [anyone]},
+        calls,
+    )
+    files = client.list_drive_files()
+    assert "driveId" in calls[0]["files.list"]["fields"]
+    permission_calls = [call["permissions.list"] for call in calls if "permissions.list" in call]
+    assert [call["fileId"] for call in permission_calls] == ["f1"]
+    assert permission_calls[0]["supportsAllDrives"] is True
+    assert files[0]["permissions"] == [anyone]
+
+    snapshot = build_google_normalized_snapshot(
+        tenant_name="Example", run_id="r1", domain="example.com",
+        collector_payloads={"google_drive_posture": {"driveFiles": {"value": list(files)}, "sharedDrives": {"value": []}}},
+    )
+    rule_ids = [item["rule_id"] for item in build_google_findings(snapshot)]
+    assert "google.drive_anyone_with_link" in rule_ids
+
+
+def test_r057_unreadable_shared_drive_permissions_are_a_coverage_gap_not_clean() -> None:
+    from auditex.google_workspace.collectors import GoogleDrivePostureCollector
+
+    calls: list[dict[str, Any]] = []
+    client = _drive_client([{"id": "f1", "name": "Budget", "driveId": "d1"}], _HttpError(403), calls)
+    result = GoogleDrivePostureCollector().run({"client": client})
+    row = next(item for item in result.coverage if item["name"] == "drivePermissions")
+    assert row["status"] == "failed"
+    assert row["error_class"] == "insufficient_permissions"
+    assert result.status == "partial"

@@ -41,6 +41,9 @@ _USER_FIELDS = (
 )
 
 
+_DRIVE_PERMISSION_FIELDS = "id,type,role,emailAddress,domain,allowFileDiscovery,deleted"
+
+
 # Gmail settings `fields` masks: only what normalize.py and findings.py read; no vacation text, signature or filter text.
 GMAIL_VACATION_FIELDS = "enableAutoReply,restrictToContacts,restrictToDomain,startTime,endTime"
 GMAIL_SEND_AS_FIELDS = (
@@ -145,6 +148,9 @@ class CollectedRows(list):
     truncated: bool = False
     result_limit: int | None = None
     page_error: Exception | None = None
+    # Drive only: files whose permissions files.list left out and that were read one by one (see list_drive_files).
+    permission_reads: int = 0
+    permission_errors: list[dict[str, Any]] | None = None
 
     def __init__(
         self,
@@ -409,14 +415,20 @@ class GoogleWorkspaceClient:
         return minimise_gmail_settings(payload)
 
     def list_drive_files(self, *, top: int | None = None) -> list[dict[str, Any]]:
+        """Drive files with their sharing.
+
+        files.list does not return ``permissions`` for items in shared drives, nor for files the subject cannot
+        share. Each file it left them out of has them read with permissions.list, so its sharing is never read as
+        none; a file whose permissions cannot be read either is listed in ``permission_errors``.
+        """
         service = self._service("drive", "v3")
         page_size = min(self.page_size, top or self.page_size)
         fields = (
             "nextPageToken,files("
-            "id,name,mimeType,owners(emailAddress,displayName),webViewLink,shared,"
-            "permissions(id,type,role,emailAddress,domain,allowFileDiscovery,deleted),modifiedTime)"
+            "id,name,mimeType,owners(emailAddress,displayName),webViewLink,shared,driveId,permissionIds,"
+            f"permissions({_DRIVE_PERMISSION_FIELDS}),modifiedTime)"
         )
-        return self._collect_pages(
+        files = self._collect_pages(
             lambda page_token: service.files().list(
                 pageSize=page_size,
                 pageToken=page_token,
@@ -428,6 +440,31 @@ class GoogleWorkspaceClient:
             "files",
             limit=top,
         )
+        if not isinstance(files, CollectedRows):
+            files = CollectedRows(files)
+        errors: list[dict[str, Any]] = []
+        for drive_file in files:
+            file_id = str(drive_file.get("id") or "")
+            if "permissions" in drive_file or not file_id:
+                continue
+            try:
+                drive_file["permissions"] = self._collect_pages(
+                    lambda page_token, file_id=file_id: service.permissions().list(
+                        fileId=file_id,
+                        pageSize=100,
+                        pageToken=page_token,
+                        supportsAllDrives=True,
+                        fields=f"nextPageToken,permissions({_DRIVE_PERMISSION_FIELDS})",
+                    ),
+                    "permissions",
+                    limit=None,
+                )
+                files.permission_reads += 1
+            except Exception as exc:  # noqa: BLE001 - recorded as a coverage gap, never as no sharing
+                error_class, error = classify_google_error(exc)
+                errors.append({"fileId": file_id, "error_class": error_class, "error": error})
+        files.permission_errors = errors
+        return files
 
     def list_shared_drives(self, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("drive", "v3")

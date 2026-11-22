@@ -690,6 +690,37 @@ class GoogleDnsPostureCollector:
         )
 
 
+def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: list[dict[str, Any]]) -> None:
+    """A coverage row for the files whose permissions had to be read one by one, failing where they could not be."""
+    errors = [item for item in getattr(drive_files, "permission_errors", None) or [] if isinstance(item, dict)]
+    reads = int(getattr(drive_files, "permission_reads", 0) or 0)
+    if not errors and not reads:
+        return
+    error_class = error = None
+    status = "ok"
+    if errors:
+        classes = [str(item.get("error_class") or "client_error") for item in errors]
+        error_class = max(set(classes), key=classes.count)
+        status = "failed" if not reads else "partial"
+        error = (
+            f"Sharing of {len(errors)} of {len(errors) + reads} Drive files (shared-drive items or files the subject "
+            f"cannot share) could not be read, so their exposure is unknown: {errors[0].get('error')}"
+        )
+    coverage.append(
+        _coverage(
+            collector,
+            "drivePermissions",
+            status=status,
+            item_count=reads,
+            duration_ms=0,
+            endpoint="drive.permissions.list",
+            error_class=error_class,
+            error=error,
+            subject_scoped=SUBJECT_SCOPE_ADMIN,
+        )
+    )
+
+
 class GoogleDrivePostureCollector:
     name = "google_drive_posture"
     description = (
@@ -720,6 +751,7 @@ class GoogleDrivePostureCollector:
             bounded_sample=sampled,
             subject_scoped=SUBJECT_SCOPE_ADMIN,
         )
+        _record_drive_permission_reads(self.name, drive_files, coverage)
         shared_drives = _call(
             collector=self.name,
             name="sharedDrives",
