@@ -147,12 +147,16 @@ def require_same_tenant_runs(run_dirs: Iterable[str | Path]) -> dict[str, Any]:
 
 
 def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Dated runs in time order (run id breaks a tie), then undated runs in the order the caller gave them.
+
+    A run id says nothing about when a run was made, so undated runs are never ordered by it (R132).
+    """
     return sorted(
         list(runs),
         key=lambda item: (
             item.get("_created_at") is None,
             item.get("_created_at") or datetime.max.replace(tzinfo=UTC),
-            str(item.get("run_id") or item.get("path") or ""),
+            str(item.get("run_id") or item.get("path") or "") if item.get("_created_at") is not None else "",
         ),
     )
 
@@ -315,7 +319,7 @@ def compare_run_directories(
 
     def ordered_pair(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
         # A run without a creation time cannot be placed before or after a dated one, so it never silently becomes
-        # the current run (R132). Two undated legacy runs keep their run-id order.
+        # the current run (R132). Two undated legacy runs keep the order the caller gave.
         if (left_run.get("_created_at") is None) != (right_run.get("_created_at") is None):
             return _blocked_diff(left_run, right_run, "run_created_utc_missing")
         return _compare_pair(left_run, right_run, compare_context, allow_cross_tenant=allow_cross_tenant, classic=classic)

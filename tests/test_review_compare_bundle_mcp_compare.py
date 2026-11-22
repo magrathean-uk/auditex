@@ -233,6 +233,20 @@ def test_compare_blocks_a_pair_when_a_run_has_no_creation_time(tmp_path: Path) -
     assert result["baseline_diff"]["reason"] == "run_created_utc_missing"
 
 
+def test_compare_keeps_the_given_order_of_two_undated_runs(tmp_path: Path) -> None:
+    # Repair round 1 (R132): the run ids sort the other way round; the caller's order decides, not the ids.
+    baseline = _run(tmp_path, "z-before", created_utc=None, findings=[FINDING], coverage={"identity": "complete"})
+    later = _run(tmp_path, "a-after", created_utc=None, findings=[], coverage={"identity": "complete"})
+
+    result = compare_runs([baseline, later])
+
+    diff = result["baseline_diff"]
+    assert [row["run_id"] for row in result["runs"]] == ["z-before", "a-after"]
+    assert diff["status"] == "ok"
+    assert diff["drift_summary"]["resolved_findings"] == [FINDING["id"]]
+    assert diff["drift_summary"]["new_findings"] == []
+
+
 # R133: findings the baseline never assessed
 
 
