@@ -158,6 +158,14 @@ def _run_bounded(
     return run
 
 
+
+def exchange_session_connectable(exo: Any) -> bool:
+    """True when the session ``exo`` gives the adapter an Exchange Online connect step; without one a cmdlet runs
+    unconnected."""
+    if not isinstance(exo, dict) or exo.get("kind") != "exchange_online" or not exo.get("access_token"):
+        return False
+    return bool(_ORGANIZATION_PATTERN.fullmatch(str(exo.get("organization") or "")))
+
 class PowerShellGraphAdapter(Adapter):
     metadata = AdapterMetadata(
         name="powershell_graph",
@@ -247,14 +255,9 @@ class PowerShellGraphAdapter(Adapter):
                 f"-Organization '{organization}' -ShowBanner:$false -ErrorAction Stop | Out-Null }} "
                 f"catch {{ throw '{IPPS_SESSION_NOT_OPENED}' }}; "
             )
-        if not session or session.get("kind") != "exchange_online":
+        if not exchange_session_connectable(session):
             return ""
-        token = session.get("access_token")
-        if not token:
-            return ""
-        organization = str(session.get("organization") or "")
-        if not _ORGANIZATION_PATTERN.fullmatch(organization):
-            return ""
+        token, organization = session["access_token"], str(session["organization"])
         env["AUDITEX_EXO_ACCESS_TOKEN"] = str(token)
         return (
             "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "

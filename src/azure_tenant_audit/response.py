@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .adapters import ADAPTERS, get_adapter
+from .adapters.powershell_graph import exchange_session_connectable
 from .ai_context import build_privacy_block
 from .auth_context import inspect_token_claims
 from .finalize import finalize_bundle_contract, seal_run_findings
@@ -353,6 +354,23 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                 "recommendations": {"notes": f"Use one of: {', '.join(ALLOWED_RESPONSE_ADAPTERS)}"},
             }
         )
+    if (action is not None and action.needs_exchange_session and config.adapter_override
+            and config.adapter_override != action.adapter):
+        # Only the action's own adapter carries the checked Exchange session into its connect step; any other adapter
+        # would run the cmdlet without it (R086).
+        blockers.append(
+            {
+                "collector": "response",
+                "item": f"response.adapter:{config.adapter_override}",
+                "status": "failed",
+                "error_class": "response_invalid_adapter_override",
+                "error": (
+                    f"Response action '{action.name}' needs an Exchange Online session, which adapter "
+                    f"'{config.adapter_override}' cannot carry."
+                ),
+                "recommendations": {"notes": f"Run '{action.name}' on its own adapter, {action.adapter}."},
+            }
+        )
     if action is not None and (adapter_name or action.adapter) in RETIRED_RESPONSE_ADAPTERS:
         blockers.append(
             {
@@ -409,14 +427,17 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
 
         exchange_session = config.exchange_session
         if (config.execute and action.needs_exchange_session
-                and not (isinstance(exchange_session, dict) and exchange_session.get("kind") == "exchange_online")):
+                and not exchange_session_connectable(exchange_session)):
             blockers.append(
                 {
                     "collector": "response",
                     "item": f"response.session:{action.name}",
                     "status": "failed",
                     "error_class": "session_not_connected",
-                    "error": f"Response action '{action.name}' needs a connected Exchange Online session.",
+                    "error": (
+                        f"Response action '{action.name}' needs a connected Exchange Online session: an access token "
+                        "and the lab tenant's onmicrosoft organisation."
+                    ),
                     "recommendations": {"notes": (
                         "The auditex CLI cannot open an Exchange Online session for response actions yet; run the "
                         "dry-run plan, or call run_response with the lab tenant's exchange_session."
