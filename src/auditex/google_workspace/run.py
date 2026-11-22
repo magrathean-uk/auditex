@@ -17,6 +17,11 @@ from azure_tenant_audit.collector_runner import (
     CollectorRunContext,
     CollectorRunner,
 )
+from azure_tenant_audit.dns_lookup import (
+    DOH_ENDPOINT_ENV,
+    doh_resolver_disclosure,
+    resolve_doh_endpoint,
+)
 from azure_tenant_audit.offline_replay import (
     absent_section_rows,
     replay_collector_status,
@@ -628,6 +633,16 @@ def run_google_offline(
     )
 
 
+def google_dns_notice(doh_endpoint: str) -> str:
+    """The data-handling notice for the Google DNS posture lookups, with how to turn them off."""
+    return (
+        "Selected Google DNS posture collection sends the customer's verified domain names to "
+        f"{doh_resolver_disclosure(doh_endpoint)}. Only domain names, no user data, are sent to the resolver. "
+        "Deselect it with --exclude google_dns_posture (the identity and collaboration presets omit it); "
+        f"set {DOH_ENDPOINT_ENV} to use another DNS-over-HTTPS resolver."
+    )
+
+
 def _auth_config(config: GoogleRunConfig, selected: list[str]) -> GoogleAuthConfig:
     scopes = scopes_for_collectors(selected)
     return GoogleAuthConfig(
@@ -654,6 +669,14 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         print(json.dumps({"error": "missing_google_dependencies", **dependency_status}, indent=2), file=sys.stderr)
         return 2
     selected = _selected_collectors(config)
+    # A resolver that cannot be used stops the run before any sign-in or call, as a bad option would.
+    doh_endpoint: str | None = None
+    if "google_dns_posture" in selected:
+        try:
+            doh_endpoint = resolve_doh_endpoint()
+        except ValueError as exc:
+            print(json.dumps({"error": "invalid_doh_endpoint", "message": str(exc)}, indent=2), file=sys.stderr)
+            return 2
     auth_config = _auth_config(config, selected)
     try:
         credentials = build_google_credentials(auth_config)
@@ -673,6 +696,10 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         "Google Workspace live run started",
         {"platform": "google_workspace", "domain": config.domain, "customer_id": config.customer_id, "auth": safe_auth_summary(auth_config)},
     )
+    if doh_endpoint is not None:
+        notice = google_dns_notice(doh_endpoint)
+        LOG.info("%s", notice)
+        writer.log_event("run.notice", notice, {"collector": "google_dns_posture", "resolver": doh_resolver_disclosure(doh_endpoint)})
     start = time.time()
     writer_adapter = AuditWriterCollectorAdapter(writer)
     runner = CollectorRunner(writer_adapter)
@@ -691,7 +718,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
                 since=config.since,
                 until=config.until,
                 hooks=writer_adapter.hooks(),
-                extra={"domain": config.domain, "customer_id": config.customer_id},
+                extra={"domain": config.domain, "customer_id": config.customer_id, "doh_endpoint": doh_endpoint},
             ),
             name=name,
         )

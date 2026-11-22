@@ -15,10 +15,10 @@ from azure_tenant_audit.collectors.base import (
     record_truncation,
 )
 from azure_tenant_audit.dns_lookup import (
-    DEFAULT_DOH_ENDPOINT,
     DohClient,
     DohError,
     collect_domain_posture,
+    resolve_doh_endpoint,
     unknown_posture,
 )
 
@@ -621,7 +621,16 @@ class GoogleDnsPostureCollector:
         client = context.get("client")
         top = _context_limit(context)
         domain = context.get("domain")
-        resolver = context.get("dns_resolver") or DohClient(endpoint=context.get("doh_endpoint", DEFAULT_DOH_ENDPOINT))
+        resolver = context.get("dns_resolver")
+        if resolver is None:
+            # The run's resolver: an explicit endpoint, else AUDITEX_DOH_ENDPOINT, else Cloudflare.
+            try:
+                resolver = DohClient(endpoint=resolve_doh_endpoint(context.get("doh_endpoint")))
+            except ValueError as exc:
+                row = _coverage(self.name, "dohEndpoint", status="failed", item_count=0, duration_ms=0,
+                                surface_type="dns", endpoint="doh", error_class="config_error", error=str(exc))
+                return CollectorResult(self.name, "partial", {"domains": {"value": []}, "domainPosture": {"value": []}}, 0,
+                                       "DNS-over-HTTPS endpoint is not valid", coverage=[row])
         log_event: AuditLogger | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         domains: list[dict[str, Any]] = []
