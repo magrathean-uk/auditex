@@ -586,3 +586,35 @@ def test_r108_graph_cases_and_searches_are_normalised() -> None:
     assert case["id"] == "case-1" and case["display_name"] == "Board matter" and case["status"] == "active"
     (search,) = snapshot["ediscovery_searches"]["records"]
     assert search["id"] == "search-1" and search["case_id"] == "case-1"
+
+
+def test_each_case_streams_its_searches_to_its_own_chunk_files(tmp_path) -> None:
+    """Bot review of PR #148: two cases must not share, and overwrite, one searches chunk file."""
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    client = _PagedGraphClient(
+        responses={
+            "/security/cases/ediscoveryCases": [{"id": "c1", "displayName": "One"}, {"id": "c2", "displayName": "Two"}],
+            "/security/cases/ediscoveryCases/c1/searches": [{"id": "s1", "displayName": "First"}],
+            "/security/cases/ediscoveryCases/c2/searches": [{"id": "s2", "displayName": "Second"}],
+        }
+    )
+    result = EDiscoveryCollector().run(
+        {
+            "client": client,
+            "top": None,
+            "page_size": 100,
+            "plane": "inventory",
+            "audit_logger": None,
+            "chunk_writer": _chunk_writer(tmp_path),
+            "run_dir": tmp_path,
+        }
+    )
+    files = [result.payload[f"case_{case}"]["searches"].get("chunk_files") for case in ("c1", "c2")]
+    assert files[0] and files[1] and set(files[0]).isdisjoint(files[1])
+
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": result.payload}, run_dir=tmp_path
+    )
+    searches = sorted((row["case_id"], row["id"]) for row in snapshot["ediscovery_searches"]["records"])
+    assert searches == [("c1", "s1"), ("c2", "s2")]
