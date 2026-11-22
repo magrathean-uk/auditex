@@ -256,6 +256,9 @@ def test_readme_and_guide_add_extras_over_an_existing_install() -> None:
     step7 = _section((ROOT / "docs/guides/install-guide.md").read_text(encoding="utf-8"), "## Step 7")
     first_command = next(line.strip() for line in step7.splitlines() if line.strip().startswith("pipx install"))
     assert first_command == 'pipx install --force "auditex[google,mcp]"'
+    from auditex.setup_guide import build_google_setup_guide
+
+    assert 'pipx install --force "auditex[google]"' in build_google_setup_guide()["setup_steps"][0]
 
 
 # Review blocker 4: PyPI shows the README as the project page, where repository-relative links break.

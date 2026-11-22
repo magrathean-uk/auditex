@@ -10,7 +10,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 ### Added
 
 - **PyPI install route (#145).** Auditex installs from PyPI with `pipx install auditex`; extras are named in brackets
-  (`pipx install "auditex[google,mcp]"`). The new [install guide](docs/guides/install-guide.md) walks an
+  (`pipx install --force "auditex[google,mcp]"` adds them to an existing install). The new [install guide](docs/guides/install-guide.md) walks an
   administrator through Linux, macOS and WSL2 step by step: Python and pipx, install, `auditex --version`,
   `auditex doctor`, a first offline run, where run folders go, upgrade, uninstall and troubleshooting. The package
   metadata carries the project links, keywords and Linux and macOS classifiers, `make dist-check` runs `twine check`
@@ -21,7 +21,9 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 - **Install hints match how Auditex was installed.** `auditex setup`, the Google dependency check and `auditex-mcp`
   name `pipx install --force "auditex[...]"` (keeping the extras already installed) for a pipx install, the running
-  interpreter's `pip` for another environment, and the editable install only in a source checkout.
+  interpreter's `pip` for another environment (quoted, so a path with a space pastes cleanly), the downloaded wheel
+  again for an install from a wheel, and the editable install only in a source checkout. What a run bundle records
+  (the Google dependency status in a blocked probe) names no local path.
 - **Shipped resources never come from the current folder or another installation (PR #151 review).** A shipped
   directory missing from the package is no longer listed from the current folder, shipped-file patterns match the whole
   path (so an operator file such as `customer/configs/input.json` is not mistaken for shipped content), and the release
