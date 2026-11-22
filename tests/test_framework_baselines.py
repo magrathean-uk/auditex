@@ -56,6 +56,7 @@ _EXPECTED_CIS_V7 = {
     "consent_policy.user_consent_unrestricted",
     "dns_posture.dkim_missing",
     "dns_posture.dmarc_missing",
+    "dns_posture.dmarc_multiple_records",
     "dns_posture.dmarc_monitor_only",
     "dns_posture.dmarc_pct_partial",
     "dns_posture.dmarc_rua_invalid",

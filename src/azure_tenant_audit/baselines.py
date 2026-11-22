@@ -899,6 +899,7 @@ _TEAMS_FEDERATION_RULE = "teams.external_federation_open"
 _SHAREPOINT_EXTERNAL_RULE = "sharepoint.external_principal"
 _RISKY_SIGNIN_RULE = "security.risky_signin"
 _BREAK_GLASS_RULE = "ca.break_glass_exclusion_missing"
+_BREAK_GLASS_RULES = frozenset({_BREAK_GLASS_RULE, "ca.break_glass_exclusion_unverified"})
 
 # Device rules -> the device_posture count of devices the check says nothing about. A rule is evaluated
 # only when the device list was read in full, there is at least one device and no device is unknown for
@@ -1045,8 +1046,12 @@ def _teams_federation_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | No
     return None
 
 
-def _break_glass_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
-    """The emergency-access check needs accounts to look for: the operator's list or an inference."""
+def _break_glass_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str = _BREAK_GLASS_RULE) -> str | None:
+    """The emergency-access check needs accounts to look for: the operator's list or an inference.
+
+    A policy that excludes the accounts only through a group whose members were not read leaves the missing-exclusion
+    rule without evidence either way, so it is not a pass (the unverified rule names the policies).
+    """
     if snapshot is None:
         return "inputs_not_available"
     # No assessment record means no Conditional Access policy was collected; the collector status says so.
@@ -1055,6 +1060,8 @@ def _break_glass_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
             return "break_glass_accounts_not_identified"
         if record.get("state") == break_glass.STATE_UNRESOLVED:
             return "break_glass_accounts_unresolved"
+        if rule_id == _BREAK_GLASS_RULE and int(record.get("policies_exclusion_unverified") or 0) > 0:
+            return "break_glass_exclusion_unverified"
     return None
 
 
@@ -1067,8 +1074,8 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
         return setting_inputs_gap(rule_id, snapshot)
     if rule_id == _TEAMS_FEDERATION_RULE:
         return _teams_federation_inputs_gap(snapshot)
-    if rule_id == _BREAK_GLASS_RULE:
-        return _break_glass_inputs_gap(snapshot)
+    if rule_id in _BREAK_GLASS_RULES:
+        return _break_glass_inputs_gap(snapshot, rule_id)
     if rule_id in _DEVICE_UNKNOWN_FIELDS:
         return _device_inputs_gap(snapshot, rule_id)
     if rule_id in _DEFENDER_RULE_FIELDS:

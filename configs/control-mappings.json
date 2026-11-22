@@ -260,6 +260,29 @@
       "T1078"
     ]
   },
+  "ca.break_glass_exclusion_unverified": {
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "CP-2"
+    ],
+    "iso_27001": [
+      "A.5.18",
+      "A.5.30"
+    ],
+    "soc2": [
+      "CC6.2",
+      "A1.2"
+    ],
+    "nis2": [
+      "Article 21(2)(c)"
+    ],
+    "dora": [
+      "Article 11(1)"
+    ]
+  },
   "ca.break_glass_exclusion_missing": {
     "ms_zero_trust": [
       "identities"
@@ -830,6 +853,37 @@
     ],
     "mitre_attack": [
       "T1566"
+    ]
+  },
+  "dns_posture.dmarc_multiple_records": {
+    "cis_m365_v7": [
+      "2.1.10"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.4.1v1"
+    ],
+    "nist_800_53": [
+      "SC-7",
+      "SC-8",
+      "SI-3",
+      "SI-8"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC6.6"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1566",
+      "T1566.002"
     ]
   },
   "dns_posture.spf_multiple_records": {
