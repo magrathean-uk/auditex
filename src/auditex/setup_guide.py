@@ -108,6 +108,11 @@ def build_setup_guide(
     config_path: str | Path = "configs/collector-definitions.json",
     permission_hints_path: str | Path = "configs/collector-permissions.json",
 ) -> dict[str, Any]:
+    _refuse_control_characters(
+        tenant_name=tenant_name, tenant_id=tenant_id, domain=domain, customer_id=customer_id, subject=subject,
+        service_account_key=service_account_key, oauth_client=oauth_client, token_cache=token_cache,
+        auditor_profile=auditor_profile, plane=plane, collector_preset=collector_preset, auth=auth,
+    )
     normalized = provider.strip().lower().replace("-", "_")
     if normalized in GOOGLE_PROVIDER_ALIASES:
         return build_google_setup_guide(
@@ -572,6 +577,17 @@ def _google_command(
     if extra:
         parts.extend(extra.split())
     return shlex.join(parts)
+
+
+def _refuse_control_characters(**values: Any) -> None:
+    """Refuse a value for a verification command that holds a line break or control character.
+
+    Values are shell-quoted, but a line break inside quotes still ends a line of the rendered Markdown, where it could
+    close the command fence and add text the operator reads as part of the guide.
+    """
+    for name, value in values.items():
+        if isinstance(value, str) and any(ord(character) < 32 or ord(character) == 127 for character in value):
+            raise ValueError(f"{name} must not contain a line break or control character.")
 
 
 def _load_permission_hints(path: str | Path) -> dict[str, Any]:

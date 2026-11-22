@@ -432,3 +432,18 @@ def test_fullcontrol_is_a_write_capable_token() -> None:
     from auditex.setup_guide import M365_WRITE_CAPABLE_TOKENS
 
     assert any(token in "Sites.FullControl.All" for token in M365_WRITE_CAPABLE_TOKENS)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"provider": "m365", "tenant_id": "contoso.onmicrosoft.com\n```\n# pasted", "collectors": "identity"},
+        {"provider": "m365", "tenant_name": "acme\r\nrm -rf x", "collectors": "identity"},
+        {"provider": "google", "subject": "admin@example.com\n```"},
+        {"provider": "google", "service_account_key": "key.json\x1b[2K"},
+    ],
+)
+def test_command_values_with_line_breaks_or_control_characters_are_refused(arguments: dict) -> None:
+    """Review round 1: a line break could close the Markdown command fence of the rendered guide."""
+    with pytest.raises(ValueError, match="control character"):
+        build_setup_guide(**arguments)
