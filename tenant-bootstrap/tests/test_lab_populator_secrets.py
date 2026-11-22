@@ -206,7 +206,7 @@ def directory(monkeypatch):
     Graph and 'az ad' writes are recorded with the tenant they would land in."""
     import requests
 
-    state: dict = {"az": [], "graph": [], "org_override": None, "default": OTHER_TENANT, "token_fails": False}
+    state: dict = {"az": [], "graph": [], "org_override": None, "default": OTHER_TENANT, "token_fails": False, "grants": []}
 
     def run(argv, *args, **kwargs):
         argv = list(argv)
@@ -244,8 +244,14 @@ def directory(monkeypatch):
                 return FakeGraphResponse(200, {
                     "id": GRAPH_SP_ID,
                     "appRoles": [{"value": "Directory.ReadWrite.All", "id": ROLE_ID, "allowedMemberTypes": ["Application"]}],
-                    "oauth2PermissionScopes": [{"value": "User.Read", "id": SCOPE_ID}],
+                    "oauth2PermissionScopes": [{"value": "Channel.Create", "id": SCOPE_ID}],
                 })
+            if path.startswith("/oauth2PermissionGrants"):
+                tenant_wide_only = "consentType eq 'AllPrincipals'" in path
+                return FakeGraphResponse(200, {"value": [
+                    grant for grant in state["grants"]
+                    if not tenant_wide_only or grant["consentType"] == "AllPrincipals"
+                ]})
             return FakeGraphResponse(200, {"value": []})
         if method == "POST" and path == "/applications":
             return FakeGraphResponse(201, {"id": APP_OBJECT_ID, "appId": APP_ID, "requiredResourceAccess": []})
@@ -403,3 +409,16 @@ def test_auth_never_changes_the_mode_of_a_folder_it_did_not_create(tmp_path, mon
     ]) == 0
     assert mode(work) == 0o755
     assert mode(work / "token.env") == 0o600
+
+
+def test_admin_consent_grants_tenant_wide_even_when_a_user_consented_before(populator_config, directory):
+    """A user's own consent grant must not be widened in place of the tenant-wide (AllPrincipals) grant."""
+    directory["grants"] = [{"id": "USERGRANT", "consentType": "Principal", "principalId": "u1", "scope": "openid"}]
+    assert directory["module"].main([
+        "--config", str(populator_config), "--tenant-id", LAB_TENANT, "--admin-consent",
+    ]) == 0
+    writes = directory["graph_writes"]()
+    assert not [c for c in writes if "USERGRANT" in c["url"]]
+    created = [c for c in writes if c["method"] == "POST" and c["url"].endswith("/oauth2PermissionGrants")]
+    assert created and created[0]["json"]["consentType"] == "AllPrincipals"
+    assert "Channel.Create" in created[0]["json"]["scope"].split()

@@ -187,8 +187,11 @@ def grant_admin_consent(directory: Directory, app_id: str, graph_sp_id: str, rol
         return
     grants = directory.call(
         "GET",
-        f"/oauth2PermissionGrants?$filter=clientId eq '{app_sp_id}' and resourceId eq '{graph_sp_id}'",
+        # Only the tenant-wide grant: a user's own consent grant is never widened in its place.
+        f"/oauth2PermissionGrants?$filter=clientId eq '{app_sp_id}' and resourceId eq '{graph_sp_id}'"
+        " and consentType eq 'AllPrincipals'",
     ).get("value", [])
+    grants = [grant for grant in grants if grant.get("consentType") == "AllPrincipals"]
     if grants:
         current = str(grants[0].get("scope") or "").split()
         merged = " ".join(dict.fromkeys([*current, *scopes]))
