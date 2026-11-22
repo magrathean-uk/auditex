@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/magrathean-uk/magrathean-uk/main/assets/icons/auditex.png" width="96" height="96" alt="">
+  <img src="https://raw.githubusercontent.com/magrathean-uk/auditex/main/assets/auditex-logo.svg" width="132" height="132" alt="">
 </p>
 
 <h1 align="center">Auditex</h1>
