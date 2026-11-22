@@ -618,3 +618,18 @@ def test_each_case_streams_its_searches_to_its_own_chunk_files(tmp_path) -> None
     )
     searches = sorted((row["case_id"], row["id"]) for row in snapshot["ediscovery_searches"]["records"])
     assert searches == [("c1", "s1"), ("c2", "s2")]
+
+
+def test_a_case_already_listed_by_the_retired_case_overview_still_has_its_searches_read() -> None:
+    """Bot review of PR #148: a pre-15 Nov bundle lists c1 in caseOverview and again in cases."""
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payload = {
+        "caseOverview": {"value": [{"id": "c1", "name": "Board matter"}]},
+        "cases": {"value": [{"id": "c1", "displayName": "Board matter"}]},
+        "case_c1": {"searches": {"value": [{"id": "s1", "displayName": "Mailboxes"}]}, "operations": {"value": []}},
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": payload})
+
+    assert [row["id"] for row in snapshot["ediscovery_cases"]["records"]] == ["c1"]
+    assert [(row["case_id"], row["id"]) for row in snapshot["ediscovery_searches"]["records"]] == [("c1", "s1")]
