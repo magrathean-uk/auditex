@@ -649,3 +649,65 @@ def test_a_search_in_both_the_retired_search_list_and_a_graph_case_is_one_record
     records = snapshot["ediscovery_searches"]["records"]
     assert [row["key"] for row in records] == ["ediscovery_search:s1"]
     assert records[0]["case_id"] == "c1"  # the Graph read names the case the retired list left out
+
+
+@pytest.mark.parametrize("old_chunk_key", ["searches", "case-c1-searches"])
+def test_resume_drops_historical_chunks_when_case_searches_are_withheld(tmp_path, monkeypatch, old_chunk_key) -> None:
+    import json
+
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.graph import GRAPH_ROOT, GraphClient
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, "acme", "resume")
+    run_dir = writer.run_dir
+    cases = "/security/cases/ediscoveryCases"
+    search_url = f"{GRAPH_ROOT}{cases}/c1/searches"
+    legacy_chunk = writer.write_chunk_records(
+        "ediscovery", old_chunk_key, 1, [{"id": "old-search"}], {"endpoint": search_url},
+    )
+    legacy_files = {
+        legacy_chunk.relative_to(run_dir).as_posix(),
+        legacy_chunk.with_suffix(".meta.json").relative_to(run_dir).as_posix(),
+    }
+    writer.write_raw("ediscovery", {
+        "cases": {"value": [{"id": "c1"}]},
+        "case_c1": {"searches": {
+            "chunk_files": [legacy_chunk.relative_to(run_dir).as_posix()],
+            "item_count": 1,
+            "error_class": "graph_transient",
+        }},
+    })
+    writer.write_checkpoint("ediscovery", {"status": "partial"})
+    writer.write_bundle({"mode": "live", "collectors": ["ediscovery"]})
+
+    def get_json(self, url, **kwargs):
+        if url == f"{GRAPH_ROOT}{cases}":
+            return {"value": [{"id": "c1"}]}
+        if url == search_url:
+            return {"value": [{"id": "retry-search"}], "@odata.nextLink": search_url}
+        if url == f"{GRAPH_ROOT}{cases}/c1/operations":
+            return {"value": [{"id": "retry-operation"}]}
+        return {"value": []}
+
+    use_fake_certificate(monkeypatch)
+    monkeypatch.setattr(GraphClient, "get_json", get_json)
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "constructed-tenant",
+        "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
+        "--collectors", "ediscovery", "--resume-from", str(run_dir),
+    ])
+    assert cli.run_live(args) == 1
+
+    raw = json.loads((run_dir / "raw" / "ediscovery.json").read_text(encoding="utf-8"))
+    assert raw["case_c1"]["searches"]["error_class"] == "incomplete_evidence"
+    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    seal = json.loads((run_dir / "bundle-hashes.json").read_text(encoding="utf-8"))
+    sealed_paths = {row["path"] for row in seal["artifacts"]}
+    assert legacy_files.isdisjoint(manifest["artifacts"])
+    assert legacy_files.isdisjoint(sealed_paths)
+    assert not list((run_dir / "chunks" / "ediscovery").glob("*searches-*"))
+    (operation_chunk,) = raw["case_c1"]["operations"]["chunk_files"]
+    assert operation_chunk in sealed_paths
