@@ -249,18 +249,19 @@ def test_compare_blocks_a_pair_when_a_run_has_no_creation_time(tmp_path: Path) -
     assert result["baseline_diff"]["reason"] == "run_created_utc_missing"
 
 
-def test_compare_keeps_the_given_order_of_two_undated_runs(tmp_path: Path) -> None:
-    # Repair round 1 (R132): the run ids sort the other way round; the caller's order decides, not the ids.
+def test_compare_blocks_two_undated_runs_whichever_order_they_are_given(tmp_path: Path) -> None:
+    # Repair round 2 (R132): two undated runs cannot be placed in time, so neither argument order may decide which
+    # one is the baseline. The pair is blocked both ways round instead of reporting resolved or new findings.
     baseline = _run(tmp_path, "z-before", created_utc=None, findings=[FINDING], coverage={"identity": "complete"})
     later = _run(tmp_path, "a-after", created_utc=None, findings=[], coverage={"identity": "complete"})
 
-    result = compare_runs([baseline, later])
-
-    diff = result["baseline_diff"]
-    assert [row["run_id"] for row in result["runs"]] == ["z-before", "a-after"]
-    assert diff["status"] == "ok"
-    assert diff["drift_summary"]["resolved_findings"] == [FINDING["id"]]
-    assert diff["drift_summary"]["new_findings"] == []
+    for order in ([baseline, later], [later, baseline]):
+        result = compare_runs(order)
+        diff = result["baseline_diff"]
+        assert diff["status"] == "blocked"
+        assert diff["reason"] == "run_created_utc_missing"
+        assert all(pair["status"] == "blocked" for pair in result["adjacent_diffs"])
+        assert "drift_summary" not in diff or not diff["drift_summary"].get("resolved_findings")
 
 
 # R133: findings the baseline never assessed
@@ -357,3 +358,4 @@ def test_cli_diff_of_a_verified_same_tenant_pair_resolves_and_exits_0(tmp_path: 
     assert code == 0
     assert result["status"] == "ok"
     assert result["drift_summary"]["resolved_findings"] == [FINDING["id"]]
+
