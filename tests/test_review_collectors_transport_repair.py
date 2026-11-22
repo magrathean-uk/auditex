@@ -132,3 +132,20 @@ def test_unread_federated_credentials_stay_distinct_from_none_configured() -> No
                                            "application_credentials")}
     assert records["a1"]["federated_credentials_state"] == "unknown"
     assert "federated_credentials_state" not in records["a2"]
+
+
+def test_the_folder_lookup_scope_and_read_are_declared() -> None:
+    """R006 repair: the folder-metadata read is in the shipped query plan and its optional scope is declared."""
+    import json
+    from pathlib import Path
+
+    from azure_tenant_audit.collectors.mailbox_forwarding import MailboxForwardingCollector
+
+    configs = Path(__file__).resolve().parents[1] / "configs"
+    permissions = json.loads((configs / "collector-permissions.json").read_text(encoding="utf-8"))
+    definitions = json.loads((configs / "collector-definitions.json").read_text(encoding="utf-8"))
+    entry = permissions["collector_permissions"]["mailbox_forwarding"]
+    assert entry["optional_graph_scopes"] == MailboxForwardingCollector.optional_permissions == ["MailboxFolder.Read.All"]
+    assert "MailboxFolder.Read.All" not in entry["graph_scopes"]
+    assert "mailFolders" in definitions["collectors"]["mailbox_forwarding"]["query_plan"]
+    assert "never a message" in entry["notes"]

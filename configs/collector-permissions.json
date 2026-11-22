@@ -372,7 +372,10 @@
         "Global Reader",
         "Security Reader"
       ],
-      "notes": "Inbox rules (messageRules) and mailbox settings are read with the MailboxSettings.Read permission (application or delegated). Mail.Read is never requested: the audit does not read message content."
+      "optional_graph_scopes": [
+        "MailboxFolder.Read.All"
+      ],
+      "notes": "Inbox rules (messageRules) and mailbox settings are read with the MailboxSettings.Read permission (application or delegated). Mail.Read is never requested: the audit does not read message content. A rule that moves mail names its target folder by ID; to tell whether that folder hides mail from the user (Junk Email, Deleted Items, Archive, Conversation History, RSS Feeds) the collector reads folder metadata only (GET /users/{id}/mailFolders?$select=id,displayName and the well-known folders with $select=id), and only for users with such a rule. That needs the optional application permission MailboxFolder.Read.All. Blast radius: read access to the folder list (folder IDs, names and counts) of every mailbox, never a message, message header or attachment. Without it the folder lookup is refused, the rule's hide-from-user state is recorded as unknown (never false) and the collector is partial with one mailFolders gap row."
     },
     "exchange_policy": {
       "graph_scopes": [],

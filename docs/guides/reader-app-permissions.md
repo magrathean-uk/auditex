@@ -311,6 +311,7 @@ person running Auditex plans to select that collector with `--collectors`, and r
 | Collector | Adds | API | Type | Admin consent | Why |
 | --- | --- | --- | --- | --- | --- |
 | mailbox_forwarding | `MailboxSettings.Read` | Microsoft Graph | Application | Yes | Reads the inbox rules and mailbox settings of every mailbox (no messages). The full audit reads mailbox forwarding through Exchange Online instead. |
+| mailbox_forwarding (inbox-rule move targets) | `MailboxFolder.Read.All` | Microsoft Graph | Application | Yes | Reads mailbox folder metadata (folder IDs and names, never a message) to tell whether an inbox rule moves mail to a folder that hides it (Junk Email, Deleted Items, Archive, Conversation History, RSS Feeds). Without it those rules are reported as not assessed, never as clean. |
 | identity_protection | `IdentityRiskyUser.Read.All` | Microsoft Graph | Application | Yes | Counts risky users (Microsoft Entra ID P2). |
 | defender_cloud_apps | `ConsentRequest.Read.All` | Microsoft Graph | Application | Yes | Reads app consent requests. |
 | ediscovery | `eDiscovery.Read.All` | Microsoft Graph | Application | Yes | Reads eDiscovery cases with their searches and operations. |

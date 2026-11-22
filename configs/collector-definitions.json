@@ -680,7 +680,8 @@
         "users",
         "domains",
         "messageRules",
-        "mailboxSettings"
+        "mailboxSettings",
+        "mailFolders"
       ]
     },
     "exchange_policy": {
