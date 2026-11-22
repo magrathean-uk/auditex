@@ -316,7 +316,8 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                 "collector": "response",
                 "item": f"response.action:{action.name}",
                 "status": "failed",
-                "error_class": "response_action_retired",
+                "error_class": "toolchain_unavailable",
+                "reason": "response_action_retired",
                 "error": f"Response action '{action.name}' needs the retired '{adapter_name or action.adapter}' adapter.",
                 "recommendations": {"notes": "This action cannot run until it has a supported adapter."},
             }
@@ -371,7 +372,7 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                     "collector": "response",
                     "item": f"response.session:{action.name}",
                     "status": "failed",
-                    "error_class": "exchange_session_unavailable",
+                    "error_class": "session_not_connected",
                     "error": f"Response action '{action.name}' needs a connected Exchange Online session.",
                     "recommendations": {"notes": "Supply the lab Exchange Online session, or run the dry-run plan."},
                 }

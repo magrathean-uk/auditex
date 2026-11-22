@@ -52,7 +52,8 @@ def test_purview_export_is_named_retired(tmp_path: Path, monkeypatch) -> None:
     rc = run_response(_config(tmp_path, action="purview_audit_export", since="2026-01-01T00:00:00Z",
                               until="2026-01-02T00:00:00Z", allow_write=True))
     assert rc == 1
-    assert [row["error_class"] for row in _blockers(tmp_path)] == ["response_action_retired"]
+    assert [(row["error_class"], row.get("reason")) for row in _blockers(tmp_path)] == [
+        ("toolchain_unavailable", "response_action_retired")]
 
 
 def test_message_trace_without_an_exchange_session_is_blocked_before_running(tmp_path: Path, monkeypatch) -> None:
@@ -62,7 +63,8 @@ def test_message_trace_without_an_exchange_session_is_blocked_before_running(tmp
     rc = run_response(_config(tmp_path))
     assert rc == 1
     assert adapter.sessions == []
-    assert [row["error_class"] for row in _blockers(tmp_path)] == ["exchange_session_unavailable"]
+    assert [(row["error_class"], row["item"]) for row in _blockers(tmp_path)] == [
+        ("session_not_connected", "response.session:message_trace")]
 
 
 def test_message_trace_runs_inside_the_supplied_exchange_session(tmp_path: Path, monkeypatch) -> None:
