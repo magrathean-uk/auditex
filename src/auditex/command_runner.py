@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import atexit
 import os
 import re
 import signal
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -121,6 +123,25 @@ def _kill_process_group(process: Any) -> None:
         process.kill()
 
 
+# Commands running now. Each starts in its own session, so a signal to the server's process group no longer reaches
+# it: the server stops them itself when it exits (atexit) or is terminated (``mcp_server`` signal handlers).
+_RUNNING: set[Any] = set()
+_RUNNING_LOCK = threading.Lock()
+
+
+def stop_running_commands() -> None:
+    """Kill the process group of every command still running; the server is going away and nothing will collect
+    their results (R063)."""
+    with _RUNNING_LOCK:
+        running = list(_RUNNING)
+    for process in running:
+        if process.poll() is None:
+            _kill_process_group(process)
+
+
+atexit.register(stop_running_commands)
+
+
 def _run_process(
     command: list[str], *, cwd: str | None = None, text: bool = True, capture_output: bool = True,
     check: bool = False, timeout: int | None = None, env: dict[str, str] | None = None, stdin: Any = None,
@@ -136,6 +157,16 @@ def _run_process(
         command, cwd=cwd, env=env, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         start_new_session=True,
     )
+    with _RUNNING_LOCK:
+        _RUNNING.add(process)
+    try:
+        return _collect(command, process, timeout)
+    finally:
+        with _RUNNING_LOCK:
+            _RUNNING.discard(process)
+
+
+def _collect(command: list[str], process: Any, timeout: int | None) -> subprocess.CompletedProcess[str]:
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

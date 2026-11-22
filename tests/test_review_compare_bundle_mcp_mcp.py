@@ -226,3 +226,37 @@ def test_a_resumable_command_timeout_names_the_partial_run_folder(monkeypatch: p
     assert result["error_class"] == "timeout"
     assert result["partial_run_dir"] == str(partial)
     assert f"--resume-from {partial}" in result["error"]
+
+
+_SERVER_STAND_IN = """
+import os, signal, sys, threading, time
+from auditex import command_runner, mcp_server
+install = getattr(mcp_server, "_install_shutdown_handlers", None)
+if install is not None:
+    install()
+marker = sys.argv[1]
+threading.Thread(target=command_runner.run_cli_command, args=(["sh", "-c", f"(sleep 2; touch '{marker}') & wait"],),
+                 daemon=True).start()
+time.sleep(0.5)
+os.kill(os.getpid(), signal.SIGTERM)
+time.sleep(5)
+"""
+
+
+def test_a_terminated_mcp_server_stops_the_commands_it_started(tmp_path: Path) -> None:
+    # Review of repair round 1 (R063): the child runs in its own session, so the server must stop it on SIGTERM.
+    import os
+    import subprocess
+    import sys
+    import time
+
+    marker = tmp_path / "grandchild-finished"
+    script = tmp_path / "server_stand_in.py"
+    script.write_text(_SERVER_STAND_IN, encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+
+    server = subprocess.run([sys.executable, str(script), str(marker)], env=env, timeout=30, check=False)
+
+    assert server.returncode != 0
+    time.sleep(2.5)
+    assert not marker.exists()

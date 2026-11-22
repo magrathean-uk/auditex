@@ -914,8 +914,29 @@ def main(argv: list[str] | None = None) -> int:
 
     server = FastMCP("auditex")
     register_fastmcp_tools(server, tool_handlers())
+    _install_shutdown_handlers()
     server.run()
     return 0
+
+
+def _install_shutdown_handlers() -> None:
+    """On SIGTERM or SIGHUP, stop the commands this server started, then end as the signal would (R063).
+
+    A command runs in its own session (so a timeout can stop its whole process group), which means a signal sent to
+    the server's process group no longer reaches it; without this a terminated server would leave an audit running.
+    """
+    import signal
+
+    from .command_runner import stop_running_commands
+
+    def handle(signum: int, _frame: Any) -> None:
+        stop_running_commands()
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
+
+    for name in ("SIGTERM", "SIGHUP"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), handle)
 
 
 def _guard_tool(handler):
