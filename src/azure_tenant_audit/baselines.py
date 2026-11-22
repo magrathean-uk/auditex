@@ -939,6 +939,9 @@ def _device_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str 
     unknown = summary.get(field)
     if isinstance(unknown, int) and unknown > 0:
         return f"{field}_for_{unknown}_devices"
+    if rule_id == "intune.device_os_end_of_life" and int(summary.get("os_lifecycle_not_covered") or 0) >= int(summary["device_count"]):
+        # Every device is on a platform outside the table (Linux, Windows Server): no device was judged.
+        return "no_devices_in_os_lifecycle_scope"
     if rule_id == "intune.device_os_end_of_life" and summary.get("os_lifecycle_edition_dependent"):
         # The Home/Pro date has passed and the Enterprise/Education date has not; osVersion does not show the edition.
         return f"os_edition_dependent_for_{summary['os_lifecycle_edition_dependent']}_devices"

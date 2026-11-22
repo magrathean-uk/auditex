@@ -192,14 +192,27 @@ def today_utc() -> date:
     return datetime.now(tz=UTC).date()
 
 
+def platform_outside_lifecycle_table(platform: Any) -> bool:
+    """Whether an Intune ``operatingSystem`` names a platform the end-of-life table knowingly leaves out.
+
+    Linux, Windows Server and Windows Phone or Mobile follow lifecycles the table does not describe. Any other value
+    the table does not recognise is unknown, not outside it.
+    """
+    text = str(platform or "").strip().lower()
+    if text.startswith("linux"):
+        return True
+    return text.startswith("windows") and any(word in text for word in ("server", "phone", "mobile"))
+
+
 def device_posture_summary(
     devices: Sequence[Mapping[str, Any]], *, read_state: str, read_detail: str | None = None, today: date | None = None
 ) -> dict[str, Any]:
     """Counts of the devices each check says nothing about.
 
     Whether a device can be judged at all is fixed here: a device with no last-sync time, or an OS the
-    table does not describe, is unknown whatever day it is. A device on a platform the table does not cover
-    (Linux, Windows Server) is counted in ``os_lifecycle_not_covered``, not as unknown. The one date-dependent unknown, a Windows build
+    table does not describe, is unknown whatever day it is. A device on a platform known to be outside the table
+    (Linux, Windows Server, Windows Phone) is counted in ``os_lifecycle_not_covered``, not as unknown; an unrecognised
+    platform (Intune's "Unknown") is unknown. The one date-dependent unknown, a Windows build
     whose Home/Pro end of support has passed but whose Enterprise/Education date has not, is counted as of
     ``os_lifecycle_evaluated_on`` because the edition is not in the data.
     """
@@ -216,12 +229,16 @@ def device_posture_summary(
     for device in devices:
         _family_name, release, reason = os_lifecycle.lookup(device.get("platform"), device.get("os_version"))
         if release is None and reason == os_lifecycle.REASON_PLATFORM_NOT_COVERED:
-            # A named platform the table does not describe (Linux, Windows Server) is outside the end-of-life rule,
-            # not an unknown that holds it open. A device that reports no platform at all could be anything.
-            if str(device.get("platform") or "").strip():
+            # A platform known to be outside the table (Linux, Windows Server, Windows Phone) is outside the
+            # end-of-life rule, not an unknown that holds it open. A device that reports no platform, or one the
+            # table does not recognise (Intune's "Unknown"), could be anything.
+            platform = str(device.get("platform") or "").strip()
+            if not platform:
+                lifecycle_reasons["platform_missing"] += 1
+            elif platform_outside_lifecycle_table(platform):
                 not_covered += 1
             else:
-                lifecycle_reasons["platform_missing"] += 1
+                lifecycle_reasons["platform_unrecognised"] += 1
         elif release is None:
             lifecycle_reasons[str(reason)] += 1
         elif os_lifecycle.classify(device.get("platform"), device.get("os_version"), today).state == os_lifecycle.STATE_EDITION_DEPENDENT:
