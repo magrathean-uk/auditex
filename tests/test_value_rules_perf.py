@@ -242,7 +242,7 @@ BI_ALL = [{"Identity": "ATP Built-In Protection Rule", "ExceptIfSentTo": None, "
 
 def test_safelinks_many_partial_rules_each_with_a_policy():
     pid = "MS.SECURITYSUITE.7.3v1"
-    rules = [{"State": "Enabled", "SentTo": ["a"], "SentToMemberOf": None, "RecipientDomainIs": None,
+    rules = [{"State": "Enabled", "SentTo": [f"a{i}"], "SentToMemberOf": None, "RecipientDomainIs": None,
               "Priority": i, "SafeLinksPolicy": f"p{i}"} for i in range(N)]
     policies = [{"Identity": f"p{i}", "TrackClicks": True} for i in range(N)] + [{"Identity": "Built-In Protection Policy", "TrackClicks": True}]
     sections = {"defender_license": True, "protection_policy_rules": [], "atp_policy_rules": [], "safe_links_rules": rules,

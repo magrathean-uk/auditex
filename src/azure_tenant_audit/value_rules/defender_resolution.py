@@ -124,7 +124,8 @@ def _safelinks_core(policy_id, sp, sections, trace):
         applied = top[0]["SafeLinksPolicy"]
     # v3.7 (lens B DEF-F1, D98; as SS 6.x D32): an enabled rule that covers only some recipients and applies before the covering rule (a lower Priority number, or no covering
     # rule at all) gives those recipients its policy; when that policy is exported with a flag off, the named recipients get a non-compliant policy: not_met. A partial rule
-    # that applies first with an unreadable policy leaves its recipients unjudged (R100, below); one whose Priority cannot be read is left as in v3.6 (it does not decide).
+    # that may apply first with an unreadable policy leaves its recipients unjudged (R100, below), as does one of unknown Priority; one that an earlier partial rule
+    # fully shadows never applies.
     low_cov = min(r["Priority"] for r in cand) if cand else None
     # Policies by Identity, built once (a string Identity is the only thing a string name equals): one list scan per
     # partial rule was quadratic in rules times policies.
@@ -133,25 +134,28 @@ def _safelinks_core(policy_id, sp, sections, trace):
         if isinstance(e, dict) and type(e.get("Identity")) is str:
             by_identity.setdefault(e["Identity"], []).append(e)
     partial_unread = None
+    shadow = _Shadows(partial)
     for r in partial:
         pr = r.get("Priority")
-        if cand and not (_is_num(pr) and pr < low_cov):
-            continue
         name = r.get("SafeLinksPolicy")
         pp = by_identity.get(name, []) if type(name) is str else []
-        if len(pp) == 1 and any(type(pp[0].get(f)) is bool and not pp[0][f] for f in sp["flags"]):
-            return _rec(policy_id, "not_met", "partial_scope_policy_flag_off",
-                        f"Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable {sp['what']}, so those recipients get a non-compliant policy.",
-                        "partial_rule_noncompliant", None, div="D98")
-        # Review R100: a partial rule that applies first gives its recipients its policy; when that policy is missing,
+        readable = len(pp) == 1 and all(type(pp[0].get(f)) is bool for f in sp["flags"])
+        if cand and not (_is_num(pr) and pr < low_cov):
+            # After the covering rule this rule never applies. One of unknown Priority may apply first: a readable policy
+            # decides nothing there (v3.6), but an unreadable one leaves its recipients unjudged (R100 repair).
+            if _is_num(pr) or readable or partial_unread is not None:
+                continue
+        elif readable:
+            if any(not pp[0][f] for f in sp["flags"]) and not shadow(r):
+                return _rec(policy_id, "not_met", "partial_scope_policy_flag_off",
+                            f"Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable {sp['what']}, so those recipients get a non-compliant policy.",
+                            "partial_rule_noncompliant", None, div="D98")
+            continue
+        elif partial_unread is not None or shadow(r):
+            continue
+        # Review R100: a partial rule that may apply first gives its recipients its policy; when that policy is missing,
         # duplicated or lacks a boolean flag, those recipients are unjudged (as data_unusable_partial_tier in SS 1.x).
-        if partial_unread is None:
-            if not pp:
-                partial_unread = "missing"
-            elif len(pp) > 1:
-                partial_unread = "duplicated"
-            elif any(type(pp[0].get(f)) is not bool for f in sp["flags"]):
-                partial_unread = "flag"
+        partial_unread = "missing" if not pp else ("duplicated" if len(pp) > 1 else "flag")
     if builtin_scope and applied == BUILTIN:
         # A preset whose both parts are enabled but scoped to some recipients may also cover the excluded recipients.
         preset_partial = any(({"q", "x", "u"} & set(eop[t]) or eop_u) and ({"q", "x", "u"} & set(atp[t]) or atp_u)
@@ -187,6 +191,68 @@ def _safelinks_core(policy_id, sp, sections, trace):
                   "policy_flag_unusable", ["safe_links_policies"], partial_scope=True)
     return _rec(policy_id, "met", "applied_policy_flags_on", f"Requirement met: the applied Safe Links policy enables {sp['what']}.", "policy_flags_ok", None,
                 applied="built_in" if applied == BUILTIN else "custom")
+
+
+_SCOPE_IN = ("SentTo", "SentToMemberOf", "RecipientDomainIs")
+
+
+def _scope_values(rule, key):
+    """A scope condition's values: an empty frozenset when unset, None when unreadable."""
+    value = rule.get(key)
+    if value is None or value == []:
+        return frozenset()
+    if isinstance(value, list) and all(type(v) is str for v in value):
+        return frozenset(value)
+    return None
+
+
+def _scope(rule):
+    """(include conditions, exceptions) as tuples of (key, values) for the condition kinds set; None when unreadable."""
+    inc = tuple((k, _scope_values(rule, k)) for k in _SCOPE_IN)
+    exc = tuple((k, _scope_values(rule, k)) for k in EXCEPT_KEYS)
+    if any(v is None for _, v in (*inc, *exc)):
+        return None
+    return tuple((k, v) for k, v in inc if v), tuple((k, v) for k, v in exc if v)
+
+
+class _Shadows:
+    """Review R100 (repair): ``shadows(rule)`` is True when an enabled partial rule with a lower numeric Priority applies
+    to every recipient ``rule`` names, so ``rule`` never applies. Sound whether Exchange joins different conditions with
+    AND or OR: both rules set the same condition kinds, the earlier one's values include the later one's, and its
+    exceptions are none or the same. Built on first use and indexed by value, so a call scans only the rules that share
+    the later rule's rarest value."""
+
+    def __init__(self, partial):
+        self._partial = partial
+        self._postings = None
+
+    def _build(self):
+        self._postings = {}
+        for rule in self._partial:
+            pr, sc = rule.get("Priority"), _scope(rule)
+            if not _is_num(pr) or sc is None or not sc[0]:
+                continue
+            inc, exc = sc
+            shape = (tuple(k for k, _ in inc), exc)
+            for k, values in inc:
+                for value in values:
+                    self._postings.setdefault((shape, k, value), []).append((pr, dict(inc)))
+
+    def __call__(self, rule):
+        pr, sc = rule.get("Priority"), _scope(rule)
+        if not _is_num(pr) or sc is None or not sc[0]:
+            return False
+        if self._postings is None:
+            self._build()
+        inc, exc = sc
+        keys = tuple(k for k, _ in inc)
+        mine = dict(inc)
+        for shape in {(keys, ()), (keys, exc)}:
+            lists = [self._postings.get((shape, k, value), ()) for k, values in inc for value in values]
+            for earlier_pr, theirs in min(lists, key=len):
+                if earlier_pr < pr and all(mine[k] <= theirs[k] for k in keys):
+                    return True
+        return False
 
 
 def _builtin_exclusions(policy_id, sp, sections, partial):
