@@ -997,7 +997,8 @@ the hash manifest cannot be replaced and a symbolic link is refused. `CONTRACT_V
 It holds `run_id`, `generated_at`, the digest and frame versions it was made with (`answer-digest-v2`,
 `answer-frames-v1`), `status` (`model`, or `fixed_text` when no model ran), `reason` (null, `runtime_missing`,
 `runtime_version`, `download_failed`, `model_unverified` or `model_failed`), `model` (the choice and the pinned
-repository, revision, file, size and SHA-256, or null), `runtime` (`llama-cpp-python` and its version, or null), the
+repository, revision, file, size, SHA-256 and the publisher's licence, or null; an answer saved without the licence is
+refused as made by another Auditex version and is made again), `runtime` (`llama-cpp-python` and its version, or null), the
 counts by verdict, `fixed_text_items`, the run `summary`, one entry per item of the run's digest (`item`, `policy_id`,
 `verdict`, the model's `selection` of sentence ids and value references or null, `fallback`, `failures` and the rendered
 `text`) and the whole printed `text`.
