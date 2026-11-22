@@ -137,8 +137,13 @@ def _capability_row_from_coverage(surface: str, probe_mode: str, row: dict[str, 
     }
 
 
-def _subprocess_probe(command: list[str], *, timeout: int = 120) -> tuple[int, str, str]:
-    completed = subprocess.run(command, text=True, capture_output=True, check=False, timeout=timeout)
+def _subprocess_probe(command: list[str], *, timeout: int = 120) -> tuple[int | None, str, str]:
+    """Return code, stdout and stderr; the code is None when the command ran past ``timeout`` (a slow pwsh start or a
+    stuck module path), so the caller records a blocked row instead of the probe dying mid-run."""
+    try:
+        completed = subprocess.run(command, text=True, capture_output=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, "", f"command_timeout:{timeout}s"
     return completed.returncode, completed.stdout, completed.stderr
 
 
@@ -232,7 +237,7 @@ def _probe_toolchain_statuses(
                     status="blocked",
                     message="ExchangeOnlineManagement module is not available.",
                     command=" ".join(module_command),
-                    error_class="module_not_found",
+                    error_class="command_timeout" if code is None else "module_not_found",
                     error=(stderr or stdout).strip() or f"return_code:{code}",
                 )
             )
@@ -266,7 +271,7 @@ def _probe_toolchain_statuses(
                     if code == 0
                     else "Message trace cmdlet is not available through the local PowerShell module path.",
                     command=" ".join(response_command),
-                    error_class=None if code == 0 else "command_not_available",
+                    error_class=None if code == 0 else "command_timeout" if code is None else "command_not_available",
                     error=None if code == 0 else (stderr or stdout).strip() or f"return_code:{code}",
                 )
             )

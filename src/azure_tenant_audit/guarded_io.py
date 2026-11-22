@@ -48,6 +48,20 @@ class UnsafeRunFileError(OSError):
         super().__init__(f"Refusing {self.field}: unsafe input.")
 
 
+UNSUPPORTED_PLATFORM_MESSAGE = "Auditex needs Linux, macOS or WSL2; native Windows is not supported yet."
+
+
+class UnsupportedPlatformError(UnsafeRunFileError):
+    """The system has no descriptor-relative, no-follow opens (native Windows), so no input can be proved safe."""
+
+    def __init__(self) -> None:
+        super().__init__("input")  # no reason: callers keep treating it as the ordinary refusal it was
+        self.args = (UNSUPPORTED_PLATFORM_MESSAGE,)
+
+    def __str__(self) -> str:
+        return UNSUPPORTED_PLATFORM_MESSAGE
+
+
 # The run's private pseudonym key (``output_redaction.PSEUDONYM_KEY_PATH`` names the same file): 32 random bytes in
 # ``operator-inputs/pseudonym.key``. The guard registers it as a private input, so no ordinary guarded read, hash,
 # copy, stdin admission or output destination accepts it; only ``GuardContext.pseudonym_key`` returns its bytes.
@@ -177,10 +191,10 @@ class GuardContext:
         self._stdin_identity: tuple[int, int] | None = None
 
     def __enter__(self) -> GuardContext:
+        if not _supported():
+            raise UnsupportedPlatformError
         failed = False
         try:
-            if not _supported():
-                raise OSError("descriptor-relative no-follow opens unavailable")
             self._root_fd = os.open("/", _DIR_FLAGS)
             self._fds.append(self._root_fd)
             self._cwd_fd = os.open(".", _DIR_FLAGS)

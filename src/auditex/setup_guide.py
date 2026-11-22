@@ -283,6 +283,11 @@ def build_m365_setup_guide(
     """The setup guide for the one Microsoft 365 way: the reader app with a certificate (DEC-107)."""
     config = CollectorConfig.from_path(config_path)
     profile = get_profile(auditor_profile)
+    if plane not in profile.supported_planes:
+        raise ValueError(
+            f"Auditor profile {profile.name} does not support plane {plane}; "
+            f"choose one of: {', '.join(profile.supported_planes)}."
+        )
     presets = load_collector_presets()
     selected = select_collectors(
         available=config.default_order,
@@ -593,9 +598,13 @@ def _refuse_control_characters(**values: Any) -> None:
 def _load_permission_hints(path: str | Path) -> dict[str, Any]:
     from azure_tenant_audit.resources import read_selected_resource
 
+    default = "configs/collector-permissions.json"
     try:
-        payload = json.loads(read_selected_resource(path, default="configs/collector-permissions.json", field="permission-hints"))
+        payload = json.loads(read_selected_resource(path, default=default, field="permission-hints"))
     except FileNotFoundError:
+        if str(path) != default:
+            # An explicit path the operator typed must exist: a silent {} would drop role hints and tool requirements.
+            raise FileNotFoundError(f"The --permission-hints file was not found: {path}") from None
         return {}
     if not isinstance(payload, dict):
         return {}

@@ -54,6 +54,11 @@ def _toolchain_runtime() -> ToolchainRuntime:
     )
 
 
+# A local readiness command (version check, select-python.sh) that runs longer than this is reported as blocked,
+# so auditex doctor always returns.
+COMMAND_TIMEOUT_SECONDS = 60
+
+
 def _run_json_command(command: list[str]) -> dict[str, Any]:
     try:
         completed = subprocess.run(
@@ -61,12 +66,19 @@ def _run_json_command(command: list[str]) -> dict[str, Any]:
             text=True,
             capture_output=True,
             check=False,
+            timeout=COMMAND_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
         return {
             "status": "blocked",
             "command": command,
             "error": "command_not_found",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "blocked",
+            "command": command,
+            "error": "command_timeout",
         }
 
     return {
