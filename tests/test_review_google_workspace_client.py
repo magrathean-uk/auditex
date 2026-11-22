@@ -219,7 +219,14 @@ def _drive_client(files: list[dict[str, Any]], permissions: Any, calls: list[dic
             calls.append({"permissions.list": kwargs})
             return _Request(permissions)
 
-    drive = type("Drive", (), {"files": lambda self: _Files(), "permissions": lambda self: _Permissions()})()
+    class _Drives:
+        def list(self, **kwargs: Any) -> _Request:
+            calls.append({"drives.list": kwargs})
+            return _Request({"drives": [{"id": "d1", "name": "Finance"}]})
+
+    drive = type(
+        "Drive", (), {"files": lambda self: _Files(), "permissions": lambda self: _Permissions(), "drives": lambda self: _Drives()}
+    )()
     client = GoogleWorkspaceClient(credentials=None)
     assert client._services is not None
     client._services[("drive", "v3")] = drive
@@ -262,6 +269,8 @@ def test_r057_unreadable_shared_drive_permissions_are_a_coverage_gap_not_clean()
     row = next(item for item in result.coverage if item["name"] == "drivePermissions")
     assert row["status"] == "failed"
     assert row["error_class"] == "insufficient_permissions"
+    # Every other read succeeds, so the unreadable sharing alone makes the collector partial.
+    assert next(item for item in result.coverage if item["name"] == "sharedDrives")["status"] == "ok"
     assert result.status == "partial"
 
 
