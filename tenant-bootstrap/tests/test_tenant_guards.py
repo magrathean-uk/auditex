@@ -369,3 +369,18 @@ def test_powershell_ca_policy_lookup_keeps_the_odata_filter_literal():
     text = (ROOT / "scripts" / "08-secure-baseline.ps1").read_text(encoding="utf-8")
     assert "policies?$filter=" not in text
     assert "policies?`$filter=" in text
+
+
+@pytest.mark.parametrize("kind", sorted(SEEDERS))
+@pytest.mark.parametrize("tenant_id", [LAB_TENANT, ZERO_TENANT])
+def test_dry_run_never_acquires_a_token(kind, tenant_id, tmp_path, graph, az_calls):
+    """A dry run makes no tenant call at all, so it must not take an (unscoped) Azure CLI token either."""
+    recorder = graph(OTHER_TENANT)
+    script, extra, _ = SEEDERS[kind]
+    if kind == "workload":
+        extra = ["--steps", "licenses,windows365,teams,intune,security"]
+    module = load_module(ROOT / "scripts" / script)
+    config = lab_config(tmp_path, tenant_id)
+    assert module.main(["--config", str(config), "--run-name", "guard", "--dry-run", *extra]) == 0
+    assert [argv for argv in az_calls if argv[:1] == ["az"]] == []
+    assert recorder.calls == []

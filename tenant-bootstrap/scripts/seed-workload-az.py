@@ -779,47 +779,10 @@ def graph_token_claims(
             roles=claims.get("roles"),
         )
         return claims
-    proc = subprocess.run(
-        [
-            "az",
-            "account",
-            "get-access-token",
-            "--resource-type",
-            "ms-graph",
-            "--query",
-            "accessToken",
-            "--output",
-            "tsv",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if debug_logger:
-        debug_logger.event(
-            "token.claims.command",
-            returncode=proc.returncode,
-            stderr=_truncate(proc.stderr),
-        )
-    if proc.returncode != 0 or not proc.stdout.strip():
-        logger.event(
-            "token.claims.unavailable",
-            "warn",
-            source=token_source,
-            reason="az-token-failed",
-        )
-        return {}
-    claims = _decode_jwt_payload(proc.stdout.strip())
-    logger.event(
-        "token.claims",
-        "success",
-        source=token_source,
-        appid=claims.get("appid"),
-        upn=claims.get("upn") or claims.get("unique_name"),
-        scopes=str(claims.get("scp") or ""),
-        roles=claims.get("roles"),
-    )
-    return claims
+    # No token means a dry run: it makes no tenant call, so it never asks the Azure CLI for an
+    # (unscoped) token just to read claims.
+    logger.event("token.claims.unavailable", "warn", source=token_source, reason="no-token-in-dry-run")
+    return {}
 
 
 def emit_license_readiness_artifact(
