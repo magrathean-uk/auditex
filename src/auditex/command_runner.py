@@ -120,7 +120,8 @@ def _kill_process_group(process: Any) -> None:
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, AttributeError):
-        process.kill()
+        if process.poll() is None:
+            process.kill()
 
 
 # Commands running now. Each starts in its own session, so a signal to the server's process group no longer reaches
@@ -135,8 +136,9 @@ def stop_running_commands() -> None:
     with _RUNNING_LOCK:
         running = list(_RUNNING)
     for process in running:
-        if process.poll() is None:
-            _kill_process_group(process)
+        # Kill the group even when its first process has exited: a process it started can still be running and
+        # holding the output pipes, and the group outlives its leader while any member is left.
+        _kill_process_group(process)
 
 
 atexit.register(stop_running_commands)
@@ -188,11 +190,26 @@ def _collect(command: list[str], process: Any, timeout: int | None) -> subproces
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
+def _flag_values(command: list[str], flag: str) -> list[str]:
+    """The values given for exactly ``flag`` (``--out X`` or ``--out=X``). Unlike ``collect_sensitive_argv_values``
+    this reads no other flag: that helper also collects every certificate flag's value (R063)."""
+    values: list[str] = []
+    for index, item in enumerate(command):
+        name, separator, value = item.partition("=")
+        if name != flag:
+            continue
+        if separator:
+            values.append(value)
+        elif index + 1 < len(command):
+            values.append(command[index + 1])
+    return values
+
+
 def _run_folders(command: list[str], cwd: str | None) -> tuple[Path, str] | None:
     """The ``--out`` folder and the ``<tenant-name>-`` prefix the engine names a new run folder with, if given."""
-    outs = sorted(collect_sensitive_argv_values(command, sensitive_flags={"--out"}))
-    tenants = sorted(collect_sensitive_argv_values(command, sensitive_flags={"--tenant-name"}))
-    if len(outs) != 1 or len(tenants) != 1:
+    outs = sorted(set(_flag_values(command, "--out")))
+    tenants = sorted(set(_flag_values(command, "--tenant-name")))
+    if len(outs) != 1 or len(tenants) != 1 or not outs[0] or not tenants[0]:
         return None
     return Path(cwd or Path.cwd()) / outs[0], f"{tenants[0]}-"
 

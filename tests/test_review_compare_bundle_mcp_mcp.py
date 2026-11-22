@@ -297,3 +297,53 @@ def test_a_terminated_mcp_server_stops_the_commands_it_started(tmp_path: Path) -
     time.sleep(2.5)
     assert not marker.exists()
 
+
+def test_the_certificate_audit_tool_timeout_names_the_partial_run_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Repair round 2 (R063/R026): through the public handler, whose command carries the certificate flags.
+    import subprocess
+
+    from auditex import mcp_server
+
+    out = tmp_path / "out"
+    partial = out / "lab-run_20261122T060000Z"
+
+    def start_then_time_out(command: list[str], **kwargs: object) -> None:
+        partial.mkdir(parents=True)
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 1)
+
+    monkeypatch.setattr("auditex.command_runner._run_process", start_then_time_out)
+    certificate = tmp_path / "reader.pem"
+    certificate.write_text("not a key", encoding="utf-8")
+
+    result = mcp_server.tool_handlers()["auditex_run_certificate_audit"](
+        tenant_name="lab", tenant_id="11111111-1111-1111-1111-111111111111",
+        client_id="22222222-2222-2222-2222-222222222222", certificate_path=str(certificate),
+        certificate_thumbprint="A" * 40, out_dir=str(out),
+    )
+
+    assert result.get("error_class") == "timeout", result
+    assert result.get("partial_run_dir") == str(partial), result
+    assert f"--resume-from {partial}" in result["error"]
+
+
+def test_a_terminated_mcp_server_stops_a_command_whose_first_process_already_exited(tmp_path: Path) -> None:
+    # Repair round 2 (R063): the engine's own process has exited but a process it started still holds the pipes.
+    import os
+    import subprocess
+    import sys
+    import time
+
+    marker = tmp_path / "grandchild-finished"
+    script = tmp_path / "server_stand_in.py"
+    script.write_text(
+        _SERVER_STAND_IN.replace("& wait", "& exit 0").replace("time.sleep(0.5)", "time.sleep(1.0)"), encoding="utf-8"
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+
+    server = subprocess.run([sys.executable, str(script), str(marker)], env=env, timeout=30, check=False)
+
+    assert server.returncode != 0
+    time.sleep(2.5)
+    assert not marker.exists()
