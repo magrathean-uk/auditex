@@ -11,7 +11,6 @@ from azure_tenant_audit.adapters import list_adapters as _list_adapters
 from azure_tenant_audit.citations import build_citation_summary
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.contracts import contract_schema_manifest
-from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.guarded_io import (
     current_context,
     guard_session,
@@ -520,6 +519,13 @@ def summarize_run_raw(run_dir: str) -> dict[str, Any]:
         bundle["report_pack_citation_summary"] = dict(report_pack.get("citation_summary") or {})
     bundle["evidence_missing"] = evidence_missing
     return bundle
+
+
+def diff_run_directories(run_a: str, run_b: str, *, classic: bool = False) -> dict[str, Any]:
+    """The gated two-run diff: the same tenant gate, bundle verification and reassessment check as compare (R054)."""
+    from .compare import diff_two_runs
+
+    return diff_two_runs(run_a, run_b, classic=classic)
 
 
 def diff_runs(run_a: str, run_b: str, classic: bool = False) -> dict[str, Any]:

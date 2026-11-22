@@ -54,6 +54,15 @@ def _run_metadata(run_dir: Path, expected_digest: str | None = None) -> dict[str
     return metadata
 
 
+def _require_run_dirs(run_dirs: list[Path]) -> None:
+    """Refuse a path that is not a run: missing, not a directory, or without ``run-manifest.json`` (R132)."""
+    for position, run_dir in enumerate(run_dirs, start=1):
+        if not run_dir.is_dir():
+            raise ValueError(f"run {position} ({run_dir}) is not a run directory")
+        if not (run_dir / "run-manifest.json").is_file():
+            raise ValueError(f"run {position} ({run_dir}) has no run-manifest.json")
+
+
 def _expected_digests(run_dirs: list[Path], expected: Mapping[str, str] | None) -> list[str | None]:
     """The expected ``bundle-hashes.json`` digest of each run, in order; a digest naming no compared run is an error.
 
@@ -196,6 +205,7 @@ def _compare_pair(
             # A run whose hash manifest or recorded contract fails is not the bundle that was finalized.
             return _blocked_diff(left_run, right_run, f"run_unverified:{side}:{problem}")
     diff = diff_run_directories(left_run["path"], right_run["path"], classic=classic)
+    diff["drift_summary"] = _reassessed_drift_summary(diff.get("drift_summary") or {}, build_finding_delta(left_run, right_run))
     diff["left_run"] = _public_run(left_run)
     diff["right_run"] = _public_run(right_run)
     diff["status"] = "ok"
@@ -212,6 +222,67 @@ def _compare_pair(
     return diff
 
 
+def _reassessed_drift_summary(drift: Mapping[str, Any], delta: Mapping[str, Any]) -> dict[str, Any]:
+    """The diff's drift summary with new, resolved and not reassessed findings taken from ``build_finding_delta``.
+
+    The object diff only sees which findings are present; a finding absent from the later run is resolved only
+    when the later run reassessed it (R054, R015), so JSON, MCP and the markdown give one answer.
+    """
+    summary = dict(drift)
+    new = [str(row["key"]) for row in delta.get("new") or []]
+    newly_assessed = [str(row["key"]) for row in delta.get("newly_assessed") or []]
+    resolved = [str(row["key"]) for row in delta.get("resolved") or []]
+    not_reassessed = [str(row["key"]) for row in delta.get("not_reassessed") or []]
+    summary.update(
+        {
+            "new_findings": new,
+            "resolved_findings": resolved,
+            "not_reassessed_findings": not_reassessed,
+            "newly_assessed_findings": newly_assessed,
+            "newly_assessed": [dict(row) for row in delta.get("newly_assessed") or []],
+            "newly_assessed_count": len(newly_assessed),
+            "not_reassessed": [dict(row) for row in delta.get("not_reassessed") or []],
+            "new_count": len(new),
+            "resolved_count": len(resolved),
+            "not_reassessed_count": len(not_reassessed),
+            "resolution_basis": "reassessed",
+            "verification": dict(delta.get("verification") or {}),
+        }
+    )
+    summary["notification_recommended"] = bool(
+        new
+        or newly_assessed
+        or summary.get("worsened_findings")
+        or summary.get("reactivated_accepted_risks")
+        or int(summary.get("stale_accepted_risk_count") or 0) > 0
+    )
+    return summary
+
+
+def diff_two_runs(
+    run_a: str | Path,
+    run_b: str | Path,
+    *,
+    classic: bool = False,
+    allow_cross_tenant: bool = False,
+    expect_manifest_sha256: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Diff ``run_b`` against ``run_a`` in the order given, through the same gates as ``compare_runs``.
+
+    The tenant gate, the bundle verification and the reassessment check all apply: a pair of different tenants or
+    an edited bundle is blocked, and a finding gone from ``run_b`` because its collector did not complete there is
+    ``not_reassessed``, not resolved.
+    """
+    paths = [Path(run_a), Path(run_b)]
+    _require_run_dirs(paths)
+    digests = _expected_digests(paths, expect_manifest_sha256)
+    left, right = (_run_metadata(path, digest) for path, digest in zip(paths, digests, strict=True))
+    result = _compare_pair(left, right, _tenant_gate([left, right]), allow_cross_tenant=allow_cross_tenant, classic=classic)
+    result.setdefault("run_a", str(paths[0]))
+    result.setdefault("run_b", str(paths[1]))
+    return result
+
+
 def compare_run_directories(
     run_dirs: Iterable[str | Path],
     *,
@@ -226,6 +297,7 @@ def compare_run_directories(
     (``expected_manifest_sha256_mismatch``) and no comparison involving it calls a finding resolved.
     """
     paths = [Path(run_dir) for run_dir in run_dirs]
+    _require_run_dirs(paths)
     digests = _expected_digests(paths, expect_manifest_sha256)
     runs = [_run_metadata(path, digest) for path, digest in zip(paths, digests, strict=False)]
     ordered_runs = _sort_runs(runs)
@@ -241,20 +313,18 @@ def compare_run_directories(
             }
         )
 
-    adjacent_diffs: list[dict[str, Any]] = []
-    for left_run, right_run in zip(ordered_runs, ordered_runs[1:], strict=False):
-        adjacent_diffs.append(
-            _compare_pair(left_run, right_run, compare_context, allow_cross_tenant=allow_cross_tenant, classic=classic)
-        )
+    def ordered_pair(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
+        # Without a creation time a run cannot be placed before or after another, so it is never the current run.
+        if left_run.get("_created_at") is None or right_run.get("_created_at") is None:
+            return _blocked_diff(left_run, right_run, "run_created_utc_missing")
+        return _compare_pair(left_run, right_run, compare_context, allow_cross_tenant=allow_cross_tenant, classic=classic)
+
+    adjacent_diffs: list[dict[str, Any]] = [
+        ordered_pair(left_run, right_run) for left_run, right_run in zip(ordered_runs, ordered_runs[1:], strict=False)
+    ]
 
     if len(ordered_runs) >= 2:
-        baseline_diff = _compare_pair(
-            ordered_runs[0],
-            ordered_runs[-1],
-            compare_context,
-            allow_cross_tenant=allow_cross_tenant,
-            classic=classic,
-        )
+        baseline_diff = ordered_pair(ordered_runs[0], ordered_runs[-1])
     else:
         baseline_diff = _blocked_diff(
             ordered_runs[0] if ordered_runs else {},
@@ -539,11 +609,14 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
     )
     right_coverage = right_bundle.collector_coverage() if right_bundle else {}
     right_sections = NormalizedSections(right_bundle) if right_bundle else None
+    left_coverage = left_bundle.collector_coverage() if left_bundle else {}
+    left_sections = NormalizedSections(left_bundle) if left_bundle else None
     left = {_finding_key(row): row for row in left_rows}
     right = {_finding_key(row): row for row in right_rows}
 
     def _summary(row: dict[str, Any]) -> dict[str, Any]:
         return {
+            "key": _finding_key(row),
             "id": row.get("id"),
             "rule_id": row.get("rule_id"),
             "severity": _severity(row),
@@ -551,7 +624,17 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
             "title": row.get("title"),
         }
 
-    new = [_summary(right[key]) for key in sorted(set(right) - set(left))]
+    new: list[dict[str, Any]] = []
+    newly_assessed: list[dict[str, Any]] = []
+    for key in sorted(set(right) - set(left)):
+        # R133: a finding the baseline could not have raised (its collector or its rule's inputs were missing there)
+        # is newly assessed, not a regression. A baseline that recorded no coverage at all is taken as assessed.
+        gap = reassessment_gap(right[key], left_coverage, left_sections) if left_coverage else None
+        # A finding that names no collector gives no evidence either way about the baseline; it stays new.
+        if gap is None or gap == "collector_unknown":
+            new.append(_summary(right[key]))
+        else:
+            newly_assessed.append({**_summary(right[key]), "reason": gap})
     resolved: list[dict[str, Any]] = []
     not_reassessed: list[dict[str, Any]] = []
     for key in sorted(set(left) - set(right)):
@@ -573,6 +656,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
             )
     return {
         "new": new,
+        "newly_assessed": newly_assessed,
         "resolved": resolved,
         "not_reassessed": not_reassessed,
         "changed": changed,
@@ -595,16 +679,48 @@ def _severity_counts(rows: list[dict[str, Any]]) -> str:
     return ", ".join(parts) if parts else "none"
 
 
-def _finding_table(title: str, rows: list[dict[str, Any]], *, changed: bool = False, reason: bool = False) -> list[str]:
+_RUN_SIDE_WORDS = {"later": "later run", "baseline": "baseline run"}
+
+
+def reason_text(code: Any, *, side: str = "later") -> str:
+    """A short plain-language cause for a ``not_reassessed`` or ``newly_assessed`` reason code (R135)."""
+    text = str(code or "")
+    run = _RUN_SIDE_WORDS.get(side, "later run")
+    head, _, detail = text.partition(":")
+    if text == "collector_unknown":
+        cause = "The finding names no collector"
+    elif text == "collector_not_run":
+        cause = f"The finding's collector did not run in the {run}"
+    elif text.startswith("collector_"):
+        cause = f"The finding's collector did not complete in the {run} ({text.removeprefix('collector_')})"
+    elif head.startswith("rule_collector_"):
+        status = head.removeprefix("rule_collector_")
+        verb = "did not run" if status == "not_run" else f"did not complete ({status})"
+        cause = f"Collector {detail}, which the rule reads, {verb} in the {run}"
+    elif head == "rule_inputs":
+        cause = f"An input the rule needs was not known in the {run}"
+    elif head.startswith("rule_parameters_"):
+        cause = "The rule was judged with different or unrecorded settings in the two runs"
+    elif head == "run_unverified":
+        cause = "A compared run failed its bundle check"
+    else:
+        cause = text
+    return cause
+
+
+def _finding_table(
+    title: str, rows: list[dict[str, Any]], *, changed: bool = False, reason: bool = False, side: str = "later"
+) -> list[str]:
     lines = [f"## {title} ({len(rows)})", ""]
     if not rows:
         return lines + ["None.", ""]
     ordered = sorted(rows, key=lambda row: (_SEVERITY_ORDER.index(_severity(row)), str(row.get("id") or "")))
     if reason:
-        lines += ["| Severity | Finding | Rule | Reason |", "| --- | --- | --- | --- |"]
+        lines += ["| Severity | Finding | Rule | Reason | Cause |", "| --- | --- | --- | --- | --- |"]
         for row in ordered:
             lines.append(
-                f"| {_md(row.get('severity'))} | {_md(row.get('title') or row.get('id'))} | {_md(row.get('rule_id'))} | {_md(row.get('reason'))} |"
+                f"| {_md(row.get('severity'))} | {_md(row.get('title') or row.get('id'))} | {_md(row.get('rule_id'))} | "
+                f"{_md(row.get('reason'))} | {_md(reason_text(row.get('reason'), side=side))} |"
             )
     elif changed:
         lines += ["| Severity | Was | Status | Was | Finding | Rule |", "| --- | --- | --- | --- | --- | --- |"]
@@ -661,6 +777,7 @@ def render_compare_markdown(result: dict[str, Any]) -> str:
         f"- Risk grade: {_md(grade_before)} -> {_md(grade_after)} ({risk_change}; score {_md(risk_before.get('score'))} -> {_md(risk_after.get('score'))})",
         f"- New findings: {len(delta['new'])} ({_severity_counts(delta['new'])})",
         f"- Resolved findings: {len(delta['resolved'])} ({_severity_counts(delta['resolved'])})",
+        f"- Newly assessed findings: {len(delta['newly_assessed'])} ({_severity_counts(delta['newly_assessed'])})",
         f"- Not reassessed findings: {len(delta['not_reassessed'])} ({_severity_counts(delta['not_reassessed'])})",
         f"- Changed findings: {len(delta['changed'])} ({_severity_counts(delta['changed'])})",
         f"- Object changes: {_md(summary.get('added', 0))} added, {_md(summary.get('removed', 0))} removed, {_md(summary.get('changed', 0))} changed",
@@ -668,7 +785,8 @@ def render_compare_markdown(result: dict[str, Any]) -> str:
         "",
     ]
     lines += _finding_table("New findings", delta["new"])
+    lines += _finding_table("Newly assessed findings (the baseline run could not assess them)", delta["newly_assessed"], reason=True, side="baseline")
     lines += _finding_table("Resolved findings", delta["resolved"])
-    lines += _finding_table("Not reassessed findings (collector did not complete in the later run)", delta["not_reassessed"], reason=True)
+    lines += _finding_table("Not reassessed findings", delta["not_reassessed"], reason=True)
     lines += _finding_table("Changed findings", delta["changed"], changed=True)
     return "\n".join(lines)
