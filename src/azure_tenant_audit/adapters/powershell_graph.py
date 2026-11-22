@@ -272,12 +272,11 @@ class PowerShellGraphAdapter(Adapter):
         log_event: Callable[[str, str, dict[str, Any] | None], None] | None = None,
         session: dict[str, Any] | None = None,
         response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Run one checked read. ``response_transform`` is honoured only for the sensitive anti-phish read.
 
-        ``timeout`` overrides the process timeout (180 s with a connect step, else 120 s) for a read known to take
-        longer, such as a whole-tenant mailbox aggregate (R047).
+        The process timeout is 180 s with a connect step, else 120 s; a whole-tenant enumeration (``-ResultSize
+        Unlimited``) gets UNBOUNDED_READ_TIMEOUT_SECONDS, as it walks every mailbox before answering (R047).
 
         ``Get-AntiPhishPolicy`` is recognised as sensitive from the command itself, so a caller that passes no
         transform still gets rows without targeted users (summarised ``not_collected``) and no output text.
@@ -333,7 +332,8 @@ class PowerShellGraphAdapter(Adapter):
                 )
             return {"error": IPPS_SESSION_NOT_OPENED, "error_class": IPPS_SESSION_NOT_OPENED, "command": safe_command}
         prepared = f"$ErrorActionPreference = 'Stop'; {prelude}{self._json_pipeline(script)}"
-        process_timeout = timeout if timeout is not None else (180 if prelude else 120)
+        process_timeout = (UNBOUNDED_READ_TIMEOUT_SECONDS if "-resultsize unlimited" in script.lower()
+                           else 180 if prelude else 120)
         if _sensitive(script):
             return self._run_sensitive(
                 exe=exe, prepared=prepared, env=env, timeout=process_timeout, script=script,
@@ -388,8 +388,12 @@ class PowerShellGraphAdapter(Adapter):
                         },
                     )
 
-            if (result.returncode != 0 or (not _json_success(result.returncode, stdout) and (
-                    self._looks_like_not_found(combined) or self._looks_like_auth_required(combined)))):
+            if _json_success(result.returncode, stdout):
+                # Tenant rows are never searched for refusal text (R020): a zero exit with JSON is classified from
+                # stderr alone, which still names a refused or missing command.
+                combined = stderr.lower()
+            if (result.returncode != 0 or self._looks_like_not_found(combined)
+                    or self._looks_like_auth_required(combined)):
                 module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
                 if module_missing:
                     error_class = "module_not_found"
@@ -539,8 +543,9 @@ class PowerShellGraphAdapter(Adapter):
                     "stdout_bytes": numbers["stdout_bytes"], "stderr_bytes": numbers["stderr_bytes"],
                 })
 
-            if run.returncode != 0 or (not _json_success(run.returncode, stdout) and (
-                    self._looks_like_not_found(combined) or self._looks_like_auth_required(combined))):
+            if _json_success(run.returncode, stdout):
+                combined = stderr.lower()  # never the tenant rows (R020)
+            if run.returncode != 0 or self._looks_like_not_found(combined) or self._looks_like_auth_required(combined):
                 module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
                 if module_missing:
                     error_class = "module_not_found"
@@ -610,9 +615,13 @@ class PowerShellGraphAdapter(Adapter):
             return failure("command_exception", "command_exception", numbers)
 
 
+# A read that enumerates every mailbox in the tenant before answering outlasts the default timeout on a large tenant.
+UNBOUNDED_READ_TIMEOUT_SECONDS = 600
+
+
 def _json_success(returncode: int | None, stdout: str | None) -> bool:
     """A zero exit whose stdout parses as JSON is a read that ran (R020): tenant rows such as a rule named 'Block
-    unauthorized sharing' must never be searched for refusal text, so the text heuristics apply only otherwise."""
+    unauthorized sharing' must never be searched for refusal text, so only stderr is."""
     if returncode != 0 or not stdout or not stdout.strip():
         return False
     try:

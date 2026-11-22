@@ -60,3 +60,12 @@ def test_sensitive_read_with_a_policy_named_unauthorized_is_read(monkeypatch, pw
     command = dict(ExchangePolicyCollector.command_collectors)["antiPhishPolicies"]
     result = pg.PowerShellGraphAdapter().run(command)
     assert result.get("error_class") is None, result
+
+
+def test_zero_exit_json_with_a_refusal_on_stderr_is_still_unauthenticated(monkeypatch, pwsh) -> None:
+    monkeypatch.setattr(
+        pg.subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout=json.dumps(ROWS), stderr="Access denied"),
+    )
+    result = pg.PowerShellGraphAdapter().run(",@(Get-TransportRule | Select-Object Name,State)")
+    assert result["error_class"] == "command_not_authenticated"
