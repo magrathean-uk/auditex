@@ -96,7 +96,10 @@ def _section(markdown: str, heading: str) -> str:
 
 def test_admin_guide_teams_section_matches_the_collector_and_adapter():
     from auditex.scuba_adapters_teams import CERTIFICATE_AUTH_MARKER
-    from azure_tenant_audit.collectors.teams_policy import APP_SETTINGS_OPERATION, TEAMS_OPERATIONS
+    from azure_tenant_audit.collectors.teams_policy import (
+        APP_SETTINGS_OPERATION,
+        TEAMS_OPERATIONS,
+    )
 
     operations = len(TEAMS_OPERATIONS) + (APP_SETTINGS_OPERATION not in TEAMS_OPERATIONS)
     section = _flat(_section(_doc("docs/guides/admin-permission-guide.md"), "### Teams policy reads in app-only runs"))
@@ -376,7 +379,10 @@ def test_setup_guide_and_manual_say_native_windows_is_unsupported():
 
 
 def test_optional_inbox_rule_folder_permission_is_documented_everywhere_and_never_default():
-    from azure_tenant_audit.collectors.mailbox_forwarding import _HIDE_FROM_USER_WELL_KNOWN, MailboxForwardingCollector
+    from azure_tenant_audit.collectors.mailbox_forwarding import (
+        _HIDE_FROM_USER_WELL_KNOWN,
+        MailboxForwardingCollector,
+    )
     from azure_tenant_audit.profiles import PROFILES
 
     (scope,) = MailboxForwardingCollector.optional_permissions
