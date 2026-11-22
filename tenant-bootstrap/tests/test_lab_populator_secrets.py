@@ -221,6 +221,8 @@ def test_create_app_refuses_when_the_az_tenant_changes_after_the_start_check(pop
     assert "tenant_mismatch" in capsys.readouterr().err
     writes = [argv for argv in fake_az["calls"] if argv[:3] == ["az", "ad", "app"] and argv[3] != "list"]
     assert writes == []
+    # A refused run leaves no empty secret file behind.
+    assert not (populator_config.parent.parent / ".secrets" / "lab-populator-app-secret.json").exists()
 
 
 def test_create_app_rejects_abbreviated_flags(populator_config, fake_az):

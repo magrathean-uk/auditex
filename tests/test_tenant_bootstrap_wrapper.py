@@ -276,6 +276,10 @@ def _lab_max_config(kit, tenant_id: str) -> None:
 
 
 def test_enterprise_lab_max_live_reaches_the_seeder_guard_under_bash_3(kit):
+    # Bash before 4.4 treats an empty "${MODE_ARGS[@]}" as unbound under set -u; Linux bash would hide it.
+    assert '"${MODE_ARGS[@]}"' not in (kit.root / "run-enterprise-lab-max.sh").read_text(encoding="utf-8").replace(
+        '${MODE_ARGS[@]+"${MODE_ARGS[@]}"}', ""
+    )
     _lab_max_config(kit, LAB_TENANT)
     kit.env["FAKE_AZ_TENANT"] = LAB_TENANT
     proc = kit.run("run-enterprise-lab-max.sh", "--live", "--run-name", "labmax-live", "--skip-workload", "--skip-verify")

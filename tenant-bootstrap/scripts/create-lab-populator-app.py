@@ -128,8 +128,9 @@ def main(argv: list[str]) -> int:
         )
         return 3
 
+    pending: dict = {}
     try:
-        return populate(args, tenant_id)
+        return populate(args, tenant_id, pending)
     except TenantChanged:
         print(
             f"tenant_mismatch: the Azure CLI is no longer signed in to tenant {tenant_id}; "
@@ -137,9 +138,15 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 3
+    finally:
+        # A run that opened the secret file but never wrote it closes it, and removes it if this run made it.
+        if pending.get("fd") is not None:
+            os.close(pending["fd"])
+            if pending.get("created"):
+                pending["path"].unlink(missing_ok=True)
 
 
-def populate(args: argparse.Namespace, tenant_id: str) -> int:
+def populate(args: argparse.Namespace, tenant_id: str, pending: dict) -> int:
     pinned = None if args.dry_run else tenant_id
     cfg = json.loads(args.config.read_text(encoding="utf-8"))
     app_name = cfg["appDisplayName"]
@@ -150,8 +157,10 @@ def populate(args: argparse.Namespace, tenant_id: str) -> int:
     if args.create_secret and not args.dry_run:
         # Check the local destination before any directory write, so a refused destination never
         # leaves an issued credential unstored.
+        existed = secret_path.exists() or secret_path.is_symlink()
         try:
             secret_fd = open_owner_only(secret_path)
+            pending.update(fd=secret_fd, created=not existed, path=secret_path)
         except OSError as exc:
             print(f"secret_path_refused: cannot store the secret at {secret_path.name}: {exc.strerror}. Nothing was changed.", file=sys.stderr)
             return 4
@@ -309,6 +318,7 @@ def populate(args: argparse.Namespace, tenant_id: str) -> int:
                 "password": secret.get("password"),
                 "endDateTime": secret.get("endDateTime"),
             }
+            pending["fd"] = None
             write_owner_only_fd(secret_fd, json.dumps(secret_payload, indent=2, sort_keys=True))
             secret_fd = None
             secret_stored = True
