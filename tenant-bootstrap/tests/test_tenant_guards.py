@@ -264,3 +264,34 @@ def test_token_acquisition_failure_is_recorded_as_failed_before_any_write(kind, 
     assert result != 0
     assert recorder.calls == []
     assert manifest is not None and manifest.get("status") == "failed" and manifest.get("error") == "tenant_check_failed"
+
+
+@pytest.mark.parametrize("kind", sorted(SEEDERS))
+def test_failed_organization_check_never_logs_the_response_body(kind, tmp_path, monkeypatch, az_calls, capsys):
+    marker = "synthetic.principal@other.example"
+
+    def forbidden(session, method, url, json=None, timeout=None, **_):  # noqa: A002
+        return FakeResponse(403, {"error": {"code": "Forbidden", "message": f"denied for {marker}"}})
+
+    monkeypatch.setattr(requests.Session, "request", forbidden)
+    monkeypatch.setenv("AZURE_ACCESS_TOKEN", fake_jwt(LAB_TENANT))
+    config = lab_config(tmp_path, LAB_TENANT)
+    result, manifest = run_seeder(kind, config)
+    assert result != 0
+    assert manifest is not None and manifest.get("error") == "tenant_check_failed"
+    captured = capsys.readouterr()
+    assert marker not in captured.out + captured.err
+    for path in (config.parent / "runs").rglob("*"):
+        if path.is_file():
+            assert marker not in path.read_text(encoding="utf-8", errors="replace"), path.name
+
+
+@pytest.mark.parametrize("kind", sorted(SEEDERS))
+def test_seeder_rejects_abbreviated_flags(kind, tmp_path, graph, az_calls):
+    recorder = graph(LAB_TENANT)
+    script, _, _ = SEEDERS[kind]
+    module = load_module(ROOT / "scripts" / script)
+    with pytest.raises(SystemExit) as exc:
+        module.main(["--config", str(lab_config(tmp_path, LAB_TENANT)), "--run-name", "guard", "--dry"])
+    assert exc.value.code == 2
+    assert recorder.calls == []

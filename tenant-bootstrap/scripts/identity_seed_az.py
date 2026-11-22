@@ -154,13 +154,31 @@ class GraphClient:
     def access_token(self) -> str:
         return str(self.session.headers.get("Authorization", "")).removeprefix("Bearer ").strip()
 
+    def _organization_for_tenant_check(self) -> dict:
+        """Read-only GET of /organization; an error body is never logged or raised, only the status."""
+        url = f"{GRAPH_ROOT}/organization?$select=id"
+        response = self.session.request("GET", url, timeout=60)
+        self.logger.event(
+            "graph.request",
+            "success" if response.ok else "error",
+            method="GET",
+            path="/organization?$select=id",
+            status_code=response.status_code,
+        )
+        if not response.ok:
+            raise RuntimeError(f"tenant check failed: HTTP {response.status_code}")
+        try:
+            return response.json()
+        except ValueError:
+            return {}
+
     def verify_tenant(self) -> None:
         """Prove the token and the Graph organisation belong to the named tenant before any write."""
         if self.dry_run:
             return
         if not self.tenant_id:
             raise TenantGuardError("tenant_id_required")
-        verify_named_tenant(self.tenant_id, self.access_token(), lambda: self.request("GET", "/organization?$select=id"))
+        verify_named_tenant(self.tenant_id, self.access_token(), self._organization_for_tenant_check)
         self.logger.event("tenant.verified", "success", tenantId=self.tenant_id)
 
     def request(self, method: str, path: str, *, payload: dict | None = None) -> dict:
@@ -673,7 +691,7 @@ def seed_group_memberships(
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Seed tenant identity/groups through Azure CLI Graph token.")
+    parser = argparse.ArgumentParser(description="Seed tenant identity/groups through Azure CLI Graph token.", allow_abbrev=False)
     parser.add_argument("--config", type=Path, default=Path("tenant-bootstrap/config.example.json"))
     parser.add_argument("--run-name", default=f"az-identity-{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     parser.add_argument("--dry-run", action="store_true")

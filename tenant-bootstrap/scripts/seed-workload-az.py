@@ -485,6 +485,24 @@ class GraphClient:
     def access_token(self) -> str:
         return self.session.headers.get("Authorization", "").removeprefix("Bearer ").strip() if not self.dry_run else ""
 
+    def _organization_for_tenant_check(self) -> dict:
+        """Read-only GET of /organization; an error body is never logged or raised, only the status."""
+        url = f"{GRAPH_ROOT}/organization?$select=id"
+        response = self.session.request("GET", url, timeout=60)
+        self.logger.event(
+            "graph.request",
+            "success" if response.ok else "error",
+            method="GET",
+            path="/organization?$select=id",
+            status_code=response.status_code,
+        )
+        if not response.ok:
+            raise RuntimeError(f"tenant check failed: HTTP {response.status_code}")
+        try:
+            return response.json()
+        except ValueError:
+            return {}
+
     def verify_tenant(self) -> None:
         """Prove the token and the Graph organisation belong to the named tenant before any write."""
         if self.dry_run:
@@ -494,7 +512,7 @@ class GraphClient:
         tenant_guard.verify_named_tenant(
             self.tenant_id,
             self.access_token(),
-            lambda: self.request("GET", "/organization?$select=id"),
+            self._organization_for_tenant_check,
         )
         self.logger.event("tenant.verified", "success", tenantId=self.tenant_id)
 
@@ -3159,7 +3177,7 @@ def seed_exchange_baseline(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Azure CLI + Graph enterprise bootstrap workload seed.")
+    parser = argparse.ArgumentParser(description="Azure CLI + Graph enterprise bootstrap workload seed.", allow_abbrev=False)
     parser.add_argument("--config", type=Path, default=Path("tenant-bootstrap/config.example.json"))
     parser.add_argument("--run-name", default=f"az-workload-{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     parser.add_argument("--steps", default="licenses,windows365,teams,intune,security,devices,exchange,sample")
