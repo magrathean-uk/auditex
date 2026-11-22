@@ -1837,11 +1837,22 @@ def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> d
     safe = _pack_payload(payload, run_path)
     if "run_dir" in payload:
         safe["run_dir"] = run_path.name
-    if isinstance(safe.get("waiver_path"), str):
-        safe["waiver_path"] = _local_path_label(safe["waiver_path"])
     if isinstance(safe.get("command_line"), list):
         safe["command_line"] = [_local_path_argument(item) for item in safe["command_line"]]
-    return safe
+    return _relabel_path_fields(safe)
+
+
+_PATH_FIELD = re.compile(r"(?:path|dir|directory|file)$", re.IGNORECASE)
+
+
+def _relabel_path_fields(value: Any, key: str = "") -> Any:
+    """Every absolute path under a path-named key (``waiver_path``, a nested ``input_path``), at any depth, as
+    ``<local-path>/<name>``; run-relative references and every other value are unchanged."""
+    if isinstance(value, Mapping):
+        return {item_key: _relabel_path_fields(item, str(item_key)) for item_key, item in value.items()}
+    if isinstance(value, list):
+        return [_relabel_path_fields(item, key) for item in value]
+    return _local_path_label(value) if _PATH_FIELD.search(key) else value
 
 
 def _copy_source_artifact(

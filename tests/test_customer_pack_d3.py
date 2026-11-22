@@ -115,12 +115,14 @@ def test_customer_pack_run_manifest_relabels_flag_equals_paths(tmp_path: Path) -
         "--out=\\\\fileserver\\Clients\\Acme\\audits",
         "\\\\fileserver\\Clients\\Acme\\waivers.json",
     ]
+    manifest["fixture_provenance"] = {"input_path": str(operator / "samples" / "tenant.json"), "artifact_path": "raw/x.json"}
     manifest_path.write_text(json.dumps(manifest))
     rehash(run)
 
     target = tmp_path / "pack"
     write_enterprise_handoff_pack(run, target)
     copied = json.loads((target / "source-artifacts" / "run-manifest.json").read_text())
+    assert copied["fixture_provenance"] == {"input_path": "<local-path>/tenant.json", "artifact_path": "raw/x.json"}
     assert copied["command_line"] == [
         "azure-tenant-audit",
         "--out=<local-path>/audits",
