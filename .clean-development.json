@@ -5,7 +5,8 @@
   "heavy": false,
   "buildDirs": [
     "build",
-    "dist"
+    "dist",
+    "tenant-bootstrap/fixture-output"
   ],
   "depDirs": [
     ".venv"
