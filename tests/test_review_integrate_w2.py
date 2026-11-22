@@ -258,3 +258,19 @@ def test_google_customer_id_masking_keeps_the_alias_and_ordinary_words() -> None
 
     assert redacted["customer_id"] == "my_customer"
     assert redacted["status"] == "Completed"
+
+
+# Impact of the R123 sibling: probe live with a mistyped --permission-hints stops with exit 2 before its run folder
+# exists, instead of a traceback after the folder is written.
+def test_r123_probe_with_a_missing_permission_hints_file_exits_2_before_the_folder(tmp_path, capsys) -> None:  # noqa: ANN001
+    from azure_tenant_audit.probe import ProbeConfig, run_live_probe
+
+    out = tmp_path / "out"
+    cfg = ProbeConfig(tenant_name="acme", output_dir=out, tenant_id="contoso.onmicrosoft.com", client_id="app-id",
+                      permission_hints_path=tmp_path / "collector-permision.json")
+
+    rc = run_live_probe(cfg)
+
+    assert rc == 2
+    assert "--permission-hints file was not found" in capsys.readouterr().err
+    assert not out.exists() or not any(out.iterdir())

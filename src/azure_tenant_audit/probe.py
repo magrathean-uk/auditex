@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +34,7 @@ from .collectors import REGISTRY
 from .collectors.base import run_graph_endpoints
 from .config import AUTH_MODE, CERTIFICATE_WAY, AuthConfig
 from .data_handling import collector_activity_notices
+from .diagnostics import PermissionHintsNotFoundError
 from .diagnostics import build_diagnostics as _build_diagnostics
 from .diagnostics import load_permission_hints as _load_permission_hints
 from .findings import build_findings
@@ -472,9 +474,15 @@ def run_live_probe(cfg: ProbeConfig) -> int:
     profile = get_profile(cfg.auditor_profile)
     if cfg.mode != "response" and cfg.mode not in profile.supported_probe_modes:
         raise ValueError(f"Audit profile '{cfg.auditor_profile}' does not support probe mode '{cfg.mode}'.")
+    # A mistyped explicit --permission-hints stops the probe before its run folder exists (the shipped default
+    # still falls back silently).
+    try:
+        permission_hints = _load_permission_hints(cfg.permission_hints_path)
+    except PermissionHintsNotFoundError as exc:
+        print(f"auditex probe: {exc}", file=sys.stderr)
+        return 2
     certificate, certificate_blocker = _probe_certificate(cfg) if cfg.mode == "app" else (None, None)
     writer = AuditWriter(cfg.output_dir.expanduser().resolve(), tenant_name=cfg.tenant_name, run_name=cfg.run_name)
-    permission_hints = _load_permission_hints(cfg.permission_hints_path)
 
     requested_surfaces = _resolve_requested_surfaces(cfg.surface, cfg.mode)
     # The final shared notice describes run selection flags, not probe --surface.
