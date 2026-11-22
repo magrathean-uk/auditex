@@ -57,7 +57,7 @@ def test_analyze_report_replays_saved_bundle_without_live_tenant(tmp_path: Path)
     result = analyze_report(run_dir)
 
     assert result["run_dir"] == str(run_dir)
-    assert result["license_profile"]["minimum_live_access"] == "delegated_read_login"
+    assert result["license_profile"]["minimum_live_access"] == "reader_app_certificate"
     assert result["replay_context"]["requires_live_tenant"] is False
     assert result["auditor_score"]["score"] > 0
     assert result["report_qa"]["status"] == "pass"
