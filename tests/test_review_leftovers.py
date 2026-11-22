@@ -82,3 +82,94 @@ def test_r164_resolver_gap_reason_does_not_claim_cloudflare_for_a_chosen_resolve
     assert "public Cloudflare DNS-over-HTTPS resolver could not" not in text
     assert "--doh-endpoint" in text and "AUDITEX_DOH_ENDPOINT" in text
 
+
+# The Google run takes --doh-endpoint like the Microsoft 365 run: never abbreviated, redacted from recorded
+# command lines, and named (by host) in the console notice and data-handling.json.
+
+def _fake_google_dns_run(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    from auditex.google_workspace import run as google_run
+    from azure_tenant_audit.collectors.base import CollectorResult
+
+    monkeypatch.delenv("AUDITEX_DOH_ENDPOINT", raising=False)
+    contexts: list[dict[str, Any]] = []
+
+    class _Collector:
+        name = "google_dns_posture"
+        required_scopes = ("scope://domains",)
+
+        def run(self, context: dict[str, Any]) -> CollectorResult:
+            contexts.append(dict(context))
+            return CollectorResult(self.name, "ok", {}, 0, coverage=[{"collector": self.name, "name": "x", "status": "ok", "item_count": 0}])
+
+    monkeypatch.setattr(google_run, "REGISTRY", {"google_dns_posture": _Collector()})
+    monkeypatch.setattr(google_run, "google_dependency_status", lambda: {"available": True, "missing": [], "install_hint": ""})
+    monkeypatch.setattr(google_run, "build_google_credentials", lambda _config: object())
+    return contexts
+
+
+def test_r164_google_run_option_reaches_the_collector_notice_and_data_handling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from auditex import cli as product_cli
+
+    contexts = _fake_google_dns_run(monkeypatch)
+    rc = product_cli.main([
+        "google", "run", "--tenant-name", "Example", "--out", str(tmp_path), "--run-name", "dns",
+        "--collectors", "google_dns_posture", "--doh-endpoint", "https://dns.corp.example/profile-abc123",
+    ])
+
+    assert rc == 0
+    assert contexts[0]["doh_endpoint"] == "https://dns.corp.example/profile-abc123"
+    err = capsys.readouterr().err
+    assert "dns.corp.example" in err and "profile-abc123" not in err and "--doh-endpoint" in err
+    run_dir = tmp_path / "Example-dns"
+    record = json.loads((run_dir / "data-handling.json").read_text(encoding="utf-8"))
+    assert record["dns_resolver"] == "dns.corp.example"
+    assert "dns.corp.example" in " ".join(record["collection_notices"])
+    assert "profile-abc123" not in (run_dir / "run-manifest.json").read_text(encoding="utf-8")
+
+
+def test_r164_google_run_refuses_a_malformed_option_before_any_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from auditex import cli as product_cli
+
+    contexts = _fake_google_dns_run(monkeypatch)
+    canary = "constructed-doh-token-zz9"
+    rc = product_cli.main([
+        "google", "run", "--tenant-name", "Example", "--out", str(tmp_path),
+        "--collectors", "google_dns_posture", "--doh-endpoint", f"http://dns.corp.example/{canary}",
+    ])
+
+    assert rc == 2 and contexts == []
+    err = capsys.readouterr().err
+    assert json.loads(err)["error"] == "invalid_doh_endpoint" and canary not in err
+    assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("inline", [False, True])
+def test_r164_google_doh_endpoint_refuses_abbreviations_without_echo(inline: bool, capsys: pytest.CaptureFixture[str]) -> None:
+    from auditex.cli import _build_google_parser
+
+    parsed = _build_google_parser().parse_args(["run", "--doh-endpoint", "https://dns.corp.example/q"])
+    assert parsed.doh_endpoint == "https://dns.corp.example/q"
+    canary = "constructed-canary-argv-zz9"
+    for length in range(3, len("--doh-endpoint")):
+        option = "--doh-endpoint"[:length]
+        with pytest.raises(SystemExit) as exc:
+            _build_google_parser().parse_args(["run", f"{option}={canary}"] if inline else ["run", option, canary])
+        assert exc.value.code == 2
+        assert canary not in capsys.readouterr().err
+
+
+def test_r164_doh_endpoint_is_redacted_by_every_command_line_scrubber() -> None:
+    from auditex.command_runner import SENSITIVE_ARGS, redact_command
+    from auditex.google_workspace.run import _SENSITIVE_COMMAND_FLAGS, scrub_google_command_line
+    from azure_tenant_audit.secret_hygiene import SENSITIVE_ARG_FLAGS, redact_argv
+
+    secret = "https://dns.corp.example/tok-zz9"
+    for flags, scrub in ((_SENSITIVE_COMMAND_FLAGS, scrub_google_command_line), (SENSITIVE_ARGS, redact_command),
+                         (SENSITIVE_ARG_FLAGS, redact_argv)):
+        assert "--doh-endpoint" in flags
+        assert secret not in scrub(["auditex", "google", "run", "--doh-endpoint", secret])
+        assert secret not in scrub(["auditex", "google", "run", f"--doh-endpoint={secret}"])
