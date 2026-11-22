@@ -185,7 +185,7 @@ ALLOW_LIST: tuple[Allowed, ...] = (
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "Credentials.from_authorized_user_file", TOKEN_POST, 1, 2,
             "A24", "cached OAuth user credentials; google-auth refreshes them lazily inside execute()"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "credentials.refresh", TOKEN_POST, 1, 2, "A21",
-            "explicit refresh of the expired cached OAuth user token"),
+            "explicit refresh of the cached OAuth user token, to read the scopes Google grants it"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "InstalledAppFlow.from_client_secrets_file", TOKEN_POST, 1,
             2, "A23, A24", "OAuth first sign-in flow; the credentials it yields refresh lazily inside execute()"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "flow.run_local_server", TOKEN_POST, 1, 2, "A23",
@@ -196,6 +196,9 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "per-user copy narrowed to the read scopes; lazy JWT bearer grant on first use"),
     Allowed(_GOOGLE_CLIENT, "GoogleWorkspaceClient._scoped_credentials", "with_scopes", TOKEN_POST, 1, 2, "A22",
             "credentials narrowed to one API's scopes; lazy token exchange on first use"),
+    Allowed(_GOOGLE_CLIENT, "GoogleWorkspaceClient.unauthorised_scopes", "narrowed.refresh", TOKEN_POST, 1, 2,
+            "A22", "one JWT bearer token exchange per scope of a collector whose token was refused, to name the "
+            "scope the delegation lacks; no API call is made"),
     Allowed(_POWER_PLATFORM_CLIENT, "PowerPlatformClient.post_read", "self.session.post", "POST", 1, 1, "A9b",
             "the one documented body-free POST read, Power Platform List tenant settings (DEC-061); post_read opens "
             "with the POST_READ_PATHS membership check and sends no body"),

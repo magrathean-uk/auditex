@@ -269,8 +269,10 @@ class GoogleWorkspaceClient:
             return None
         missing: list[str] = []
         for scope in scopes:
+            narrowed = self._scoped_credentials((scope,))
+            if narrowed is self.credentials:
+                return None
             try:
-                narrowed = self.credentials.with_scopes([scope])
                 narrowed.refresh(_token_request())
             except Exception as exc:  # noqa: BLE001
                 if not is_token_refusal(str(exc)):
