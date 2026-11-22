@@ -26,6 +26,12 @@ if TYPE_CHECKING:
     from .mcp_registry import McpToolEntry
 
 MCP_ROOT_ENV = "AUDITEX_MCP_ROOT"
+# Path arguments for which an empty string means "not given": optional credential files. Any path argument whose
+# handler default is None is optional too. Every other empty path is refused, because it would resolve against the
+# server's working directory rather than the root.
+OPTIONAL_PATH_ARGS = frozenset(
+    {"service_account_key", "oauth_client", "token_cache", "certificate_path", "certificate_password_file"}
+)
 
 
 class McpPathError(ValueError):
@@ -97,7 +103,8 @@ def confine_value(value: Any, *, argument: str = "path", root: Path | None = Non
 def confine_handler(entry: McpToolEntry, handler: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a tool handler so its declared path arguments are confined before it runs.
 
-    ``entry.name_args`` (tenant and run names) are validated as plain names. ``entry.path_args`` are always confined, defaults included. ``entry.resource_args`` name inputs
+    ``entry.name_args`` (tenant and run names) are validated as plain names. ``entry.path_args`` are always confined, defaults included;
+    an empty one is refused unless it is an optional credential file (``OPTIONAL_PATH_ARGS``) or defaults to None. ``entry.resource_args`` name inputs
     whose default is a shipped read-only file (configs, schemas, examples): the default passes
     through, any other value is confined.
     """
@@ -116,10 +123,16 @@ def confine_handler(entry: McpToolEntry, handler: Callable[..., Any]) -> Callabl
             bound.arguments[name] = confine_name(bound.arguments[name], argument=name)
         root = mcp_root() if (entry.path_args or entry.resource_args) else None
         for name in entry.path_args:
-            bound.arguments[name] = confine_value(bound.arguments[name], argument=name, root=root)
+            value = bound.arguments[name]
+            optional = name in OPTIONAL_PATH_ARGS or signature.parameters[name].default is None
+            if value == "" and not optional:
+                raise McpPathError(f"{name} must not be empty; give a path under {root}")
+            bound.arguments[name] = confine_value(value, argument=name, root=root)
         for name in entry.resource_args:
             value = bound.arguments[name]
             if value != signature.parameters[name].default:
+                if value == "":
+                    raise McpPathError(f"{name} must not be empty; omit it for the shipped default or give a path under {root}")
                 bound.arguments[name] = confine_value(value, argument=name, root=root)
         return handler(*bound.args, **bound.kwargs)
 

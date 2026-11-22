@@ -62,6 +62,13 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _application_permissions(value: Any) -> list[str]:
+    """Application permission names from a hint such as ``{"application": "Sites.FullControl.All"}``."""
+    raw = _mapping(value).get("application")
+    items = raw if isinstance(raw, (list, tuple)) else [raw] if raw else []
+    return _dedupe([str(item) for item in items])
+
+
 def build_m365_scope_catalog(
     *,
     collector_config: CollectorConfig,
@@ -81,6 +88,8 @@ def build_m365_scope_catalog(
                 + [str(item) for item in hint.get("graph_scopes") or []]
             ),
             "minimum_role_hints": _dedupe([str(item) for item in hint.get("minimum_role_hints") or []]),
+            # SharePoint (Office 365 SharePoint Online) application permissions, not Microsoft Graph scopes.
+            "sharepoint_permissions": _application_permissions(hint.get("sharepoint_permissions")),
             "tool_requirements": _dedupe([str(item) for item in hint.get("command_tools") or []]),
             "optional_commands": _dedupe([str(item) for item in hint.get("optional_commands") or []]),
             "scope_warnings": [],
@@ -135,6 +144,7 @@ def aggregate_catalog_rows(
 ) -> dict[str, Any]:
     required_permissions: list[str] = []
     minimum_role_hints: list[str] = []
+    sharepoint_permissions: list[str] = []
     tool_requirements: list[str] = []
     optional_commands: list[str] = []
     api_enablement: list[str] = []
@@ -149,6 +159,7 @@ def aggregate_catalog_rows(
         collector_rows.append(row)
         required_permissions.extend([str(item) for item in row.get("required_permissions") or []])
         minimum_role_hints.extend([str(item) for item in row.get("minimum_role_hints") or []])
+        sharepoint_permissions.extend([str(item) for item in row.get("sharepoint_permissions") or []])
         tool_requirements.extend([str(item) for item in row.get("tool_requirements") or []])
         optional_commands.extend([str(item) for item in row.get("optional_commands") or []])
         api_enablement.extend([str(item) for item in row.get("api_enablement") or []])
@@ -165,6 +176,7 @@ def aggregate_catalog_rows(
         "collectors": collector_rows,
         "required_permissions": _dedupe(required_permissions),
         "minimum_role_hints": _dedupe(minimum_role_hints),
+        "sharepoint_permissions": _dedupe(sharepoint_permissions),
         "tool_requirements": _dedupe(tool_requirements),
         "optional_commands": _dedupe(optional_commands),
         "api_enablement": _dedupe(api_enablement),

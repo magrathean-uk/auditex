@@ -35,7 +35,6 @@
       ],
       "minimum_role_hints": [
         "Global Reader",
-        "Identity Governance Administrator",
         "Security Reader"
       ],
       "notes": "Conditional Access policy graph endpoints are policy-scoped and may require policy admin or equivalent directory read roles. GET /policies/identitySecurityDefaultsEnforcementPolicy (security defaults) needs only Policy.Read.All."
@@ -70,8 +69,7 @@
       ],
       "minimum_role_hints": [
         "Security Reader",
-        "Global Reader",
-        "Compliance Administrator"
+        "Global Reader"
       ],
       "notes": "Named gap: retention labels, retention policies, DLP policies and the audit log are not collected. They were read only by the CLI for Microsoft 365, which Auditex no longer runs; each operation is recorded in coverage with the error m365_cli_not_used. The reader app's certificate reads no Purview data in this collector."
     },
@@ -82,7 +80,6 @@
       ],
       "minimum_role_hints": [
         "eDiscovery Reader",
-        "Compliance Administrator",
         "Global Reader"
       ],
       "notes": "eDiscovery cases, with each case's searches and operations, are read through Microsoft Graph with the reader app's certificate (eDiscovery.Read.All). Named gap: the case, search, export, review set and hold listings of the CLI for Microsoft 365 are not run, because Auditex no longer runs that CLI; each is recorded in coverage with the error m365_cli_not_used."
@@ -94,7 +91,6 @@
       ],
       "minimum_role_hints": [
         "Global Reader",
-        "Authentication Policy Administrator",
         "Security Reader"
       ],
       "notes": "Authentication method policy and registration reports can require report-reading access. The registration report is read with a fixed $select of metadata fields (userType and isAdmin included) and returns no authentication method values. Policy.Read.All also covers the typed authentication method configurations, which come inline in the policy read (the separate list endpoint is not called); no per-user method values are read."
@@ -129,7 +125,6 @@
       ],
       "minimum_role_hints": [
         "Global Reader",
-        "Cloud Application Administrator",
         "Security Reader"
       ],
       "notes": "Consent policy inventory covers admin consent workflow and permission grant policies. Directory.Read.All reads beta /settings, retaining only EnableAdminConsentRequests values. Policy.Read.All reads default and custom application management policies and ids-only appliesTo targets (at most 100 policies and 50 targets per policy); failures and bounds are coverage gaps."
@@ -140,8 +135,7 @@
       ],
       "minimum_role_hints": [
         "Global Reader",
-        "Security Reader",
-        "Identity Governance Administrator"
+        "Security Reader"
       ],
       "notes": "Cross-tenant access settings are read via /policies/crossTenantAccessPolicy and surface default and partner-scoped trust posture."
     },
@@ -170,7 +164,7 @@
         "DeviceManagementApps.Read.All"
       ],
       "minimum_role_hints": [
-        "Intune Administrator",
+        "Global Reader",
         "Security Reader"
       ],
       "notes": "Will return empty/unavailable datasets if tenant lacks Intune licensing. No scope beyond the three above is needed for the device posture fields (managedDevices $select: isEncrypted, jailBroken, managedDeviceOwnerType, enrolledDateTime, deviceEnrollmentType, lastSyncDateTime), the compliance policy assignments (GET /deviceManagement/deviceCompliancePolicies/{id}/assignments, DeviceManagementConfiguration.Read.All) or the Defender antivirus state (GET /deviceManagement/managedDevices/{id}/windowsProtectionState for at most 100 Windows devices, DeviceManagementManagedDevices.Read.All). The Intune reports API (reports/getDefenderAgentsReport, reports/exportJobs) is a POST export job and is not used."
@@ -181,8 +175,7 @@
         "SharePointTenantSettings.Read.All"
       ],
       "minimum_role_hints": [
-        "Global Reader",
-        "SharePoint Administrator"
+        "Global Reader"
       ],
       "notes": "SharePoint tenant settings (GET /admin/sharepoint/settings) need SharePointTenantSettings.Read.All; the site inventory needs Sites.Read.All. Both are read-only."
     },
@@ -192,8 +185,7 @@
         "SharePointTenantSettings.Read.All"
       ],
       "minimum_role_hints": [
-        "Global Reader",
-        "SharePoint Administrator"
+        "Global Reader"
       ],
       "notes": "Sampled site permissions (GET /sites/{id}/permissions) are not read: the reader app records the named skip site_permissions_app_only_not_read, so the default collectors need no write-capable scope."
     },
@@ -203,8 +195,7 @@
         "SharePointTenantSettings.Read.All"
       ],
       "minimum_role_hints": [
-        "Global Reader",
-        "SharePoint Administrator"
+        "Global Reader"
       ],
       "notes": "OneDrive posture uses SharePoint read APIs and site URL heuristics; admin-center-only OneDrive details may still be unavailable to Global Reader."
     },
@@ -216,21 +207,21 @@
         "application": "Sites.FullControl.All"
       },
       "minimum_role_hints": [
-        "SharePoint Administrator"
+        "Global Reader"
       ],
       "notes": "Opt-in, off by default and in no profile or preset; select it with --collectors sharepoint_admin. Reads one thing: GET https://{tenant}-admin.sharepoint.com/_api/SPO.Tenant (Accept application/json;odata=verbose), keeping only ODBSharingCapability, DefaultSharingLinkType, DefaultLinkPermission, RequireAnonymousLinksExpireInDays, FileAnonymousLinkType, FolderAnonymousLinkType, EmailAttestationRequired and EmailAttestationReAuthDays. {tenant} is the prefix of the tenant's current SharePoint host, siteCollection.hostname from GET /sites/root?$select=siteCollection (Sites.Read.All, read-only, in the default set), which follows a SharePoint rename; it must be <prefix>.sharepoint.com, otherwise the read is the named skip sharepoint_admin_host_unresolved. The host is never guessed and never taken from the initial onmicrosoft.com domain. The reader app needs the SharePoint (Office 365 SharePoint Online, 00000003-0000-0ff1-ce00-000000000000) application permission Sites.FullControl.All with admin consent; its token is minted from the certificate (--certificate-path with --certificate-thumbprint), the only credential Auditex accepts. The permission is write-capable: blast radius full control of every site collection. Auditex makes no mutating call: the read guard admits only that one body-free GET, and the API ledger records it under observed_ledger.sharepoint_admin_rest. Remove the permission after the engagement (Entra admin center > App registrations > the app > API permissions > SharePoint > remove, then revoke admin consent), or delete the app."
     },
     "power_bi": {
       "graph_scopes": [],
       "minimum_role_hints": [
-        "Fabric Administrator"
+        "Global Reader"
       ],
       "notes": "Opt-in extended scope, off by default; commercial cloud only. App mode obtains its own token via app_token_for for https://analysis.windows.net/powerbi/api/.default. Customer one-time setup: create a plain Entra security group (no role assignment), add the service principal, then in Power BI Admin portal > Tenant settings > Admin API settings enable \"Service principals can access read-only admin APIs\" for that specific security group. No Power BI API permission is required; never grant Tenant.Read.All. The alternative operator role is Fabric Administrator with a Power BI or Fabric licence and one prior Power BI portal sign-in, but Auditex has no delegated token path: all eight MS.POWERBI policies stay not assessed on delegated runs. Fabric Administrator is a write-capable admin role used read-only; its blast radius includes tenant-wide Power BI/Fabric administration. The service-principal setting grants access to tenant-wide read-only admin metadata for the group. Remove it by switching the setting back to Disabled (or removing the group from it), then deleting the group. Auditex uses only GET /v1/admin/tenantsettings and derives accessState locally; no tenant writes, message bodies or file content. Use --collector-preset power-platform deliberately; without the opt-in, optional Power BI / Power Platform collection was not enabled and these policies are not assessed."
     },
     "power_platform": {
       "graph_scopes": [],
       "minimum_role_hints": [
-        "Power Platform Administrator"
+        "Global Reader"
       ],
       "notes": "Opt-in extended scope, off by default; commercial cloud only. The collector obtains its own token in app mode via app_token_for for https://service.powerapps.com//.default; no manually supplied bearer token or new Graph application permission is required. Customer one-time setup: an authorised Power Platform Administrator signs in with Add-PowerAppsAccount -Endpoint prod -TenantID <tenant id>, then registers the customer-owned audit app using New-PowerAppManagementApp -ApplicationId <app id>. This is a customer-side write, never run by Auditex. Blast radius (Microsoft Learn): a registered management app is treated within Power Platform like a user with the Power Platform Administrator role assigned, read and write, and granular roles cannot limit it; it gets no Entra role. Remove it when the audit is done: Remove-PowerAppManagementApp -ApplicationId <app id>. The alternative operator role is Power Platform Administrator with a Power Apps for Office 365 licence; it permits tenant-wide environment and policy administration and is a write-capable admin role used read-only. Auditex has no delegated token path: all seven supported MS.POWERPLATFORM policies stay not assessed on delegated runs. Auditex itself writes nothing. Its BAP sessions use GET for environments (2023-06-01), DLP summaries (2020-10-01), apiPolicies (2016-11-01) and tenantIsolationPolicy (2020-06-01), and one body-free POST read for listTenantSettings (2020-10-01, the version Microsoft documents), which Microsoft documents as POST with no request body; TENANT_SETTINGS_METHOD is POST and no other POST is sent. The companion Power BI audience is https://analysis.windows.net/powerbi/api/.default. No message bodies or file content. Use --collector-preset power-platform deliberately; without the opt-in, optional Power BI / Power Platform collection was not enabled and these policies are not assessed."
     },
@@ -283,14 +274,13 @@
         "Group.Read.All"
       ],
       "minimum_role_hints": [
-        "Teams Service Administrator"
+        "Global Reader"
       ],
       "notes": "Teams endpoints are still readable in many read-only role patterns."
     },
     "teams_policy": {
       "graph_scopes": [],
       "minimum_role_hints": [
-        "Teams Administrator",
         "Global Reader"
       ],
       "notes": "App-only policy reads use a certificate-authenticated Teams admin API token for resource 48ac35b8-9aa8-4d74-927d-1f4a14a0b239 and Global Reader on the service principal, in commercial and GCC only. No Graph scope is required. In supported environments, without a usable certificate token, all eight operations are skipped with reason teams_token_unavailable and no Get-Cs command is attempted; Teams alone does not make the run partial. Coverage gaps say not collected: certificate token for the Teams admin API not available. A service refusal with a usable token or a missing role remains command_not_authenticated. The token is minted through msal from the run's certificate credential (--certificate-path with --certificate-thumbprint; key password only from --certificate-password-env or --certificate-password-file); a secret-only or delegated run never requests it and records teams_token_unavailable. The key credential can sign in as the app with every permission it holds; keep the key owner-only and remove the credential after the engagement. Client-secret acceptance is not verified live and is disabled. With a usable token, messaging and app setup are skipped with reason teams_powershell_not_supported because Teams PowerShell sessions are not supported; no Get-Cs command is attempted. The org-wide unified app settings (tenantAppSettings, GET https://substrate.office.com/AdminAppCatalog/ps/v2/admin/unifiedApp/settings, resource 08ff1ce2-4973-4b08-86a3-ebed13badc7f) answer only a user sign-in: an app-only run records the named skip teams_powershell_not_supported, requests no token for them and sends no request, and MS.TEAMS 5.1-5.3 are decided from the app permission policies, as ScubaGear does with certificate authentication. No permission is added.",
@@ -316,7 +306,6 @@
       ],
       "minimum_role_hints": [
         "Global Reader",
-        "Cloud Application Administrator",
         "Security Reader"
       ],
       "notes": "Enterprise application consent depth depends on delegated grant and app role assignment visibility. Application.Read.All resolves the eight risky resource app IDs and reads all their delegated permission classifications (v1.0), without filtering by classification or risk; missing resource principals are legal, failed reads are coverage gaps."
@@ -328,9 +317,7 @@
         "AuditLog.Read.All"
       ],
       "minimum_role_hints": [
-        "Global Reader",
-        "Cloud Application Administrator",
-        "Application Administrator"
+        "Global Reader"
       ],
       "notes": "Application credential hygiene reads passwordCredentials, keyCredentials, redirect URIs, federatedIdentityCredentials, and owner counts via Microsoft Graph. AuditLog.Read.All enables the Graph beta servicePrincipalSignInActivities report used for dormant-application findings; when unavailable the collector records a coverage gap and the dormant rule stays inert."
     },
@@ -340,8 +327,7 @@
         "Directory.Read.All"
       ],
       "minimum_role_hints": [
-        "Global Reader",
-        "License Administrator"
+        "Global Reader"
       ],
       "notes": "License assignment details are sampled and can be cross-correlated with SKU inventory."
     },
@@ -353,9 +339,7 @@
         "Directory.Read.All"
       ],
       "minimum_role_hints": [
-        "Global Reader",
-        "Identity Governance Administrator",
-        "Privileged Role Administrator"
+        "Global Reader"
       ],
       "notes": "Governance and PIM schedule visibility depends on Entra ID Governance licensing and role-scoped APIs. The PIM role policy reads of the directory roles are covered by RoleManagement.Read.Directory, so an existing registration needs no change; RoleManagementPolicy.Read.Directory is the least-privilege alternative for those policy reads on a new registration (the schedule reads still need RoleManagement.Read.Directory). PIM for Groups policies (RoleManagementPolicy.Read.AzureADGroup) are not read."
     },
@@ -366,7 +350,6 @@
         "DeviceManagementScripts.Read.All"
       ],
       "minimum_role_hints": [
-        "Intune Administrator",
         "Intune Reader",
         "Global Reader"
       ],
@@ -376,8 +359,7 @@
       "graph_scopes": [],
       "minimum_role_hints": [
         "Exchange Reader",
-        "Global Reader",
-        "Exchange Administrator"
+        "Global Reader"
       ],
       "notes": "Retired: this collector read Exchange through the CLI for Microsoft 365, which Auditex no longer runs. It reads nothing and records each former operation as skipped with the reason m365_cli_not_used. exchange_policy reads Exchange Online with the reader app's certificate."
     },
@@ -388,7 +370,6 @@
       ],
       "minimum_role_hints": [
         "Global Reader",
-        "Exchange Administrator",
         "Security Reader"
       ],
       "notes": "Inbox rules (messageRules) and mailbox settings are read with the MailboxSettings.Read permission (application or delegated). Mail.Read is never requested: the audit does not read message content."
@@ -397,7 +378,6 @@
       "graph_scopes": [],
       "minimum_role_hints": [
         "Exchange Reader",
-        "Exchange Administrator",
         "Global Reader"
       ],
       "notes": "Exchange policy depth uses read-only Exchange PowerShell Get-* cmdlets and requires PowerShell plus Exchange connectivity. Detection-coverage cmdlets (Get-AdminAuditLogConfig, Get-OrganizationConfig, Get-MailboxAuditBypassAssociation counted only) need an Exchange Online PowerShell session; Get-ProtectionAlert, a DLP licence probe (Get-Command Get-DlpCompliancePolicy, a count only), Get-DlpCompliancePolicy and Get-DlpComplianceRule run in Security & Compliance PowerShell, opened only in app-only certificate runs with Connect-IPPSSession -AccessToken (a certificate token for https://ps.compliance.protection.outlook.com/.default, minted silently; ExchangeOnlineManagement 3.8.0 or later). That session needs the application permission Exchange.ManageAsApp on the Microsoft Exchange Online Protection API (resource app id 00000007-0000-0ff1-ce00-000000000000) with admin consent, a second consent beside the Office 365 Exchange Online one, and a supported read role: Global Reader is enough. Blast radius: the app can open Security & Compliance PowerShell with its directory role's rights, read-only under Global Reader; Auditex issues only these four read-allow-listed Get-* reads. Secret, delegated and access-token runs, and a connect that fails, record the ipps_session_not_opened section gap on each of the four reads, never a pass; a session with no DLP cmdlet records dlp_licence_not_detected on the two DLP reads. Mail protection cmdlets Get-MalwareFilterPolicy, Get-TransportConfig, Get-CASMailbox (a count of the mailboxes that switch SMTP AUTH back on, never an address) and Get-DkimSigningConfig run in the same Exchange Online session and are readable with the Global Reader role the other Exchange cmdlets already use; they need no Graph scope and no further role. None of these cmdlets change tenant state; a missing session is reported as an 'unknown' detection signal and 'not_assessed' mail protection rules, never 'off' or a pass. Get-AcceptedDomain selects Name, DomainName, DomainType, Default and IsCoexistenceDomain; completed same-run evidence supplies the DNS record universe without another tenant read or additional grants. Partner-sharing domain names and actions are read via Get-SharingPolicy (Name, Domains), readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet; no message content is read. Defender for Office 365 / EOP policy reads use the same Exchange Online session (Exchange.ManageAsApp plus Global Reader), add no Graph scope and are read-only. A licence limit is inferred only when both ATP licence-check reads fail with command_error after a healthy eopProtectionPolicyRules read; reclassified envelopes retain the error text and carry licence_inferred: true. Authentication, session and command_not_found failures remain coverage gaps; the real unlicensed-tenant error class is unverified.",

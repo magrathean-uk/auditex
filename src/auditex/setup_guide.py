@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.data_handling import collector_activity_notices
+from azure_tenant_audit.diagnostics import reader_roles
 from azure_tenant_audit.presets import load_collector_presets
 from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.scope_catalog import (
@@ -76,7 +78,14 @@ M365_SOURCE_REFERENCES = [
     },
 ]
 
-M365_WRITE_CAPABLE_TOKENS = ("ReadWrite", "ManageAsApp", "Write.")
+M365_WRITE_CAPABLE_TOKENS = ("ReadWrite", "ManageAsApp", "Write.", "FullControl")
+# Blast radius of the SharePoint application permission the opt-in sharepoint_admin collector needs.
+SHAREPOINT_FULLCONTROL_BLAST_RADIUS = (
+    "Write-capable SharePoint application permission used read-only: blast radius full control of every site "
+    "collection and OneDrive. Microsoft offers no read-only permission for the SharePoint admin API; Auditex sends "
+    "only one body-free GET of the tenant sharing settings with it, and the read guard refuses any other request. "
+    "Remove it after the engagement."
+)
 
 
 def build_setup_guide(
@@ -99,6 +108,11 @@ def build_setup_guide(
     config_path: str | Path = "configs/collector-definitions.json",
     permission_hints_path: str | Path = "configs/collector-permissions.json",
 ) -> dict[str, Any]:
+    _refuse_control_characters(
+        tenant_name=tenant_name, tenant_id=tenant_id, domain=domain, customer_id=customer_id, subject=subject,
+        service_account_key=service_account_key, oauth_client=oauth_client, token_cache=token_cache,
+        auditor_profile=auditor_profile, plane=plane, collector_preset=collector_preset, auth=auth,
+    )
     normalized = provider.strip().lower().replace("-", "_")
     if normalized in GOOGLE_PROVIDER_ALIASES:
         return build_google_setup_guide(
@@ -288,7 +302,7 @@ def build_m365_setup_guide(
 
     collector_rows: list[dict[str, Any]] = []
     graph_permissions: list[str] = list(aggregate["required_permissions"])
-    role_hints: list[str] = _dedupe([*profile.delegated_role_hints, *aggregate["minimum_role_hints"]])
+    role_hints: list[str] = reader_roles([*profile.delegated_role_hints, *aggregate["minimum_role_hints"]])
     optional_commands: list[str] = list(aggregate["optional_commands"])
     for name in selected:
         row = _mapping(catalog.get(name))
@@ -297,7 +311,7 @@ def build_m365_setup_guide(
                 "collector": name,
                 "description": row.get("description", ""),
                 "required_permissions": list(row.get("required_permissions") or []),
-                "minimum_role_hints": list(row.get("minimum_role_hints") or []),
+                "minimum_role_hints": reader_roles(row.get("minimum_role_hints") or []),
                 "tool_requirements": list(row.get("tool_requirements") or []),
                 "notes": str(row.get("notes") or ""),
             }
@@ -309,6 +323,7 @@ def build_m365_setup_guide(
     elif auditor_profile in {"auto", "global-reader"}:
         tool_requirements = [tool for tool in tool_requirements if tool not in {"pwsh", "ExchangeOnlineManagement"}]
     exchange_permissions = ["Exchange.ManageAsApp"] if "exchange_policy" in selected else []
+    sharepoint_permissions: list[str] = list(aggregate.get("sharepoint_permissions") or [])
     exchange_blast_radius = (
         "Write-capable Exchange application permission used read-only: read-only Get-* cmdlets only; "
         "no mutating cmdlet is issued; the Exchange.ManageAsApp role assignment gives Global Reader only. "
@@ -320,12 +335,14 @@ def build_m365_setup_guide(
             "risk": "write_capable",
             "note": "Permission name includes write/manage capability. Auditex remains audit-only and records observed calls.",
         }
-        for permission in [*graph_permissions, *exchange_permissions]
+        for permission in _dedupe([*graph_permissions, *exchange_permissions, *sharepoint_permissions])
         if any(token in permission for token in M365_WRITE_CAPABLE_TOKENS)
     ]
     for warning in broad_permissions:
         if warning["permission"] == "Exchange.ManageAsApp":
             warning["note"] = exchange_blast_radius
+        elif warning["permission"] in sharepoint_permissions and "FullControl" in warning["permission"]:
+            warning["note"] = SHAREPOINT_FULLCONTROL_BLAST_RADIUS
 
     collection_notices = collector_activity_notices(selected, "app")
     setup_steps = [
@@ -345,6 +362,11 @@ def build_m365_setup_guide(
         setup_steps.append(
             "For Exchange, grant admin consent to Exchange.ManageAsApp and assign Global Reader to the reader app; "
             "install pwsh and ExchangeOnlineManagement. " + exchange_blast_radius
+        )
+    if sharepoint_permissions:
+        setup_steps.append(
+            f"For sharepoint_admin, add the SharePoint (Office 365 SharePoint Online) application permission "
+            f"{', '.join(sharepoint_permissions)} and grant admin consent. " + SHAREPOINT_FULLCONTROL_BLAST_RADIUS
         )
     if "teams_policy" in selected:
         setup_steps.append(
@@ -368,17 +390,19 @@ def build_m365_setup_guide(
     credential = (
         "--client-id <app-id> --certificate-path <private-key-file> --certificate-thumbprint <sha1-thumbprint>"
     )
-    preset_flag = f" --collector-preset {collector_preset}" if collector_preset else ""
+    # Every caller value is shell-quoted; the <...> placeholders in ``credential`` are the operator's to fill in.
+    q = shlex.quote
+    preset_flag = f" --collector-preset {q(collector_preset)}" if collector_preset else ""
     commands = {
         "probe": (
-            f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
-            f"--auditor-profile {auditor_profile} --mode app {credential} "
-            f"--surface {','.join(_dedupe([*selected, 'windows365']))}"
+            f"auditex probe live --tenant-name {q(tenant_name)} --tenant-id {q(tenant_id)} "
+            f"--auditor-profile {q(auditor_profile)} --mode app {credential} "
+            f"--surface {q(','.join(_dedupe([*selected, 'windows365'])))}"
         ),
         "run": (
-            f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
-            f"--auditor-profile {auditor_profile} --plane {plane} {credential} "
-            f"--probe-first --throttle-mode safe{preset_flag} --collectors {','.join(selected)}"
+            f"auditex run --tenant-name {q(tenant_name)} --tenant-id {q(tenant_id)} "
+            f"--auditor-profile {q(auditor_profile)} --plane {q(plane)} {credential} "
+            f"--probe-first --throttle-mode safe{preset_flag} --collectors {q(','.join(selected))}"
         ),
     }
 
@@ -397,6 +421,7 @@ def build_m365_setup_guide(
         "graph_permissions": graph_permissions,
         "graph_permissions_csv": ",".join(graph_permissions),
         "exchange_application_permissions": exchange_permissions,
+        "sharepoint_application_permissions": sharepoint_permissions,
         "minimum_role_hints": role_hints,
         "tool_requirements": tool_requirements,
         "optional_commands": optional_commands,
@@ -455,6 +480,10 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
             lines.extend(["", "## Exchange Application Permissions", ""])
             for permission in payload["exchange_application_permissions"]:
                 lines.append(f"- `{permission}` (Office 365 Exchange Online, not Microsoft Graph)")
+        if payload.get("sharepoint_application_permissions"):
+            lines.extend(["", "## SharePoint Application Permissions", ""])
+            for permission in payload["sharepoint_application_permissions"]:
+                lines.append(f"- `{permission}` (Office 365 SharePoint Online, not Microsoft Graph)")
         lines.extend(["", "## Role Hints", ""])
         for role in payload.get("minimum_role_hints") or []:
             lines.append(f"- {role}")
@@ -547,7 +576,18 @@ def _google_command(
         parts.extend(["--tenant-name", tenant_name])
     if extra:
         parts.extend(extra.split())
-    return " ".join(parts)
+    return shlex.join(parts)
+
+
+def _refuse_control_characters(**values: Any) -> None:
+    """Refuse a value for a verification command that holds a line break or control character.
+
+    Values are shell-quoted, but a line break inside quotes still ends a line of the rendered Markdown, where it could
+    close the command fence and add text the operator reads as part of the guide.
+    """
+    for name, value in values.items():
+        if isinstance(value, str) and any(ord(character) < 32 or ord(character) == 127 for character in value):
+            raise ValueError(f"{name} must not contain a line break or control character.")
 
 
 def _load_permission_hints(path: str | Path) -> dict[str, Any]:

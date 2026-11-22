@@ -71,6 +71,7 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
         name="auditex_setup_guide",
         description="Build provider setup scopes, roles, admin steps, and verification commands before tenant access; Microsoft 365 uses the reader app with a certificate.",
         read_only_hint=True,
+        name_args=("tenant_name",),
     ),
     McpToolEntry(
         name="auditex_contract_schema_manifest",

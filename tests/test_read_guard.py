@@ -548,3 +548,162 @@ def test_the_shipped_sharepoint_admin_read_is_the_one_the_guard_admits() -> None
     for method in ("POST", "PUT", "PATCH", "DELETE", "MERGE"):
         assert sharepoint_admin_request_violation(method, url, headers=headers)
     assert sharepoint_admin_request_violation("GET", url, headers=headers, body=b"<Request/>")
+
+
+# R078/R017: a bare word followed by '=' at a statement start is a command (pwsh passes '=' as an argument), so it is
+# judged like any other command; only a key inside an @{ } hashtable literal is skipped.
+@pytest.mark.parametrize("adapter", ["powershell_graph", "m365dsc"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "$p = @{Mailbox='alice'; ForwardTo='evil@example.com'}; New-InboxRule = @p",
+        "$p = @{ BlindCopyTo = 'attacker@evil.example' }; New-TransportRule = @p",
+        "Get-Mailbox; Remove-Mailbox = @p",
+        "Get-Mailbox | Remove-Mailbox =",
+        "Get-Mailbox; Remove-MgUser = $x",
+        "Get-A | Set-B = $null",
+        "New-InboxRule = 'x'",
+        "Get-Mailbox | Where-Object { Remove-Mailbox = $_ }",
+        "Get-Mailbox -Identity (Remove-Mailbox = 'a')",
+        "X = 1",
+    ],
+)
+def test_a_command_followed_by_equals_is_still_judged(adapter: str, command: str) -> None:
+    with pytest.raises(CommandRefused):
+        check_command(adapter, command)
+    assert classify_command(adapter, command).read_only is False
+
+
+def test_hashtable_keys_and_calculated_properties_stay_allowed() -> None:
+    script = (
+        "$p = @{ Identity = 'a'; ResultSize = 'Unlimited' }; Get-Mailbox @p | "
+        "Select-Object @{n='a';e={ $_.Name }}, @{ Name = 'b'; Expression = { $_.Alias } }"
+    )
+    assert check_command("powershell_graph", script) == ("Get-Mailbox", "Select-Object")
+
+
+# R079/R084: the guard never reads the auditor's own environment, variables or provider drives, and a script with
+# no command word (a bare expression such as a variable) is refused.
+@pytest.mark.parametrize("adapter", ["powershell_graph", "m365dsc"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "$env:AZURE_CLIENT_SECRET",
+        "$env:AUDITEX_CERT_PASSWORD -replace '(.)', '$1 '",
+        "$env:AUDITEX_EXO_ACCESS_TOKEN -replace '[.]', ' '",
+        ",@($env:AUDITEX_EXO_ACCESS_TOKEN)",
+        "Get-OrganizationConfig | Select-Object Name, @{n='t';e={ $env:AUDITEX_EXO_ACCESS_TOKEN }}",
+        "${env:AUDITEX_EXO_ACCESS_TOKEN}",
+        'Get-AcceptedDomain | Where-Object { $_.Name -eq "x $env:AZURE_CLIENT_SECRET" }',
+        'Get-AcceptedDomain -Identity "${env:AZURE_CLIENT_SECRET}"',
+        "Get-AcceptedDomain | Where-Object -FilterScript ${function:Enable-OrganizationCustomization}",
+        "Get-AcceptedDomain | Where-Object { ${function:Enable-OrganizationCustomization} }",
+        "$global:token",
+        "Get-AcceptedDomain | Select-Object @{n='x';e={ $script:secret }}",
+        "$using:secret",
+        "Get-Variable -ValueOnly",
+        "Get-Variable",
+        "Get-PSDrive",
+        "Get-Clipboard",
+        "Get-History",
+        "Get-Secret -Name x",
+        "Get-AzAccessToken",
+        "'just a string'",
+        "$x",
+    ],
+)
+def test_environment_variable_and_drive_reads_are_refused(adapter: str, command: str) -> None:
+    with pytest.raises(CommandRefused):
+        check_command(adapter, command)
+
+
+def test_plain_and_automatic_variables_stay_allowed() -> None:
+    script = "$r = Get-AcceptedDomain; $r | Where-Object { $_.Default -eq $true -and $null -ne $_.Name } | Select-Object Name"
+    assert check_command("powershell_graph", script) == ("Get-AcceptedDomain", "Where-Object", "Select-Object")
+
+
+def test_powershell_child_gets_no_credential_from_the_environment(monkeypatch) -> None:
+    import subprocess
+
+    envs: list[dict[str, str]] = []
+
+    def _run(cmd, **kwargs):  # noqa: ANN001
+        envs.append(dict(kwargs["env"]))
+        return subprocess.CompletedProcess(cmd, 0, stdout='[{"Name": "r1"}]', stderr="")
+
+    monkeypatch.setattr("subprocess.run", _run)
+    monkeypatch.setattr("shutil.which", lambda name, *a, **k: f"/usr/bin/{name}")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("HOME", "/home/auditor")
+    monkeypatch.setenv("PSModulePath", "/opt/modules")
+    monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/ca.pem")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    secrets = {
+        "AZURE_CLIENT_SECRET": "client-secret-value",
+        "AUDITEX_SMTP_PASSWORD": "smtp-password-value",
+        "AUDITEX_CERT_PASSWORD": "cert-password-value",
+        "GITHUB_TOKEN": "gh-token-value",
+        "OPENAI_API_KEY": "api-key-value",
+        "AWS_SECRET_ACCESS_KEY": "aws-value",
+        "STORAGE_CONNECTION_STRING": "conn-value",
+        "AUDITEX_EXO_ACCESS_TOKEN": "stale-token-from-the-parent",
+        "AUDITEX_IPPS_ACCESS_TOKEN": "stale-ipps-token",
+    }
+    for name, value in secrets.items():
+        monkeypatch.setenv(name, value)
+
+    PowerShellGraphAdapter().run(
+        "Get-AcceptedDomain",
+        session={"kind": "exchange_online", "access_token": "fresh-token", "organization": "contoso.onmicrosoft.com"},
+    )
+    PowerShellGraphAdapter().run("Get-AcceptedDomain")
+
+    with_session, without_session = envs
+    for env in envs:
+        assert env["PATH"] == "/usr/bin:/bin"
+        assert env["HOME"] == "/home/auditor"
+        assert env["PSModulePath"] == "/opt/modules"
+        assert env["SSL_CERT_FILE"] == "/etc/ssl/ca.pem"
+        assert env["HTTPS_PROXY"] == "http://proxy.example:8080"
+        assert not set(secrets.values()) & set(env.values())
+    assert with_session["AUDITEX_EXO_ACCESS_TOKEN"] == "fresh-token"
+    assert "AUDITEX_EXO_ACCESS_TOKEN" not in without_session
+
+
+# Review round 1 on the guard: a command in a hashtable value, local file readers and a numeric-only script.
+@pytest.mark.parametrize(
+    "command",
+    [
+        "$p = @{ k = New-InboxRule = @q }",
+        "Get-Mailbox | Select-Object @{ n = Remove-Mailbox = 'a' }",
+        "$p = @{ k = 1; j = Set-Mailbox = 'x' }",
+        "Get-FileHash -Path secrets.pfx",
+        "Get-PfxCertificate -FilePath reader.pfx",
+        "Get-AuthenticodeSignature -FilePath x.ps1",
+        "Get-WinEvent -LogName Security",
+        "Get-EventLog -LogName Security",
+        "42",
+        "1; 2",
+    ],
+)
+def test_review_round_one_guard_bypasses_are_refused(command: str) -> None:
+    with pytest.raises(CommandRefused):
+        check_command("powershell_graph", command)
+
+
+def test_short_password_and_pin_names_never_reach_the_pwsh_child() -> None:
+    """Review round 1: credential names without SECRET or PASSWORD in them are dropped too."""
+    from azure_tenant_audit.adapters.powershell_graph import child_environment
+
+    source = {"PFX_PASS": "a", "CERT_PW": "b", "SMARTCARD_PIN": "c", "PW": "d", "PATH": "/bin", "PWD": "/work", "SPINNER": "x"}
+    assert child_environment(source) == {"PATH": "/bin", "PWD": "/work", "SPINNER": "x"}
+
+
+def test_the_certificate_password_variable_is_consumed_before_any_child_starts(monkeypatch) -> None:
+    """Impact prediction 3: an operator-named password variable (any name) is popped when the key is loaded."""
+    from azure_tenant_audit import certificate_auth
+    from azure_tenant_audit.adapters.powershell_graph import child_environment
+
+    monkeypatch.setenv("PFX_PIN", "key-password")
+    assert certificate_auth._password("PFX_PIN", None, __import__("os").environ) == b"key-password"
+    assert "PFX_PIN" not in child_environment()
