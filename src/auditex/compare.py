@@ -314,8 +314,9 @@ def compare_run_directories(
         )
 
     def ordered_pair(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
-        # Without a creation time a run cannot be placed before or after another, so it is never the current run.
-        if left_run.get("_created_at") is None or right_run.get("_created_at") is None:
+        # A run without a creation time cannot be placed before or after a dated one, so it never silently becomes
+        # the current run (R132). Two undated legacy runs keep their run-id order.
+        if (left_run.get("_created_at") is None) != (right_run.get("_created_at") is None):
             return _blocked_diff(left_run, right_run, "run_created_utc_missing")
         return _compare_pair(left_run, right_run, compare_context, allow_cross_tenant=allow_cross_tenant, classic=classic)
 
