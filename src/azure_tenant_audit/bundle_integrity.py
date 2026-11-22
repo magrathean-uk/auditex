@@ -73,10 +73,11 @@ _PRIVATE_TEMPORARY = re.compile(
 # ``model_assessment_prompts.jsonl`` is no longer written by any command; bundles from older runs may still carry
 # it, so it stays accepted as an unhashed post-finalisation file.
 _LEGACY_POST_FINALIZATION_OUTPUTS = frozenset({"model_assessment_prompts.jsonl"})
+# Matched with ``fullmatch``: a name that only ends in a newline is another file (``$`` would accept it).
 _POST_FINALIZATION_OUTPUT = re.compile(
-    r"^reports/(?:explorer\.html"
+    r"reports/(?:explorer\.html"
     r"|rendered-report\.(?:json|md|csv|html|sarif\.json|oscal\.json)"
-    r"|(?:api-calls|permissions|proof-table|handoff)\.(?:json|md))$"
+    r"|(?:api-calls|permissions|proof-table|handoff)\.(?:json|md))"
 )
 # Directories whose files consumers open by name. A file at the root counts too.
 _CONSUMED_DIRECTORIES = ("normalized/", "findings/", "blockers/", "reports/", "ai_safe/")
@@ -87,7 +88,7 @@ def is_post_finalization_output(relative: str) -> bool:
     return (
         relative in ("model_assessment.json", "local_answer.json")
         or relative in _LEGACY_POST_FINALIZATION_OUTPUTS
-        or bool(_POST_FINALIZATION_OUTPUT.match(relative))
+        or bool(_POST_FINALIZATION_OUTPUT.fullmatch(relative))
     )
 
 

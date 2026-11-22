@@ -155,6 +155,24 @@ def test_resume_keeps_a_root_file_whose_name_only_folds_to_a_generated_report_pa
     assert operator_file in os.listdir(run_dir)
 
 
+def test_resume_keeps_a_report_whose_name_only_ends_in_a_newline(tmp_path: Path) -> None:
+    # Review of repair round 2 (R052): "handoff.md\n" is not reports/handoff.md. It is neither removed on resume nor
+    # left out of the bundle hashes as a post-finalisation output.
+    import os
+
+    from azure_tenant_audit.bundle_integrity import is_post_finalization_output
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    (run_dir / "reports").mkdir(exist_ok=True)
+    (run_dir / "reports" / "handoff.md\n").write_text("operator notes", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    assert "handoff.md\n" in os.listdir(run_dir / "reports")
+    assert not is_post_finalization_output("reports/handoff.md\n")
+
+
 def test_resume_under_another_tenant_name_keeps_one_run_id(tmp_path: Path) -> None:
     from azure_tenant_audit.output import AuditWriter
 
