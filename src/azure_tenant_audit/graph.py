@@ -12,7 +12,8 @@ from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
-from requests.exceptions import RequestException
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import RequestException, Timeout
 
 from . import auth_context, certificate_auth
 from .certificate_auth import CERTIFICATE_ERRORS, CertificateAuthError
@@ -561,7 +562,29 @@ class GraphClient:
                     "Graph request raised exception",
                     {"method": method, "url": url, "error": str(exc), "attempt": attempt},
                 )
-                raise
+                # A read timeout or dropped connection is retried like a 5xx (R033): one network blip must not fail
+                # an endpoint or cut a long paged list. Other request errors (a bad URL, a refused redirect) are not.
+                if not isinstance(exc, (Timeout, RequestsConnectionError)):
+                    raise
+                if attempt > self._throttle_policy().server_error_retries:
+                    raise
+                backoff_seconds = self._retry_delay(attempt)
+                if wait_budget is not None and not wait_budget.allows(backoff_seconds):
+                    raise
+                self._emit(
+                    "graph.request.retry",
+                    "Transport error, retrying request",
+                    {
+                        "method": method,
+                        "url": url,
+                        "error": type(exc).__name__,
+                        "attempt": attempt,
+                        "backoff_seconds": backoff_seconds,
+                        "reason": "transport_error",
+                    },
+                )
+                self._take_wait(wait_budget, backoff_seconds)
+                continue
             duration_ms = round((time.time() - request_start) * 1000, 2)
             self._emit(
                 "graph.request.completed",

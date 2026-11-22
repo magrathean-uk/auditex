@@ -53,3 +53,43 @@ def test_genuine_permission_refusals_still_trip_the_stop(monkeypatch) -> None:
     with pytest.raises(GraphError) as caught:
         client.get_json("/users")
     assert caught.value.error_code == "PermissionStop"
+
+
+def test_transport_errors_are_retried_like_server_errors(monkeypatch) -> None:
+    """R033: one read timeout or connection reset is retried within the throttle policy, not raised at once."""
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+    from requests.exceptions import ReadTimeout
+
+    client = fake_graph_client(throttle_mode="ultra-safe")
+    waits: list[float] = []
+    client.sleep = waits.append
+    answers: list[object] = [ReadTimeout("read timed out"), RequestsConnectionError("reset"), graph_response(200, {"value": []})]
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ARG001
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(client.session, "request", _request)
+    assert client.get_json("/identity/conditionalAccess/policies") == {"value": []}
+    assert answers == []
+    assert len([w for w in waits if w >= 2.0]) == 2
+
+
+def test_transport_errors_stop_after_the_server_error_bound(monkeypatch) -> None:
+    from requests.exceptions import ReadTimeout
+
+    client = fake_graph_client(throttle_mode="safe")
+    client.sleep = lambda _seconds: None
+    calls = {"count": 0}
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ARG001
+        calls["count"] += 1
+        raise ReadTimeout("read timed out")
+
+    monkeypatch.setattr(client.session, "request", _request)
+    with pytest.raises(ReadTimeout):
+        client.get_json("/users")
+    # safe: server_error_retries=3, so four attempts in all.
+    assert calls["count"] == 4
