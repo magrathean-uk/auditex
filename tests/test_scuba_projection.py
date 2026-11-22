@@ -2245,6 +2245,32 @@ def test_scuba_config_break_glass_users_and_groups_fail_closed_where_unseen(comp
         assert case_config(p, pid) == NOT_COLLECTED and policies[pid] == 'unseen_shape'
 
 
+def test_scuba_config_rule_views_skip_the_model_shape_gate(complete_bundle):
+    """Review R041: the model shape gate withholds unseen scuba_config shapes from the projected views only. The value rules
+    read the private rule view, so a recorded emergency-access account must not turn MS.AAD.3.2v2, 3.8v1 or 7.4v1 into
+    section_not_collected."""
+    from azure_tenant_audit.value_rules import assess
+    p = project_run(config_bundle(identity_rows(complete_bundle), accounts=[BREAK_GLASS_ID, 'Emergency Group']))
+    policies = p.report['sections']['scuba_config']['synthesis']['policies']
+    assert policies['MS.AAD.3.2v2'] == policies['MS.AAD.3.8v1'] == policies['MS.AAD.7.4v1'] == 'unseen_shape'
+    rule = {pid: p.rule_views[pid]['scuba_config'] for pid in ('MS.AAD.3.2v2', 'MS.AAD.3.8v1', 'MS.AAD.7.4v1')}
+    both = {**EMPTY_CAP, 'Users': [BREAK_GLASS_ID], 'Groups': [BREAK_GLASS_GROUP]}
+    assert rule['MS.AAD.3.2v2'] == {**AAD_DEFAULT, 'Aad': {'MS.AAD.3.2v1': {'CapExclusions': both, 'RoleExclusions': EMPTY_ROLE}}}
+    assert rule['MS.AAD.3.8v1'] == {**AAD_DEFAULT, 'Aad': {'MS.AAD.3.8v1': {'CapExclusions': both, 'RoleExclusions': EMPTY_ROLE}}}
+    assert rule['MS.AAD.7.4v1']['Aad']['MS.AAD.7.4v1']['RoleExclusions'] == {'Users': [BREAK_GLASS_ID], 'Groups': [BREAK_GLASS_GROUP]}
+    # The projected (model) views keep the shape gate.
+    assert case_config(p, 'MS.AAD.3.2v2') == NOT_COLLECTED
+    users = {'IncludeUsers': ['All'], 'ExcludeUsers': [BREAK_GLASS_ID], 'ExcludeGroups': [], 'ExcludeRoles': [], 'IncludeRoles': [],
+             'ExcludeGuestsOrExternalUsers': None}
+    policy = {'DisplayName': 'synthetic', 'State': 'enabled', 'GrantControls': {'BuiltInControls': ['mfa'], 'Operator': 'OR',
+                                                                               'AuthenticationStrength': None},
+              'Conditions': {'Users': users, 'ClientAppTypes': ['all'], 'AuthenticationFlows': None, 'UserRiskLevels': [],
+                             'SignInRiskLevels': [], 'Applications': {'IncludeApplications': ['All'], 'ExcludeApplications': [],
+                                                                      'IncludeUserActions': []}}}
+    record = assess('MS.AAD.3.2v2', {'conditional_access_policies': [policy], 'scuba_config': rule['MS.AAD.3.2v2']})
+    assert (record['verdict'], record['cell']) == ('met', 'met_policy_declared_exclusions')
+
+
 @pytest.mark.parametrize('accounts,state', [(['nobody@example.invalid'], 'unresolved'), (None, None)])
 def test_scuba_config_unresolved_or_unrecorded_list_withholds_exclusion_policies(complete_bundle, accounts, state):
     if accounts is None:

@@ -1409,6 +1409,7 @@ def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str,
     exclusions, break_glass_summary = _break_glass(bundle, manifest)
     base = {"Aad": None, "CapExclusions": deepcopy(_EMPTY_CAP), "RoleExclusions": deepcopy(_EMPTY_ROLE)}
     views: dict[str, Any] = {}
+    rule_views: dict[str, Any] = {}
     outcomes: dict[str, str] = {}
     for policy_id in sorted(p for p, entry in catalogue.items() if "scuba_config" in entry["sections"]):
         family = policy_id.split(".")[1]
@@ -1439,16 +1440,19 @@ def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str,
                 raise Unavailable("operator_input_required")
             else:
                 raise Unavailable()
+            # Review R041: the value rules read the synthesised view itself. The shape and size gates below served the
+            # retired model's prompts, so they withhold the projected view only, never the private rule view.
+            rule_views[policy_id] = view
             _seen_shape("scuba_config", view)
             if _oversize(view, max_items, max_chars):
                 raise Unavailable("oversize")
         except Unavailable as exc:
             views[policy_id] = dict(NOT_COLLECTED)
+            rule_views.setdefault(policy_id, dict(NOT_COLLECTED))
             outcomes[policy_id] = "unseen_shape" if exc.reason == "incomplete_shape" else exc.reason
         else:
             views[policy_id] = view
             outcomes[policy_id] = "projected"
-    rule_views = dict(views)
     loaded: dict[str, tuple[str, ...]] = {}
     # SS 2.1 uses the run's single verified capture (also behind the anti-phish coverage check), never a reread.
     snapshot = bundle.sensitive_users
