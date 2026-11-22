@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT, fanout_gap_row
+from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT, REASON_PAGINATION_FAILED, fanout_gap_row
 from azure_tenant_audit.collectors.base import (
     CollectorResult,
     context_limit,
@@ -115,6 +115,7 @@ def _call(
     start = time.perf_counter()
     truncated = False
     result_limit: int | None = None
+    page_error: Exception | None = None
     try:
         rows = func()
         status = "ok"
@@ -122,6 +123,11 @@ def _call(
         error = None
         truncated = bool(getattr(rows, "truncated", False))
         result_limit = getattr(rows, "result_limit", None)
+        page_error = getattr(rows, "page_error", None)
+        if page_error is not None:
+            # A later page failed: the rows read before it are kept, and the list is a partial read.
+            status = "partial"
+            error_class, error = classify_google_error(page_error)
     except Exception as exc:  # noqa: BLE001
         rows = []
         status = "failed"
@@ -140,7 +146,9 @@ def _call(
     )
     if result_limit:
         row["result_limit"] = result_limit
-    if truncated and bounded_sample:
+    if page_error is not None:
+        record_truncation(row, list_name=name, rows=len(rows), limit=result_limit, reason=REASON_PAGINATION_FAILED)
+    elif truncated and bounded_sample:
         row["bounded_sample"] = True
         row["collection_truncated"] = False
     elif truncated:

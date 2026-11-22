@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -72,20 +73,54 @@ def classify_google_error(exc: Exception) -> tuple[str, str]:
     return "client_error", message
 
 
+# Waits before each retry of a rate-limited (429) or transient (5xx, dropped connection) read; then the error stands.
+RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)
+_RETRYABLE_ERROR_CLASSES = frozenset({"rate_limited", "google_transient"})
+_sleep = time.sleep
+
+
+def _retryable(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    return classify_google_error(exc)[0] in _RETRYABLE_ERROR_CLASSES
+
+
+def _execute(call: Callable[[], Any]) -> Any:
+    """Run one API call, retrying 429 and 5xx answers with backoff; other errors are raised at once."""
+    for delay in (*RETRY_DELAYS, None):
+        try:
+            return call()
+        except Exception as exc:
+            if delay is None or not _retryable(exc):
+                raise
+            _sleep(delay)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 class CollectedRows(list):
     """Rows of one Google list, plus whether the list continued past the operator's limit.
 
     A plain ``list`` is what a caller that does not know about limits returns; the collectors
-    read ``truncated`` with ``getattr`` so both work.
+    read ``truncated`` with ``getattr`` so both work. ``page_error`` is the error of a later page that
+    could not be read even after retries: the rows before it are kept and the list is cut short.
     """
 
     truncated: bool = False
     result_limit: int | None = None
+    page_error: Exception | None = None
 
-    def __init__(self, rows: Any = (), *, truncated: bool = False, result_limit: int | None = None) -> None:
+    def __init__(
+        self,
+        rows: Any = (),
+        *,
+        truncated: bool = False,
+        result_limit: int | None = None,
+        page_error: Exception | None = None,
+    ) -> None:
         super().__init__(rows)
         self.truncated = truncated
         self.result_limit = result_limit
+        self.page_error = page_error
 
 
 def _cut(values: list[dict[str, Any]], limit: int | None) -> CollectedRows:
@@ -173,8 +208,17 @@ class GoogleWorkspaceClient:
         limit = limit or None
         rows: list[dict[str, Any]] = []
         token: str | None = None
+        first_page = True
         while True:
-            payload = request_factory(token).execute()
+            try:
+                payload = _execute(lambda: request_factory(token).execute())
+            except Exception as exc:
+                if first_page:
+                    raise
+                # A later page failed after its retries: keep what was read, recorded as a list cut short.
+                kept = rows[:limit] if limit is not None else rows
+                return CollectedRows(kept, truncated=True, result_limit=limit, page_error=exc)
+            first_page = False
             values = payload.get(item_key) or payload.get("items") or payload.get("value") or []
             if isinstance(values, list):
                 rows.extend(item for item in values if isinstance(item, dict))
@@ -204,10 +248,10 @@ class GoogleWorkspaceClient:
                 limit=top,
             )
         if resource == "orgUnits":
-            payload = service.orgunits().list(customerId=self.customer, type="all").execute()
+            payload = _execute(lambda: service.orgunits().list(customerId=self.customer, type="all").execute())
             return _cut(payload.get("organizationUnits") or [], top)
         if resource == "domains":
-            payload = service.domains().list(customer=self.customer).execute()
+            payload = _execute(lambda: service.domains().list(customer=self.customer).execute())
             return _cut(payload.get("domains") or [], top)
         if resource == "roles":
             return self._collect_pages(
@@ -238,12 +282,12 @@ class GoogleWorkspaceClient:
 
     def list_user_aliases(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
-        payload = service.users().aliases().list(userKey=user_key).execute()
+        payload = _execute(lambda: service.users().aliases().list(userKey=user_key).execute())
         return _cut(payload.get("aliases") or [], top)
 
     def list_user_tokens(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
-        payload = service.tokens().list(userKey=user_key).execute()
+        payload = _execute(lambda: service.tokens().list(userKey=user_key).execute())
         return _cut(payload.get("items") or [], top)
 
     def list_report_activities(
@@ -302,7 +346,7 @@ class GoogleWorkspaceClient:
 
         def _capture(name: str, getter: Callable[[], Any], *, list_key: str | None = None, default: Any = None) -> None:
             try:
-                value = getter()
+                value = _execute(getter)
                 if list_key is not None and isinstance(value, dict):
                     payload[name] = value.get(list_key, default if default is not None else [])
                 else:
@@ -362,7 +406,7 @@ class GoogleWorkspaceClient:
 
     def get_group_settings(self, group_email: str) -> dict[str, Any]:
         service = self._service("groupssettings", "v1")
-        return service.groups().get(groupUniqueId=group_email, fields=GROUP_SETTING_FIELDS).execute()
+        return _execute(lambda: service.groups().get(groupUniqueId=group_email, fields=GROUP_SETTING_FIELDS).execute())
 
     def list_calendar_resources(self, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
