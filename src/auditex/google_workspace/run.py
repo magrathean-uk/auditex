@@ -266,6 +266,7 @@ def build_google_capability_rows(
             "observed_permissions": [],
             "delegated_roles": [],
             "minimum_role_hints": ["Google Workspace super admin or delegated admin"],
+            "scopes_proven": scopes_proven,
             "notes": f"Google Workspace {auth_mode} auth.",
             "endpoint_statuses": [
                 {

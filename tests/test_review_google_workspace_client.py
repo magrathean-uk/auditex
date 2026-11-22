@@ -485,3 +485,47 @@ def test_w2_25_a_completed_google_preflight_read_is_still_exact_scope() -> None:
         coverage_rows=preflight,
     )[0]
     assert row["status"] == "supported_exact_scope"
+
+
+def test_w2_21_a_permission_block_beside_proven_scopes_asks_for_a_role_not_scopes() -> None:
+    from auditex.google_workspace.collectors import GoogleDevicesCollector
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_live_readiness,
+    )
+
+    class _Client:
+        def list_devices(self, resource: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            if resource == "chromeos":
+                raise _HttpError(403)
+            return []
+
+    result = GoogleDevicesCollector().run({"client": _Client()})
+    rows = build_google_capability_rows(
+        ["google_devices"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=result.coverage,
+    )
+    row = rows[0]
+    assert row["missing_permissions"] == []
+    assert row["blocker_kind"] == "admin_role"
+    assert "scope" not in row["next_step"].lower()
+    readiness = build_google_live_readiness(["google_devices"], rows, coverage_rows=result.coverage)
+    gate = readiness["evidence_gates"][0]
+    assert gate["blocker_kind"] == "admin_role"
+    assert readiness["blocker_summary"]["counts"].get("auth_scope") is None
+
+
+def test_w2_21_a_refused_token_with_no_proven_scope_still_asks_for_scopes() -> None:
+    from auditex.google_workspace.run import build_google_capability_rows
+
+    coverage = [
+        {"collector": "google_devices", "type": "google", "name": "mobileDevices", "status": "failed",
+         "item_count": 0, "error_class": "insufficient_permissions", "error": "HTTP 403"},
+    ]
+    row = build_google_capability_rows(
+        ["google_devices"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=coverage,
+    )[0]
+    assert row["status"] == "blocked_by_scope"
+    assert row["blocker_kind"] == "auth_scope"
+
