@@ -45,7 +45,10 @@ def decode_claims(token: str) -> dict:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Inspect the current lab-populator Graph token and claims.")
+    parser = argparse.ArgumentParser(
+        description="Inspect the current lab-populator Graph token and claims.",
+        allow_abbrev=False,
+    )
     parser.add_argument("--tenant-id", default=None)
     parser.add_argument("--out", type=Path, default=Path(".secrets/lab-populator-token-claims.json"))
     parser.add_argument("--app-secret-file", type=Path, default=None)
@@ -67,8 +70,10 @@ def main(argv: list[str]) -> int:
                 "grant_type": "client_credentials",
             },
             timeout=120,
+            # A redirect would resend the client secret to another host; never follow one.
+            allow_redirects=False,
         )
-        if not response.ok:
+        if response.status_code != 200:
             raise RuntimeError(f"app token request failed with HTTP {response.status_code}.")
         payload = response.json()
         payload["tokenType"] = payload.get("token_type")
@@ -93,8 +98,8 @@ def main(argv: list[str]) -> int:
     token = payload.get("accessToken") or payload.get("access_token") or ""
     claims = decode_claims(token)
     if args.write_env:
-        if not args.write_env.parent.exists():
-            ensure_private_dir(args.write_env.parent)
+        # The env file holds a bearer token: its folder is made owner-only even when it exists.
+        ensure_private_dir(args.write_env.parent)
         write_owner_only(args.write_env, f"AZURE_ACCESS_TOKEN={token}\n")
     result = {
         "generatedAt": utc_now(),
