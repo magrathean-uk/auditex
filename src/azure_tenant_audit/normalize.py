@@ -2844,7 +2844,7 @@ def build_normalized_snapshot(
     # sections above are retired and stay only for old bundles.
     seen_case_ids = {str(item.get("id")) for item in ediscovery_cases}
     searched_case_ids: set[str] = set()
-    # One record per search key: a Graph search replaces the retired searchList row for the same id.
+    # One record per search key, with populated Graph fields taking precedence over retired searchList fields.
     search_index = {record["key"]: index for index, record in enumerate(ediscovery_searches)}
     graph_search_cases: dict[str, str] = {}
     for item in _values(ediscovery_payload, "cases"):
@@ -2895,7 +2895,7 @@ def build_normalized_snapshot(
                 continue
             graph_search_cases[key] = case_id
             if key in search_index:
-                ediscovery_searches[search_index[key]] = record
+                ediscovery_searches[search_index[key]].update(record)
             else:
                 search_index[key] = len(ediscovery_searches)
                 ediscovery_searches.append(record)

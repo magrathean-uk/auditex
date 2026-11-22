@@ -651,6 +651,26 @@ def test_a_search_in_both_the_retired_search_list_and_a_graph_case_is_one_record
     assert records[0]["case_id"] == "c1"  # the Graph read names the case the retired list left out
 
 
+@pytest.mark.parametrize(
+    ("graph_fields", "expected_status"),
+    [({}, "completed"), ({"status": None}, "completed"), ({"status": ""}, "completed"), ({"status": "running"}, "running")],
+    ids=["missing", "null", "empty", "populated"],
+)
+def test_a_mixed_search_keeps_legacy_status_when_graph_has_no_value(graph_fields, expected_status) -> None:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payload = {
+        "searchList": {"value": [{"id": "s1", "status": "completed"}]},
+        "cases": {"value": [{"id": "c1"}]},
+        "case_c1": {"searches": {"value": [{"id": "s1", **graph_fields}]}},
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": payload})
+
+    (search,) = snapshot["ediscovery_searches"]["records"]
+    assert search.get("status") == expected_status
+    assert search["case_id"] == "c1"
+
+
 def test_a_search_in_a_shared_historical_chunk_has_no_known_case(tmp_path) -> None:
     from azure_tenant_audit.normalize import build_normalized_snapshot
     from azure_tenant_audit.output import AuditWriter
