@@ -19,11 +19,20 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def write_owner_only(path: Path, text: str) -> None:
-    """Write a secret file as 0600 from the first byte; never follow a symlink at the final path."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+class TenantChanged(RuntimeError):
+    """The signed-in Azure CLI tenant is no longer the named lab tenant."""
+
+
+def open_owner_only(path: Path) -> int:
+    """Open a secret file as 0600 without truncating it; never follow a symlink at the final path."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    os.fchmod(fd, 0o600)
+    return fd
+
+
+def write_owner_only_fd(fd: int, text: str) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        os.fchmod(handle.fileno(), 0o600)
+        handle.truncate(0)
         handle.write(text)
 
 
@@ -32,10 +41,14 @@ def ensure_private_dir(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
-def run_az(args: list[str], *, dry_run: bool) -> dict:
+def run_az(args: list[str], *, dry_run: bool, tenant_id: str | None = None) -> dict:
     command = ["az", *args]
     if dry_run:
         return {"dryRun": True, "command": command}
+    # az ad commands take no --tenant and act in whatever tenant is signed in at that moment, so
+    # check it again right before every call: a switch after the start check stops the run.
+    if tenant_id is not None and signed_in_tenant_id() != tenant_id:
+        raise TenantChanged(tenant_id)
     proc = subprocess.run(command, check=False, capture_output=True, text=True, timeout=180)
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout).strip() or f"az command failed: {' '.join(command)}")
@@ -44,8 +57,8 @@ def run_az(args: list[str], *, dry_run: bool) -> dict:
     return json.loads(proc.stdout)
 
 
-def graph_permission_map(*, dry_run: bool) -> dict[tuple[str, str], dict[str, str]]:
-    sp = run_az(["ad", "sp", "show", "--id", GRAPH_APP_ID, "--output", "json"], dry_run=dry_run)
+def graph_permission_map(*, dry_run: bool, tenant_id: str | None = None) -> dict[tuple[str, str], dict[str, str]]:
+    sp = run_az(["ad", "sp", "show", "--id", GRAPH_APP_ID, "--output", "json"], dry_run=dry_run, tenant_id=tenant_id)
     if dry_run:
         return {}
     mapping: dict[tuple[str, str], dict[str, str]] = {}
@@ -85,7 +98,10 @@ def signed_in_tenant_id() -> str:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Create or update the lab-only Microsoft Graph tenant populator app.")
+    parser = argparse.ArgumentParser(
+        description="Create or update the lab-only Microsoft Graph tenant populator app.",
+        allow_abbrev=False,
+    )
     parser.add_argument("--config", type=Path, default=Path("configs/lab-populator-permissions.json"))
     parser.add_argument(
         "--tenant-id",
@@ -112,14 +128,38 @@ def main(argv: list[str]) -> int:
         )
         return 3
 
+    try:
+        return populate(args, tenant_id)
+    except TenantChanged:
+        print(
+            f"tenant_mismatch: the Azure CLI is no longer signed in to tenant {tenant_id}; "
+            "stopped before the next directory call.",
+            file=sys.stderr,
+        )
+        return 3
+
+
+def populate(args: argparse.Namespace, tenant_id: str) -> int:
+    pinned = None if args.dry_run else tenant_id
     cfg = json.loads(args.config.read_text(encoding="utf-8"))
     app_name = cfg["appDisplayName"]
     manifest_path = args.config.parent.parent / ".secrets" / "lab-populator-app.json"
     ensure_private_dir(manifest_path.parent)
+    secret_path = args.config.parent.parent / ".secrets" / "lab-populator-app-secret.json"
+    secret_fd: int | None = None
+    if args.create_secret and not args.dry_run:
+        # Check the local destination before any directory write, so a refused destination never
+        # leaves an issued credential unstored.
+        try:
+            secret_fd = open_owner_only(secret_path)
+        except OSError as exc:
+            print(f"secret_path_refused: cannot store the secret at {secret_path.name}: {exc.strerror}. Nothing was changed.", file=sys.stderr)
+            return 4
 
     existing = run_az(
         ["ad", "app", "list", "--display-name", app_name, "--query", "[0]", "--output", "json"],
         dry_run=args.dry_run,
+        tenant_id=pinned,
     )
     if args.dry_run or not existing:
         app = run_az(
@@ -139,6 +179,7 @@ def main(argv: list[str]) -> int:
                 "json",
             ],
             dry_run=args.dry_run,
+            tenant_id=pinned,
         )
     else:
         app = existing
@@ -181,9 +222,10 @@ def main(argv: list[str]) -> int:
                     json.dumps(normalized_resource_access),
                 ],
                 dry_run=False,
+                tenant_id=pinned,
             )
-            app = run_az(["ad", "app", "show", "--id", app_id, "--output", "json"], dry_run=False)
-    permission_map = graph_permission_map(dry_run=args.dry_run)
+            app = run_az(["ad", "app", "show", "--id", app_id, "--output", "json"], dry_run=False, tenant_id=pinned)
+    permission_map = graph_permission_map(dry_run=args.dry_run, tenant_id=pinned)
     existing_permissions = set()
     if not args.dry_run:
         for resource_access in app.get("requiredResourceAccess", []):
@@ -230,12 +272,12 @@ def main(argv: list[str]) -> int:
                     "json",
                 ],
                 dry_run=False,
+                tenant_id=pinned,
             )
 
     if args.admin_consent and not args.dry_run:
-        run_az(["ad", "app", "permission", "admin-consent", "--id", app_id, "--output", "json"], dry_run=False)
+        run_az(["ad", "app", "permission", "admin-consent", "--id", app_id, "--output", "json"], dry_run=False, tenant_id=pinned)
 
-    secret_path = args.config.parent.parent / ".secrets" / "lab-populator-app-secret.json"
     secret_stored = False
     if args.create_secret:
         if args.dry_run:
@@ -258,6 +300,7 @@ def main(argv: list[str]) -> int:
                     "json",
                 ],
                 dry_run=False,
+                tenant_id=pinned,
             )
             secret_payload = {
                 "createdAt": utc_now(),
@@ -266,7 +309,8 @@ def main(argv: list[str]) -> int:
                 "password": secret.get("password"),
                 "endDateTime": secret.get("endDateTime"),
             }
-            write_owner_only(secret_path, json.dumps(secret_payload, indent=2, sort_keys=True))
+            write_owner_only_fd(secret_fd, json.dumps(secret_payload, indent=2, sort_keys=True))
+            secret_fd = None
             secret_stored = True
 
     manifest = {

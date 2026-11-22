@@ -131,17 +131,6 @@ def test_create_app_tightens_existing_secret_file_and_folder(populator_config, f
     assert mode(secrets_dir) == 0o700
 
 
-def test_create_app_refuses_to_follow_a_symlinked_secret_file(populator_config, fake_az, tmp_path):
-    secrets_dir = populator_config.parent.parent / ".secrets"
-    secrets_dir.mkdir()
-    elsewhere = tmp_path / "elsewhere.json"
-    elsewhere.write_text("untouched", encoding="utf-8")
-    (secrets_dir / "lab-populator-app-secret.json").symlink_to(elsewhere)
-    with pytest.raises(OSError):
-        fake_az["module"].main(["--config", str(populator_config), "--tenant-id", LAB_TENANT, "--create-secret"])
-    assert elsewhere.read_text(encoding="utf-8") == "untouched"
-
-
 def _token(claims: dict) -> str:
     import base64
 
@@ -210,3 +199,90 @@ def test_auth_env_file_is_created_owner_only(tmp_path, monkeypatch):
     assert mode(env_dir) == 0o700
     # Created owner-only from the first byte, never through a symlink.
     assert opened and all(m == 0o600 and flags & os.O_NOFOLLOW for flags, m in opened)
+
+
+def test_create_app_refuses_when_the_az_tenant_changes_after_the_start_check(populator_config, fake_az, capsys):
+    """Every az ad call checks the signed-in tenant again, so a later switch stops before any write."""
+    module = fake_az["module"]
+    real_run = module.subprocess.run
+    seen_show = {"count": 0}
+
+    def switching_run(argv, *args, **kwargs):
+        result = real_run(argv, *args, **kwargs)
+        if list(argv)[:3] == ["az", "account", "show"]:
+            seen_show["count"] += 1
+            if seen_show["count"] == 1:
+                fake_az["tenant"] = OTHER_TENANT
+        return result
+
+    module.subprocess.run = switching_run
+    result = module.main(["--config", str(populator_config), "--tenant-id", LAB_TENANT, "--admin-consent", "--create-secret"])
+    assert result != 0
+    assert "tenant_mismatch" in capsys.readouterr().err
+    writes = [argv for argv in fake_az["calls"] if argv[:3] == ["az", "ad", "app"] and argv[3] != "list"]
+    assert writes == []
+
+
+def test_create_app_rejects_abbreviated_flags(populator_config, fake_az):
+    with pytest.raises(SystemExit) as exc:
+        fake_az["module"].main(["--config", str(populator_config), "--tenant-id", LAB_TENANT, "--create-s"])
+    assert exc.value.code == 2
+    assert fake_az["calls"] == []
+
+
+def test_create_app_refuses_a_symlinked_secret_file_before_issuing_a_credential(populator_config, fake_az, tmp_path):
+    secrets_dir = populator_config.parent.parent / ".secrets"
+    secrets_dir.mkdir()
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text("untouched", encoding="utf-8")
+    (secrets_dir / "lab-populator-app-secret.json").symlink_to(elsewhere)
+    result = fake_az["module"].main(["--config", str(populator_config), "--tenant-id", LAB_TENANT, "--create-secret"])
+    assert result != 0
+    assert not any(argv[:5] == ["az", "ad", "app", "credential", "reset"] for argv in fake_az["calls"])
+    assert elsewhere.read_text(encoding="utf-8") == "untouched"
+
+
+def test_auth_app_token_request_never_follows_a_redirect(tmp_path, monkeypatch):
+    module = load_module("auth-lab-populator.py")
+    posts: list[dict] = []
+
+    class Redirect:
+        status_code = 307
+        ok = True
+        is_redirect = True
+        headers = {"Location": "https://elsewhere.example/token"}
+
+        def json(self) -> dict:
+            return {}
+
+    def fake_post(url, data=None, timeout=None, **kwargs):
+        posts.append({"url": url, **kwargs})
+        return Redirect()
+
+    monkeypatch.setattr(module.requests, "post", fake_post)
+    secret_file = tmp_path / "secret.json"
+    secret_file.write_text(json.dumps({"appId": APP_ID, "password": SECRET_VALUE, "tenantId": LAB_TENANT}), encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        module.main(["--app-secret-file", str(secret_file), "--out", str(tmp_path / "claims.json")])
+    assert len(posts) == 1 and posts[0].get("allow_redirects") is False
+
+
+def test_auth_tightens_an_existing_secrets_folder(tmp_path, monkeypatch):
+    module = load_module("auth-lab-populator.py")
+    token = _token({"tid": LAB_TENANT})
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=json.dumps({"accessToken": token}), stderr=""))
+    env_dir = tmp_path / ".secrets"
+    env_dir.mkdir()
+    env_dir.chmod(0o755)
+    assert module.main([
+        "--tenant-id", LAB_TENANT, "--out", str(env_dir / "claims.json"), "--write-env", str(env_dir / "t.env"),
+    ]) == 0
+    assert mode(env_dir) == 0o700
+
+
+def test_auth_rejects_abbreviated_flags(tmp_path):
+    module = load_module("auth-lab-populator.py")
+    with pytest.raises(SystemExit) as exc:
+        module.main(["--app-secret", str(tmp_path / "x.json")])
+    assert exc.value.code == 2
