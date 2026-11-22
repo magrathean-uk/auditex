@@ -30,6 +30,7 @@ from azure_tenant_audit.output_redaction import (
 )
 from azure_tenant_audit.private_io import make_private_dirs, write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
+from azure_tenant_audit.profiles import profile_choices
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 from azure_tenant_audit.versioning import package_version_line
@@ -232,7 +233,7 @@ def _build_probe_parser() -> argparse.ArgumentParser:
     live = subparsers.add_parser("live", allow_abbrev=False, help="Run a live capability probe.")
     live.add_argument("--tenant-name", required=True, help="Label for the probe output folder.")
     live.add_argument("--tenant-id", default=None, help="Entra tenant ID.")
-    live.add_argument("--auditor-profile", default="global-reader", help="Audit profile for escalation guidance.")
+    live.add_argument("--auditor-profile", default="global-reader", help="Audit profile for escalation guidance.", choices=profile_choices())
     live.add_argument("--mode", default="app", choices=_probe_mode_choices(),
                       help="app probes the tenant as the reader app with its certificate; response is lab only.")
     live.add_argument("--surface", default="all", help="Surface family to probe, or comma-separated list.")
@@ -476,7 +477,7 @@ def _build_setup_guide_parser() -> argparse.ArgumentParser:
     m365.add_argument("--exclude", default=None)
     m365.add_argument("--tenant-name", default="CLIENT")
     m365.add_argument("--tenant-id", default="<tenant-id-or-domain>")
-    m365.add_argument("--auditor-profile", default="global-reader")
+    m365.add_argument("--auditor-profile", default="global-reader", choices=profile_choices())
     m365.add_argument("--plane", choices=("inventory", "full", "export"), default="full")
     m365.add_argument("--mode", choices=("app",), default="app",
                       help="Kept for old scripts: the guide is always for the reader app with a certificate.")
@@ -1095,25 +1096,30 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "setup-guide":
         parser = _build_setup_guide_parser()
         args = parse_guarded(parser, argv[1:])
-        payload = build_setup_guide(
-            provider=args.provider,
-            collector_preset=getattr(args, "collector_preset", None),
-            collectors=getattr(args, "collectors", None),
-            exclude=getattr(args, "exclude", None),
-            auth=getattr(args, "auth", "domain-delegation"),
-            tenant_name=getattr(args, "tenant_name", "CLIENT"),
-            tenant_id=getattr(args, "tenant_id", "<tenant-id-or-domain>"),
-            domain=getattr(args, "domain", "example.com"),
-            customer_id=getattr(args, "customer_id", "my_customer"),
-            subject=getattr(args, "subject", "admin@example.com"),
-            service_account_key=getattr(args, "service_account_key", "/path/to/service-account.json"),
-            oauth_client=getattr(args, "oauth_client", "/path/to/oauth-client.json"),
-            token_cache=getattr(args, "token_cache", ".secrets/google-token.json"),
-            auditor_profile=getattr(args, "auditor_profile", "global-reader"),
-            plane=getattr(args, "plane", "full"),
-            config_path=getattr(args, "config", "configs/collector-definitions.json"),
-            permission_hints_path=getattr(args, "permission_hints", "configs/collector-permissions.json"),
-        )
+        try:
+            payload = build_setup_guide(
+                provider=args.provider,
+                collector_preset=getattr(args, "collector_preset", None),
+                collectors=getattr(args, "collectors", None),
+                exclude=getattr(args, "exclude", None),
+                auth=getattr(args, "auth", "domain-delegation"),
+                tenant_name=getattr(args, "tenant_name", "CLIENT"),
+                tenant_id=getattr(args, "tenant_id", "<tenant-id-or-domain>"),
+                domain=getattr(args, "domain", "example.com"),
+                customer_id=getattr(args, "customer_id", "my_customer"),
+                subject=getattr(args, "subject", "admin@example.com"),
+                service_account_key=getattr(args, "service_account_key", "/path/to/service-account.json"),
+                oauth_client=getattr(args, "oauth_client", "/path/to/oauth-client.json"),
+                token_cache=getattr(args, "token_cache", ".secrets/google-token.json"),
+                auditor_profile=getattr(args, "auditor_profile", "global-reader"),
+                plane=getattr(args, "plane", "full"),
+                config_path=getattr(args, "config", "configs/collector-definitions.json"),
+                permission_hints_path=getattr(args, "permission_hints", "configs/collector-permissions.json"),
+            )
+        except FileNotFoundError as exc:
+            parser.error_prevalidated(str(exc))
+        except ValueError as exc:
+            parser.error_prevalidated(str(exc))
         _emit_setup_guide(payload, format_name=args.format, output_path=args.output)
         return 0
     if argv[0] == "doctor":

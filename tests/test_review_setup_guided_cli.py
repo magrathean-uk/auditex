@@ -275,3 +275,118 @@ def test_r118_google_probe_refuses_offline_flags(monkeypatch, capsys, flag) -> N
     assert exc.value.code == 2
     assert probed == []
     assert flag[0] in capsys.readouterr().err
+
+
+# R120: an unknown auditor profile, or a plane the profile does not support, is refused, never shown as auto.
+
+def test_r120_get_profile_refuses_an_unknown_name() -> None:
+    from azure_tenant_audit.profiles import get_profile
+
+    with pytest.raises(ValueError, match="intune_reader"):
+        get_profile("intune_reader")
+
+
+@pytest.mark.parametrize("argv", [
+    ["setup-guide", "m365", "--auditor-profile", "intune_reader", "--format", "json"],
+    ["probe", "live", "--tenant-name", "acme", "--auditor-profile", "global_reader"],
+])
+def test_r120_cli_refuses_an_unknown_auditor_profile(capsys, argv) -> None:  # noqa: ANN001
+    from auditex import cli as product_cli
+
+    with pytest.raises(SystemExit) as exc:
+        product_cli.main(argv)
+
+    assert exc.value.code == 2
+    assert "{" not in capsys.readouterr().out
+
+
+def test_r120_setup_guide_refuses_a_plane_the_profile_does_not_support() -> None:
+    from auditex.setup_guide import build_m365_setup_guide
+
+    with pytest.raises(ValueError, match="export"):
+        build_m365_setup_guide(auditor_profile="intune-reader", plane="export")
+
+
+def test_r120_setup_guide_cli_reports_an_unsupported_plane(capsys) -> None:  # noqa: ANN001
+    from auditex import cli as product_cli
+
+    with pytest.raises(SystemExit) as exc:
+        product_cli.main(["setup-guide", "m365", "--auditor-profile", "intune-reader", "--plane", "export"])
+
+    assert exc.value.code == 2
+    assert "export" in capsys.readouterr().err
+
+
+# R123: an explicit --permission-hints path that does not exist is an error, not a silently thinner guide.
+
+def test_r123_missing_explicit_permission_hints_is_an_error(tmp_path) -> None:  # noqa: ANN001
+    from auditex.setup_guide import build_m365_setup_guide
+
+    with pytest.raises(FileNotFoundError):
+        build_m365_setup_guide(permission_hints_path=tmp_path / "collector-permision.json")
+
+
+def test_r123_setup_guide_cli_exits_2_for_a_missing_permission_hints_file(tmp_path, capsys) -> None:  # noqa: ANN001
+    from auditex import cli as product_cli
+
+    with pytest.raises(SystemExit) as exc:
+        product_cli.main(["setup-guide", "m365", "--permission-hints", str(tmp_path / "collector-permision.json"),
+                          "--format", "json"])
+
+    assert exc.value.code == 2
+    assert "permission-hints" in capsys.readouterr().err
+
+
+def test_r123_shipped_default_permission_hints_still_load() -> None:
+    from auditex.setup_guide import build_m365_setup_guide
+
+    guide = build_m365_setup_guide()
+    assert len(guide["optional_commands"]) > 0 and len(guide["tool_requirements"]) == 3
+
+
+# R121: a run with no evidence is not graded strong, QA checks are not vacuously true, and the licence profile names
+# the reader-app certificate route.
+
+_BLOCKED_GAPS = [{"collector": f"c{index}", "surface": f"s{index}", "status": "blocked"} for index in range(20)]
+
+
+def test_r121_run_with_every_collector_blocked_is_graded_blocked() -> None:
+    from azure_tenant_audit.autopilot import build_auditor_score
+
+    score = build_auditor_score(findings=[], overall_status="partial", evidence_paths=["x"], coverage_gaps=_BLOCKED_GAPS)
+
+    assert score["grade"] == "blocked"
+    assert score["components"]["evidence_depth"] < 100 and score["components"]["finding_confidence"] < 100
+
+
+def test_r121_clean_run_with_no_findings_and_no_gaps_still_scores_high() -> None:
+    from azure_tenant_audit.autopilot import build_auditor_score
+
+    score = build_auditor_score(findings=[], overall_status="ok", evidence_paths=["x"], coverage_gaps=[])
+
+    assert score["grade"] == "ultimate"
+
+
+def test_r121_report_qa_checks_are_not_vacuously_true_without_evidence() -> None:
+    from azure_tenant_audit.autopilot import build_report_qa
+
+    qa = build_report_qa([], coverage_gaps=_BLOCKED_GAPS)
+
+    assert qa["checks"]["every_finding_has_evidence"] is False
+    assert qa["checks"]["all_findings_high_confidence"] is False
+    assert qa["checks"]["limitations_declared"] is True
+
+
+def test_r121_limitations_declared_is_false_for_an_undescribed_gap() -> None:
+    from azure_tenant_audit.autopilot import build_report_qa
+
+    assert build_report_qa([], coverage_gaps=[{"status": "blocked"}])["checks"]["limitations_declared"] is False
+
+
+def test_r121_m365_licence_profile_names_the_reader_app_certificate() -> None:
+    from azure_tenant_audit.autopilot import build_basic_license_intelligence
+
+    pack = build_basic_license_intelligence(tenant_name="acme", platform="m365", overall_status="ok", findings=[],
+                                            evidence_paths=["x"], coverage_gaps=[])
+
+    assert pack["license_profile"]["minimum_live_access"] == "reader_app_certificate"

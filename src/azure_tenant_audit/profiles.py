@@ -250,4 +250,8 @@ def profile_choices() -> list[str]:
 
 
 def get_profile(name: str) -> AuditProfile:
-    return PROFILES.get(name, PROFILES["auto"])
+    """The named profile; an unknown name is refused, never answered with another profile's collectors."""
+    profile = PROFILES.get(name)
+    if profile is None:
+        raise ValueError(f"Unknown auditor profile {name!r}; choose one of: {', '.join(PROFILES)}.")
+    return profile
