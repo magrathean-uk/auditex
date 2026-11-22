@@ -630,6 +630,12 @@ def _control_note(control: dict[str, Any], status: str) -> str:
     return " ".join(parts)
 
 
+def _count(value: Any, fallback: int) -> int:
+    """A count from the report pack: a non-negative int, otherwise ``fallback``. A tampered pack (a text or bool count)
+    must still render, so its integrity banner is shown (review R098); zero keeps the old ``or`` fallback."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else fallback
+
+
 def _baselines(alignment: dict[str, Any]) -> dict[str, Any] | None:
     frameworks = alignment.get("frameworks") if isinstance(alignment.get("frameworks"), dict) else {}
     cards = []
@@ -648,7 +654,7 @@ def _baselines(alignment: dict[str, Any]) -> dict[str, Any] | None:
                     "id": _text(control.get("control_id")),
                     "title": _text(control.get("title")),
                     "status": status,
-                    "linked": int(control.get("open_finding_count") or len(finding_ids)) if status == "fail" else len(finding_ids),
+                    "linked": _count(control.get("open_finding_count"), len(finding_ids)) if status == "fail" else len(finding_ids),
                     "note": _control_note(control, status),
                 }
             )
@@ -674,7 +680,7 @@ def _baselines(alignment: dict[str, Any]) -> dict[str, Any] | None:
             if not isinstance(control, dict):
                 continue
             agreement = _text(control.get("agreement"))
-            findings = int(control.get("auditex_open_finding_count") or 0)
+            findings = _count(control.get("auditex_open_finding_count"), 0)
             verdict = {"agrees": "agree", "auditex_only": "disagree", "microsoft_only": "disagree"}.get(agreement, "not_assessed")
             if agreement == "auditex_only":
                 note = f"Microsoft scores this control as complete, but Auditex has {_plural(findings, 'open finding')} here."
