@@ -45,7 +45,6 @@ _DIAGNOSTIC_RULES = {
 # removing one) is a deliberate mapping change: update
 # docs/reference/framework-mappings.md and configs/framework-catalog.json too.
 _EXPECTED_CIS_V7 = {
-    "app_consent.high_privilege",
     "app_credentials.secret_long_validity",
     "ca.admin_mfa_not_enforced",
     "ca.admin_mfa_role_set_incomplete",
@@ -73,11 +72,8 @@ _EXPECTED_CIS_V7 = {
     "identity.global_admin_sprawl",
     "identity.privileged_mfa_not_registered",
     "identity.user_mfa_not_registered",
-    "mailbox_forwarding.external_inbox_rule",
     "sharepoint.external_sharing_broad",
-    "sharepoint.broad_link",
     "sharepoint.default_link_type_broad",
-    "sharepoint.external_principal",
     "sharepoint.sharing_domains_unrestricted",
 }
 _EXPECTED_SECURE_SCORE = {

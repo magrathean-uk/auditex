@@ -460,7 +460,7 @@ def test_excluding_the_global_administrator_role_fails_the_mfa_controls_it_used_
     assert verdicts["effective_mfa"] == "enforced_with_exclusions"
     assert verdicts["administrator_mfa"] == "not_enforced"
     assert _status(controls, "cis_m365_v7", "5.2.2.2") == "fail"
-    assert _status(controls, "cisa_scuba", "MS.AAD.3.2v1") == "fail"
+    assert _status(controls, "cisa_scuba", "MS.AAD.3.2v2") == "fail"
     assert _status(controls, "cis_m365_v7", "5.2.2.1") == "fail"
     assert _status(controls, "cisa_scuba", "MS.AAD.3.6v1") == "fail"
     assert _status(controls, "ms_secure_score", "AdminMFAV2") == "fail"
@@ -481,7 +481,7 @@ def test_an_all_staff_group_and_all_guests_excluded_fail_the_user_controls_but_n
     controls, _snapshot, _findings = _alignment([policy])
 
     assert _status(controls, "cis_m365_v7", "5.2.2.2") == "fail"
-    assert _status(controls, "cisa_scuba", "MS.AAD.3.2v1") == "fail"
+    assert _status(controls, "cisa_scuba", "MS.AAD.3.2v2") == "fail"
     # The group may hold administrators, so administrator MFA is judged to have exclusions, which also fails 5.2.2.1.
     assert _status(controls, "cis_m365_v7", "5.2.2.1") == "fail"
 
@@ -516,7 +516,7 @@ def test_registered_administrators_never_pass_an_enforcement_control_while_nothi
     for framework, control_id in (
         ("cis_m365_v7", "5.2.2.1"),
         ("cis_m365_v7", "5.2.2.2"),
-        ("cisa_scuba", "MS.AAD.3.2v1"),
+        ("cisa_scuba", "MS.AAD.3.2v2"),
         ("cisa_scuba", "MS.AAD.3.6v1"),
         ("ms_secure_score", "AdminMFAV2"),
     ):

@@ -857,7 +857,7 @@ def evaluate_effective_mfa(
     The verdict is the reading Cyber Essentials takes: an administrator role or administrator that every all-users
     policy excludes, but a role-targeted MFA policy requires MFA of, is covered (the row is marked
     ``covered_by_policy_ids`` and the policy listed in ``supplementary_policies``). ``single_policy_verdict`` is the
-    reading CIS 5.2.2.2 and SCuBA MS.AAD.3.2v1 take, which look for one policy that leaves nobody out, and does not
+    reading CIS 5.2.2.2 and SCuBA MS.AAD.3.2v2 take, which look for one policy that leaves nobody out, and does not
     credit that cover.
     """
     defaults_view, defaults_enabled = _security_defaults_view(security_defaults)
@@ -909,7 +909,7 @@ def evaluate_effective_mfa(
         excluded_all, coverers, directory, known=admin_scope is not None and admin_scope.complete, sanctioned=sanctioned
     )
     gap = _unsanctioned(excluded)
-    # CIS 5.2.2.2 and MS.AAD.3.2v1 look for one policy that leaves nobody out: a policy's own exclusions decide it,
+    # CIS 5.2.2.2 and MS.AAD.3.2v2 look for one policy that leaves nobody out: a policy's own exclusions decide it,
     # not the principals every policy shares (two policies that each exclude a different user cover everyone combined).
     single_clean = any(not _unsanctioned(policy["exclusions"]) for policy in qualifying)
     # The policies back a positive verdict only when they alone leave nobody out. Security defaults that are on beside

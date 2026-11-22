@@ -824,7 +824,7 @@ def test_mfa_not_enforced_rule_carries_severity_mappings_and_evidence() -> None:
     assert finding["collector"] == "conditional_access"
     assert finding["title"] == "Neither security defaults nor Conditional Access enforce MFA for all users"
     assert finding["framework_mappings"]["cis_m365_v7"] == ["5.2.2.2"]
-    assert finding["framework_mappings"]["cisa_scuba"] == ["MS.AAD.3.2v1"]
+    assert finding["framework_mappings"]["cisa_scuba"] == ["MS.AAD.3.2v2"]
     assert finding["control_ids"] == ["AUDITEX-CA-MFA-NOT-ENFORCED"]
     assert finding["returned_value"]["verdict"] == "not_enforced"
     near_miss = {row["id"]: row for row in finding["evidence"]["non_qualifying_mfa_policies"]}

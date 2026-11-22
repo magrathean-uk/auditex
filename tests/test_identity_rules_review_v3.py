@@ -388,7 +388,7 @@ def test_security_defaults_keep_the_verdicts_but_not_the_conditional_access_benc
         ("cis_m365_v7", "5.2.2.1", "ca.admin_mfa_not_enforced"),
         ("cis_m365_v7", "5.2.2.2", "ca.mfa_not_enforced"),
         ("cis_m365_v7", "5.2.2.3", "ca.legacy_auth_not_blocked"),
-        ("cisa_scuba", "MS.AAD.3.2v1", "ca.mfa_not_enforced"),
+        ("cisa_scuba", "MS.AAD.3.2v2", "ca.mfa_not_enforced"),
         ("cisa_scuba", "MS.AAD.1.1v1", "ca.legacy_auth_not_blocked"),
     ):
         assert _status(controls, framework, control_id) != "pass", (framework, control_id)
@@ -418,7 +418,7 @@ def test_a_qualifying_conditional_access_policy_passes_the_benchmark_controls(tm
         ("cis_m365_v7", "5.2.2.1"),
         ("cis_m365_v7", "5.2.2.2"),
         ("cis_m365_v7", "5.2.2.3"),
-        ("cisa_scuba", "MS.AAD.3.2v1"),
+        ("cisa_scuba", "MS.AAD.3.2v2"),
         ("cisa_scuba", "MS.AAD.1.1v1"),
     ):
         assert _status(controls, framework, control_id) == "pass", (framework, control_id)
@@ -701,7 +701,7 @@ def test_two_policies_that_leave_an_administrator_out_by_different_routes_fail_t
     assert verdicts["effective_mfa"]["verdict"] == "enforced_with_exclusions"
     assert verdicts["administrator_mfa"]["verdict"] == "not_enforced"
     assert _rules(findings)["ca.admin_mfa_not_enforced"]["severity"] == "high"
-    for framework, control_id in (("cis_m365_v7", "5.2.2.1"), ("cis_m365_v7", "5.2.2.2"), ("cisa_scuba", "MS.AAD.3.2v1"), ("ms_secure_score", "AdminMFAV2")):
+    for framework, control_id in (("cis_m365_v7", "5.2.2.1"), ("cis_m365_v7", "5.2.2.2"), ("cisa_scuba", "MS.AAD.3.2v2"), ("ms_secure_score", "AdminMFAV2")):
         assert _status(controls, framework, control_id) == "fail", (framework, control_id)
 
 
@@ -1155,7 +1155,7 @@ def test_the_ga_role_split_passes_cyber_essentials_and_fails_the_single_policy_b
     assert finding["returned_value"]["covered_exclusions"][0]["covered_by_policy_ids"] == ["ga"]
     assert _rule_row(controls, "cyber_essentials", "ce.uac.mfa_cloud_services", "ca.mfa_not_enforced")["status"] == "pass"
     assert "ca.mfa_split_across_policies" not in controls[("cyber_essentials", "ce.uac.mfa_cloud_services")]["rule_ids"]
-    for framework, control_id in (("cis_m365_v7", "5.2.2.2"), ("cisa_scuba", "MS.AAD.3.2v1")):
+    for framework, control_id in (("cis_m365_v7", "5.2.2.2"), ("cisa_scuba", "MS.AAD.3.2v2")):
         assert _status(controls, framework, control_id) == "fail", (framework, control_id)
     assert "cyber_essentials" not in finding["framework_mappings"] and "ms_secure_score" not in finding["framework_mappings"]
 
@@ -1239,7 +1239,7 @@ def test_security_defaults_beside_a_policy_with_gaps_leave_the_benchmark_control
         ("cis_m365_v7", "5.2.2.1"),
         ("cis_m365_v7", "5.2.2.2"),
         ("cis_m365_v7", "5.2.2.3"),
-        ("cisa_scuba", "MS.AAD.3.2v1"),
+        ("cisa_scuba", "MS.AAD.3.2v2"),
         ("cisa_scuba", "MS.AAD.1.1v1"),
     ):
         assert _status(controls, framework, control_id) != "pass", (framework, control_id)
