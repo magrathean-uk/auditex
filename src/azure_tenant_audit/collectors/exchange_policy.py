@@ -112,10 +112,9 @@ from .exchange_defender_commands import (
 )
 
 EXCHANGE_ONLINE_SCOPE = "https://outlook.office365.com/.default"
-# Whole-tenant mailbox aggregates enumerate every mailbox before counting, so on a large tenant they outlast the
-# adapter's default process timeout (R047). They get a longer one, and a timeout is named as a large-tenant gap.
+# Whole-tenant mailbox aggregates enumerate every mailbox before counting (R047): the adapter gives a -ResultSize
+# Unlimited read its longer timeout, and a timeout that still happens is named as a large-tenant gap.
 AGGREGATE_READS = frozenset({"casMailboxSmtpAuth", "mailboxAuditBypass"})
-AGGREGATE_COMMAND_TIMEOUT_SECONDS = 600.0
 REASON_LARGE_TENANT_AGGREGATE_TIMEOUT = "large_tenant_aggregate_timeout"
 # Security & Compliance PowerShell: the Microsoft Exchange Online Protection resource (Exchange.ManageAsApp on it).
 COMPLIANCE_SCOPE = "https://ps.compliance.protection.outlook.com/.default"
@@ -333,11 +332,7 @@ class ExchangePolicyCollector(Collector):
                 response = _run_anti_phish(adapter, command, log_event, exchange_session, anti_phish, context)
                 payload[name] = response
                 continue
-            if name in AGGREGATE_READS and isinstance(adapter, PowerShellGraphAdapter):
-                response = adapter.run(command, log_event=log_event, session=exchange_session,
-                                       timeout=AGGREGATE_COMMAND_TIMEOUT_SECONDS)
-            else:
-                response = adapter.run(command, log_event=log_event, session=exchange_session)
+            response = adapter.run(command, log_event=log_event, session=exchange_session)
             response.setdefault("command", command)
             minimise_recipients(name, response)
             payload[name] = response
