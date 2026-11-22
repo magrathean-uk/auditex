@@ -179,22 +179,36 @@ function Connect-BootstrapGraph {
 
   Invoke-BootstrapCommand -Name "graph-context" -Module "graph" -Step "auth" -Action {
     # Every later step writes through this Graph session, so prove it is the named lab tenant first.
-    $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?`$select=id,displayName" -OutputType PSObject -ErrorAction Stop
-    $orgs = @($org.value)
-    if ($orgs.Count -ne 1 -or ([string]$orgs[0].id).ToLowerInvariant() -ne $tenantId) {
+    # A failed request's message can carry the response body, so only the HTTP status is surfaced.
+    $org = $null
+    try {
+      $org = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/organization?`$select=id,displayName" -OutputType PSObject -ErrorAction Stop
+    } catch {
+      $status = ""
+      $response = $_.Exception.PSObject.Properties["Response"]
+      if ($response -and $response.Value -and $response.Value.PSObject.Properties["StatusCode"]) {
+        $status = " (HTTP $([int]$response.Value.StatusCode))"
+      }
+      throw "tenant_check_failed: the Graph organisation could not be read$status. Nothing was written."
+    }
+    $orgs = @(if ($org -and $org.PSObject.Properties["value"]) { $org.value })
+    if ($orgs.Count -ne 1 -or -not $orgs[0].PSObject.Properties["id"] -or ([string]$orgs[0].id).ToLowerInvariant() -ne $tenantId) {
       throw "tenant_mismatch: the Graph session is not in tenant $tenantId. Nothing was written."
     }
-    $sessionUser = $null
+    # App-only sessions have no /me; then the session is named after the organisation.
+    $principal = ""
     try {
-      $sessionUser = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me" -OutputType PSObject -ErrorAction Stop
+      $sessionUser = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me?`$select=userPrincipalName" -OutputType PSObject -ErrorAction Stop
+      if ($sessionUser -and $sessionUser.PSObject.Properties["userPrincipalName"]) { $principal = [string]$sessionUser.userPrincipalName }
     } catch {
-      $sessionUser = $orgs[0]
+      $principal = ""
+    }
+    if (-not $principal -and $orgs[0].PSObject.Properties["displayName"]) {
+      $principal = "app session in $([string]$orgs[0].displayName)"
     }
 
-    $global:BootstrapSession.Context.signedInUser = $sessionUser
-    Write-BootstrapEvent -Message "graph-session-user" -Status "info" -Step "auth" -Details @{
-      principal = if ($sessionUser.userPrincipalName) { $sessionUser.userPrincipalName } else { $sessionUser.displayName }
-    }
+    $global:BootstrapSession.Context.signedInUser = $principal
+    Write-BootstrapEvent -Message "graph-session-user" -Status "info" -Step "auth" -Details @{ principal = $principal }
   }
 }
 

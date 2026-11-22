@@ -174,7 +174,8 @@ def test_dry_run_with_placeholder_tenant_still_plans(kind, tmp_path, graph, az_c
 PWSH_DRIVER = r"""
 $ErrorActionPreference = "Stop"
 . (Join-Path $env:KIT_SCRIPTS "00-shared.ps1") -ConfigPath $env:KIT_CONFIG
-function Write-BootstrapEvent { param($Message, $Status, $Details, $Step) }
+$global:Events = @()
+function Write-BootstrapEvent { param($Message, $Status, $Details, $Step) $global:Events += (@{ message = $Message; details = $Details } | ConvertTo-Json -Compress -Depth 5) }
 # Microsoft.Graph.Authentication 2.x: -AccessToken is a SecureString and Select-MgProfile no longer exists.
 function Connect-MgGraph {
   param([SecureString]$AccessToken, [string]$TenantId, [string]$ClientId, [string]$CertificateThumbprint, [switch]$NoWelcome)
@@ -184,7 +185,11 @@ $global:GraphTokenType = ""
 function az { $global:AzCalls += ,($args -join " "); "fake-token" }
 function Invoke-MgGraphRequest {
   param($Method, $Uri, $OutputType, $ErrorAction)
-  if ($Uri -like "*/me*") { return [pscustomobject]@{ userPrincipalName = "operator@lab.example" } }
+  if ($Uri -like "*/me*") {
+    if ($env:ME_FAILS) { throw "Response status code does not indicate success: Forbidden." }
+    return [pscustomobject]@{ userPrincipalName = "operator@lab.example" }
+  }
+  if ($env:ORG_FAILS) { throw "Response status code does not indicate success: Forbidden (Forbidden). {`"error`":{`"message`":`"denied for $($env:ORG_FAILS)`"}}" }
   return [pscustomobject]@{ value = @([pscustomobject]@{ id = $env:ORG_ID; displayName = "Org" }) }
 }
 function Get-Module { param([switch]$ListAvailable, $Name) [pscustomobject]@{ Name = $Name } }
@@ -202,11 +207,12 @@ $result.azCalls = @($global:AzCalls)
 $result.graphTokenType = $global:GraphTokenType
 $result.exchangeArgs = $global:ExoArgs
 $result.exchangeDisconnected = $global:ExoDisconnected
+$result.events = @($global:Events)
 $result | ConvertTo-Json -Compress
 """
 
 
-def run_shared_ps1(tmp_path: Path, tenant_id: str, org_id: str, exo_tenant: str | None = None) -> dict:
+def run_shared_ps1(tmp_path: Path, tenant_id: str, org_id: str, exo_tenant: str | None = None, **flags: str) -> dict:
     import os
     import subprocess
 
@@ -217,7 +223,7 @@ def run_shared_ps1(tmp_path: Path, tenant_id: str, org_id: str, exo_tenant: str 
     driver = tmp_path / "driver.ps1"
     driver.write_text(PWSH_DRIVER, encoding="utf-8")
     env = {**os.environ, "KIT_SCRIPTS": str(ROOT / "scripts"), "KIT_CONFIG": str(config), "ORG_ID": org_id,
-           "EXO_TENANT": exo_tenant or org_id}
+           "EXO_TENANT": exo_tenant or org_id, "ME_FAILS": "", "ORG_FAILS": "", **flags}
     proc = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(driver)],
                           capture_output=True, text=True, timeout=120, env=env)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -384,3 +390,51 @@ def test_dry_run_never_acquires_a_token(kind, tenant_id, tmp_path, graph, az_cal
     assert module.main(["--config", str(config), "--run-name", "guard", "--dry-run", *extra]) == 0
     assert [argv for argv in az_calls if argv[:1] == ["az"]] == []
     assert recorder.calls == []
+
+
+def test_powershell_graph_context_accepts_an_app_session_without_a_user(tmp_path):
+    """App-only sessions have no /me; the organisation object has no userPrincipalName under StrictMode."""
+    result = run_shared_ps1(tmp_path, LAB_TENANT, LAB_TENANT, ME_FAILS="1")
+    assert result["graphError"] == ""
+
+
+def test_powershell_failed_tenant_check_never_surfaces_the_response_body(tmp_path):
+    marker = "synthetic.principal@other.example"
+    result = run_shared_ps1(tmp_path, LAB_TENANT, LAB_TENANT, ORG_FAILS=marker)
+    assert "tenant_check_failed" in result["graphError"]
+    assert marker not in json.dumps(result)
+
+
+STEP_DRY_RUN_DRIVER = r"""
+$ErrorActionPreference = "Stop"
+$global:GraphCalls = @()
+foreach ($name in @("Get-MgUser", "Get-MgGroup", "Get-MgGroupMember", "Invoke-MgGraphRequest", "Connect-MgGraph",
+                    "New-MgUser", "Get-Mailbox", "New-Mailbox", "Connect-ExchangeOnline",
+                    "Get-SafeLinksPolicy", "New-SafeLinksPolicy", "Get-SafeAttachmentPolicy", "New-SafeAttachmentPolicy",
+                    "Get-AntiPhishPolicy", "New-AntiPhishPolicy")) {
+  Set-Item -Path "function:global:$name" -Value ([scriptblock]::Create("`$global:GraphCalls += '$name'; return `$null"))
+}
+function global:az { $global:GraphCalls += "az"; return $null }
+$err = ""
+try { & $env:STEP_SCRIPT -ConfigPath $env:KIT_CONFIG -RunName dry -RunDirectory $env:RUN_DIR -DryRun | Out-Null } catch { $err = $_.Exception.Message }
+[ordered]@{ error = $err; calls = @($global:GraphCalls) } | ConvertTo-Json -Compress
+"""
+
+
+def test_powershell_exchange_dry_run_makes_no_tenant_call(tmp_path):
+    import os
+    import subprocess
+
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("pwsh is not installed")
+    driver = tmp_path / "step-driver.ps1"
+    driver.write_text(STEP_DRY_RUN_DRIVER, encoding="utf-8")
+    env = {**os.environ, "STEP_SCRIPT": str(ROOT / "scripts" / "04-seed-exchange.ps1"),
+           "KIT_CONFIG": str(lab_config(tmp_path, LAB_TENANT)), "RUN_DIR": str(tmp_path / "run")}
+    proc = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(driver)],
+                          capture_output=True, text=True, timeout=120, env=env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert result["error"] == ""
+    assert result["calls"] == []
