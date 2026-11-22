@@ -372,9 +372,11 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-  # Local answer: large model download, so one OS only (ubuntu, Python 3.11). Size and time go to the summary.
+  # Local answer: large model download and an hour of CPU time, so one OS only (ubuntu, Python 3.11) and only on
+  # manual dispatch. Size and time go to the summary.
   explain:
     name: explain ubuntu py3.11
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     defaults:
@@ -424,5 +426,48 @@ jobs:
           path: |
             explain.log
             outputs/offline/*/local_answer.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  # The same command on the demo run, which has real findings, with the small model from the local-answer guide.
+  explain-demo:
+    name: explain-demo ubuntu py3.11 (small model)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: README - install with the local-answer extra
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -e '.[local-answer]'
+      - name: README - auditex demo --no-pause
+        run: |
+          source .venv/bin/activate
+          auditex demo --no-pause
+      - name: auditex explain on the demo run (--model small)
+        run: |
+          source .venv/bin/activate
+          RUN=outputs/demo/runs/halcyon-demo
+          s=$(date +%s)
+          auditex explain "$RUN" --model small 2>&1 | tee explain-demo.log
+          echo "explain-demo (small, download plus answer) seconds: $(( $(date +%s) - s ))" | tee -a "$GITHUB_STEP_SUMMARY"
+          test -f "$RUN/local_answer.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: explain-demo-ubuntu-py3.11
+          path: |
+            explain-demo.log
+            outputs/demo/runs/halcyon-demo/local_answer.json
           retention-days: 14
           if-no-files-found: warn
