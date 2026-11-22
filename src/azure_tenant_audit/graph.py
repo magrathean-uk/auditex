@@ -707,7 +707,7 @@ class GraphClient:
                     reason = error
             error_url = response.url if graph_host_url(response.url) else redacted_url(response.url)
             if not graph_host_url(response.url):
-                reason = _off_graph_reason(response)
+                reason, error_code = _off_graph_reason(response), None
             self._emit(
                 "graph.response.error",
                 "Graph endpoint returned error response",
