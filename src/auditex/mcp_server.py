@@ -543,16 +543,33 @@ def _cap_summary(result: dict[str, Any], budget: int = SUMMARY_RESPONSE_BUDGET_B
     return _cap_kept_sections(capped, omitted, budget)
 
 
-# Field names a capped section lists as left out; the rest are only counted.
+# Field names a capped section lists as left out; the rest are only counted. A name longer than the limit is only
+# counted too, so the record of what was left out stays small however long the names are (R025).
 _OMITTED_FIELDS_LISTED = 20
+_OMITTED_FIELD_NAME_CHARS = 64
 # Keys the capped summary never drops: what the client needs to know the answer was cut and where to read the rest.
 _SUMMARY_CORE_KEYS = frozenset({"omitted_sections", "summary_truncated", "citations", "citation_summary", "evidence_missing"})
+# Scalar fields that identify the run; a kept section loses every other field before these.
+_SUMMARY_IDENTITY_FIELDS = frozenset(
+    {"tenant_name", "tenant_id", "run_id", "created_utc", "platform", "mode", "overall_status", "status", "schema_version"}
+)
+
+
+def _record_omitted_field(capped: dict[str, Any], omitted: dict[str, Any], key: str, name: str, size: int) -> None:
+    # One entry per section, so the record of what was left out stays small however many fields it lost.
+    entry = omitted.setdefault(f"{key}.fields", _omitted_entry(capped, key, None, 0) | {"fields": [], "more_fields": 0})
+    entry["bytes"] += size
+    if len(entry["fields"]) < _OMITTED_FIELDS_LISTED and len(name) <= _OMITTED_FIELD_NAME_CHARS:
+        entry["fields"].append(name)
+    else:
+        entry["more_fields"] += 1
 
 
 def _cap_kept_sections(capped: dict[str, Any], omitted: dict[str, Any], budget: int) -> dict[str, Any]:
     """Second stage of ``_cap_summary`` (R025): the kept sections alone are over ``budget`` (hundreds of coverage gaps
     repeated in the manifest, the summary and the run metadata). Drop their nested lists and mappings, largest first,
-    keeping each section's scalar fields (tenant, run id, status); then, if still over, whole sections.
+    then their other fields, keeping each section's identity (tenant, run id, status); then, if still over, whole
+    sections. The result never exceeds ``budget``: the record of what was left out shrinks last of all.
     """
     capped["omitted_sections"] = omitted
     capped["summary_truncated"] = True
@@ -575,20 +592,59 @@ def _cap_kept_sections(capped: dict[str, Any], omitted: dict[str, Any], budget: 
         section = dict(capped[key])
         section.pop(name)
         capped[key] = section
-        # One entry per section, so the record of what was left out stays small however many fields it lost.
-        entry = omitted.setdefault(f"{key}.fields", _omitted_entry(capped, key, None, 0) | {"fields": [], "more_fields": 0})
-        entry["bytes"] += size
-        if len(entry["fields"]) < _OMITTED_FIELDS_LISTED:
-            entry["fields"].append(name)
-        else:
-            entry["more_fields"] += 1
+        _record_omitted_field(capped, omitted, key, name, size)
+    scalars = sorted(
+        (
+            (_json_size({name: item}), key, name)
+            for key, value in capped.items()
+            if key not in _SUMMARY_CORE_KEYS and isinstance(value, dict)
+            for name, item in value.items()
+            if name not in _SUMMARY_IDENTITY_FIELDS
+        ),
+        key=lambda row: row[0],
+        reverse=True,
+    )
+    for size, key, name in scalars:
+        if _json_size(capped) <= budget:
+            return capped
+        section = dict(capped[key])
+        section.pop(name)
+        capped[key] = section
+        _record_omitted_field(capped, omitted, key, name, size)
+    # The run's identity outweighs the detail of the omitted record and the citations.
+    _shrink_core(capped, budget)
     for key in sorted(
         (key for key in capped if key not in _SUMMARY_CORE_KEYS), key=lambda item: _json_size(capped[item]), reverse=True
     ):
         if _json_size(capped) <= budget:
             break
         value = capped.pop(key)
-        omitted[key] = _omitted_entry(capped, key, value, _json_size(value))
+        record = capped["omitted_sections"]
+        if set(record) == {"sections"}:
+            record["sections"] += 1
+        else:
+            record[key] = _omitted_entry(capped, key, value, _json_size(value))
+    return _shrink_core(capped, budget)
+
+
+def _shrink_core(capped: dict[str, Any], budget: int) -> dict[str, Any]:
+    """Last resort: the kept core keys themselves are over ``budget``. Field lists become counts, then the omitted
+    record becomes a count of sections, then the citations are emptied and counted, so the answer always fits."""
+    omitted = capped.get("omitted_sections")
+    if _json_size(capped) > budget and isinstance(omitted, dict):
+        for entry in omitted.values():
+            if isinstance(entry, dict) and isinstance(entry.get("fields"), list):
+                entry["more_fields"] = int(entry.get("more_fields") or 0) + len(entry["fields"])
+                entry["fields"] = []
+    if _json_size(capped) > budget and isinstance(omitted, dict):
+        capped["omitted_sections"] = {"sections": len(omitted)}
+    for key in ("citations", "evidence_missing", "citation_summary"):
+        if _json_size(capped) <= budget:
+            break
+        value = capped.get(key)
+        if isinstance(value, (list, dict)) and value:
+            capped[key] = type(value)()
+            capped[f"{key}_omitted"] = len(value)
     return capped
 
 

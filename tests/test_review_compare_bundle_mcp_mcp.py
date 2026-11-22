@@ -128,6 +128,42 @@ def test_mcp_summary_fits_the_cap_when_a_kept_section_has_many_small_fields(tmp_
     assert result["manifest"]["tenant_name"]
 
 
+def test_mcp_summary_fits_the_cap_when_left_out_field_names_are_long(tmp_path: Path) -> None:
+    # Repair round 2 (R025): 21 long manifest extension field names. The record of what was left out is bounded too,
+    # and the manifest's identity stays.
+    from support import RunBundleBuilder
+
+    from auditex.mcp_server import summarize_run, tool_handlers
+
+    long_fields = {f"extension_{index:02d}_" + "n" * 2800: {"status": "blocked_permission"} for index in range(21)}
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .manifest(**long_fields)
+        .report_pack(summary={"overall_status": "partial"}, findings=[], evidence_paths=[])
+        .build()
+    )
+
+    handlers = tool_handlers()
+    for result in (summarize_run(str(run_dir)), handlers["auditex_probe_summarize"](run_dir=str(run_dir))):
+        assert len(json.dumps(result, default=str)) <= 48_000
+        assert result["summary_truncated"] is True
+        assert result["manifest"]["tenant_name"]
+        assert result["manifest"]["run_id"]
+
+
+def test_a_capped_summary_never_exceeds_the_budget_even_when_its_core_keys_do() -> None:
+    # Repair round 2 (R025): the keys a capped summary always keeps can be over the budget on their own.
+    from auditex.mcp_server import _cap_summary
+
+    citations = [{"artifact_path": f"normalized/section_{index}.json", "reason": "r" * 200} for index in range(400)]
+    result = _cap_summary({"manifest": {"tenant_name": "acme", "run_id": "r1"}, "citations": citations}, budget=4_000)
+
+    assert len(json.dumps(result, default=str)) <= 4_000
+    assert result["summary_truncated"] is True
+    assert result["manifest"] == {"tenant_name": "acme", "run_id": "r1"}
+    assert result["citations_omitted"] == 400
+
+
 def test_mcp_summary_of_a_small_run_keeps_every_section(tmp_path: Path) -> None:
     from support import RunBundleBuilder
 
@@ -260,3 +296,4 @@ def test_a_terminated_mcp_server_stops_the_commands_it_started(tmp_path: Path) -
     assert server.returncode != 0
     time.sleep(2.5)
     assert not marker.exists()
+
