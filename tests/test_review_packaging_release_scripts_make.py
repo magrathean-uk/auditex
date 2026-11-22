@@ -16,6 +16,12 @@ ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 VERSION = PYPROJECT["project"]["version"]
 
+
+def _head_version() -> str:
+    """The version make dist builds: pyproject.toml as committed in HEAD, not the working tree."""
+    shown = subprocess.run(["git", "show", "HEAD:pyproject.toml"], cwd=ROOT, capture_output=True, text=True, check=True)
+    return tomllib.loads(shown.stdout)["project"]["version"]
+
 needs_git_checkout = pytest.mark.skipif(
     shutil.which("git") is None or shutil.which("make") is None or not (ROOT / ".git").exists(),
     reason="needs make and a git checkout",
@@ -56,7 +62,8 @@ def test_dist_replaces_stale_artefacts(tmp_path: Path) -> None:
     run = _make("dist", f"DIST_DIR={dist}", f"PYTHON={sys.executable}")
 
     assert run.returncode == 0, run.stderr[-3000:]
-    assert sorted(p.name for p in dist.iterdir()) == [f"auditex-{VERSION}-py3-none-any.whl", f"auditex-{VERSION}.tar.gz"]
+    built = _head_version()
+    assert sorted(p.name for p in dist.iterdir()) == [f"auditex-{built}-py3-none-any.whl", f"auditex-{built}.tar.gz"]
 
 
 # R070: release smoke refuses an ambiguous dist folder instead of testing whichever file sorts first.
