@@ -42,6 +42,29 @@ def test_an_answer_over_part_of_the_catalogue_says_how_much_was_assessed() -> No
     assert f"Partial: the rules assessed 3 of the {total} SCuBA checks in the shipped catalogue" in answer["text"]
 
 
+def test_the_structured_run_summary_also_says_the_answer_is_partial() -> None:
+    # Repair round 1 (R096): a caller that reads only summary.text sees the catalogue denominator too.
+    from azure_tenant_audit.value_rules.catalogue import catalogue
+
+    total = len(catalogue()["policies"])
+    _, answer = _answer_for(["MS.AAD.8.1v1", "MS.AAD.7.1v1", "MS.AAD.2.1v1"])
+
+    note = f"Partial: the rules assessed 3 of the {total} SCuBA checks in the shipped catalogue"
+    assert answer["summary"]["text"].startswith(note)
+    assert answer["text"].count(note) == 1
+
+
+def test_a_stored_summary_without_the_partial_note_fails_its_check_against_the_run() -> None:
+    from auditex import local_answer as la
+
+    digest, answer = _answer_for(["MS.AAD.8.1v1"])
+    kept = [line for line in answer["summary"]["text"].split("\n") if not line.startswith("Partial:")]
+    stored = {**answer, "summary": {**answer["summary"], "text": "\n".join(kept)}}
+
+    with pytest.raises(la.LocalAnswerError):
+        la.verify_answer(stored, digest)
+
+
 def test_a_stored_answer_without_the_partial_note_fails_its_check_against_the_run() -> None:
     import pytest as _pytest
 

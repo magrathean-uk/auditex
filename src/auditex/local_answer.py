@@ -737,10 +737,10 @@ def _partial_note(coverage: Any) -> str | None:
             f"the other {total - assessed} are not in this answer.")
 
 
-def answer_text(answer: Mapping[str, Any], coverage: Mapping[str, Any] | None = None) -> str:
+def answer_text(answer: Mapping[str, Any]) -> str:
     """The whole answer as Auditex prints it, from the answer's own fields: header, how many items used the fixed
-    text, the run summary, then every item in the rules' order under its verdict heading. ``coverage`` is the
-    digest's catalogue coverage; an assessment over part of the catalogue says so in the header."""
+    text, the run summary, then every item in the rules' order under its verdict heading. An assessment over part
+    of the catalogue says so in the run summary's first line (``assemble_answer``)."""
     model, runtime, reason = answer["model"], answer["runtime"], answer["reason"]
     run_id = answer.get("run_id")
     lines = [f"Auditex answer for run {quoted(run_id)}" if run_id else "Auditex answer"]
@@ -751,9 +751,6 @@ def answer_text(answer: Mapping[str, Any], coverage: Mapping[str, Any] | None = 
         lines.append("No local model ran; the rules decided every verdict and the order.")
     if reason:
         lines.append(f"Why: {REASONS[reason]}")
-    partial = _partial_note(coverage)
-    if partial:
-        lines.append(partial)
     items = answer["items"]
     lines.append(f"Items shown with the fixed text: {answer['fixed_text_items']} of {len(items)}."
                  + (" The run summary is the fixed one." if answer["summary"]["fallback"] else ""))
@@ -802,6 +799,10 @@ def assemble_answer(digest: Mapping[str, Any], item_answers: Mapping[int, Any], 
     else:
         summary = answer_summary(summary_raw, digest)
         summary_failures = summary["failures"]
+    partial = _partial_note(digest.get("catalogue"))
+    if partial:
+        # R096: the structured run summary carries the catalogue denominator too, not only the printed answer.
+        summary = {**summary, "text": f"{partial}\n{summary['text']}"}
     counts = {verdict: sum(1 for item in digest["items"] if item["verdict"] == verdict) for verdict in VERDICT_ORDER}
     answer: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -819,7 +820,7 @@ def assemble_answer(digest: Mapping[str, Any], item_answers: Mapping[int, Any], 
                     "fallback": summary["fallback"], "failures": summary_failures, "text": summary["text"]},
         "items": entries,
     }
-    answer["text"] = answer_text(answer, digest.get("catalogue"))
+    answer["text"] = answer_text(answer)
     problems = completeness_problems(answer, digest)
     if problems:                                       # by construction this never happens; fail closed if it does
         raise LocalAnswerError("; ".join(problems))
