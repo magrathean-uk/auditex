@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -673,16 +674,16 @@ class GoogleDnsPostureCollector:
                 if posture.get("resolver_error"):
                     status = "failed"
                     error_class = "dns_resolver_error"
-                    error = str(posture["resolver_error"])
+                    posture["resolver_error"] = error = _host_only(str(posture["resolver_error"]))
             except DohError as exc:
+                error = _host_only(str(exc))
                 posture = {
                     "domain": domain_name,
-                    "resolver_error": str(exc),
+                    "resolver_error": error,
                     **unknown_posture(("google",)),
                 }
                 status = "failed"
                 error_class = "dns_resolver_error"
-                error = str(exc)
             assessments.append(posture)
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
             coverage.append(
@@ -706,6 +707,14 @@ class GoogleDnsPostureCollector:
             len(domains) + len(assessments),
             coverage=coverage,
         )
+
+
+_URL = re.compile(r"\b(https?)://([^/\s'\"<>?#]+)[^\s'\"<>]*")
+
+
+def _host_only(text: str) -> str:
+    """``text`` with every URL cut to its scheme and host: a configured resolver's path can hold a private profile id."""
+    return _URL.sub(lambda match: f"{match.group(1)}://{match.group(2)}", text)
 
 
 def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: list[dict[str, Any]]) -> None:

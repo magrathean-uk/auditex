@@ -189,7 +189,10 @@ def test_r056_a_blocked_collector_names_only_the_missing_scope(monkeypatch: pyte
 
 
 def _probe_capability(client: Any, collector: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    from auditex.google_workspace.run import build_google_capability_rows, build_google_preflight_rows
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
 
     preflight = build_google_preflight_rows(client, [collector], domain=None)
     capability = build_google_capability_rows(
@@ -248,3 +251,30 @@ def test_r058_probe_reports_a_failed_later_page_as_a_gap() -> None:
     assert preflight[0]["error_class"] == "google_transient"
     assert capability["status"] != "supported_exact_scope"
 
+
+
+# ---- X1: a failed resolver request never carries the resolver's path into the bundle ------------------------------
+
+
+def test_x1_resolver_error_names_the_resolver_by_host_only() -> None:
+    import json
+
+    from auditex.google_workspace.collectors import GoogleDnsPostureCollector
+    from azure_tenant_audit.dns_lookup import DohError
+
+    class _FailingResolver:
+        endpoint = "https://dns.example.net/profile-abc123"
+
+        def query_detailed(self, name: str, record_type: str) -> Any:
+            raise DohError(f"DoH query failed for {record_type} {name}: 503 Server Error: Service Unavailable for url: "
+                           f"https://dns.example.net/profile-abc123?name={name}&type={record_type}")
+
+        def query(self, name: str, record_type: str) -> list[str]:
+            return self.query_detailed(name, record_type)
+
+    result = GoogleDnsPostureCollector().run({"domain": "example.com", "dns_resolver": _FailingResolver()})
+    row = next(item for item in result.coverage if item["name"] == "posture:example.com")
+    assert row["status"] == "failed"
+    assert "dns.example.net" in str(row["error"])
+    assert "profile-abc123" not in json.dumps(result.coverage)
+    assert "profile-abc123" not in json.dumps(result.payload)
