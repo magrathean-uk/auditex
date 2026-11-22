@@ -93,7 +93,8 @@ _COLLECTOR_FAILURE_REASON_TEXT = {
         "use app authentication or deselect exchange_policy."
     ),
     "dns_resolver_error": (
-        "Not assessed: the public Cloudflare DNS-over-HTTPS resolver could not answer or was unreachable; "
+        "Not assessed: the run's DNS-over-HTTPS resolver (public Cloudflare unless --doh-endpoint or "
+        "AUDITEX_DOH_ENDPOINT chose another) could not answer or was unreachable; "
         "DNS records are unknown, not absent. Check resolver connectivity and rerun dns_posture."
     ),
     "public_lookup_error": "Not assessed: the verified domain's MTA-STS or public OpenID discovery HTTPS read failed.",
