@@ -467,6 +467,7 @@ def _write_google_bundle(
     waiver_rows: list[dict[str, Any]] | None = None,
     replay: dict[str, Any] | None = None,
     as_of: datetime | None = None,
+    data_handling_notices: list[str] | None = None,
 ) -> int:
     normalized_snapshot = build_google_normalized_snapshot(
         tenant_name=config.tenant_name,
@@ -568,6 +569,7 @@ def _write_google_bundle(
                 "replay_source": replay,
                 "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
                 "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
+                "data_handling_notices": list(data_handling_notices or []),
             },
             as_of=as_of,
         ),
@@ -846,6 +848,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         auth_context_path=auth_context_path,
         command_line=command_line,
         waiver_rows=waiver_rows,
+        data_handling_notices=[google_dns_notice(doh_endpoint)] if doh_endpoint is not None else [],
     )
 
 

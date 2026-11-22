@@ -126,3 +126,13 @@ def test_l6_notice_names_only_the_host_of_a_configured_resolver(
     notice = " ".join(record.getMessage() for record in caplog.records)
     assert "dns.example.net" in notice and "profile-abc123" not in notice
     assert "profile-abc123" not in (tmp_path / "Example-dns" / "audit-log.jsonl").read_text(encoding="utf-8")
+
+
+def test_l6_data_handling_record_carries_the_dns_notice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_dns_run(monkeypatch)
+    monkeypatch.setenv(DOH_ENDPOINT_ENV, "https://dns.example.net/profile-abc123")
+    run_google_live(GoogleRunConfig(tenant_name="Example", out=tmp_path, run_name="dns", collectors="google_dns_posture"))
+    record = json.loads((tmp_path / "Example-dns" / "data-handling.json").read_text(encoding="utf-8"))
+    notices = " ".join(record["collection_notices"])
+    assert "--exclude google_dns_posture" in notices
+    assert "dns.example.net" in notices and "profile-abc123" not in notices
