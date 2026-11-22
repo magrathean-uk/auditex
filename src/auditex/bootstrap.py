@@ -4,6 +4,7 @@ import json
 import platform
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP_SCRIPT = REPO_ROOT / "scripts" / "bootstrap-local-tools.sh"
 SELECT_PYTHON_SCRIPT = REPO_ROOT / "scripts" / "select-python.sh"
 DEFAULT_VENV_DIR = REPO_ROOT / ".venv"
+
+
+def is_source_checkout() -> bool:
+    """Whether this package runs from its own source checkout (with the bootstrap scripts) or an installed wheel/sdist."""
+    try:
+        own_tree = (REPO_ROOT / "src" / "auditex" / "bootstrap.py").resolve() == Path(__file__).resolve()
+    except OSError:
+        return False
+    return own_tree and BOOTSTRAP_SCRIPT.is_file() and SELECT_PYTHON_SCRIPT.is_file()
 
 
 def detect_package_manager() -> str | None:
@@ -82,10 +92,22 @@ def _tool_status(
 
 
 def _selected_python() -> dict[str, Any]:
+    if not is_source_checkout():
+        # An installed package runs in the interpreter it was installed into; that interpreter is the Python.
+        supported = sys.version_info >= (3, 11)
+        return {
+            "status": "supported" if supported else "blocked",
+            "path": sys.executable,
+            "version": f"Python {platform.python_version()}",
+            "selector": "installed",
+            "error": None if supported else "python_too_old",
+        }
     return _toolchain_runtime().selected_python()
 
 
 def _venv_status() -> dict[str, Any]:
+    if not is_source_checkout():
+        return {"status": "supported", "path": sys.prefix, "python_path": sys.executable}
     return _toolchain_runtime().venv_status()
 
 
@@ -168,8 +190,18 @@ def format_doctor_report(report: dict[str, Any]) -> str:
 
 
 def run_setup(*, with_exchange: bool = False, with_pwsh: bool = False, with_mcp: bool = False) -> int:
-    if not BOOTSTRAP_SCRIPT.exists():
-        raise RuntimeError(f"missing bootstrap script: {BOOTSTRAP_SCRIPT}")
+    if not is_source_checkout():
+        # Nothing to bootstrap in an installed package; print the manual steps instead of failing, so guided-run
+        # carries on and doctor still reports any missing optional pack.
+        print(
+            "auditex setup prepares a source checkout; this Auditex is an installed package, so its Python is ready.\n"
+            "Optional packs are installed by hand:\n"
+            "  MCP server:      python -m pip install 'auditex[mcp]'\n"
+            "  Exchange checks: install PowerShell 7, then the ExchangeOnlineManagement module\n"
+            "                   for the current user (from PSGallery, without trusting the gallery)\n"
+            "Run auditex doctor to check."
+        )
+        return 0
     command = ["bash", str(BOOTSTRAP_SCRIPT)]
     if with_exchange:
         command.append("--exchange")

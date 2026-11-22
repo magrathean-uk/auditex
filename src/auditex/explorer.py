@@ -1130,12 +1130,9 @@ def build_explorer_bundle(run_dirs: Path | str | Sequence[Path | str]) -> dict[s
 
 
 def _generator_label() -> str:
-    from importlib.metadata import PackageNotFoundError, version
+    from azure_tenant_audit import versioning
 
-    try:
-        return f"Auditex {version('auditex')}"
-    except PackageNotFoundError:  # pragma: no cover - running from a bare source tree
-        return "Auditex"
+    return f"Auditex {versioning.package_version()}"
 
 
 # --------------------------------------------------------------------------- rendering

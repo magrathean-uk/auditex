@@ -17,6 +17,7 @@ Defaults:
   COLLECTORS: the global-reader profile
   TOP: none (every list is paged to its last row; --top N sets an explicit limit and records the cut as a coverage gap)
   OUTPUT: ./audit-output
+  PYTHON: $AUDITEX_PYTHON (make audit-full passes the .venv interpreter), else python3 on PATH
 
 Example:
   tenant-audit-full --tenant-id contoso.onmicrosoft.com --tenant-name CONTOSO --client-id <app-id> \
@@ -88,7 +89,7 @@ fi
 TENANT_NAME="${TENANT_NAME:-${TENANT_ID}}"
 
 CMD=(
-  env "PYTHONPATH=${ROOT}/src" python3 -m azure_tenant_audit
+  env "PYTHONPATH=${ROOT}/src" "${AUDITEX_PYTHON:-python3}" -m azure_tenant_audit
   --tenant-name "${TENANT_NAME}" --tenant-id "${TENANT_ID}" --client-id "${CLIENT_ID}"
   --certificate-path "${CERTIFICATE_PATH}" --certificate-thumbprint "${CERTIFICATE_THUMBPRINT}"
   ${PASSWORD_ARGS[@]+"${PASSWORD_ARGS[@]}"}
