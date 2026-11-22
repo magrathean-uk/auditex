@@ -29,8 +29,8 @@ def test_markdown_inline_escapes_html_links_breaks_and_cells() -> None:
     assert "\\|" in out and "&lt;img" in out and "\\[Verify here\\]" in out
     # A backslash cannot cancel the pipe escape and reopen a table cell.
     assert markdown_inline("a\\|b") == "a\\\\\\|b"
-    # Placeholders and ordinary identifiers stay readable.
-    assert markdown_inline("<redacted-text> MS.AAD.1.1v1 identity:global_admin") == "<redacted-text> MS.AAD.1.1v1 identity:global_admin"
+    # Ordinary identifiers stay readable; a placeholder is shown as visible text, never a raw tag.
+    assert markdown_inline("<redacted-text> MS.AAD.1.1v1 identity:global_admin") == "&lt;redacted-text> MS.AAD.1.1v1 identity:global_admin"
 
 
 @pytest.mark.parametrize("profile", ["local", "shareable", "customer_pack"])
@@ -68,12 +68,11 @@ def test_customer_pack_markdown_files_render_hostile_title_literally(tmp_path: P
         _assert_literal(path.read_text(encoding="utf-8"), str(path.relative_to(target)))
 
 
-def test_markdown_inline_keeps_only_known_placeholders_as_tags() -> None:
+def test_markdown_inline_shows_every_placeholder_as_text() -> None:
     from auditex.reporting import markdown_inline
 
-    assert markdown_inline("<redacted-guid> <redacted-segment-3> <run-dir>") == "<redacted-guid> <redacted-segment-3> <run-dir>"
+    assert markdown_inline("<redacted-guid> <run-dir>") == "&lt;redacted-guid> &lt;run-dir>"
     assert markdown_inline("<redacted-x onclick=1>") == "&lt;redacted-x onclick=1>"
-    assert markdown_inline("<redacted-script>") == "&lt;redacted-script>"
 
 
 def test_safety_lines_escape_the_replay_source() -> None:

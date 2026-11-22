@@ -35,7 +35,8 @@ def test_customer_pack_redacts_all_files_and_verifies(planted_run: Path, tmp_pat
     target = tmp_path / "pack"
     result = write_enterprise_handoff_pack(planted_run, target)
     texts = {p.relative_to(target): p.read_text() for p in target.rglob("*") if p.is_file()}
-    assert texts and "<redacted-text>" in texts[Path("report.md")]
+    # Markdown shows the placeholder as visible text (a raw tag would render as nothing).
+    assert texts and "&lt;redacted-text>" in texts[Path("report.md")]
     for path, text in texts.items():
         assert all(value not in text for value in (OWNER, NOTES, GUID)), path
     rows = [row for row in result["source_artifacts"] if row.get("source_path") == "reports/report-pack.json"]

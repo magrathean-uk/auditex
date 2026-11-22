@@ -2879,8 +2879,6 @@ def _offline_live_readiness(*sources: Mapping[str, Any]) -> str | None:
 # Every C0 and C1 control (CR, LF, tab included) and the Unicode line and paragraph separators: a line break inside a
 # value would let tenant text start a new Markdown line (a forged heading, list item or table row).
 _MARKDOWN_BREAKS = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
-# The fixed placeholders the redaction writes, kept verbatim so readers and checks still recognise them.
-_MARKDOWN_PLACEHOLDER = re.compile(r"(<(?:redacted-text|redacted-guid|redacted-segment-[0-9]+|run-dir|local-path)>)")
 # A backslash that would escape the next punctuation character (it could cancel the pipe escape), link brackets and
 # the table cell separator.
 _MARKDOWN_INLINE_SPECIAL = re.compile(r"\\(?=[!-/:-@\[-`{-~])|[\[\]|]")
@@ -2895,12 +2893,7 @@ def markdown_inline(value: Any) -> str:
     Shared by the report, customer-pack and compare Markdown renderers.
     """
     text = _MARKDOWN_BREAKS.sub(" ", "" if value is None else str(value)).strip()
-    parts = _MARKDOWN_PLACEHOLDER.split(text)
-    return "".join(
-        part if index % 2 else
-        _MARKDOWN_INLINE_SPECIAL.sub(lambda match: "\\" + match[0], part).replace("<", "&lt;")
-        for index, part in enumerate(parts)
-    )
+    return _MARKDOWN_INLINE_SPECIAL.sub(lambda match: "\\" + match[0], text).replace("<", "&lt;")
 
 
 def _markdown_cell(value: Any) -> str:
