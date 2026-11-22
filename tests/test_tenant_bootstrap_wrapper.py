@@ -203,3 +203,9 @@ def test_run_auditor_forwards_only_options_the_collector_accepts(kit):
     argv = recorder.read_text(encoding="utf-8").splitlines()
     assert argv[argv.index("--tenant-id") + 1] == LAB_TENANT
     assert argv[argv.index("--certificate-thumbprint") + 1] == THUMBPRINT
+
+
+def test_enterprise_lab_max_default_dry_run_exits_zero(kit):
+    proc = kit.run("run-enterprise-lab-max.sh", "--run-name", "labmax-dry")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
