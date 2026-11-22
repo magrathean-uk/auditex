@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.assurance import build_live_readiness_summary
@@ -16,6 +17,12 @@ from azure_tenant_audit.collector_runner import (
     AuditWriterCollectorAdapter,
     CollectorRunContext,
     CollectorRunner,
+)
+from azure_tenant_audit.dns_lookup import (
+    DEFAULT_DOH_ENDPOINT,
+    DOH_ENDPOINT_ENV,
+    doh_resolver_disclosure,
+    resolve_doh_endpoint,
 )
 from azure_tenant_audit.offline_replay import (
     absent_section_rows,
@@ -43,7 +50,13 @@ from .auth import (
     read_service_account_summary,
     safe_auth_summary,
 )
-from .client import GoogleWorkspaceClient, classify_google_error
+from .client import (
+    GoogleWorkspaceClient,
+    classify_google_error,
+    classify_page_error,
+    gmail_settings_status,
+    is_token_refusal,
+)
 from .collectors import (
     COLLECTOR_SECTIONS,
     DEFAULT_ORDER,
@@ -198,14 +211,35 @@ def build_google_capability_rows(
             row_status = "supported_exact_scope"
             row_reason = "runtime_preflight_ok"
         elif failures:
-            classes = {str(item.get("error_class") or "") for item in failures}
-            if classes & {"insufficient_permissions", "unauthenticated"}:
+            # Only a read refused outright is a scope block; a read that partly succeeded proves the scopes work.
+            classes = {str(item.get("error_class") or "") for item in failures if item.get("status") == "failed"}
+            # A Google read of this collector that returned data proves its token carries the collector's scopes
+            # (one token per collector), so another read refused beside it is a role limit, not a missing scope. A
+            # DNS lookup uses no Google token and proves nothing.
+            scopes_proven = any(
+                str(item.get("type") or "google") == "google"
+                and item.get("status") in {"ok", "partial"}
+                and int(item.get("item_count") or 0) > 0
+                for item in seen_by_collector.get(name, [])
+            )
+            if classes & {"insufficient_permissions", "unauthenticated"} and not scopes_proven:
                 row_status = "blocked_by_scope"
                 row_reason = "runtime_permission_block"
-                missing_permissions = required
+                # A refused token whose scopes were checked one by one names only the ones actually missing.
+                named = [
+                    str(scope)
+                    for item in failures
+                    if isinstance(item.get("missing_permissions"), list)
+                    for scope in item["missing_permissions"]
+                ]
+                missing_permissions = list(dict.fromkeys(named)) or required
             else:
                 row_status = "partial"
-                row_reason = "runtime_endpoint_block"
+                row_reason = (
+                    "runtime_permission_block"
+                    if classes & {"insufficient_permissions", "unauthenticated"}
+                    else "runtime_endpoint_block"
+                )
         if auth_mode == "offline" and not failures:
             # A replay observed nothing on a tenant: it is an offline sample, not an exact-scope read.
             row_status = "offline_sample"
@@ -287,6 +321,39 @@ def build_google_toolchain_readiness(dependency_status: dict[str, Any]) -> dict[
     }
 
 
+def _collector_client(client: Any, collector: str) -> Any:
+    """``client`` narrowed to the collector's own scopes, so a scope left out of the delegation fails only it."""
+    for_scopes = getattr(client, "for_scopes", None)
+    if for_scopes is None:
+        return client
+    return for_scopes(tuple(getattr(REGISTRY.get(collector), "required_scopes", ()) or ()))
+
+
+def name_missing_scopes(client: Any, coverage_rows: list[dict[str, Any]]) -> None:
+    """Add ``missing_permissions`` to each row whose token was refused, naming only the scopes the delegation lacks.
+
+    One token exchange per scope of each refused collector; nothing is changed when that cannot be told.
+    """
+    checker = getattr(client, "unauthorised_scopes", None)
+    if checker is None:
+        return
+    refused: dict[str, list[dict[str, Any]]] = {}
+    for row in coverage_rows:
+        if row.get("status") == "failed" and is_token_refusal(row.get("error")):
+            refused.setdefault(str(row.get("collector") or ""), []).append(row)
+    for collector, rows in refused.items():
+        required = tuple(getattr(REGISTRY.get(collector), "required_scopes", ()) or ())
+        if not required:
+            continue
+        try:
+            missing = checker(required)
+        except Exception:  # noqa: BLE001 - the capability row then lists every required scope, as before
+            missing = None
+        if missing:
+            for row in rows:
+                row["missing_permissions"] = list(missing)
+
+
 def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -298,6 +365,18 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
         rows = []
         status = "failed"
         error_class, error = classify_google_error(exc)
+    page_error = getattr(rows, "page_error", None)
+    if status == "ok" and isinstance(page_error, Exception):
+        # A later page failed after its retries: what was read is real, but the list is cut short.
+        status = "partial"
+        error_class, error = classify_page_error(page_error)
+    permission_errors = [item for item in getattr(rows, "permission_errors", None) or [] if isinstance(item, dict)]
+    if status == "ok" and permission_errors:
+        # Drive files whose sharing could not be read: their exposure is unknown, so the read is not complete.
+        classes = [str(item.get("error_class") or "client_error") for item in permission_errors]
+        status = "partial"
+        error_class = max(set(classes), key=classes.count)
+        error = f"Sharing of {len(permission_errors)} Drive files could not be read ({', '.join(sorted(set(classes)))})."
     return {
         "collector": collector,
         "name": name,
@@ -309,6 +388,22 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
     }
 
 
+def _gmail_preflight_status(row: dict[str, Any], check: Any) -> dict[str, Any]:
+    """A probe read that returned settings whose every read failed is not ready; some failing is partial."""
+    if row.get("status") != "ok":
+        return {}
+    for payload in getattr(check, "payloads", None) or []:
+        if not isinstance(payload, dict):
+            continue
+        status, error_class, error = gmail_settings_status(payload)
+        if status != "ok":
+            update = {"status": status, "error_class": error_class, "error": error}
+            if status == "failed":
+                update["item_count"] = 0
+            return update
+    return {}
+
+
 def build_google_preflight_rows(
     client: Any,
     selected: list[str],
@@ -318,44 +413,55 @@ def build_google_preflight_rows(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for collector in selected:
-        if collector == "google_directory":
-            rows.append(_preflight_call(collector, "users", lambda: client.list_directory("users", top=top)))
-        elif collector == "google_reports":
-            rows.append(_preflight_call(collector, "loginActivities", lambda: client.list_report_activities("login", top=top)))
-        elif collector == "google_alert_center":
-            rows.append(_preflight_call(collector, "alerts", lambda: client.list_alerts(top=top)))
-        elif collector == "google_policies":
-            rows.append(_preflight_call(collector, "twoStepVerificationPolicies", lambda: client.list_policies(top=top)))
-        elif collector == "google_gmail_settings":
-            def gmail_check() -> list[dict[str, Any]]:
-                # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
-                if not getattr(client, "per_user_delegation", True):
-                    return [client.get_gmail_settings_for_user("me")]
-                users = client.list_directory("users", top=1)
-                if not users:
-                    return []
-                email = str(users[0].get("primaryEmail") or users[0].get("email") or "")
-                return [client.get_gmail_settings_for_user(email)] if email else []
+        rows.extend(_collector_preflight_rows(_collector_client(client, collector), collector, domain=domain, top=top))
+    name_missing_scopes(client, rows)
+    return rows
 
-            rows.append(_preflight_call(collector, "mailboxSettings", gmail_check))
-        elif collector == "google_devices":
-            rows.append(_preflight_call(collector, "mobileDevices", lambda: client.list_devices("mobile", top=top)))
-        elif collector == "google_dns_posture":
-            rows.append({"collector": collector, "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None})
-        elif collector == "google_drive_posture":
-            rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
-            rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
-        elif collector == "google_groups_settings":
-            def group_settings_check() -> list[dict[str, Any]]:
-                groups = client.list_directory("groups", top=1)
-                if not groups:
-                    return []
-                email = str(groups[0].get("email") or groups[0].get("id") or "")
-                return [client.get_group_settings(email)] if email else []
 
-            rows.append(_preflight_call(collector, "groupSettings", group_settings_check))
-        elif collector == "google_calendar_posture":
-            rows.append(_preflight_call(collector, "calendarResources", lambda: client.list_calendar_resources(top=top)))
+def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None, top: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if collector == "google_directory":
+        rows.append(_preflight_call(collector, "users", lambda: client.list_directory("users", top=top)))
+    elif collector == "google_reports":
+        rows.append(_preflight_call(collector, "loginActivities", lambda: client.list_report_activities("login", top=top)))
+    elif collector == "google_alert_center":
+        rows.append(_preflight_call(collector, "alerts", lambda: client.list_alerts(top=top)))
+    elif collector == "google_policies":
+        rows.append(_preflight_call(collector, "twoStepVerificationPolicies", lambda: client.list_policies(top=top)))
+    elif collector == "google_gmail_settings":
+        def gmail_check() -> list[dict[str, Any]]:
+            # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
+            if not getattr(client, "per_user_delegation", True):
+                gmail_check.payloads = [client.get_gmail_settings_for_user("me")]  # type: ignore[attr-defined]
+                return gmail_check.payloads  # type: ignore[attr-defined]
+            users = client.list_directory("users", top=1)
+            if not users:
+                return []
+            email = str(users[0].get("primaryEmail") or users[0].get("email") or "")
+            gmail_check.payloads = [client.get_gmail_settings_for_user(email)] if email else []  # type: ignore[attr-defined]
+            return gmail_check.payloads  # type: ignore[attr-defined]
+
+        row = _preflight_call(collector, "mailboxSettings", gmail_check)
+        row.update(_gmail_preflight_status(row, gmail_check))
+        rows.append(row)
+    elif collector == "google_devices":
+        rows.append(_preflight_call(collector, "mobileDevices", lambda: client.list_devices("mobile", top=top)))
+    elif collector == "google_dns_posture":
+        rows.append({"collector": collector, "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None})
+    elif collector == "google_drive_posture":
+        rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
+        rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
+    elif collector == "google_groups_settings":
+        def group_settings_check() -> list[dict[str, Any]]:
+            groups = client.list_directory("groups", top=1)
+            if not groups:
+                return []
+            email = str(groups[0].get("email") or groups[0].get("id") or "")
+            return [client.get_group_settings(email)] if email else []
+
+        rows.append(_preflight_call(collector, "groupSettings", group_settings_check))
+    elif collector == "google_calendar_posture":
+        rows.append(_preflight_call(collector, "calendarResources", lambda: client.list_calendar_resources(top=top)))
     return rows
 
 
@@ -375,6 +481,7 @@ def _write_google_bundle(
     waiver_rows: list[dict[str, Any]] | None = None,
     replay: dict[str, Any] | None = None,
     as_of: datetime | None = None,
+    data_handling_notices: list[str] | None = None,
 ) -> int:
     normalized_snapshot = build_google_normalized_snapshot(
         tenant_name=config.tenant_name,
@@ -476,11 +583,41 @@ def _write_google_bundle(
                 "replay_source": replay,
                 "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
                 "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
+                "data_handling_notices": list(data_handling_notices or []),
             },
             as_of=as_of,
         ),
     )
     return 1 if overall_status == "partial" else 0
+
+
+def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Mailboxes in a sample whose Gmail settings reads failed replay as the failed or partial reads they were."""
+    if collector != "google_gmail_settings":
+        return []
+    section = payload.get("mailboxSettings")
+    mailboxes = section.get("value") if isinstance(section, dict) else None
+    rows: list[dict[str, Any]] = []
+    for mailbox in mailboxes if isinstance(mailboxes, list) else []:
+        if not isinstance(mailbox, dict):
+            continue
+        status, error_class, error = gmail_settings_status(mailbox)
+        if status == "ok":
+            continue
+        rows.append(
+            {
+                "collector": collector,
+                "type": "google",
+                "name": f"mailboxSettings:{mailbox.get('userEmail') or 'unknown'}",
+                "endpoint": "gmail.users.settings",
+                "status": status,
+                "item_count": 0 if status == "failed" else 1,
+                "duration_ms": 0,
+                "error_class": error_class,
+                "error": error,
+            }
+        )
+    return rows
 
 
 def run_google_offline(
@@ -557,7 +694,11 @@ def run_google_offline(
         for section in payload.values():
             if isinstance(section, dict) and isinstance(section.get("value"), list):
                 item_count += len(section["value"])
-        replayed = [*replay_coverage_rows(name, payload), *absent_section_rows(name, held, COLLECTOR_SECTIONS.get(name, ()))]
+        replayed = [
+            *replay_coverage_rows(name, payload),
+            *absent_section_rows(name, held, COLLECTOR_SECTIONS.get(name, ())),
+            *_replayed_mailbox_rows(name, payload),
+        ]
         coverage_rows.extend(replayed)
         diagnostics.extend(dict(row) for row in replayed if row.get("status") != "ok")
         row = {
@@ -597,6 +738,23 @@ def run_google_offline(
     )
 
 
+def _resolver_label(doh_endpoint: str) -> str:
+    """The resolver as the notice and run log name it: a configured one by host only, since a path can hold a profile id."""
+    if doh_endpoint == DEFAULT_DOH_ENDPOINT:
+        return doh_resolver_disclosure(doh_endpoint)
+    return f"the configured DNS-over-HTTPS resolver at {urlsplit(doh_endpoint).netloc}"
+
+
+def google_dns_notice(doh_endpoint: str) -> str:
+    """The data-handling notice for the Google DNS posture lookups, with how to turn them off."""
+    return (
+        "Selected Google DNS posture collection sends the customer's verified domain names to "
+        f"{_resolver_label(doh_endpoint)}. Only domain names, no user data, are sent to the resolver. "
+        "Deselect it with --exclude google_dns_posture (the identity and collaboration presets omit it); "
+        f"set {DOH_ENDPOINT_ENV} to use another DNS-over-HTTPS resolver."
+    )
+
+
 def _auth_config(config: GoogleRunConfig, selected: list[str]) -> GoogleAuthConfig:
     scopes = scopes_for_collectors(selected)
     return GoogleAuthConfig(
@@ -623,6 +781,14 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         print(json.dumps({"error": "missing_google_dependencies", **dependency_status}, indent=2), file=sys.stderr)
         return 2
     selected = _selected_collectors(config)
+    # A resolver that cannot be used stops the run before any sign-in or call, as a bad option would.
+    doh_endpoint: str | None = None
+    if "google_dns_posture" in selected:
+        try:
+            doh_endpoint = resolve_doh_endpoint()
+        except ValueError as exc:
+            print(json.dumps({"error": "invalid_doh_endpoint", "message": str(exc)}, indent=2), file=sys.stderr)
+            return 2
     auth_config = _auth_config(config, selected)
     try:
         credentials = build_google_credentials(auth_config)
@@ -642,6 +808,10 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         "Google Workspace live run started",
         {"platform": "google_workspace", "domain": config.domain, "customer_id": config.customer_id, "auth": safe_auth_summary(auth_config)},
     )
+    if doh_endpoint is not None:
+        notice = google_dns_notice(doh_endpoint)
+        LOG.info("%s", notice)
+        writer.log_event("run.notice", notice, {"collector": "google_dns_posture", "resolver": _resolver_label(doh_endpoint)})
     start = time.time()
     writer_adapter = AuditWriterCollectorAdapter(writer)
     runner = CollectorRunner(writer_adapter)
@@ -653,14 +823,14 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         output = runner.run(
             REGISTRY[name],
             CollectorRunContext(
-                client=client,
+                client=_collector_client(client, name),
                 top=config.top,
                 page_size=config.page_size,
                 plane="inventory",
                 since=config.since,
                 until=config.until,
                 hooks=writer_adapter.hooks(),
-                extra={"domain": config.domain, "customer_id": config.customer_id},
+                extra={"domain": config.domain, "customer_id": config.customer_id, "doh_endpoint": doh_endpoint},
             ),
             name=name,
         )
@@ -668,9 +838,8 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         writer.write_summary(dict(output.result_row))
         coverage_rows.extend(output.coverage_rows)
         collector_payloads[name] = output.result.payload
-        for row in output.coverage_rows:
-            if row.get("status") != "ok":
-                diagnostics.append(dict(row))
+    name_missing_scopes(client, coverage_rows)
+    diagnostics = [dict(row) for row in coverage_rows if row.get("status") != "ok"]
     capability_rows = _capability_rows(
         selected,
         auth_mode=config.auth,
@@ -693,6 +862,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         auth_context_path=auth_context_path,
         command_line=command_line,
         waiver_rows=waiver_rows,
+        data_handling_notices=[google_dns_notice(doh_endpoint)] if doh_endpoint is not None else [],
     )
 
 

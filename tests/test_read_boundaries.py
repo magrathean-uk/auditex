@@ -3217,7 +3217,7 @@ def test_every_google_api_call_is_a_read_method() -> None:
         "users.list", "groups.list", "orgunits.list", "domains.list", "roles.list", "roleAssignments.list",
         "members.list", "users.aliases.list", "tokens.list", "activities.list", "alerts.list",
         "getAutoForwarding", "filters.list", "forwardingAddresses.list", "sendAs.list", "getImap", "getPop",
-        "getVacation", "delegates.list", "files.list", "drives.list", "groups.get", "resources.calendars.list",
+        "getVacation", "delegates.list", "files.list", "permissions.list", "drives.list", "groups.get", "resources.calendars.list",
         "calendarList.list", "acl.list", "list", "mobiledevices.list", "chromeosdevices.list",
     }
     violations = [

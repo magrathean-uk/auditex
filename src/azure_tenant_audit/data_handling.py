@@ -174,7 +174,9 @@ def build_data_handling_summary(
     response_execute: bool = False,
     response_allow_write: bool = False,
     doh_endpoint: str | None = None,
+    collection_notices: list[str] | None = None,
 ) -> dict[str, Any]:
+    """``collection_notices`` replaces the notices derived from ``collectors`` (the Google run writes its own)."""
     event_rows = _event_rows(events)
     scope_summary = _scope_summary(auth_scopes)
     write_capable_scopes = scope_summary["write_capable"]
@@ -223,7 +225,11 @@ def build_data_handling_summary(
         "auth_scope_summary": scope_summary,
         "write_capable_scopes": write_capable_scopes,
         "events": event_rows,
-        "collection_notices": collector_activity_notices(collectors, mode, doh_endpoint),
+        "collection_notices": (
+            [str(item) for item in collection_notices]
+            if collection_notices is not None
+            else collector_activity_notices(collectors, mode, doh_endpoint) if platform != "google_workspace" else []
+        ),
         "dns_resolver": dns_resolver_host(collectors, doh_endpoint) if mode != "offline" else None,
         "provider_assertions": provider_assertions,
     }

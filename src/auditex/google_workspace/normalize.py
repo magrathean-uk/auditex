@@ -483,6 +483,7 @@ def build_google_normalized_snapshot(
             alert_type=item.get("type"),
             severity=_alert_metadata(item).get("severity") or item.get("severity"),
             status=_alert_metadata(item).get("status") or item.get("status"),
+            deleted=item.get("deleted") is True,
             create_time=item.get("createTime"),
         )
         for item in _values(collector_payloads.get("google_alert_center", {}), "alerts")

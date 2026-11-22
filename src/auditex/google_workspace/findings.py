@@ -984,6 +984,41 @@ def _issue_surface(name: str) -> tuple[str, str | None]:
     return _SURFACE_LABELS.get(prefix, prefix), rest or None
 
 
+# Full mailbox access is the root scope itself; matched exactly so a look-alike host is not caught by a substring.
+_FULL_MAIL_SCOPES = frozenset({"https://mail.google.com/", "https://mail.google.com"})
+# Mail read, send, insert and settings scopes, Drive, admin and cloud scopes, matched as parts of the scope URL.
+_HIGH_RISK_SCOPE_TERMS = (
+    "gmail.readonly",
+    "gmail.modify",
+    "gmail.send",
+    "gmail.compose",
+    "gmail.insert",
+    "gmail.settings.basic",
+    "gmail.settings.sharing",
+    "/auth/drive",
+    "admin.directory",
+    "cloud-platform",
+)
+
+
+def _high_risk_oauth_scope(scope: str) -> bool:
+    text = scope.strip()
+    return text in _FULL_MAIL_SCOPES or any(term in text for term in _HIGH_RISK_SCOPE_TERMS)
+
+
+def _failed_login_challenge(activity: dict[str, Any]) -> bool:
+    """Whether a login activity holds a ``login_challenge`` event whose ``login_challenge_status`` says it failed."""
+    for event in activity.get("events") or []:
+        if not isinstance(event, dict) or str(event.get("name") or "").strip().lower() != "login_challenge":
+            continue
+        for parameter in event.get("parameters") or []:
+            if not isinstance(parameter, dict) or parameter.get("name") != "login_challenge_status":
+                continue
+            if "fail" in str(parameter.get("value") or "").lower():
+                return True
+    return False
+
+
 def _evidence_unknown_finding(
     *,
     check: str,
@@ -1279,7 +1314,10 @@ def build_google_findings(
         )
 
     super_admins = [user for user in _records(normalized_snapshot, "google_users") if user.get("is_admin")]
-    if len(super_admins) == 1:
+    # A users list cut short (``--top``, a failed page) may hold only some of the super admins: one observed admin is
+    # then no evidence of a single one. More than five observed is sprawl however many were left out.
+    users_cut = "google_directory.users" in {str(item) for item in snapshot.get("truncated_sections") or []}
+    if len(super_admins) == 1 and not users_cut:
         admin = super_admins[0]
         findings.append(
             _finding(
@@ -1412,10 +1450,9 @@ def build_google_findings(
             record=alias_error,
         )
 
-    high_risk_scope_terms = ("gmail.modify", "gmail.settings.sharing", "/auth/drive", "admin.directory", "cloud-platform")
     for grant in _records(normalized_snapshot, "google_oauth_grants"):
         scopes = [str(item) for item in grant.get("scopes") or []]
-        if any(any(term in scope for term in high_risk_scope_terms) for scope in scopes):
+        if any(_high_risk_oauth_scope(scope) for scope in scopes):
             findings.append(
                 _finding(
                     rule_id="google.oauth_high_risk_scope",
@@ -1483,7 +1520,8 @@ def build_google_findings(
                     returned_value=imap,
                 )
             )
-        if str(pop.get("accessWindow") or "").lower() not in {"", "disabled", "access_window_unspecified"}:
+        # The API spells the enum in camelCase (accessWindowUnspecified); compare without case or underscores.
+        if str(pop.get("accessWindow") or "").lower().replace("_", "") not in {"", "disabled", "accesswindowunspecified"}:
             findings.append(
                 _finding(
                     rule_id="google.gmail_pop_enabled",
@@ -2108,6 +2146,9 @@ def build_google_findings(
         )
 
     for alert in _records(normalized_snapshot, "google_alerts"):
+        # A triaged and closed (or deleted) alert is history, not an active incident to triage again.
+        if str(alert.get("status") or "").strip().upper() == "CLOSED" or alert.get("deleted") is True:
+            continue
         findings.append(
             _finding(
                 rule_id="google.alert_active",
@@ -2123,7 +2164,14 @@ def build_google_findings(
             )
         )
 
-    suspicious_login_events = {"suspicious_login", "suspicious_login_activity", "login_challenge"}
+    # Google's own suspicious-login events. A ``login_challenge`` is raised for every verification challenge, passed
+    # ones included, so it counts only when the challenge failed.
+    suspicious_login_events = {
+        "suspicious_login",
+        "suspicious_login_activity",
+        "suspicious_login_less_secure_app",
+        "suspicious_programmatic_login",
+    }
     admin_privilege_events = {
         "assign_role",
         "change_user_admin_privilege",
@@ -2134,7 +2182,9 @@ def build_google_findings(
     for activity in _records(normalized_snapshot, "google_activity_events"):
         event_names = {str(name or "").strip().lower() for name in activity.get("event_names") or []}
         application = str(activity.get("application") or "").lower()
-        if application == "login" and event_names.intersection(suspicious_login_events):
+        if application == "login" and (
+            event_names.intersection(suspicious_login_events) or _failed_login_challenge(activity)
+        ):
             findings.append(
                 _finding(
                     rule_id="google.login_suspicious_event",

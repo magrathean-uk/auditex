@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections import OrderedDict
+import time
+from collections import Counter, OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from azure_tenant_audit.data_minimisation import minimise_gmail_settings
@@ -32,6 +33,17 @@ _CHROMEOS_DEVICE_FIELDS = (
 )
 
 
+# Users: only the fields the audit reads. Recovery e-mail and phone, phones, addresses and notes are never received.
+_USER_FIELDS = (
+    "nextPageToken,users("
+    "id,primaryEmail,name/fullName,isAdmin,isDelegatedAdmin,suspended,archived,"
+    "isEnrolledIn2Sv,isEnforcedIn2Sv,lastLoginTime,creationTime,orgUnitPath)"
+)
+
+
+_DRIVE_PERMISSION_FIELDS = "id,type,role,emailAddress,domain,allowFileDiscovery,deleted"
+
+
 # Gmail settings `fields` masks: only what normalize.py and findings.py read; no vacation text, signature or filter text.
 GMAIL_VACATION_FIELDS = "enableAutoReply,restrictToContacts,restrictToDomain,startTime,endTime"
 GMAIL_SEND_AS_FIELDS = (
@@ -48,6 +60,53 @@ GROUP_SETTING_FIELDS = (
     "email,allowExternalMembers,whoCanJoin,whoCanPostMessage,messageModerationLevel,"
     "whoCanViewMembership,whoCanViewGroup"
 )
+
+
+# The settings each mailbox read makes; a failed one is kept in the payload as ``<name>_error``.
+GMAIL_SETTING_NAMES: tuple[str, ...] = (
+    "autoForwarding", "filters", "forwardingAddresses", "sendAs", "imap", "pop", "vacation", "delegates",
+)
+
+
+def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str | None]:
+    """Status, dominant error class and error of one mailbox's settings read.
+
+    Every settings read failing is ``failed``; some failing is ``partial``; none failing is ``ok``.
+    """
+    skipped = set(payload.get("skippedSettings") or ())
+    attempted = [name for name in GMAIL_SETTING_NAMES if name not in skipped]
+    failures = {
+        name: error
+        for name in attempted
+        if isinstance(error := payload.get(f"{name}_error"), dict) and error
+    }
+    if not failures:
+        if skipped:
+            # A setting these credentials cannot read (delegates under OAuth) is a gap, never a complete read.
+            names = ", ".join(sorted(skipped))
+            return "partial", "subject_scope", f"Gmail settings not read with these credentials: {names}."
+        return "ok", None, None
+    classes = Counter(str(error.get("error_class") or "client_error") for error in failures.values())
+    error_class = classes.most_common(1)[0][0]
+    example = next(
+        (str(error.get("error") or "") for error in failures.values() if str(error.get("error_class") or "client_error") == error_class),
+        "",
+    )
+    status = "failed" if len(failures) == len(attempted) else "partial"
+    error = f"{len(failures)} of {len(attempted)} Gmail settings reads failed ({', '.join(sorted(failures))})"
+    return status, error_class, f"{error}: {example}" if example else error
+
+
+def classify_page_error(exc: Exception) -> tuple[str, str]:
+    """Class and a fixed description of a later page that failed after its retries.
+
+    The library's text names the request URL, whose query carries the customer and the opaque page cursor, so it is
+    never copied: only the HTTP status (when there is one) is kept.
+    """
+    error_class, _message = classify_google_error(exc)
+    status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
+    detail = f"HTTP {status}" if isinstance(status, int) else error_class
+    return error_class, f"A later page failed after its retries ({detail}); the rows read before it are kept."
 
 
 class GoogleWorkspaceError(RuntimeError):
@@ -72,20 +131,73 @@ def classify_google_error(exc: Exception) -> tuple[str, str]:
     return "client_error", message
 
 
+# Token-exchange refusals: domain-wide delegation was not granted one of the scopes the token asked for.
+_TOKEN_REFUSAL_MARKERS = ("unauthorized_client", "invalid_scope", "not authorized for any of the scopes")
+
+
+def is_token_refusal(error: str | None) -> bool:
+    """Whether an error text is a refused token exchange (a scope missing from the delegation), not an API answer."""
+    text = str(error or "")
+    return any(marker in text for marker in _TOKEN_REFUSAL_MARKERS)
+
+
+def _token_request() -> Any:
+    from google.auth.transport.requests import Request
+
+    return Request()
+
+
+# Waits before each retry of a rate-limited (429) or transient (5xx, dropped connection) read; then the error stands.
+RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)
+_RETRYABLE_ERROR_CLASSES = frozenset({"rate_limited", "google_transient"})
+_sleep = time.sleep
+
+
+def _retryable(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    return classify_google_error(exc)[0] in _RETRYABLE_ERROR_CLASSES
+
+
+def _execute(call: Callable[[], Any]) -> Any:
+    """Run one API call, retrying 429 and 5xx answers with backoff; other errors are raised at once."""
+    for delay in (*RETRY_DELAYS, None):
+        try:
+            return call()
+        except Exception as exc:
+            if delay is None or not _retryable(exc):
+                raise
+            _sleep(delay)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 class CollectedRows(list):
     """Rows of one Google list, plus whether the list continued past the operator's limit.
 
     A plain ``list`` is what a caller that does not know about limits returns; the collectors
-    read ``truncated`` with ``getattr`` so both work.
+    read ``truncated`` with ``getattr`` so both work. ``page_error`` is the error of a later page that
+    could not be read even after retries: the rows before it are kept and the list is cut short.
     """
 
     truncated: bool = False
     result_limit: int | None = None
+    page_error: Exception | None = None
+    # Drive only: files whose permissions files.list left out and that were read one by one (see list_drive_files).
+    permission_reads: int = 0
+    permission_errors: list[dict[str, Any]] | None = None
 
-    def __init__(self, rows: Any = (), *, truncated: bool = False, result_limit: int | None = None) -> None:
+    def __init__(
+        self,
+        rows: Any = (),
+        *,
+        truncated: bool = False,
+        result_limit: int | None = None,
+        page_error: Exception | None = None,
+    ) -> None:
         super().__init__(rows)
         self.truncated = truncated
         self.result_limit = result_limit
+        self.page_error = page_error
 
 
 def _cut(values: list[dict[str, Any]], limit: int | None) -> CollectedRows:
@@ -137,6 +249,21 @@ class GoogleWorkspaceClient:
             self._services[key] = build(api, version, credentials=credentials, cache_discovery=False)
         return self._services[key]
 
+    def for_scopes(self, scopes: tuple[str, ...] | list[str] | None) -> GoogleWorkspaceClient:
+        """A client whose calls use a token narrowed to ``scopes`` (one collector's).
+
+        Under domain-wide delegation one scope the tenant has not authorised fails every call on the token that
+        asks for it, so each collector asks only for its own: a missing scope then fails only that collector.
+        Credentials that cannot be narrowed (an OAuth sign-in, which granted every scope at once) are shared as is.
+        """
+        wanted = tuple(scopes or ())
+        if not wanted or getattr(self.credentials, "with_scopes", None) is None:
+            return self
+        credentials = self._scoped_credentials(wanted)
+        if credentials is self.credentials:
+            return self
+        return replace(self, credentials=credentials, _services=None, _subject_services=None)
+
     def _scoped_credentials(self, scopes: tuple[str, ...]) -> Any:
         """Credentials narrowed to ``scopes``, so a scope the tenant has not authorised fails only its own calls."""
         with_scopes = getattr(self.credentials, "with_scopes", None)
@@ -146,6 +273,28 @@ class GoogleWorkspaceClient:
             return with_scopes(list(scopes))
         except Exception:  # noqa: BLE001 - fall back to the shared token rather than skip the read
             return self.credentials
+
+    def unauthorised_scopes(self, scopes: tuple[str, ...] | list[str]) -> list[str] | None:
+        """The scopes in ``scopes`` the domain-wide delegation does not grant, found by one token exchange per scope.
+
+        A refused token says only that some scope was not authorised; asking for each scope alone names the ones
+        actually missing. ``None`` when that cannot be told (credentials that cannot be narrowed, or an exchange
+        that failed for another reason).
+        """
+        if getattr(self.credentials, "with_scopes", None) is None:
+            return None
+        missing: list[str] = []
+        for scope in scopes:
+            narrowed = self._scoped_credentials((scope,))
+            if narrowed is self.credentials:
+                return None
+            try:
+                narrowed.refresh(_token_request())
+            except Exception as exc:  # noqa: BLE001
+                if not is_token_refusal(str(exc)):
+                    return None
+                missing.append(scope)
+        return missing
 
     def _subject_service(self, subject: str, api: str, version: str, scopes: tuple[str, ...]) -> Any:
         """A service that acts as ``subject`` with only ``scopes``; the last few are cached, never one per user."""
@@ -173,8 +322,17 @@ class GoogleWorkspaceClient:
         limit = limit or None
         rows: list[dict[str, Any]] = []
         token: str | None = None
+        first_page = True
         while True:
-            payload = request_factory(token).execute()
+            try:
+                payload = _execute(lambda token=token: request_factory(token).execute())
+            except Exception as exc:
+                if first_page:
+                    raise
+                # A later page failed after its retries: keep what was read, recorded as a list cut short.
+                kept = rows[:limit] if limit is not None else rows
+                return CollectedRows(kept, truncated=True, result_limit=limit, page_error=exc)
+            first_page = False
             values = payload.get(item_key) or payload.get("items") or payload.get("value") or []
             if isinstance(values, list):
                 rows.extend(item for item in values if isinstance(item, dict))
@@ -192,7 +350,8 @@ class GoogleWorkspaceClient:
             # customer=my_customer lists every domain of the tenant, secondary and alias domains included.
             return self._collect_pages(
                 lambda page_token: service.users().list(
-                    customer=self.customer, maxResults=page_size, pageToken=page_token, orderBy="email"
+                    customer=self.customer, maxResults=page_size, pageToken=page_token, orderBy="email",
+                    fields=_USER_FIELDS,
                 ),
                 "users",
                 limit=top,
@@ -204,10 +363,10 @@ class GoogleWorkspaceClient:
                 limit=top,
             )
         if resource == "orgUnits":
-            payload = service.orgunits().list(customerId=self.customer, type="all").execute()
+            payload = _execute(lambda: service.orgunits().list(customerId=self.customer, type="all").execute())
             return _cut(payload.get("organizationUnits") or [], top)
         if resource == "domains":
-            payload = service.domains().list(customer=self.customer).execute()
+            payload = _execute(lambda: service.domains().list(customer=self.customer).execute())
             return _cut(payload.get("domains") or [], top)
         if resource == "roles":
             return self._collect_pages(
@@ -238,12 +397,12 @@ class GoogleWorkspaceClient:
 
     def list_user_aliases(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
-        payload = service.users().aliases().list(userKey=user_key).execute()
+        payload = _execute(lambda: service.users().aliases().list(userKey=user_key).execute())
         return _cut(payload.get("aliases") or [], top)
 
     def list_user_tokens(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
-        payload = service.tokens().list(userKey=user_key).execute()
+        payload = _execute(lambda: service.tokens().list(userKey=user_key).execute())
         return _cut(payload.get("items") or [], top)
 
     def list_report_activities(
@@ -275,10 +434,20 @@ class GoogleWorkspaceClient:
     def list_alerts(self, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("alertcenter", "v1beta1")
         page_size = min(self.page_size, top or self.page_size)
-        return self._collect_pages(
+        rows = self._collect_pages(
             lambda page_token: service.alerts().list(pageSize=page_size, pageToken=page_token, fields=ALERT_FIELDS),
             "alerts",
             limit=top,
+        )
+        # A deleted alert is not an open incident; it never reaches the findings as one.
+        kept = [alert for alert in rows if alert.get("deleted") is not True]
+        if len(kept) == len(rows):
+            return rows
+        return CollectedRows(
+            kept,
+            truncated=getattr(rows, "truncated", False),
+            result_limit=getattr(rows, "result_limit", None),
+            page_error=getattr(rows, "page_error", None),
         )
 
     def get_gmail_settings_for_user(self, user_email: str) -> dict[str, Any]:
@@ -297,7 +466,7 @@ class GoogleWorkspaceClient:
 
         def _capture(name: str, getter: Callable[[], Any], *, list_key: str | None = None, default: Any = None) -> None:
             try:
-                value = getter()
+                value = _execute(getter)
                 if list_key is not None and isinstance(value, dict):
                     payload[name] = value.get(list_key, default if default is not None else [])
                 else:
@@ -318,18 +487,33 @@ class GoogleWorkspaceClient:
         _capture("imap", lambda: settings.getImap(userId=user_email).execute(), default={})
         _capture("pop", lambda: settings.getPop(userId=user_email).execute(), default={})
         _capture("vacation", lambda: settings.getVacation(userId=user_email, fields=GMAIL_VACATION_FIELDS).execute(), default={})
-        _capture("delegates", lambda: settings.delegates().list(userId=user_email).execute(), list_key="delegates", default=[])
+        if self.per_user_delegation:
+            _capture("delegates", lambda: settings.delegates().list(userId=user_email).execute(), list_key="delegates", default=[])
+        else:
+            # delegates.list answers only a service account with domain-wide delegation; an OAuth sign-in is always
+            # refused, which is not a missing scope. It is recorded as not read, never as a failed read.
+            payload["skippedSettings"] = ["delegates"]
+            payload["delegates_error"] = {
+                "error_class": "subject_scope",
+                "error": "Gmail delegates can be listed only under domain-wide delegation; they were not read.",
+            }
         return minimise_gmail_settings(payload)
 
     def list_drive_files(self, *, top: int | None = None) -> list[dict[str, Any]]:
+        """Drive files with their sharing.
+
+        files.list does not return ``permissions`` for items in shared drives, nor for files the subject cannot
+        share. Each file it left them out of has them read with permissions.list, so its sharing is never read as
+        none; a file whose permissions cannot be read either is listed in ``permission_errors``.
+        """
         service = self._service("drive", "v3")
         page_size = min(self.page_size, top or self.page_size)
         fields = (
             "nextPageToken,files("
-            "id,name,mimeType,owners(emailAddress,displayName),webViewLink,shared,"
-            "permissions(id,type,role,emailAddress,domain,allowFileDiscovery,deleted),modifiedTime)"
+            "id,name,mimeType,owners(emailAddress,displayName),webViewLink,shared,driveId,permissionIds,"
+            f"permissions({_DRIVE_PERMISSION_FIELDS}),modifiedTime)"
         )
-        return self._collect_pages(
+        files = self._collect_pages(
             lambda page_token: service.files().list(
                 pageSize=page_size,
                 pageToken=page_token,
@@ -341,6 +525,35 @@ class GoogleWorkspaceClient:
             "files",
             limit=top,
         )
+        if not isinstance(files, CollectedRows):
+            files = CollectedRows(files)
+        errors: list[dict[str, Any]] = []
+        for drive_file in files:
+            file_id = str(drive_file.get("id") or "")
+            if "permissions" in drive_file or not file_id:
+                continue
+            try:
+                permissions = self._collect_pages(
+                    lambda page_token, file_id=file_id: service.permissions().list(
+                        fileId=file_id,
+                        pageSize=100,
+                        pageToken=page_token,
+                        supportsAllDrives=True,
+                        fields=f"nextPageToken,permissions({_DRIVE_PERMISSION_FIELDS})",
+                    ),
+                    "permissions",
+                    limit=None,
+                )
+                drive_file["permissions"] = permissions
+                if permissions.page_error is not None:
+                    # Only some pages were read: what is there is kept, but the file's sharing is not complete.
+                    raise permissions.page_error
+                files.permission_reads += 1
+            except Exception as exc:  # noqa: BLE001 - recorded as a coverage gap, never as no sharing
+                error_class, error = classify_google_error(exc)
+                errors.append({"fileId": file_id, "error_class": error_class, "error": error})
+        files.permission_errors = errors
+        return files
 
     def list_shared_drives(self, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("drive", "v3")
@@ -357,7 +570,7 @@ class GoogleWorkspaceClient:
 
     def get_group_settings(self, group_email: str) -> dict[str, Any]:
         service = self._service("groupssettings", "v1")
-        return service.groups().get(groupUniqueId=group_email, fields=GROUP_SETTING_FIELDS).execute()
+        return _execute(lambda: service.groups().get(groupUniqueId=group_email, fields=GROUP_SETTING_FIELDS).execute())
 
     def list_calendar_resources(self, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")

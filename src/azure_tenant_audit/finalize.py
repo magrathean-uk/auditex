@@ -231,6 +231,9 @@ def finalize_bundle_contract(
             events=metadata.get("data_handling_events") if isinstance(metadata.get("data_handling_events"), list) else [],
             response_execute=bool(metadata.get("response_execute")),
             response_allow_write=bool(metadata.get("response_allow_write")),
+            collection_notices=(
+                metadata.get("data_handling_notices") if isinstance(metadata.get("data_handling_notices"), list) else None
+            ),
         )
         data_handling_path = writer.write_json_artifact("data-handling.json", data_handling_payload)
         metadata["data_handling_path"] = str(data_handling_path.relative_to(writer.run_dir))
