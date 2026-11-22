@@ -289,6 +289,9 @@ def validate_assessment(payload: Any) -> None:
                     raise ValueError("Inconsistent scuba_config synthesis")
             elif section == "scuba_config" and detail["status"] == "projected":
                 raise ValueError("Inconsistent scuba_config synthesis")
+            # Review R106: a withheld section whose private rule view was still built says how; a projected one never does.
+            if "rule_view" in detail and detail["status"] != "not_collected":
+                raise ValueError("Inconsistent projection rule view")
             unsupported = detail.get("unsupported_conditions", [])
             if unsupported and (section != "conditional_access_policies" or detail["reason"] != "incomplete_shape"
                                 or unsupported != sorted(set(unsupported))):

@@ -1051,6 +1051,14 @@
           },
           "uniqueItems": true
         },
+        "rule_view": {
+          "type": "string",
+          "description": "Present only on a withheld (not_collected) section whose private value-rule view was still built: by its model adapter before a model-only gate (adapter) or by a rule variant (variant).",
+          "enum": [
+            "adapter",
+            "variant"
+          ]
+        },
         "unsupported_conditions": {
           "type": "array",
           "items": {

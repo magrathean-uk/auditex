@@ -109,3 +109,78 @@ def test_r099_empty_rule_lists_follow_the_built_in_policy(policy_id):
         assert _answer(policy_id, _safelinks(rules, [SL_BUILTIN], BI_ALL)) == ("met", "policy_flags_ok")
         assert _answer(policy_id, _safelinks(rules, [{**SL_BUILTIN, flag: False}], BI_ALL)) == ("not_met", "policy_flag_off")
         assert _answer(policy_id, _safelinks(rules, [], BI_ALL)) == ("not_assessed", "policy_not_in_export")
+
+
+# ---- R106: the projection report says when a withheld section still feeds the value rules ----
+
+NOT_COLLECTED = {"collection_status": "not_collected"}
+
+
+@pytest.fixture
+def run(tmp_path, monkeypatch):
+    from test_scuba_adapters_aad import TENANT, write
+
+    from auditex import scuba_projection as projection
+    monkeypatch.setattr(projection, "AREA_ADAPTER_MODULES", ("auditex.scuba_adapters_aad",))
+    write(tmp_path, "run-manifest.json", {"run_id": "synthetic-run", "platform": "m365", "tenant_id": TENANT,
+                                          "rule_parameters": {"break_glass_accounts": []}})
+    return tmp_path
+
+
+def _project(run, rows, **options):
+    from test_scuba_adapters_aad import operation
+
+    from auditex import scuba_projection as projection
+    operation(run, "conditional_access", "conditionalAccessPolicies", rows)
+    return projection.project_run(run, **options)
+
+
+def test_r106_variant_rule_view_is_named_in_the_report(run):
+    from test_scuba_adapters_aad import RESTRICTIONS, with_restriction
+    result = _project(run, [with_restriction(RESTRICTIONS[0])])
+    detail = result.report["sections"]["conditional_access_policies"]
+    assert detail["status"] == "not_collected" and detail["unsupported_conditions"]
+    assert result.rule_sections["conditional_access_policies"] != NOT_COLLECTED
+    assert detail.get("rule_view") == "variant"
+
+
+def test_r106_adapter_rule_view_behind_a_model_only_gate_is_named(run):
+    from test_scuba_adapters_aad import CA
+    result = _project(run, [CA])                     # an object shape the model gate has not seen; the rules still read it
+    detail = result.report["sections"]["conditional_access_policies"]
+    assert (detail["status"], detail["reason"], detail["detail"]["kind"]) == ("not_collected", "incomplete_shape", "unseen_shape")
+    assert result.rule_sections["conditional_access_policies"] != NOT_COLLECTED
+    assert detail.get("rule_view") == "adapter"
+    assert "unsupported_conditions" not in detail
+
+
+def test_r106_projected_or_unbuilt_sections_carry_no_rule_view(run):
+    from test_scuba_adapters_aad import CA
+    result = _project(run, [CA])
+    sections = result.report["sections"]
+    assert {name for name, detail in sections.items() if detail["status"] == "projected"} >= {"scuba_config", "tenant_id"}
+    for name, detail in sections.items():
+        rule = result.rule_sections.get(name, NOT_COLLECTED)
+        if detail["status"] == "projected" or (isinstance(rule, dict) and rule.get("collection_status") == "not_collected"):
+            assert "rule_view" not in detail, name
+
+
+def test_r106_assessment_validator_accepts_the_rule_view_only_on_withheld_sections(run):
+    import json
+
+    from test_scuba_adapters_aad import RESTRICTIONS, operation, with_restriction
+
+    import auditex.rule_assessment as rule_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
+    operation(run, "conditional_access", "conditionalAccessPolicies", [with_restriction(RESTRICTIONS[0])])
+    rule_assessment.assess_run(run, policies=["MS.AAD.1.1v1"])
+    payload = json.loads((run / "model_assessment.json").read_text())
+    sections = payload["projection"]["sections"]
+    assert sections["conditional_access_policies"].get("rule_view") == "variant"
+    validate_assessment(payload)
+    projected = next(name for name, detail in sections.items() if detail["status"] == "projected")
+    for name, value in ((projected, "adapter"), ("conditional_access_policies", "model")):
+        bad = json.loads(json.dumps(payload))
+        bad["projection"]["sections"][name]["rule_view"] = value
+        with pytest.raises(ValueError):
+            validate_assessment(bad)
