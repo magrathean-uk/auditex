@@ -560,7 +560,10 @@ def _ca_exists(policy_id, sp, sections):
                   "exemption_key_ambiguous", ["scuba_config"])
     ctl = [r for r in res if r[1]]
     if len(ctl) >= 2 and not restricted_pass:
-        gap = _shared_gap(c, [p for p, r in zip(objs, res, strict=True) if r[1]], sections, allowed_sets)
+        # A failing object whose control cannot be read may still carry it, so it joins the shared-gap test: the gap is definite only when every object
+        # that could carry the control shares it (review: an unreadable control on a narrow policy that includes the shared role kept the union possible).
+        carriers = [p for p, r in zip(objs, res, strict=True) if r[1] or _may_carry(c, p, sections, inventory)]
+        gap = _shared_gap(c, carriers, sections, allowed_sets)
         if gap == "role":
             return _rec(policy_id, "not_met", "no_policy_meets_requirement", f"Requirement not met: no Conditional Access policy meets every condition ({sp['what']}).", "no_policy_meets", None)
         if gap:
@@ -579,6 +582,12 @@ def _ca_exists(policy_id, sp, sections):
         return _rec(policy_id, "not_met", "exclusions_not_configured", "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list.",
                     "near_miss_exclusions", None)
     return _rec(policy_id, "not_met", "no_policy_meets_requirement", f"Requirement not met: no Conditional Access policy meets every condition ({sp['what']}).", "no_policy_meets", None)
+
+
+def _may_carry(c, p, sections, inventory=None):
+    """True when no control (C) conjunct of the object is known false and no restriction is known: it may carry the control even where an unreadable value
+    keeps it from being shown to (`ctl` needs every C conjunct true and the restriction known absent)."""
+    return all(_conj(n, p, sections, inventory)[0] != "f" for n, k in c["conj"] if k == "C") and _restricted(c, p) is not True
 
 
 _EXCLUDED = {"users": (("Conditions", "Users", "ExcludeUsers"), "Users"), "groups": (("Conditions", "Users", "ExcludeGroups"), "Groups"),
