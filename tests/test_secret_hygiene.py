@@ -400,3 +400,16 @@ def test_item26_ownership_is_not_trusted_when_the_volume_flags_cannot_be_read(mo
     assert secret_hygiene.ownership_enforced(tmp_path / "token.json") is False
     monkeypatch.setattr(secret_hygiene, "_darwin_mount_flags", lambda _path: 0)
     assert secret_hygiene.ownership_enforced(tmp_path / "token.json") is True
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="reads macOS mount flags")
+def test_item26_a_vanished_cache_folder_is_not_judged_by_the_volume_above_it() -> None:
+    from pathlib import Path
+
+    from azure_tenant_audit import secret_hygiene
+
+    # A folder that does not exist under a system-volume folder: the volume that held it (say an unmounted noowners
+    # disk) is gone, so the system volume's ownership policy above it says nothing about the cache.
+    gone = Path("/private/var/auditex-missing-volume-check") / "auditex"
+    assert not gone.parent.exists()
+    assert secret_hygiene.ownership_enforced(gone / "token.json") is False

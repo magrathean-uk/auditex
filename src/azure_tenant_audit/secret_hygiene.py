@@ -254,12 +254,16 @@ _STATFS_BUFFER = 4096
 
 
 def _darwin_mount_flags(path: Path) -> int | None:
-    """The mount flags of the volume holding ``path`` (its nearest existing folder); ``None`` when they cannot be read."""
+    """The mount flags of the volume holding the folder ``path``; ``None`` when it is missing or they cannot be read.
+
+    A missing folder is not judged by the volume above it: the volume that held it may have been unmounted since the
+    secret was read, and the folder above it is then on another volume with another ownership policy.
+    """
     import ctypes
 
     current = path
-    while not os.path.exists(current) and current != current.parent:
-        current = current.parent
+    if not os.path.isdir(current):
+        return None
     try:
         libc = ctypes.CDLL(None, use_errno=True)
         try:
