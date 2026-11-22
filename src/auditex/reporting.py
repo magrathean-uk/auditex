@@ -14,7 +14,10 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.autopilot import build_basic_license_intelligence
+from azure_tenant_audit.autopilot import (
+    build_basic_license_intelligence,
+    completed_collector_count,
+)
 from azure_tenant_audit.bundle_integrity import (
     BUNDLE_HASHES_SCHEMA_VERSION,
     integrity_failed,
@@ -693,6 +696,7 @@ def analyze_report(run_dir: str | Path) -> dict[str, Any]:
         findings=findings,
         evidence_paths=[str(item) for item in evidence_paths],
         coverage_gaps=[dict(item) for item in coverage_gaps if isinstance(item, Mapping)] if isinstance(coverage_gaps, list) else [],
+        completed_collectors=completed_collector_count([str(row["status"]) for row in bundle.collector_coverage().values()]),
     )
     citations = _dedupe_citations(
         (

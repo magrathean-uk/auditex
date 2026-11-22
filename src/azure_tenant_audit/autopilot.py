@@ -244,6 +244,15 @@ def _infer_platform(findings: list[dict[str, Any]]) -> str:
     return "m365"
 
 
+def completed_collector_count(statuses: list[str]) -> int | None:
+    """How many collectors finished (complete, partial or ok) out of their coverage statuses; None when no status
+    says anything (empty, or every collector not applicable), so the score falls back to coverage alone."""
+    rows = [str(status or "") for status in statuses]
+    if not [status for status in rows if status != "not_applicable"]:
+        return None
+    return sum(1 for status in rows if status == "ok" or status.startswith(("complete", "partial")))
+
+
 def build_auditor_score(
     *,
     findings: list[dict[str, Any]],
@@ -584,6 +593,7 @@ def build_basic_license_intelligence(
     findings: list[dict[str, Any]],
     evidence_paths: list[str],
     coverage_gaps: list[dict[str, Any]] | None = None,
+    completed_collectors: int | None = None,
 ) -> dict[str, Any]:
     enriched = enrich_findings_for_autopilot(findings)
     return {
@@ -602,6 +612,7 @@ def build_basic_license_intelligence(
             overall_status=overall_status,
             evidence_paths=evidence_paths,
             coverage_gaps=coverage_gaps,
+            completed_collectors=completed_collectors,
         ),
         "attack_paths": build_attack_paths(enriched),
         "control_simulator": build_control_simulator(enriched),
@@ -623,6 +634,7 @@ def build_board_report_sections(
     evidence_paths: list[str],
     blocker_count: int,
     coverage_gaps: list[dict[str, Any]] | None = None,
+    completed_collectors: int | None = None,
 ) -> dict[str, Any]:
     rows = enrich_findings_for_autopilot(findings)
     open_findings = [item for item in rows if str(item.get("status") or "open") == "open"]
@@ -662,6 +674,7 @@ def build_board_report_sections(
         findings=rows,
         evidence_paths=evidence_paths,
         coverage_gaps=gaps,
+        completed_collectors=completed_collectors,
     )
     reviewer_index = _build_reviewer_index(
         top_findings=top_findings,

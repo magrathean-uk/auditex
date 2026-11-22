@@ -174,3 +174,55 @@ def test_x1_dns_posture_uses_the_configured_resolver_when_the_context_names_none
         pass
 
     assert endpoints == ["https://dns.example.net/dns-query"]
+
+
+# R121 remainder: a run in which no collector finished is graded blocked in the report pack and in report analyze,
+# not only when a caller passes completed_collectors by hand.
+def _blocked_ledger() -> list[dict]:
+    return [
+        {"collector": "identity", "coverage_status": "blocked_permission"},
+        {"collector": "security", "coverage_status": "failed_runtime"},
+        {"collector": "sharepoint", "coverage_status": "not_applicable"},
+    ]
+
+
+def test_r121_report_pack_grades_a_run_with_no_completed_collector_blocked() -> None:
+    from azure_tenant_audit.findings import build_report_pack
+
+    pack = build_report_pack(tenant_name="acme", overall_status="partial", findings=[], evidence_paths=["summary.json"],
+                             coverage_ledger=_blocked_ledger())
+
+    assert pack["auditor_score"]["grade"] == "blocked"
+
+
+def test_r121_report_pack_still_grades_a_run_with_a_completed_collector() -> None:
+    from azure_tenant_audit.findings import build_report_pack
+
+    ledger = [*_blocked_ledger(), {"collector": "apps", "coverage_status": "partial_success"}]
+    pack = build_report_pack(tenant_name="acme", overall_status="partial", findings=[], evidence_paths=["summary.json"],
+                             coverage_ledger=ledger)
+
+    assert pack["auditor_score"]["grade"] != "blocked"
+
+
+def test_r121_report_analyze_grades_a_run_with_no_completed_collector_blocked(tmp_path) -> None:  # noqa: ANN001
+    import json
+
+    from auditex.reporting import analyze_report
+
+    run_dir = tmp_path / "acme-run"
+    (run_dir / "reports").mkdir(parents=True)
+    (run_dir / "run-manifest.json").write_text(json.dumps(
+        {"tenant_name": "acme", "run_id": "run", "platform": "m365", "overall_status": "partial",
+         "artifacts": ["reports/report-pack.json"]}), encoding="utf-8")
+    (run_dir / "summary.json").write_text(json.dumps(
+        {"tenant_name": "acme", "run_id": "run", "overall_status": "partial",
+         "collectors": [{"name": "identity", "status": "failed"}, {"name": "security", "status": "failed"}]}),
+        encoding="utf-8")
+    (run_dir / "reports" / "report-pack.json").write_text(json.dumps(
+        {"summary": {"tenant_name": "acme", "overall_status": "partial"}, "findings": [],
+         "evidence_paths": ["summary.json"]}), encoding="utf-8")
+
+    result = analyze_report(run_dir)
+
+    assert result["auditor_score"]["grade"] == "blocked"
