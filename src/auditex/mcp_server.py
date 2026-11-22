@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import inspect
+import json
 import sys
 from functools import wraps
 from pathlib import Path
@@ -24,6 +25,7 @@ from azure_tenant_audit.output_redaction import (
     snapshot_run,
 )
 from azure_tenant_audit.profiles import PROFILES
+from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.response import response_actions
 from azure_tenant_audit.scope_catalog import (
     build_google_scope_catalog,
@@ -133,6 +135,9 @@ def list_collectors(config_path: str = "configs/collector-definitions.json", pro
 
     path = Path(config_path)
     if not path.exists():
+        # R024: the default names a shipped resource; an installed server or another working directory finds it there.
+        path = resolve_resource_path(config_path)
+    if not path.exists():
         return _with_static_citations(
             {"error": "collector definitions file not found", "path": str(path)},
             [{"artifact_path": str(path), "reason": "Collector definition source requested by this MCP helper."}],
@@ -149,7 +154,7 @@ def list_collectors(config_path: str = "configs/collector-definitions.json", pro
 
     catalog = build_m365_scope_catalog(
         collector_config=config,
-        permission_hints=load_permission_hints(Path("configs/collector-permissions.json")),
+        permission_hints=load_permission_hints(resolve_resource_path("configs/collector-permissions.json")),
     )
 
     collectors = [
@@ -279,11 +284,12 @@ def setup_guide(
 def contract_schema_inventory(schema_dir: str = "schemas") -> dict[str, Any]:
     payload = contract_schema_manifest(schema_dir=schema_dir)
     path = Path(schema_dir)
+    resolved = path if path.exists() else resolve_resource_path(schema_dir)
     citations = [
         {"artifact_path": "src/azure_tenant_audit/contracts.py", "reason": "Contract schema manifest builder and bundle validation rules."},
         {"artifact_path": str(path), "reason": "Shipped schema directory requested by this MCP helper."},
     ]
-    evidence_missing = [] if path.exists() else [str(path)]
+    evidence_missing = [] if resolved.exists() else [str(path)]
     return _with_static_citations(payload, citations, evidence_missing=evidence_missing)
 
 
@@ -465,15 +471,76 @@ def build_response_command(
     )
 
 
+# MCP clients cap a tool result at tens of kilobytes; a summary over this size drops its heaviest sections (R025).
+SUMMARY_RESPONSE_BUDGET_BYTES = 48_000
+# Sections a size-capped summary may drop, and the tool that reads each one in full.
+_SUMMARY_DROPPABLE_SECTIONS = {
+    "report_pack": "auditex_report_analyze",
+    "findings": "auditex_proof_table",
+    "action_plan": "auditex_report_analyze",
+    "api_inventory": "auditex_api_inventory",
+    "ai_context": "auditex_report_preview",
+    "audit_plan": "auditex_enterprise_handoff",
+    "coverage_ledger": "auditex_enterprise_handoff",
+    "capability_matrix": "auditex_permissions_ledger",
+    "blockers": "auditex_list_blockers",
+    "diagnostics": "auditex_list_blockers",
+    "validation": "auditex_enterprise_handoff",
+    "data_handling": "auditex_enterprise_handoff",
+    "live_readiness": "auditex_enterprise_handoff",
+    "toolchain_readiness": "auditex_enterprise_handoff",
+    "auth_context": "auditex_enterprise_handoff",
+    "summary_md": "auditex_report_preview",
+    "report_pack_citation_summary": "auditex_report_analyze",
+}
+
+
+def _json_size(value: Any) -> int:
+    return len(json.dumps(value, default=str))
+
+
+def _cap_summary(result: dict[str, Any], budget: int = SUMMARY_RESPONSE_BUDGET_BYTES) -> dict[str, Any]:
+    """Drop the largest droppable sections until the summary fits ``budget``; each is listed in ``omitted_sections``.
+
+    Identity, the summary, validation status, coverage gaps, the scorecard and citations always stay. A section that
+    is dropped keeps its path, its size and item count, and the tool that reads it in full.
+    """
+    if _json_size(result) <= budget:
+        return result
+    capped = dict(result)
+    omitted: dict[str, Any] = {}
+    sizes = sorted(
+        ((_json_size(capped[key]), key) for key in _SUMMARY_DROPPABLE_SECTIONS if key in capped), reverse=True
+    )
+    for size, key in sizes:
+        value = capped.pop(key)
+        entry: dict[str, Any] = {"bytes": size, "read_with": _SUMMARY_DROPPABLE_SECTIONS[key]}
+        if isinstance(value, list):
+            entry["items"] = len(value)
+        elif isinstance(value, dict) and isinstance(value.get("findings"), list):
+            entry["findings"] = len(value["findings"])
+        path = capped.get(f"{key}_path")
+        if isinstance(path, str) and path:
+            entry["path"] = path
+        omitted[key] = entry
+        capped["omitted_sections"] = omitted
+        capped["summary_truncated"] = True
+        if _json_size(capped) <= budget:
+            break
+    return capped
+
+
 @guarded_operation
 def summarize_run(run_dir: str) -> dict[str, Any]:
     """The run summary an MCP client receives: the shareable redaction over the complete payload (its citation
-    summary re-derived). The operator's own terminal reads ``summarize_run_raw``."""
+    summary re-derived), capped at ``SUMMARY_RESPONSE_BUDGET_BYTES`` by dropping its heaviest sections. The
+    operator's own terminal reads ``summarize_run_raw``."""
     current_context().bind_run(run_dir)
     before = snapshot_run(run_dir)
     result = redact_payload(summarize_run_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
     assert_snapshot_stable(run_dir, before)
-    return result
+    # Dropping keys after redaction cannot reveal anything the redaction removed.
+    return _cap_summary(result)
 
 
 def summarize_run_raw(run_dir: str) -> dict[str, Any]:

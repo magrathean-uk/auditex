@@ -91,10 +91,35 @@ def _redact_text(value: str | bytes, sensitive_values: set[str], operator_values
     return text
 
 
+# A full audit of a large tenant (paged users, SharePoint, Intune, Exchange PowerShell) can run for hours, so the
+# MCP tools wait four hours by default. AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS sets another limit; 0 waits without one.
+COMMAND_TIMEOUT_ENV = "AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS"
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 4 * 3600
+
+
+def command_timeout_seconds() -> int | None:
+    """The limit an MCP-launched command runs under: the environment setting, else four hours (``None``: no limit)."""
+    raw = os.environ.get(COMMAND_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return DEFAULT_COMMAND_TIMEOUT_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_COMMAND_TIMEOUT_SECONDS
+    return None if value <= 0 else value
+
+
 def run_cli_command(
-    command: list[str], cwd: str | None = None, *, timeout_seconds: int = 900,
+    command: list[str], cwd: str | None = None, *, timeout_seconds: int | None = None,
     scrub_operator_inputs: bool = False,
 ) -> dict[str, Any]:
+    """Run an Auditex command for an MCP tool and return its redacted output.
+
+    ``timeout_seconds`` defaults to ``command_timeout_seconds()`` (R063): four hours, not the fifteen minutes a
+    full audit of a large tenant outlasts.
+    """
+    if timeout_seconds is None:
+        timeout_seconds = command_timeout_seconds()
     child_env = None
     if scrub_operator_inputs:
         command = _without_operator_input_args(command)
@@ -129,7 +154,10 @@ def run_cli_command(
             "stdout": _redact_text(stdout, sensitive_values, operator_values),
             "stderr": _redact_text(stderr, sensitive_values, operator_values),
             "error_class": "timeout",
-            "error": f"command timed out after {timeout_seconds}s",
+            "error": (
+                f"command timed out after {timeout_seconds}s; the run folder is left unfinalised and can be "
+                f"completed with --resume-from. Set {COMMAND_TIMEOUT_ENV} for a longer limit (0 for none)."
+            ),
         }
     return {
         "command": redact_command(command),
