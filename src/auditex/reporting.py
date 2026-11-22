@@ -2838,12 +2838,29 @@ def verify_enterprise_handoff_pack(
     }
 
 
+class UnknownReportSectionError(ValueError):
+    """An --include-section or --exclude-section name that is no report section (review R126): a misspelt exclusion
+    must not silently publish the section it meant to drop."""
+
+
+def validate_section_names(include_sections: list[str] | None, exclude_sections: list[str] | None) -> None:
+    """Refuse section names outside ``_SECTION_ORDER``, naming the valid ids."""
+    unknown = sorted(
+        {str(name) for name in [*(include_sections or []), *(exclude_sections or [])] if str(name) not in _SECTION_ORDER}
+    )
+    if unknown:
+        raise UnknownReportSectionError(
+            f"Unknown report section(s): {', '.join(unknown)}. Valid sections: {', '.join(_SECTION_ORDER)}."
+        )
+
+
 def _select_sections(
     bundle: dict[str, Any],
     *,
     include_sections: list[str] | None = None,
     exclude_sections: list[str] | None = None,
 ) -> dict[str, Any]:
+    validate_section_names(include_sections, exclude_sections)
     sections = _mapping(bundle.get("sections"))
     if include_sections is None:
         include = [key for key in _SECTION_ORDER if key in sections]
@@ -4146,6 +4163,7 @@ def preview_report(
         raise ValueError(f"Unsupported report format: {format_name}")
     if profile not in PROFILES:
         raise KeyError(profile)  # a typo must not silently publish under a weaker profile
+    validate_section_names(include_sections, exclude_sections)
     before = snapshot_run(run_dir) if profile != PROFILE_LOCAL else None
 
     bundle = load_report_bundle(run_dir, shareable=profile != PROFILE_LOCAL)
