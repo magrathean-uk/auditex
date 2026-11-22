@@ -78,7 +78,9 @@ def test_a_truncated_site_permission_list_gives_no_ownership_verdict() -> None:
     """R045 repair: ownership worked out from a cut permission list is unknown, so no orphaned-site finding fires."""
     from test_review_collectors_transport_fanout import _NextPageFails
 
-    from azure_tenant_audit.collectors.sharepoint_access import SharePointAccessCollector
+    from azure_tenant_audit.collectors.sharepoint_access import (
+        SharePointAccessCollector,
+    )
 
     fake = _NextPageFails(
         "/sites/site-1/permissions",
@@ -139,7 +141,9 @@ def test_the_folder_lookup_scope_and_read_are_declared() -> None:
     import json
     from pathlib import Path
 
-    from azure_tenant_audit.collectors.mailbox_forwarding import MailboxForwardingCollector
+    from azure_tenant_audit.collectors.mailbox_forwarding import (
+        MailboxForwardingCollector,
+    )
 
     configs = Path(__file__).resolve().parents[1] / "configs"
     permissions = json.loads((configs / "collector-permissions.json").read_text(encoding="utf-8"))
@@ -149,3 +153,97 @@ def test_the_folder_lookup_scope_and_read_are_declared() -> None:
     assert "MailboxFolder.Read.All" not in entry["graph_scopes"]
     assert "mailFolders" in definitions["collectors"]["mailbox_forwarding"]["query_plan"]
     assert "never a message" in entry["notes"]
+
+
+def _lab_token(tenant_id: str) -> str:
+    import base64
+    import json
+
+    def part(value: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    return f"{part({'alg': 'none'})}.{part({'tid': tenant_id, 'aud': 'https://outlook.office365.com'})}.constructed"
+
+
+def _response_config(tmp_path, **overrides):
+    from azure_tenant_audit.response import ResponseConfig
+
+    values = dict(tenant_name="lab", out_dir=tmp_path, tenant_id="lab-tenant", action="message_trace",
+                  target="user@example.com", intent="lab check", auditor_profile="exchange-reader", execute=True,
+                  allow_lab_response=True, run_name="r",
+                  exchange_session={"kind": "exchange_online", "access_token": _lab_token("lab-tenant"),
+                                    "organization": "lab.onmicrosoft.com"})
+    values.update(overrides)
+    return ResponseConfig(**values)
+
+
+class _RecordingAdapter:
+    name = "powershell_graph"
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def dependency_check(self) -> bool:
+        return True
+
+    def run(self, command, log_event=None, session=None, **kwargs):  # noqa: ANN001, ARG002
+        self.calls.append({"command": command, **kwargs})
+        return {"command": command, "value": [], "duration_ms": 1.0}
+
+
+def _response_blockers(tmp_path) -> list[dict]:
+    import json
+
+    return json.loads((tmp_path / "lab-r" / "blockers" / "blockers.json").read_text(encoding="utf-8"))
+
+
+def test_response_execution_needs_the_response_toggle(tmp_path, monkeypatch) -> None:
+    """R086 repair: the embedded path enforces AUDITEX_ENABLE_RESPONSE before any tenant command runs."""
+    from azure_tenant_audit.response import run_response
+
+    adapter = _RecordingAdapter()
+    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"lab-tenant"})
+    monkeypatch.delenv("AUDITEX_ENABLE_RESPONSE", raising=False)
+    assert run_response(_response_config(tmp_path)) == 1
+    assert adapter.calls == []
+    assert ("lab_guard", "response_disabled") in {(b["error_class"], b.get("reason")) for b in _response_blockers(tmp_path)}
+
+
+def test_an_exchange_session_for_another_tenant_is_refused(tmp_path, monkeypatch) -> None:
+    """R086 repair: the supplied session must belong to the allow-listed lab tenant, or nothing runs."""
+    from azure_tenant_audit.response import run_response
+
+    adapter = _RecordingAdapter()
+    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"lab-tenant"})
+    monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
+    session = {"kind": "exchange_online", "access_token": _lab_token("customer-tenant"), "organization": "x.onmicrosoft.com"}
+    assert run_response(_response_config(tmp_path, exchange_session=session)) == 1
+    assert adapter.calls == []
+    assert ("lab_guard", "session_tenant_mismatch") in {
+        (b["error_class"], b.get("reason")) for b in _response_blockers(tmp_path)}
+
+
+def test_response_trace_rows_never_reach_the_command_log(tmp_path, monkeypatch) -> None:
+    """R086 repair: a response read's output is evidence only; the command log keeps no stdout sample."""
+    import subprocess
+
+    from azure_tenant_audit.adapters import powershell_graph
+    from azure_tenant_audit.response import run_response
+
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"lab-tenant"})
+    monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
+    monkeypatch.setattr(powershell_graph.shutil, "which", lambda _name: "pwsh")
+    rows = '[{"Subject": "Quarterly merger plan", "SenderAddress": "boss@example.com", "Status": "Delivered"}]'
+    monkeypatch.setattr(
+        powershell_graph.subprocess, "run",
+        lambda argv, **_kw: subprocess.CompletedProcess(argv, 0, stdout=rows, stderr=""),
+    )
+    assert run_response(_response_config(tmp_path, since="2026-01-01T00:00:00Z", until="2026-01-02T00:00:00Z")) == 0
+    run_dir = tmp_path / "lab-r"
+    # raw/ and normalized/ hold the read's evidence by design; the run's logs must not copy it.
+    logs = [p for p in run_dir.rglob("*") if p.is_file() and p.name.startswith("audit-")]
+    assert logs
+    leaked = [str(p.relative_to(run_dir)) for p in logs if "merger" in p.read_text(encoding="utf-8", errors="ignore")]
+    assert leaked == [], leaked

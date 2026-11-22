@@ -4,13 +4,30 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from azure_tenant_audit.response import (
     ALLOWED_RESPONSE_ADAPTERS,
     ResponseConfig,
     run_response,
 )
 
-SESSION = {"kind": "exchange_online", "access_token": "constructed-token", "organization": "lab.onmicrosoft.com"}
+
+def _token(tenant_id: str) -> str:
+    import base64
+
+    def part(value: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    return f"{part({'alg': 'none'})}.{part({'tid': tenant_id})}.constructed-token"
+
+
+SESSION = {"kind": "exchange_online", "access_token": _token("lab-tenant"), "organization": "lab.onmicrosoft.com"}
+
+
+@pytest.fixture(autouse=True)
+def _response_on(monkeypatch) -> None:
+    monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
 
 
 class _Adapter:

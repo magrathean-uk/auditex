@@ -8,6 +8,7 @@ from typing import Any
 
 from .adapters import ADAPTERS, get_adapter
 from .ai_context import build_privacy_block
+from .auth_context import inspect_token_claims
 from .finalize import finalize_bundle_contract, seal_run_findings
 from .findings import build_report_pack
 from .output import AuditWriter
@@ -22,6 +23,10 @@ ALLOWED_RESPONSE_ADAPTERS = tuple(sorted(name for name in ADAPTERS if name in {"
 RETIRED_RESPONSE_ADAPTERS = frozenset({"m365_cli"})
 SAFE_RESPONSE_FIELD_BLACKLIST = frozenset("\x00\r\n\t;&|`$<>\"'")
 MAX_RESPONSE_FIELD_LENGTH = 512
+# The product toggle (auditex.features.RESPONSE_ENABLE_ENV), read here too: the engine never imports the product layer.
+RESPONSE_ENABLE_ENV = "AUDITEX_ENABLE_RESPONSE"
+# Command output a response read returns is evidence (raw/, normalized/), never copied into the run's logs (R086).
+_RESPONSE_LOG_OUTPUT_KEYS = frozenset({"stdout", "stderr", "stdout_sample", "stderr_sample"})
 
 
 def _is_safe_response_field(value: str | None) -> bool:
@@ -126,6 +131,31 @@ def response_actions() -> list[str]:
     return sorted(RESPONSE_ACTIONS.keys())
 
 
+def _response_enabled() -> bool:
+    return os.environ.get(RESPONSE_ENABLE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _session_tenant(session: Any) -> str | None:
+    """The tenant the session's access token was minted for (its ``tid`` claim), or None when it cannot be read."""
+    token = session.get("access_token") if isinstance(session, dict) else None
+    if not isinstance(token, str):
+        return None
+    try:
+        tenant = inspect_token_claims(token).get("tenant_id")
+    except (ValueError, TypeError):
+        return None
+    return str(tenant) if tenant else None
+
+
+def _log_without_output(log_event: Any) -> Any:
+    def log(kind: str, message: str, details: dict[str, Any] | None = None) -> None:
+        if isinstance(details, dict):
+            details = {key: value for key, value in details.items() if key not in _RESPONSE_LOG_OUTPUT_KEYS}
+        log_event(kind, message, details)
+
+    return log
+
+
 def _lab_tenant_ids() -> set[str]:
     configured = os.environ.get(LAB_TENANT_ENV, "")
     values = [value.strip() for value in configured.split(",") if value.strip()]
@@ -220,6 +250,19 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                 "recommendations": {
                     "notes": "Pass --allow-lab-response and target a tenant in AUDITEX_LAB_TENANT_IDS."
                 },
+            }
+        )
+
+    if config.execute and not _response_enabled():
+        blockers.append(
+            {
+                "collector": "response",
+                "item": "response.feature_toggle",
+                "status": "failed",
+                "error_class": "lab_guard",
+                "reason": "response_disabled",
+                "error": f"Response execution is disabled; {RESPONSE_ENABLE_ENV} is not set.",
+                "recommendations": {"notes": f"Set {RESPONSE_ENABLE_ENV}=1 for lab-only development."},
             }
         )
 
@@ -374,7 +417,24 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                     "status": "failed",
                     "error_class": "session_not_connected",
                     "error": f"Response action '{action.name}' needs a connected Exchange Online session.",
-                    "recommendations": {"notes": "Supply the lab Exchange Online session, or run the dry-run plan."},
+                    "recommendations": {"notes": (
+                        "The auditex CLI cannot open an Exchange Online session for response actions yet; run the "
+                        "dry-run plan, or call run_response with the lab tenant's exchange_session."
+                    )},
+                }
+            )
+        elif config.execute and action.needs_exchange_session and _session_tenant(session) != tenant_id:
+            # The lab guard checked the configured tenant ID; the session must be that tenant's, or the read would
+            # run in whichever organisation the token belongs to.
+            blockers.append(
+                {
+                    "collector": "response",
+                    "item": f"response.session:{action.name}",
+                    "status": "failed",
+                    "error_class": "lab_guard",
+                    "reason": "session_tenant_mismatch",
+                    "error": "The Exchange Online session does not belong to the allow-listed lab tenant.",
+                    "recommendations": {"notes": "Supply a session minted for the lab tenant named by --tenant-id."},
                 }
             )
 
@@ -454,11 +514,12 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
             )
         else:
             last_failure: dict[str, Any] | None = None
+            command_log = _log_without_output(writer.log_event)
             for index, command in enumerate(planned_commands, start=1):
                 if action.needs_exchange_session and adapter.name == "powershell_graph":
-                    command_payload = adapter.run(command, log_event=writer.log_event, session=config.exchange_session)
+                    command_payload = adapter.run(command, log_event=command_log, session=config.exchange_session)
                 else:
-                    command_payload = adapter.run(command, log_event=writer.log_event)
+                    command_payload = adapter.run(command, log_event=command_log)
                 command_payload.setdefault("command", command)
                 command_payload.setdefault("plan_position", index)
                 executed = command_payload.get("error") is None
