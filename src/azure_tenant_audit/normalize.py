@@ -123,11 +123,18 @@ class _NormalizationSources:
             key in section for key in ("value", "chunk_files", "sample_truncated", "item_count")
         )
 
-    def values(self, payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    def values(
+        self, payload: dict[str, Any], key: str, *, collector: str | None = None, source_name: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Rows of one endpoint section, with its completeness recorded under ``<collector>.<source_name>``.
+
+        A nested fan-out section (a section inside a collector's payload, such as one eDiscovery case's searches)
+        names its ``collector`` and its own ``source_name``, so each fan-out read is accounted for on its own.
+        """
         section = payload.get(key) if isinstance(payload, dict) else None
         if not self.is_endpoint(section):
             return []
-        collector = self.collector_names.get(id(payload), "unknown")
+        collector = collector or self.collector_names.get(id(payload), "unknown")
         effective_section = dict(section)
         coverage = self.coverage.get((collector, key), [])
         # A fan-out can have many coverage rows counting nested members rather
@@ -164,7 +171,8 @@ class _NormalizationSources:
                 truncation_reason = coverage[0].get("truncation_reason")
             truncation_reason = str(truncation_reason or (REASON_OPERATOR_LIMIT if limit else REASON_UNKNOWN))
         source_failed = bool(section.get("error")) or any(row.get("status") == "failed" for row in coverage)
-        source = f"{collector}.{key}"
+        name = source_name or key
+        source = f"{collector}.{name}"
         previous = self.reports.get(source)
         if previous:
             if previous["record_count"] != len(rows):
@@ -173,7 +181,7 @@ class _NormalizationSources:
         self.reports[source] = {
             "key": f"normalization:{source}",
             "collector": collector,
-            "source_name": key,
+            "source_name": name,
             "source": source,
             "storage": "chunks" if section.get("chunk_files") else "inline",
             "record_count": len(rows),
@@ -2839,7 +2847,9 @@ def build_normalized_snapshot(
         )
         case_section = ediscovery_payload.get(f"case_{case_id}")
         searches = case_section.get("searches") if isinstance(case_section, dict) else None
-        for search in _values({"searches": searches}, "searches") if isinstance(searches, dict) else []:
+        for search in _values(
+            case_section, "searches", collector="ediscovery", source_name=f"case_{case_id}.searches"
+        ) if isinstance(searches, dict) else []:
             if not search.get("id"):
                 continue
             ediscovery_searches.append(

@@ -107,3 +107,24 @@ def test_i2_a_verified_exclusion_raises_no_unverified_note() -> None:
     from azure_tenant_audit.findings import build_findings
 
     assert "ca.break_glass_exclusion_unverified" not in {item["rule_id"] for item in build_findings([], normalized_snapshot=snapshot)}
+
+
+def test_i3_case_searches_with_different_counts_keep_normalisation_complete() -> None:
+    """R108: each case's searches are their own ediscovery source, never one shared "unknown.searches"."""
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payload = {
+        "cases": {"value": [{"id": "c1"}, {"id": "c2"}]},
+        "case_c1": {"searches": {"value": [{"id": "s1"}]}, "operations": {"value": []}},
+        "case_c2": {"searches": {"value": [{"id": "s2"}, {"id": "s3"}]}, "operations": {"value": []}},
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="r", collector_payloads={"ediscovery": payload})
+
+    assert snapshot["snapshot"]["normalization_complete"] is True
+    assert snapshot["snapshot"]["normalization_incomplete_sections"] == []
+    sources = {row["source"]: row for row in snapshot["normalization_coverage"]["records"]}
+    assert not [name for name in sources if name.startswith("unknown.")]
+    assert sources["ediscovery.case_c1.searches"]["collector"] == "ediscovery"
+    assert sources["ediscovery.case_c2.searches"]["record_count"] == 2
+    searches = {(row["case_id"], row["id"]) for row in snapshot["ediscovery_searches"]["records"]}
+    assert searches == {("c1", "s1"), ("c2", "s2"), ("c2", "s3")}
