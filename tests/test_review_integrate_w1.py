@@ -29,3 +29,12 @@ def test_i6_rule_inventory_rates_expired_app_credentials_low() -> None:
     ratings = {row["name"]: row.get("risk_rating") for row in list_rule_inventory()}
     assert ratings["app_credentials.secret_expired"] == "low"
     assert ratings["app_credentials.certificate_expired"] == "low"
+
+
+def test_i7_permission_notes_describe_retired_cli_operations_as_named_skips() -> None:
+    """R107: purview and ediscovery record each retired CLI operation as skipped, not as an error."""
+    collectors = _load("collector-permissions.json")["collector_permissions"]
+    for name in ("purview", "ediscovery"):
+        notes = collectors[name]["notes"]
+        assert "error m365_cli_not_used" not in notes, name
+        assert "skipped with the reason m365_cli_not_used" in notes, name

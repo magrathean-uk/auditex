@@ -71,7 +71,7 @@
         "Security Reader",
         "Global Reader"
       ],
-      "notes": "Named gap: retention labels, retention policies, DLP policies and the audit log are not collected. They were read only by the CLI for Microsoft 365, which Auditex no longer runs; each operation is recorded in coverage with the error m365_cli_not_used. The reader app's certificate reads no Purview data in this collector."
+      "notes": "Named gap: retention labels, retention policies, DLP policies and the audit log are not collected. They were read only by the CLI for Microsoft 365, which Auditex no longer runs; each operation is recorded in coverage as skipped with the reason m365_cli_not_used. The reader app's certificate reads no Purview data in this collector."
     },
     "ediscovery": {
       "graph_scopes": [
@@ -82,7 +82,7 @@
         "eDiscovery Reader",
         "Global Reader"
       ],
-      "notes": "eDiscovery cases, with each case's searches and operations, are read through Microsoft Graph with the reader app's certificate (eDiscovery.Read.All). Named gap: the case, search, export, review set and hold listings of the CLI for Microsoft 365 are not run, because Auditex no longer runs that CLI; each is recorded in coverage with the error m365_cli_not_used."
+      "notes": "eDiscovery cases, with each case's searches and operations, are read through Microsoft Graph with the reader app's certificate (eDiscovery.Read.All). Named gap: the case, search, export, review set and hold listings of the CLI for Microsoft 365 are not run, because Auditex no longer runs that CLI; each is recorded in coverage as skipped with the reason m365_cli_not_used."
     },
     "auth_methods": {
       "graph_scopes": [
