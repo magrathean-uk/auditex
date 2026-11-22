@@ -446,3 +446,23 @@ def test_setup_guide_carries_the_earlier_lanes_setup_facts():
     assert hint_message in guide
     assert f"{cert_message} {cert_hint}" in m365
     assert _host(GRAPH_ROOT) in m365 and "GCC High" in m365, "say which clouds the fixed Graph host serves"
+
+
+# Earlier lanes' wording for product-manual.md --------------------------------------------------------------------
+
+
+def test_product_manual_carries_the_earlier_lanes_operator_facts():
+    from auditex.guided import build_guided_parser
+    from azure_tenant_audit.resources import RESOURCE_ROOT_ENV
+
+    flags = {option for action in build_guided_parser()._actions for option in action.option_strings}
+    assert {"--install-tools", "--non-interactive", "--doh-endpoint"} <= flags
+    setup_line = re.search(r'"(auditex setup prepares a source checkout[^"\\]+)', _doc("src/auditex/bootstrap.py")).group(1)
+    assert 'grade": "blocked"' in _doc("src/azure_tenant_audit/autopilot.py")
+    manual = _flat(_doc("docs/guides/product-manual.md"))
+    install = _flat(_section(_doc("docs/guides/product-manual.md"), "## Install"))
+    assert setup_line in install and RESOURCE_ROOT_ENV in install
+    m365 = _flat(_section(_doc("docs/guides/product-manual.md"), "## Microsoft 365 Audit Flow"))
+    for flag in ("--install-tools", "--non-interactive", "--doh-endpoint"):
+        assert f"`{flag}" in m365, flag
+    assert "`blocked`" in manual and "no collector completed" in manual
