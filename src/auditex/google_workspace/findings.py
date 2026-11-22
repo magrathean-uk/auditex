@@ -984,6 +984,28 @@ def _issue_surface(name: str) -> tuple[str, str | None]:
     return _SURFACE_LABELS.get(prefix, prefix), rest or None
 
 
+# Full mailbox access is the root scope itself; matched exactly so a look-alike host is not caught by a substring.
+_FULL_MAIL_SCOPES = frozenset({"https://mail.google.com/", "https://mail.google.com"})
+# Mail read, send, insert and settings scopes, Drive, admin and cloud scopes, matched as parts of the scope URL.
+_HIGH_RISK_SCOPE_TERMS = (
+    "gmail.readonly",
+    "gmail.modify",
+    "gmail.send",
+    "gmail.compose",
+    "gmail.insert",
+    "gmail.settings.basic",
+    "gmail.settings.sharing",
+    "/auth/drive",
+    "admin.directory",
+    "cloud-platform",
+)
+
+
+def _high_risk_oauth_scope(scope: str) -> bool:
+    text = scope.strip()
+    return text in _FULL_MAIL_SCOPES or any(term in text for term in _HIGH_RISK_SCOPE_TERMS)
+
+
 def _failed_login_challenge(activity: dict[str, Any]) -> bool:
     """Whether a login activity holds a ``login_challenge`` event whose ``login_challenge_status`` says it failed."""
     for event in activity.get("events") or []:
@@ -1425,10 +1447,9 @@ def build_google_findings(
             record=alias_error,
         )
 
-    high_risk_scope_terms = ("gmail.modify", "gmail.settings.sharing", "/auth/drive", "admin.directory", "cloud-platform")
     for grant in _records(normalized_snapshot, "google_oauth_grants"):
         scopes = [str(item) for item in grant.get("scopes") or []]
-        if any(any(term in scope for term in high_risk_scope_terms) for scope in scopes):
+        if any(_high_risk_oauth_scope(scope) for scope in scopes):
             findings.append(
                 _finding(
                     rule_id="google.oauth_high_risk_scope",

@@ -94,3 +94,41 @@ def test_r012_failed_login_challenge_is_suspicious() -> None:
 )
 def test_r012_google_suspicious_login_events_are_reported(event: str) -> None:
     assert len(_login_findings(_login(event))) == 1
+
+
+# ---- R013: the broad Gmail scopes are high-risk OAuth grants ------------------------------------------------
+
+
+def _grant_findings(scopes: list[str]) -> list[dict[str, Any]]:
+    payload = {
+        "google_directory": {
+            "users": {"value": [{"id": "u1", "primaryEmail": "user@example.com"}]},
+            "oauthGrants": {"value": [{"userKey": "user@example.com", "clientId": "app-1", "displayText": "App", "scopes": scopes}]},
+        }
+    }
+    return [item for item in _findings(payload) if item.get("rule_id") == "google.oauth_high_risk_scope"]
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.insert",
+        "https://www.googleapis.com/auth/gmail.settings.basic",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.settings.sharing",
+    ],
+)
+def test_r013_each_mail_scope_is_a_high_risk_grant(scope: str) -> None:
+    assert len(_grant_findings([scope])) == 1
+
+
+@pytest.mark.parametrize(
+    "scope",
+    ["https://www.googleapis.com/auth/userinfo.email", "openid", "https://mail.google.com.example.net/"],
+)
+def test_r013_narrow_or_lookalike_scopes_are_not_high_risk(scope: str) -> None:
+    assert _grant_findings([scope]) == []
