@@ -562,3 +562,18 @@ def test_review_preset_with_unreadable_defender_scope_may_cover_the_excluded():
     sections["atp_policy_rules"] = [{"Identity": name, "State": "Enabled"}]
     record = _kind(sections)
     assert (record["verdict"], record["cell"]) == ("not_assessed", "partial_tier_may_cover")
+
+
+# ---- Repair round 2 ----
+
+def test_review2_spaced_dmarc_record_beside_a_note_does_not_crash():
+    summary = dns_lookup._summarize_dmarc(["v = DMARC1; p=reject", "note: use v=DMARC1"])
+    assert summary["present"] is True and summary["multiple_records"] is False
+
+
+def test_review2_multi_member_gzip_policy_is_decoded_whole():
+    import gzip
+    first, second = b"version: STSv1\nmode: enforce\n", b"mx: mail.contoso.example\nmax_age: 604800\n"
+    assert exposure_lookup._decode_body(gzip.compress(first) + gzip.compress(second), "gzip") == first + second
+    bomb = gzip.compress(b"a" * (exposure_lookup.MAX_POLICY_BYTES * 4)) * 3
+    assert len(exposure_lookup._decode_body(bomb, "gzip")) == exposure_lookup.MAX_POLICY_BYTES + 1

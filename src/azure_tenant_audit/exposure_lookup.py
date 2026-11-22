@@ -122,10 +122,17 @@ def _decode_body(raw: bytes, encoding: Any) -> bytes:
         decoder = zlib.decompressobj(zlib.MAX_WBITS if raw[:1] == b"\x78" else -zlib.MAX_WBITS)
     else:
         return raw
+    out = b""
     try:
-        return decoder.decompress(raw, MAX_POLICY_BYTES + 1)
+        while True:
+            out += decoder.decompress(raw, MAX_POLICY_BYTES + 1 - len(out))
+            # gzip allows several members back to back (RFC 1952 section 2.2); read each, never past the cap
+            if len(out) > MAX_POLICY_BYTES or not decoder.eof or not decoder.unused_data or name == "deflate":
+                return out
+            raw = decoder.unused_data
+            decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
     except zlib.error:
-        return b""
+        return out
 
 
 def is_safe_domain_name(domain: str) -> bool:

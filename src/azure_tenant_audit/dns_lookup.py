@@ -546,7 +546,7 @@ def _summarize_dmarc(records: list[str]) -> dict[str, Any]:
     records_proper = [rec for rec in records if _DMARC_RECORD_START.match(rec)]
     if len(records_proper) > 1:
         return {**_absent("dmarc"), "multiple_records": True, "record_count": len(records_proper)}
-    parsed = parse_dmarc(records_proper[0]) if records_proper else parsed_records[0]
+    parsed = (parse_dmarc(records_proper[0]) if records_proper else None) or parsed_records[0]
     pct = parsed.get("pct")
     pct_partial = isinstance(pct, int) and 0 <= pct < 100
     return {
