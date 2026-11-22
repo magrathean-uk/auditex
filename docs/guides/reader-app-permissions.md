@@ -305,8 +305,11 @@ registration); without a certificate nobody can sign in as it. Upload a new cert
 
 ## Optional collectors (not part of the grant)
 
-A full audit does not use these collectors and does not need their permissions. Add a permission only if the
-person running Auditex plans to select that collector with `--collectors`, and remove it afterwards with the app.
+The full audit in step 7 does not use these collectors and does not need their permissions. Add a permission only
+if the person running Auditex plans to select that collector, and remove it afterwards with the app. One profile
+selects one of them by default: the `app-readonly-full` auditor profile adds `ediscovery` (with `purview` and
+`intune_depth`, which need nothing beyond this guide), so a run with that profile needs `eDiscovery.Read.All`
+below. Without it the `ediscovery` collector fails on the missing permission and the run is partial.
 
 | Collector | Adds | API | Type | Admin consent | Why |
 | --- | --- | --- | --- | --- | --- |

@@ -6,7 +6,9 @@ Tenant administrators: every permission, role and setting the reader app needs i
 
 Runs with the `auto` or `global-reader` profile select `exchange_policy`
 and `dns_posture` by default, as does the `full` preset. `app-readonly-full` also
-includes both. Every other preset (`config-only`, `identity-only`, `security-only`
+includes both and adds `intune_depth`, `purview` and `ediscovery`; `ediscovery` needs
+`eDiscovery.Read.All`, an [optional permission](reader-app-permissions.md#optional-collectors-not-part-of-the-grant)
+of the reader app, and without it the run is partial. Every other preset (`config-only`, `identity-only`, `security-only`
 and `power-platform`) replaces the profile defaults with its own list and omits
 both, as does an explicit `--collectors` list; `--exclude` drops either one after
 selection. Power Platform and Power BI remain opt-in.

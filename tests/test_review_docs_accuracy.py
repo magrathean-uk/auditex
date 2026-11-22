@@ -164,3 +164,25 @@ def test_setup_guide_names_every_preset_that_drops_the_exchange_and_dns_defaults
     for name in dropping:
         assert f"`{name}`" in opening, f"setup guide must say the `{name}` preset omits exchange_policy and dns_posture"
     assert "Only an explicit `--collectors` list or the `config-only` and `power-platform` presets change that" not in opening
+
+
+# R145 ------------------------------------------------------------------------------------------------------------
+
+
+def test_reader_app_guide_says_app_readonly_full_needs_ediscovery():
+    from azure_tenant_audit.profiles import PROFILES
+
+    full = PROFILES["app-readonly-full"]
+    assert "ediscovery" in full.default_collectors and "eDiscovery.Read.All" in full.app_escalation_permissions
+    guide = _flat(_doc("docs/guides/reader-app-permissions.md"))
+    optional = guide[guide.index("## Optional collectors") :]
+    optional = optional[: optional.index("Related reading")]
+    assert "A full audit does not use these collectors and does not need their permissions." not in optional
+    assert "`app-readonly-full`" in optional, "the optional table must say app-readonly-full selects ediscovery"
+    assert "eDiscovery.Read.All" in optional
+    # setup-guide.md presents app-readonly-full as including the defaults: it must also say what it adds.
+    setup = _flat(_section(_doc("docs/guides/setup-guide.md"), "## Default Exchange and public DNS collection"))
+    extra = sorted(set(full.default_collectors) - set(PROFILES["global-reader"].default_collectors))
+    for name in extra:
+        assert f"`{name}`" in setup, f"setup guide must say app-readonly-full adds `{name}`"
+    assert "eDiscovery.Read.All" in setup
