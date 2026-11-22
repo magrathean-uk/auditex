@@ -797,7 +797,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             ",@(Get-DkimSigningConfig | Select-Object Domain,Enabled,Status)": {
                 "value": [{"Domain": "example.invalid", "Enabled": True, "Status": "Valid"}]
             },
-            ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,HostedContentFilterPolicy,AntiPhishPolicy,MalwareFilterPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
             ",@(Get-ATPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
             ",@(Get-ATPBuiltInProtectionRule | Select-Object Identity,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
             "Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB": {"value": []},

@@ -852,7 +852,7 @@
           "name": "eopProtectionPolicyRules",
           "category": "policy",
           "commands": [
-            ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+            ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,HostedContentFilterPolicy,AntiPhishPolicy,MalwareFilterPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
           ]
         },
         {
