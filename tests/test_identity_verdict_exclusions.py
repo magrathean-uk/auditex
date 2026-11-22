@@ -676,3 +676,78 @@ def test_findings_for_exclusions_and_administrator_mfa_cite_records_that_exist()
     refs = [(ref["artifact_path"], ref["record_key"]) for ref in findings["ca.mfa_not_enforced"]["evidence_refs"]]
     assert len(refs) == len(set(refs)), "no reference is listed twice"
     assert "conditional_access_policy:ca-mfa" in {record_key for _path, record_key in refs}
+
+
+# --- deep review 2026-11-21: identity posture --------------------------------------------------------
+
+CONTRACTORS = "g-contractors"
+
+
+def test_two_policies_each_excluding_a_different_unread_group_are_not_a_clean_pass() -> None:
+    """R035: someone in both unread groups is outside both policies, so no verdict may read as a clean pass."""
+    first = _policy("ca-1", users=_all_users(excludeGroups=[ALL_STAFF]))
+    second = _policy("ca-2", users=_all_users(excludeGroups=[CONTRACTORS]))
+
+    mfa = _mfa(first, second)
+    assert mfa["verdict"] == "enforced_with_exclusions"
+    assert mfa["single_policy_verdict"] == "enforced_with_exclusions"
+    row = mfa["unsanctioned_exclusions"][0]
+    assert row["possible"] is True and row["type"] == "group"
+    assert {item["id"] for item in row["via"]} == {ALL_STAFF, CONTRACTORS}
+
+    admin = _admin(first, second)
+    assert admin["verdict"] == "enforced_with_exclusions"
+
+    legacy = _legacy(
+        _block("ca-b1", users=_all_users(excludeGroups=[ALL_STAFF])),
+        _block("ca-b2", users=_all_users(excludeGroups=[CONTRACTORS])),
+    )
+    assert legacy["verdict"] == "blocked_with_exclusions"
+
+    # One policy excluding only an emergency-access group the operator listed still leaves everyone covered.
+    assert _mfa(first, _policy("ca-2", users=_all_users(excludeGroups=[BREAK_GLASS_GROUP])),
+                sanctioned=frozenset({BREAK_GLASS_GROUP}))["verdict"] == "enforced"
+
+
+def test_single_policy_verdict_needs_one_policy_that_leaves_nobody_out() -> None:
+    """R036: split user exclusions cover everyone combined, but no single policy leaves nobody out."""
+    first = _policy("ca-1", users=_all_users(excludeUsers=["u-x"]))
+    second = _policy("ca-2", users=_all_users(excludeUsers=["u-y"]))
+
+    split = _mfa(first, second)
+    assert split["verdict"] == "enforced"
+    assert split["single_policy_verdict"] == "enforced_with_exclusions"
+
+    assert _mfa(first, _policy("ca-3"))["single_policy_verdict"] == "enforced"
+    sanctioned = _policy("ca-4", users=_all_users(excludeUsers=[BREAK_GLASS_USER]))
+    assert _mfa(first, sanctioned, sanctioned=frozenset({BREAK_GLASS_USER}))["single_policy_verdict"] == "enforced"
+
+
+GLOBAL_READER = "f2ef992c-3afb-46b9-b7cf-a126ee74c451"
+
+
+def test_a_role_policy_for_administrators_does_not_rescue_a_non_privileged_role_exclusion() -> None:
+    """Impact on R037: an administrator who also holds Global Reader is not every Global Reader."""
+    scope = AdminScope(
+        complete=True,
+        privileged_role_ids=frozenset({GLOBAL_ADMIN, EXCHANGE_ADMIN}),
+        held_role_ids=frozenset({GLOBAL_ADMIN}),
+        admin_principal_ids=frozenset({ADMIN}),
+        guest_admin_count=0,
+        principal_roles={ADMIN: frozenset({GLOBAL_ADMIN, GLOBAL_READER})},
+    )
+    all_users = _policy("ca-all", users=_all_users(excludeRoles=[GLOBAL_READER]))
+    for_admins = _policy("ca-ga", users={"includeRoles": [GLOBAL_ADMIN]})
+
+    verdict = evaluate_effective_mfa(
+        policies=_collected(all_users, for_admins),
+        security_defaults=_defaults(False),
+        authentication_strengths=_collected(),
+        lookups=LOOKUPS,
+        admin_scope=scope,
+    )
+    assert verdict["verdict"] == "enforced_with_exclusions"
+    row = next(item for item in verdict["excluded_principals"] if item["id"] == GLOBAL_READER)
+    assert not row.get("covered_by_policy_ids")
+    # The administrator verdict reads administrators only: the role policy covers the one who holds both.
+    assert _admin(all_users, for_admins, scope=scope)["verdict"] == "enforced"

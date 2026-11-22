@@ -488,3 +488,65 @@ def test_an_excluded_group_whose_members_the_run_read_covers_the_accounts_in_it(
 
     assert _finding(covered) is None
     assert _finding(not_covered) is not None
+
+
+# ---- deep review 2026-11-21: identity posture -----------------------------------------------------------
+
+
+def test_an_operator_account_excluded_through_a_role_it_holds_counts_as_excluded() -> None:
+    """R039: Entra excludes a listed Global Administrator from a policy that excludes the Global Administrator role."""
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeRoles": [GLOBAL_ADMIN_ROLE]})
+
+    snapshot = _role_snapshot([policy], held={BG1: [GLOBAL_ADMIN_ROLE]}, accounts=["bg1@example.com"])
+
+    assert _finding(snapshot) is None
+    record = snapshot["break_glass_assessment"]["records"][0]
+    assert record["policies_in_scope"] == 1 and record["policies_missing_exclusion"] == 0
+    # A listed account that does not hold the excluded role is still missing.
+    other = _role_snapshot([policy], held={BG1: [HELPDESK_ROLE]}, accounts=["bg1@example.com"])
+    assert _finding(other) is not None
+
+
+def test_an_exclusion_through_a_group_whose_members_were_not_read_is_unverified_not_missing() -> None:
+    """R040: the run cannot tell whether a plain security group contains the listed account."""
+    groups = [{"id": "g-ca-ex", "displayName": "CA Exclusions", "isAssignableToRole": False}]
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeGroups": ["g-ca-ex"]})
+
+    snapshot = _snapshot([policy], accounts=["bg1@example.com"], groups=groups)
+
+    finding = _finding(snapshot)
+    assert finding is None or finding["severity"] != "high"
+    assert snapshot["break_glass_assessment"]["records"][0]["policies_missing_exclusion"] == 0
+    accounts = break_glass.resolve_accounts(
+        ["bg1@example.com"],
+        users=[{"id": BG1, "userPrincipalName": "bg1@example.com"}],
+        groups=groups,
+        role_assignments=[],
+        role_definitions=[],
+    )
+    assessment = break_glass.assess_policy(
+        {"include_users": ["All"], "exclude_groups": ["g-ca-ex"], "include_applications": ["All"],
+         "grant": {"built_in_controls": ["mfa"]}},
+        "enabled",
+        accounts,
+    )
+    assert assessment["missing"] is False
+    assert assessment["exclusion_unverified"] is True
+    assert assessment["unverified_exclusion_groups"] == ["CA Exclusions"]
+
+
+def test_a_role_the_account_is_only_eligible_for_does_not_exclude_it() -> None:
+    """R039 review: a Conditional Access role exclusion applies to active holders; an eligible account signs in without it."""
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeRoles": [GLOBAL_ADMIN_ROLE]})
+    payloads = _role_payloads([policy], held={})
+    payloads["identity_governance"] = {
+        "roleEligibilitySchedules": {"value": [
+            {"id": "elig-bg1", "principalId": BG1, "roleDefinitionId": GLOBAL_ADMIN_ROLE, "directoryScopeId": "/"}
+        ]}
+    }
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="r", collector_payloads=payloads, break_glass_accounts=["bg1@example.com"]
+    )
+
+    assert _finding(snapshot) is not None
+    assert snapshot["break_glass_assessment"]["records"][0]["policies_missing_exclusion"] == 1

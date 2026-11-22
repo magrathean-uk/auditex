@@ -190,12 +190,16 @@ class AdminScope:
     held_role_ids: frozenset[str] = frozenset()
     admin_principal_ids: frozenset[str] = frozenset()
     guest_admin_count: int | None = None
-    # Principal id -> the administrator roles that principal holds, by any route the set read. Empty for a scope
+    # Principal id -> every directory role that administrator holds, by any route the set read (privileged or not:
+    # an exclusion of Global Reader leaves out the administrators who hold it). Empty for a scope
     # that was built by hand with only the flat sets above: the verdicts then assume the worst split of roles.
     principal_roles: Mapping[str, frozenset[str]] = field(default_factory=dict)
     # Group id -> ids of the members the run read (role-assignable groups, nested groups included as members).
     group_members: Mapping[str, frozenset[str]] = field(default_factory=dict)
     guest_principal_ids: frozenset[str] = frozenset()
+    # Administrators whose guest status the set cannot tell (an assignment to a principal the users list did not
+    # resolve, or a user without a user type): a guest-type exclusion may reach them.
+    guest_unknown_principal_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -569,6 +573,10 @@ class _Directory:
         self._direct: dict[str, frozenset[str]] = dict(scope.group_members) if scope is not None else {}
         self._closure: dict[str, frozenset[str]] = {}
         self.guests: frozenset[str] = scope.guest_principal_ids if scope is not None else frozenset()
+        self._guest_unknown: frozenset[str] = scope.guest_unknown_principal_ids if scope is not None else frozenset()
+        # Holders are listed in full only for the privileged roles: a non-privileged role is known only for the
+        # administrators who also hold it.
+        self._privileged: frozenset[str] = scope.privileged_role_ids if scope is not None else frozenset()
         # Whether the set says what each administrator holds and whether they are a guest, or only the flat sets.
         self._itemised = bool(scope is not None and scope.principal_roles)
 
@@ -582,10 +590,16 @@ class _Directory:
     def is_guest(self, principal: str) -> bool | None:
         if principal in self.guests:
             return True
+        if principal in self._guest_unknown:
+            return None
         return False if self._itemised and principal in self._roles else None
 
     def holders(self, role_id: str) -> set[str]:
         return set(self._holders.get(role_id, ()))
+
+    def knows_every_holder(self, role_id: str) -> bool:
+        """Whether ``holders`` lists everyone who holds the role, not only the administrators who also do."""
+        return not self._privileged or role_id in self._privileged
 
     def knows_group(self, group_id: str) -> bool:
         return group_id in self._direct
@@ -670,6 +684,9 @@ def _common_exclusions(
         for principal in set().union(*per_policy)
         if all(principal in routes or groups for routes, groups in zip(per_policy, unread_groups, strict=False))
     } - shared
+    unseen = _unseen_member_row(policies, unread_groups, result, policy_ids, lookups)
+    if unseen is not None:
+        result.append(unseen)
     if not shared and not possible:
         return result
     implied: set[str] = set()
@@ -703,6 +720,45 @@ def _common_exclusions(
             row["display_name"] = names[principal]
         result.append(row)
     return result
+
+
+def _unseen_member_row(
+    policies: list[dict[str, Any]],
+    unread_groups: list[list[str]],
+    common_rows: list[dict[str, Any]],
+    policy_ids: list[str],
+    lookups: Mapping[str, Mapping[str, str]] | None,
+) -> dict[str, Any] | None:
+    """A ``possible`` group row when every policy excludes a group whose members the run did not read.
+
+    A principal the run never saw can be a member of one such group from each policy and so be outside all of
+    them, though no exclusion is common to the policies and no visible route reaches anyone. ``None`` when some
+    policy has no such group, or an unread group common to every policy already stands for that principal.
+    """
+    if not all(unread_groups):
+        return None
+    common_unread = {str(group).lower() for group in unread_groups[0]}.intersection(
+        *({str(group).lower() for group in groups} for groups in unread_groups[1:])
+    )
+    if any(row["type"] == "group" and str(row["id"]).lower() in common_unread for row in common_rows):
+        return None
+    group_names = {key.lower(): value for key, value in ((lookups or {}).get("group") or {}).items()}
+    via = [
+        {"policy_id": policy["id"], "type": "group", "id": groups[0], "members_read": False}
+        for policy, groups in zip(policies, unread_groups, strict=False)
+    ]
+    first_seen = list(dict.fromkeys(item["id"] for item in via))
+    names = [group_names.get(str(group).lower(), str(group)) for group in first_seen]
+    return {
+        "type": "group",
+        "id": "+".join(first_seen),
+        "display_name": "a member of " + " and of ".join(names) + " (members not read)",
+        "resolved": False,
+        "sanctioned": False,
+        "possible": True,
+        "via": via,
+        "policy_ids": policy_ids,
+    }
 
 
 def _common_values(policies: list[dict[str, Any]], key: str) -> list[str]:
@@ -853,7 +909,9 @@ def evaluate_effective_mfa(
         excluded_all, coverers, directory, known=admin_scope is not None and admin_scope.complete, sanctioned=sanctioned
     )
     gap = _unsanctioned(excluded)
-    single_gap = _unsanctioned(excluded_all)
+    # CIS 5.2.2.2 and MS.AAD.3.2v1 look for one policy that leaves nobody out: a policy's own exclusions decide it,
+    # not the principals every policy shares (two policies that each exclude a different user cover everyone combined).
+    single_clean = any(not _unsanctioned(policy["exclusions"]) for policy in qualifying)
     # The policies back a positive verdict only when they alone leave nobody out. Security defaults that are on beside
     # a policy with gaps establish the verdict, and that policy is not a basis for a Conditional Access benchmark
     # control, so it is not listed.
@@ -898,7 +956,7 @@ def evaluate_effective_mfa(
         "authentication_strength_collection": authentication_strengths.summary(),
         "single_policy_verdict": (
             VERDICT_ENFORCED
-            if defaults_enabled is True or (qualifying and not single_gap)
+            if defaults_enabled is True or single_clean
             else VERDICT_ENFORCED_WITH_EXCLUSIONS
             if qualifying
             else verdict
@@ -1204,6 +1262,7 @@ def _exclusion_coverage(
     *,
     known: bool,
     sanctioned: Collection[str],
+    administrators_only: bool = True,
 ) -> list[tuple[str, list[_Coverer], list[str]]] | None:
     """Whether other policies require MFA of the administrators an excluded role or user row leaves out.
 
@@ -1216,7 +1275,9 @@ def _exclusion_coverage(
     if row["type"] == "role":
         holders = sorted(directory.holders(row_id))
         outcomes = [_coverage(coverers, principal, directory, sanctioned) for principal in holders]
-        if not known or not holders:
+        if not known or not holders or not (administrators_only or directory.knows_every_holder(row_id)):
+            # For an all-users verdict a non-privileged role (Global Reader) is held by people the set does not
+            # list, so the role is judged as a whole, not only through the administrators who also hold it.
             outcomes.append(_role_coverage(row_id, coverers, sanctioned))
         return outcomes
     if row["type"] == "user" and directory.knows_principal(row_id):
@@ -1243,7 +1304,7 @@ def _rescue_exclusions(
     relied: list[_Coverer] = []
     for row in rows:
         outcomes = None if row.get("sanctioned") or row.get("possible") else _exclusion_coverage(
-            row, coverers, directory, known=known, sanctioned=sanctioned_ids
+            row, coverers, directory, known=known, sanctioned=sanctioned_ids, administrators_only=False
         )
         if outcomes and all(state == "yes" for state, _, _ in outcomes):
             used = [coverer for _, items, _ in outcomes for coverer in items]
@@ -1287,7 +1348,11 @@ def _administrator_outcome(
         if all(state == "yes" for state, _, _ in outcomes):
             return VERDICT_ENFORCED, [], used, []
         return VERDICT_UNKNOWN, [], [], sorted({reason for _, _, items in outcomes for reason in items})
-    relevant_roles = (scope.held_role_ids if known else scope.privileged_role_ids) if scope is not None else frozenset()
+    relevant_roles = (
+        (scope.held_role_ids | {role for roles in scope.principal_roles.values() for role in roles})
+        if known
+        else scope.privileged_role_ids
+    ) if scope is not None else frozenset()
     definite: list[dict[str, Any]] = []
     possible: list[dict[str, Any]] = []
     undecided: list[str] = []
