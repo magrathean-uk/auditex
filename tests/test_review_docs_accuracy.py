@@ -139,3 +139,10 @@ def test_ai_assessment_guide_states_dns_posture_default_selection():
     assert "--exclude dns_posture" in paragraph
     assert "setup-guide.md#default-exchange-and-public-dns-collection" in paragraph
 
+
+def test_ai_assessment_guide_names_the_current_assessment_schema():
+    from auditex.rule_assessment import SCHEMA_VERSION
+
+    guide = _flat(_doc("docs/guides/ai-assessment.md"))
+    sentence = guide[guide.index("the cell inventory and reason codes") :][:220]
+    assert f"`{SCHEMA_VERSION}`" in sentence, sentence
