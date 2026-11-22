@@ -154,7 +154,10 @@ def _check_private_key_file(path: Path) -> None:
     The key can act as any user in the domain, so it gets the same check as the Microsoft 365 certificate. The
     message is fixed and never repeats the path or the file's content.
     """
-    from azure_tenant_audit.certificate_auth import CertificateAuthError, _read_private_file
+    from azure_tenant_audit.certificate_auth import (
+        CertificateAuthError,
+        _read_private_file,
+    )
 
     try:
         _read_private_file(path, _SERVICE_ACCOUNT_KEY_LIMIT, "service_account_key_refused")
