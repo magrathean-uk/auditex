@@ -101,6 +101,10 @@ def resolve_resource_path(path: str | Path) -> Path:
         if candidate is not None:
             return candidate
 
+    # Not a resource any root holds: an operator's own relative path (a sample, a config) means the cwd.
+    in_cwd = Path.cwd() / target
+    if in_cwd.exists():
+        return in_cwd
     return _repo_root() / target
 
 
@@ -119,6 +123,8 @@ def is_shipped_resource(path: str | Path) -> bool:
     """Whether a lexical path belongs to a shipped-content area of a resource root."""
     target = Path(path).expanduser()
     for adapter in _resource_adapters():
+        if not target.is_absolute() and adapter.resolve(target) is None:
+            continue  # a relative path counts only when this root holds it, never a same-named cwd file
         try:
             relative = target.relative_to(adapter.root) if target.is_absolute() else target
         except ValueError:

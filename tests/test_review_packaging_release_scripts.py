@@ -92,3 +92,20 @@ def test_cryptography_floor_is_declared_and_its_apis_exist():
     assert floors and floors[0] and int(floors[0].group(1)) >= 42, dependencies
     assert hasattr(x509.Certificate, "not_valid_before_utc") and hasattr(x509.Certificate, "not_valid_after_utc")
     assert callable(x509.load_pem_x509_certificates)
+
+
+# Impact of R069: a relative path the operator names (a sample of their own) resolves against the cwd once no
+# resource root holds it, while shipped resources keep winning over same-named files in the cwd.
+def test_relative_operator_file_resolves_against_the_cwd(tmp_path, monkeypatch):
+    from azure_tenant_audit.cli import run_offline
+
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    (tmp_path / "mine.json").write_bytes((ROOT / "examples/sample_audit_bundle/sample_result.json").read_bytes())
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "collector-definitions.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert resources.resolve_resource_path("mine.json") == tmp_path / "mine.json"
+    assert resources.resolve_resource_path("configs/collector-definitions.json") != tmp_path / "configs" / "collector-definitions.json"
+    assert not resources.is_shipped_resource("configs/not-shipped-here.json")
+    assert run_offline(Path("mine.json"), tmp_path / "out", "t", "r") == 0
