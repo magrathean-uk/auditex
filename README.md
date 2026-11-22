@@ -39,7 +39,30 @@ An Auditex report is evidence from an automated, read-only run. It is not a cert
 
 Run Auditex only against a tenant you own or have the owner's written authorisation to audit. A run folder holds personal data about the tenant's users (names, addresses, sign-in records and similar); whoever runs the audit is responsible for handling it lawfully. See [the security and privacy model](docs/reference/security-privacy.md).
 
-## Install and check locally
+## Install
+
+Auditex runs on Linux, macOS and Windows through WSL2, with Python 3.11 or newer. Native Windows is not supported;
+use WSL2. Install it from PyPI with [pipx](https://pipx.pypa.io/):
+
+```bash
+pipx install auditex
+auditex --version
+auditex doctor
+```
+
+`auditex doctor` ends with `Core ready: yes` on a working install. Optional extras add Google Workspace audits
+(`google`), the local MCP server (`mcp`) and the local model summary (`local-answer`):
+
+```bash
+pipx install "auditex[google,mcp]"
+```
+
+Upgrade with `pipx upgrade auditex`. The [install guide](docs/guides/install-guide.md) walks through every step on
+each system, from installing Python and pipx to a first offline run, upgrading, uninstalling and troubleshooting.
+
+## Install from source (contributors)
+
+To change Auditex or run its checks, install from a source checkout:
 
 ```bash
 git clone https://github.com/magrathean-uk/auditex.git
@@ -50,9 +73,7 @@ python -m pip install -e '.[test]'
 auditex doctor --json
 ```
 
-Run every command in this README from inside the `auditex` folder. The activation line is for Linux and macOS.
-
-Native Windows is not supported yet; use WSL2.
+Run the repository commands below from inside the `auditex` folder. The activation line is for Linux and macOS.
 
 Optional dependencies:
 
@@ -184,6 +205,8 @@ The MCP registry exposes inventory and contract inspection, offline validation, 
 ## Documentation
 
 Use [docs/index.md](docs/index.md) as the documentation index.
+
+- [The install guide](docs/guides/install-guide.md) installs Auditex from PyPI with pipx, step by step.
 
 - [The runbook](docs/development/runbook.md) covers setup, operator flows, local checks, and the separate lab bootstrap kit.
 - [The product manual](docs/guides/product-manual.md) explains the product workflows.

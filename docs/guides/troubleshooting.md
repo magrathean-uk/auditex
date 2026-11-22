@@ -4,9 +4,18 @@ This guide maps common failures to operator actions. Do not hide blockers; rerun
 
 ## Local Runtime
 
+Installing, upgrading and removing Auditex, with their failures, are in the [install guide](install-guide.md#troubleshooting).
+
 ### `auditex: command not found`
 
-Activate the environment and install the package.
+For a pipx install, put pipx's command folder on your `PATH`, then open a new terminal:
+
+```bash
+pipx ensurepath
+pipx list
+```
+
+For a source checkout, activate the environment and install the package:
 
 ```bash
 source .venv/bin/activate
@@ -15,19 +24,22 @@ python -m pip install -e .
 
 ### Google libraries missing
 
-Install the Google extra.
+Install the Google extra, keeping any other extras you use inside the brackets (`auditex google doctor --json`
+prints the exact command for your install in `install_hint`):
 
 ```bash
-python -m pip install -e '.[google]'
+pipx install --force "auditex[google]"         # pipx install
+python -m pip install -e '.[google]'           # source checkout
 auditex google doctor --json
 ```
 
 ### MCP libraries missing
 
-Install the MCP extra.
+Install the MCP extra:
 
 ```bash
-python -m pip install -e '.[mcp]'
+pipx install --force "auditex[mcp]"            # pipx install
+python -m pip install -e '.[mcp]'              # source checkout
 auditex-mcp --help
 ```
 

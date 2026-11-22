@@ -143,3 +143,32 @@ def test_the_runbook_runs_the_reproducible_build_check_with_the_venv_interpreter
     runbook = (Path(__file__).resolve().parents[1] / "docs/development/runbook.md").read_text(encoding="utf-8")
     assert "python3 scripts/check-reproducible-build.py" not in runbook
     assert runbook.count(".venv/bin/python scripts/check-reproducible-build.py") == 2
+
+
+# -- #145: the install guide. The launch website copies these five commands; the guide must show each as a command
+# line, and the README and the docs index must lead to it. Docs are shipped by glob, so the wheel carries it.
+WEBSITE_COMMANDS = (
+    "pipx install auditex",
+    'pipx install "auditex[google,mcp]"',
+    "auditex --version",
+    "auditex doctor",
+    "pipx upgrade auditex",
+)
+
+
+def test_the_install_guide_shows_the_website_commands_and_is_linked_and_shipped() -> None:
+    from fnmatch import fnmatch
+
+    from azure_tenant_audit.shipped_content import SHIPPED_CONTENT_AREAS
+
+    root = Path(__file__).resolve().parents[1]
+    guide = (root / "docs/guides/install-guide.md").read_text(encoding="utf-8")
+    command_lines = {line.strip() for line in guide.splitlines()}
+    for command in WEBSITE_COMMANDS:
+        assert command in command_lines, command
+    for section in ("Linux", "macOS", "WSL2", "Upgrade", "Uninstall", "Troubleshooting", "Where run folders go"):
+        assert section in guide, section
+    assert "](docs/guides/install-guide.md)" in (root / "README.md").read_text(encoding="utf-8")
+    assert "](guides/install-guide.md)" in (root / "docs/index.md").read_text(encoding="utf-8")
+    patterns = [p for area in SHIPPED_CONTENT_AREAS for p in area.package_patterns]
+    assert any(fnmatch("docs/guides/install-guide.md", p) for p in patterns)
