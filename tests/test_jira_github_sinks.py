@@ -121,7 +121,7 @@ def test_send_notification_jira_posts_issue(run_dir: Path, monkeypatch: pytest.M
     # Search call must have happened first with the expected JQL.
     assert captured["get_calls"], "search request was not issued before create"
     search_call = captured["get_calls"][0]
-    assert search_call["url"].endswith("/rest/api/3/search")
+    assert search_call["url"].endswith("/rest/api/3/search/jql")
     jql = search_call["params"]["jql"]
     assert 'project = "AUDIT"' in jql
     assert "auditex-fp-" in jql
@@ -394,3 +394,58 @@ def test_send_notification_github_fingerprint_aligns_with_jira(
     jira_result = notify_module.send_notification(run_dir=str(run_dir), sink="jira", dry_run=False)
     github_result = notify_module.send_notification(run_dir=str(run_dir), sink="github", dry_run=False)
     assert jira_result["fingerprint"] == github_result["fingerprint"]
+
+
+def test_review_r161_fingerprint_ignores_how_the_run_dir_is_spelt(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from auditex.notify import send_notification
+
+    absolute = send_notification(run_dir=str(run_dir), sink="jira", dry_run=True)["payload"]["run_fingerprint"]
+    monkeypatch.chdir(run_dir.parent)
+    for spelling in (f"./{run_dir.name}", f"{run_dir.name}/", f"./{run_dir.name}/../{run_dir.name}"):
+        assert send_notification(run_dir=spelling, sink="jira", dry_run=True)["payload"]["run_fingerprint"] == absolute
+
+
+def _created_after_search(monkeypatch: pytest.MonkeyPatch, search_status: int) -> tuple[dict[str, Any], Any]:
+    import auditex.notify as notify_module
+
+    captured: dict[str, Any] = {"get_calls": []}
+
+    class _FakePost:
+        status_code = 201
+        text = '{"key": "AUDIT-7", "number": 7}'
+
+        def json(self) -> dict[str, Any]:
+            return {"key": "AUDIT-7", "number": 7, "html_url": "https://example.invalid/7"}
+
+    def _fake_get(url: str, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        captured["get_calls"].append({"url": url, "params": params})
+        return _FakeJiraSearchResponse(issues=[], status_code=search_status)
+
+    monkeypatch.setattr(notify_module.requests, "get", _fake_get)
+    monkeypatch.setattr(notify_module.requests, "post", lambda *args, **kwargs: _FakePost())
+    return captured, notify_module
+
+
+def test_review_r161_jira_dedup_uses_the_search_jql_endpoint(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _jira_env(monkeypatch)
+    captured, notify_module = _created_after_search(monkeypatch, 200)
+    result = notify_module.send_notification(run_dir=str(run_dir), sink="jira", dry_run=False)
+    assert captured["get_calls"][0]["url"] == "https://example.atlassian.net/rest/api/3/search/jql"
+    assert result["status"] == "sent"
+    assert result.get("dedup") == "checked"
+
+
+def test_review_r161_jira_failed_dedup_search_is_visible(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _jira_env(monkeypatch)
+    _, notify_module = _created_after_search(monkeypatch, 410)
+    result = notify_module.send_notification(run_dir=str(run_dir), sink="jira", dry_run=False)
+    assert result["status"] == "sent"
+    assert result["dedup"] == "skipped"
+    assert result["dedup_http_status"] == 410
+
+
+def test_review_r161_github_dedup_searches_open_issues_only(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _github_env(monkeypatch)
+    captured, notify_module = _created_after_search(monkeypatch, 200)
+    notify_module.send_notification(run_dir=str(run_dir), sink="github", dry_run=False)
+    assert "is:open" in captured["get_calls"][0]["params"]["q"]

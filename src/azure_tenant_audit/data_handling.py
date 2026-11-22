@@ -3,13 +3,53 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+_DNS_COLLECTORS = ("dns_posture", "google_dns_posture")
 
-def collector_activity_notices(collectors: list[str], mode: str) -> list[str]:
-    """Disclose planned side effects; selection does not prove a session or request succeeded."""
+
+def _resolved_doh_endpoint(doh_endpoint: str | None) -> str | None:
+    """The resolver DNS posture collection would use, or None when the configured value is not a usable URL."""
+    from .dns_lookup import resolve_doh_endpoint
+
+    try:
+        return resolve_doh_endpoint(doh_endpoint)
+    except ValueError:
+        return None
+
+
+def _resolver_text(doh_endpoint: str | None) -> str:
+    from .dns_lookup import DOH_ENDPOINT_ENV, doh_resolver_disclosure
+
+    endpoint = _resolved_doh_endpoint(doh_endpoint)
+    if endpoint is None:
+        # resolve_doh_endpoint refuses the value; never repeat it, it may carry a token.
+        return (f"the configured DNS-over-HTTPS resolver (not shown: the value in {DOH_ENDPOINT_ENV} or the option "
+                "is not a plain https:// URL)")
+    return doh_resolver_disclosure(endpoint)
+
+
+def dns_resolver_host(collectors: list[str], doh_endpoint: str | None = None) -> str | None:
+    """Host of the DoH resolver that receives the tenant's domain names, or None when no DNS collector is selected."""
+    if not set(_DNS_COLLECTORS).intersection(collectors):
+        return None
+    endpoint = _resolved_doh_endpoint(doh_endpoint)
+    if endpoint is None:
+        return None
+    from urllib.parse import urlsplit
+
+    return urlsplit(endpoint).hostname
+
+
+def collector_activity_notices(collectors: list[str], mode: str, doh_endpoint: str | None = None) -> list[str]:
+    """Disclose planned side effects; selection does not prove a session or request succeeded.
+
+    The DNS notices name the resolver from ``resolve_doh_endpoint(doh_endpoint)``: an explicit endpoint, else
+    ``AUDITEX_DOH_ENDPOINT``, else Cloudflare. The last notice always holds the deselection switches.
+    """
     if mode == "offline":
         return (["Offline replay: no Exchange Online PowerShell session or public DNS/HTTPS requests are made."]
-                if {"exchange_policy", "dns_posture"}.intersection(collectors) else [])
+                if {"exchange_policy", *_DNS_COLLECTORS}.intersection(collectors) else [])
     notices = []
+    switches = []
     if "exchange_policy" in collectors:
         notices.append(
             "Selected Exchange policy collection opens an Exchange Online PowerShell session using app authentication "
@@ -21,29 +61,62 @@ def collector_activity_notices(collectors: list[str], mode: str) -> list[str]:
             "plus Global Reader); without it they are not assessed (ipps_session_not_opened)."
         )
     if "dns_posture" in collectors:
-        from .dns_lookup import DEFAULT_DOH_ENDPOINT
-
         notices.append(
-            "Selected public DNS posture collection sends the tenant's domain names to the public Cloudflare "
-            f"DNS-over-HTTPS resolver ({DEFAULT_DOH_ENDPOINT}). Only domain names, no user data, are sent to the resolver. "
+            "Selected public DNS posture collection sends the tenant's domain names to "
+            f"{_resolver_text(doh_endpoint)}. Only domain names, no user data, are sent to the resolver. "
             "SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange accepted domains (coexistence excluded) "
             "when the same run collected them, else Graph verified domains with the Email service. "
             "Posture checks and MTA-STS policy HTTPS reads where advertised and public Entra OpenID discovery "
             "HTTPS reads stay on Graph-verified domains."
         )
-    if notices:
-        notices.append(
+    if {"exchange_policy", "dns_posture"}.intersection(collectors):
+        switches.append(
             "Deselect either with --exclude exchange_policy or --exclude dns_posture, or both with "
             "--exclude exchange_policy,dns_posture. --collectors replaces the selection; "
             "--collector-preset config-only omits both. Exchange/DNS failures leave dependent policies "
             "not assessed with a coverage-gap reason and overall status partial. "
             "A skipped Security & Compliance read leaves the collector and run ok when other reads succeed."
         )
+    if "google_dns_posture" in collectors:
+        # Review R083: Google runs send every verified domain to the same DoH resolver.
+        notices.append(
+            "Selected Google DNS posture collection sends each verified Google Workspace domain name to "
+            f"{_resolver_text(doh_endpoint)}: SPF, DMARC, MTA-STS, TLS-RPT and BIMI TXT lookups and up to six DKIM "
+            "selector names. Only domain names, no user data, are sent to the resolver."
+        )
+        switches.append(
+            "Deselect it with --exclude google_dns_posture; --collectors replaces the selection, and the "
+            "identity and collaboration presets omit it. DNS failures leave the DNS checks not assessed with a "
+            "coverage-gap reason."
+        )
+    if notices:
+        notices.append(" ".join(switches))
     return notices
 
 
 def _event_rows(events: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return [dict(item) for item in events or [] if isinstance(item, Mapping)]
+
+
+# Review R088: Microsoft Graph read permissions that can read message, chat, note or file content. Auditex never
+# reads content, but the permission's blast radius includes it, so it is not reported as plainly read-only.
+M365_CONTENT_CAPABLE_SCOPES = frozenset(
+    name.lower()
+    for name in (
+        "Sites.Read.All",
+        "Files.Read",
+        "Files.Read.All",
+        "Mail.Read",
+        "Mail.Read.Shared",
+        "Chat.Read",
+        "Chat.Read.All",
+        "ChatMessage.Read.All",
+        "ChannelMessage.Read.All",
+        "Notes.Read",
+        "Notes.Read.All",
+        "eDiscovery.Read.All",
+    )
+)
 
 
 def classify_auth_scope(scope: str) -> str:
@@ -55,6 +128,8 @@ def classify_auth_scope(scope: str) -> str:
 
     # A scope that can read content is not "read only" because its name says so (Drive readonly reads file content).
     if GOOGLE_SCOPE_NOTES.get(value, {}).get("risk") == "content_capable":
+        return "content_capable"
+    if lower.rsplit("/", 1)[-1] in M365_CONTENT_CAPABLE_SCOPES:
         return "content_capable"
     if lower.endswith("/.default"):
         return "tenant_configured"
@@ -98,6 +173,7 @@ def build_data_handling_summary(
     events: list[dict[str, Any]] | None = None,
     response_execute: bool = False,
     response_allow_write: bool = False,
+    doh_endpoint: str | None = None,
 ) -> dict[str, Any]:
     event_rows = _event_rows(events)
     scope_summary = _scope_summary(auth_scopes)
@@ -147,6 +223,7 @@ def build_data_handling_summary(
         "auth_scope_summary": scope_summary,
         "write_capable_scopes": write_capable_scopes,
         "events": event_rows,
-        "collection_notices": collector_activity_notices(collectors, mode) if platform != "google_workspace" else [],
+        "collection_notices": collector_activity_notices(collectors, mode, doh_endpoint),
+        "dns_resolver": dns_resolver_host(collectors, doh_endpoint) if mode != "offline" else None,
         "provider_assertions": provider_assertions,
     }
