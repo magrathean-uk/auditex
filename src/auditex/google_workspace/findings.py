@@ -2108,6 +2108,9 @@ def build_google_findings(
         )
 
     for alert in _records(normalized_snapshot, "google_alerts"):
+        # A triaged and closed (or deleted) alert is history, not an active incident to triage again.
+        if str(alert.get("status") or "").strip().upper() == "CLOSED" or alert.get("deleted") is True:
+            continue
         findings.append(
             _finding(
                 rule_id="google.alert_active",

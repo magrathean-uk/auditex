@@ -275,11 +275,16 @@ class GoogleWorkspaceClient:
     def list_alerts(self, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("alertcenter", "v1beta1")
         page_size = min(self.page_size, top or self.page_size)
-        return self._collect_pages(
+        rows = self._collect_pages(
             lambda page_token: service.alerts().list(pageSize=page_size, pageToken=page_token, fields=ALERT_FIELDS),
             "alerts",
             limit=top,
         )
+        # A deleted alert is not an open incident; it never reaches the findings as one.
+        kept = [alert for alert in rows if alert.get("deleted") is not True]
+        if len(kept) == len(rows):
+            return rows
+        return CollectedRows(kept, truncated=getattr(rows, "truncated", False), result_limit=getattr(rows, "result_limit", None))
 
     def get_gmail_settings_for_user(self, user_email: str) -> dict[str, Any]:
         """Settings of one mailbox, read as that user when the credentials are delegated.
