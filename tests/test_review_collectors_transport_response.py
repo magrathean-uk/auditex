@@ -4,7 +4,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from azure_tenant_audit.response import ALLOWED_RESPONSE_ADAPTERS, ResponseConfig, run_response
+from azure_tenant_audit.response import (
+    ALLOWED_RESPONSE_ADAPTERS,
+    ResponseConfig,
+    run_response,
+)
 
 SESSION = {"kind": "exchange_online", "access_token": "constructed-token", "organization": "lab.onmicrosoft.com"}
 

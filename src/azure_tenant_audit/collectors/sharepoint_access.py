@@ -12,7 +12,13 @@ from ..collection_gaps import (
 )
 from ..graph import GraphClient, GraphError
 from ..normalize import _iter_permission_targets
-from .base import Collector, CollectorResult, _classify_graph_error, record_truncation, run_graph_endpoints
+from .base import (
+    Collector,
+    CollectorResult,
+    _classify_graph_error,
+    record_truncation,
+    run_graph_endpoints,
+)
 
 
 def _follow_next_link(client: Any, rows: list[Any], next_link: str) -> tuple[list[Any], Exception | None]:

@@ -21,7 +21,13 @@ from ._endpoint_reads import (
     mark_section_scoped,
     scoped_gap_message,
 )
-from .base import Collector, CollectorResult, _classify_graph_error, record_truncation, run_graph_endpoints
+from .base import (
+    Collector,
+    CollectorResult,
+    _classify_graph_error,
+    record_truncation,
+    run_graph_endpoints,
+)
 
 # deviceManagementScripts returns ``scriptContent`` (the base64 script body) unless
 # $select excludes it. Script bodies are file content and must never be collected,
