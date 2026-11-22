@@ -107,7 +107,7 @@ def _selected_python() -> dict[str, Any]:
 
 def _venv_status() -> dict[str, Any]:
     if not is_source_checkout():
-        return {"status": "supported", "path": sys.prefix, "python_path": sys.executable, "layout": "installed"}
+        return {"status": "supported", "path": sys.prefix, "python_path": sys.executable}
     return _toolchain_runtime().venv_status()
 
 
@@ -135,7 +135,6 @@ def build_doctor_report() -> dict[str, Any]:
         "bootstrap": {
             "script": str(BOOTSTRAP_SCRIPT),
             "exists": BOOTSTRAP_SCRIPT.exists(),
-            "applicable": is_source_checkout(),
         },
         "python": python_status,
         "venv": venv_status,
@@ -198,8 +197,8 @@ def run_setup(*, with_exchange: bool = False, with_pwsh: bool = False, with_mcp:
             "auditex setup prepares a source checkout; this Auditex is an installed package, so its Python is ready.\n"
             "Optional packs are installed by hand:\n"
             "  MCP server:      python -m pip install 'auditex[mcp]'\n"
-            "  Exchange checks: install PowerShell 7, then run\n"
-            "                   pwsh -Command \"Install-Module ExchangeOnlineManagement -Scope CurrentUser\"\n"
+            "  Exchange checks: install PowerShell 7, then the ExchangeOnlineManagement module\n"
+            "                   for the current user (from PSGallery, without trusting the gallery)\n"
             "Run auditex doctor to check."
         )
         return 0
