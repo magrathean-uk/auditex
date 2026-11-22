@@ -27,3 +27,15 @@ See [AI assessment](ai-assessment.md) for reading the result.
 The tools that mined labelled cases from ScubaGear and Prowler for model development have been removed
 with the model layer. The provenance of the vendored ScubaGear data that the shipped catalogue and rules
 still use is recorded in [provenance](../provenance/provenance.md).
+
+## Where the training ran
+
+The model experiments of 2026 ran on two research supercomputers: Isambard-AI in the UK and JUPITER in the
+EU. None of the trained models shipped; the optional plain-language answer uses a ready-made model, and every
+verdict still comes from the value rules.
+
+We acknowledge the use of resources provided by the Isambard-AI National AI Research Resource (AIRR)
+(McIntosh-Smith, Alam and Woods, 2024, arXiv:2410.11199), operated by the University of Bristol and funded by
+the UK Government's Department for Science, Innovation and Technology through UK Research and Innovation and
+the Science and Technology Facilities Council [ST/AIRR/I-A-I/1023]. Neither body has reviewed or endorsed
+Auditex.
