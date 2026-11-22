@@ -247,3 +247,4 @@ def test_r058_probe_reports_a_failed_later_page_as_a_gap() -> None:
     assert preflight[0]["status"] == "partial"
     assert preflight[0]["error_class"] == "google_transient"
     assert capability["status"] != "supported_exact_scope"
+

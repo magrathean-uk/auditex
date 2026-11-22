@@ -127,14 +127,18 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                 # Loaded with the scopes it was granted (not this run's), so a run that needs more signs in again
                 # rather than reusing a token its new collectors cannot use.
                 credentials = Credentials.from_authorized_user_file(str(token_cache))
-                if not _has_scopes(credentials, config.scopes):
+                if not _has_scopes(credentials, config.scopes) or not credentials.refresh_token:
                     credentials = None
-            if credentials and credentials.expired and credentials.refresh_token:
+            if credentials is not None:
+                # The cache's scopes are what was asked for (an older cache may claim scopes never granted), so it is
+                # refreshed every run and trusted only for the scopes Google's token endpoint grants now.
                 try:
                     credentials.refresh(Request())
                 except RefreshError:
                     # Revoked, expired (Testing-status clients expire refresh tokens after 7 days) or narrower than
                     # asked: sign in again.
+                    credentials = None
+                if credentials is not None and not _granted(credentials, config.scopes):
                     credentials = None
             if not credentials or not credentials.valid:
                 flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
@@ -187,6 +191,14 @@ def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:
         return bool(has_scopes(list(scopes)))
     except Exception:  # noqa: BLE001 - an unreadable cache is signed in again, never trusted
         return False
+
+
+def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
+    """Whether the last refresh granted every scope this run asks for (an unknown grant is not trusted)."""
+    granted = getattr(credentials, "granted_scopes", None)
+    if not granted:
+        return False
+    return set(scopes).issubset(set(granted))
 
 
 def user_delegated_credentials(credentials: Any, subject: str, *, scopes: tuple[str, ...] | None = None) -> Any:

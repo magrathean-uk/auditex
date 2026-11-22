@@ -105,19 +105,23 @@ class _RefreshError(_GoogleAuthError):
 class _UserCredentials:
     """google.oauth2.credentials.Credentials as the library builds it: explicit scopes win over the cached ones."""
 
-    def __init__(self, scopes: list[str], *, valid: bool = True, refresh_error: bool = False, tag: str = "cached") -> None:
+    def __init__(self, scopes: list[str], *, valid: bool = True, refresh_error: bool = False, tag: str = "cached",
+                 granted: list[str] | None = None) -> None:
         self.scopes = list(scopes)
         self.valid = valid
         self.expired = not valid
         self.refresh_token = "<REDACTED>"
         self.refresh_error = refresh_error
         self.tag = tag
+        # What Google's token endpoint grants on a refresh: the cache's ``scopes`` are only what was asked for.
+        self.grant = list(granted) if granted is not None else list(scopes)
+        self.granted_scopes: list[str] | None = None
 
     @classmethod
     def from_authorized_user_file(cls, path: str, scopes: list[str] | None = None) -> _UserCredentials:
         info = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(scopes if scopes is not None else info.get("scopes") or [], valid=info.get("valid", True),
-                   refresh_error=info.get("refresh_error", False))
+                   refresh_error=info.get("refresh_error", False), granted=info.get("granted"))
 
     def has_scopes(self, scopes: list[str]) -> bool:
         return set(scopes).issubset(self.scopes)
@@ -126,6 +130,7 @@ class _UserCredentials:
         if self.refresh_error:
             raise _RefreshError("invalid_grant")
         self.valid, self.expired = True, False
+        self.granted_scopes = list(self.grant)
 
     def to_json(self) -> str:
         return json.dumps({"scopes": self.scopes, "tag": self.tag})
@@ -364,3 +369,22 @@ def test_r059_consent_flow_errors_outside_google_auth_are_a_sign_in_failure(tmp_
 def test_r092_missing_key_says_not_found(tmp_path: Path, service_account_module: list[str]) -> None:
     with pytest.raises(ValueError, match="not found"):
         google_auth.build_google_credentials(_delegation_config(tmp_path / "absent.json"))
+
+
+# ---- repair round 1: the cache is trusted only for the scopes Google grants on a refresh (R059, R022) -------------
+
+
+def test_r059_valid_cache_claiming_scopes_never_granted_is_re_consented(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    # Written by the old code: it recorded the scopes the run asked for, not the ones granted.
+    _write_cache(tmp_path, scopes=["scope://a", "scope://b"], granted=["scope://a"])
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a", "scope://b")))
+    assert oauth_modules["flows"] == 1
+    assert credentials.tag == "consented"
+
+
+def test_r059_refresh_granting_fewer_scopes_is_re_consented(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    _write_cache(tmp_path, scopes=["scope://a", "scope://b"], granted=["scope://a"], valid=False)
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a", "scope://b")))
+    assert oauth_modules["flows"] == 1
+    assert credentials.tag == "consented"
+    assert json.loads((tmp_path / "cache" / "token.json").read_text(encoding="utf-8"))["tag"] == "consented"
