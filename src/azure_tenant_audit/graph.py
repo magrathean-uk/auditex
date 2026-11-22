@@ -245,6 +245,35 @@ class _WaitBudget:
         self.spent += seconds
 
 
+# Phrases and error codes of a Graph answer that refuses a read for a missing licence, not a missing permission. The
+# phrases match those collectors.base._classify_graph_error maps to license_required.
+_LICENCE_PHRASES = (
+    "premium license",
+    "spo license",
+    "not licensed",
+    "does not have a license",
+    "license is required",
+    "needs to have microsoft entra id p2",
+    "governance license",
+)
+
+
+def _licence_refusal(response: Any) -> bool:
+    """Whether a 403 answer names a missing licence rather than a missing permission."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    code, message = "", str(getattr(response, "text", "") or "")
+    if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+        code = str(payload["error"].get("code") or "")
+        message = str(payload["error"].get("message") or message)
+    if "license" in code.lower() or "licence" in code.lower():
+        return True
+    lower = message.lower()
+    return any(phrase in lower for phrase in _LICENCE_PHRASES)
+
+
 def _off_graph_reason(response: Any) -> str:
     """An error from the download host after a redirect: its body can echo the signed URL (a credential), so only the
     host and status are kept (R158)."""
@@ -549,7 +578,10 @@ class GraphClient:
             if response.status_code in _REDIRECT_STATUSES:
                 response = self._follow_redirects(response, method, url, headers)
             if response.status_code == 403 and permission_stop_after:
-                self._permission_failures[family] = self._permission_failures.get(family, 0) + 1
+                # A licence answer is not a permission refusal: sibling reads of the family may still be licensed or
+                # take another path (R004), so only genuine authorisation refusals count toward the stop.
+                if not _licence_refusal(response):
+                    self._permission_failures[family] = self._permission_failures.get(family, 0) + 1
             elif response.status_code < 400:
                 self._permission_failures.pop(family, None)
 
