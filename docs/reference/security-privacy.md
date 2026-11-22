@@ -375,9 +375,10 @@ one by its host alone (its path may carry a token), and `data-handling.json`
 records that host as `dns_resolver`. A failed lookup is described by the
 resolver's `https://host` (an IPv6 address in brackets, a port only when it is
 not 443), the record asked for and the HTTP status or error
-class only, never the transport library's text, and the DNS coverage gap of
-either provider names that host; a gap built from an older diagnostic keeps
-only the same display form, never a user name, path or query. While a DoH
+class only. Both providers scrub URLs in live and replayed DNS diagnostics to
+their origins and withhold standalone request targets. A DNS coverage gap names
+the resolver from the configured endpoint and reports it as unknown when that
+endpoint is unavailable, including older samples without endpoint metadata. While a DoH
 request runs, the `urllib3` and `requests` loggers record nothing, so a
 DEBUG log never holds the resolver's path or query.
 

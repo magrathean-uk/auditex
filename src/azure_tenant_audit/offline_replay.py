@@ -40,7 +40,12 @@ from .collection_gaps import (
     section_was_cut,
 )
 from .collectors.exchange_policy import DLP_READS, IPPS_OPERATIONS
-from .dns_lookup import safe_resolver_diagnostic
+from .dns_lookup import (
+    DNS_POSTURE_COLLECTORS,
+    doh_resolver_display,
+    safe_resolver_diagnostic,
+    sanitise_resolver_fields,
+)
 from .resources import resolve_resource_path
 
 OFFLINE_ROW_TYPE = "offline_sample"
@@ -128,6 +133,7 @@ def resolver_error_rows(collector: str, payload: Mapping[str, Any]) -> list[dict
     """Failed rows for domain posture records whose DNS resolver did not answer (a live run writes the same rows)."""
     section = payload.get("domainPosture")
     records = section.get("value") if isinstance(section, Mapping) else None
+    origin = doh_resolver_display(payload.get("doh_endpoint"))
     rows: list[dict[str, Any]] = []
     for record in records if isinstance(records, list) else []:
         if isinstance(record, Mapping) and record.get("resolver_error"):
@@ -140,9 +146,9 @@ def resolver_error_rows(collector: str, payload: Mapping[str, Any]) -> list[dict
                     "status": "failed",
                     "item_count": 1,
                     "error_class": DNS_RESOLVER_ERROR_CLASS,
-                    # Untrusted text from the sample: only its safe form is copied (review R164).
                     "error": safe_resolver_diagnostic(record["resolver_error"]),
                     "message": "Replayed from an offline sample whose DNS resolver did not answer for this domain.",
+                    **({"doh_endpoint": origin} if origin else {}),
                 }
             )
     return rows
@@ -153,7 +159,9 @@ def replay_coverage_rows(collector: str, payload: Mapping[str, Any]) -> list[dic
 
     A domain posture record with a ``resolver_error`` is a failed read too (see :func:`resolver_error_rows`).
     """
+    payload = sanitise_resolver_fields(payload, dns=collector in DNS_POSTURE_COLLECTORS)
     rows: list[dict[str, Any]] = resolver_error_rows(collector, payload)
+    origin = doh_resolver_display(payload.get("doh_endpoint"))
     for name, section in sorted(payload.items()):
         if not isinstance(section, Mapping):
             continue
@@ -193,10 +201,11 @@ def replay_coverage_rows(collector: str, payload: Mapping[str, Any]) -> list[dic
             "result_limit": limit,
             "collection_truncated": bool(cut),
             "error_class": str(error_class or "unknown") if failed else TRUNCATION_ERROR_CLASS,
-            "error": (safe_resolver_diagnostic(error or error_class) if error_class == DNS_RESOLVER_ERROR_CLASS
-                      else str(error or error_class)) if failed else None,
+            "error": str(error or error_class) if failed else None,
             "message": "Replayed from an offline sample that recorded this read as failed or cut short.",
         }
+        if error_class == DNS_RESOLVER_ERROR_CLASS and origin:
+            row["doh_endpoint"] = origin
         if cut:
             reason = str(section.get("truncation_reason") or (REASON_OPERATOR_LIMIT if limit else REASON_UNKNOWN))
             row["truncation_reason"] = reason

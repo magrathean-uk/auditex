@@ -13,9 +13,12 @@ from typing import Any
 
 import pytest
 
-_SECRETS = ("synthetic-user-zz9", "synthetic-pass-zz9", "path-tok-zz9", "query-tok-zz9")
-_LEGACY_URL = "https://synthetic-user-zz9(x:synthetic-pass-zz9@[2001:db8::53]:8443/path-tok-zz9?key=query-tok-zz9"
+_SECRETS = ("synthetic-user-zz9", "synthetic-pass-zz9", "path-tok-zz9", "query-tok-zz9", "fragment-tok-zz9",
+            "percent-user%40zz9", "percent-pass%28zz9", "percent-path%2Fzz9", "percent-query%2Bzz9")
+_LEGACY_URL = ("https://synthetic-user-zz9(x:synthetic-pass-zz9@[2001:db8::53]:8443/"
+               "path-tok-zz9?key=query-tok-zz9#fragment-tok-zz9")
 _DISPLAY = "https://[2001:db8::53]:8443"
+_CONFIGURED_DISPLAY = "https://[2001:db8::54]:8443"
 _LEGACY_ERRORS = (
     f"DoH resolver at {_LEGACY_URL} could not answer TXT contoso.example: SERVFAIL",
     f"DoH query failed for TXT contoso.example at {_LEGACY_URL} (HTTP 503)",
@@ -23,10 +26,29 @@ _LEGACY_ERRORS = (
 # The wording before R164: the library text names the path without a scheme.
 _PRE_R164_ERROR = ("DoH query failed for TXT contoso.example: HTTPSConnectionPool(host='2001:db8::53', port=8443): "
                    "Max retries exceeded with url: /path-tok-zz9?key=query-tok-zz9&name=contoso.example")
+_NESTED_TARGET = _PRE_R164_ERROR.replace("/path-tok-zz9", "/https://fake-host-zz9.example/path-tok-zz9")
+_FUZZ_DIAGNOSTICS = (
+    (_LEGACY_ERRORS[0], f"DoH resolver at {_DISPLAY} could not answer TXT contoso.example: SERVFAIL"),
+    ("request to https://synthetic-user-zz9(@x):synthetic-pass-zz9@dns.example/path-tok-zz9 failed",
+     "request to https://dns.example failed"),
+    ("request to https://percent-user%40zz9:percent-pass%28zz9@dns.example/percent-path%2Fzz9"
+     "?k=percent-query%2Bzz9#fragment-tok-zz9 failed", "request to https://dns.example failed"),
+    ("from https://dns.example/https://fake-host-zz9.example/path-tok-zz9 to http://[::1]:8080/query-tok-zz9",
+     "from https://dns.example to http://[::1]:8080"),
+    ("failed at (https://[2001:db8::53]:8443), retrying at https://retry.example.",
+     "failed at (https://[2001:db8::53]:8443), retrying at https://retry.example."),
+    ('failed at "https://u:p@dns.example/path-tok-zz9"', 'failed at "https://dns.example"'),
+)
 
 
-def _dns_payload(domain_key: str) -> dict[str, Any]:
+def _dns_payload(domain_key: str, scenario: str) -> dict[str, Any]:
+    if scenario == "nested_target":
+        return {"domainPosture": {"value": [{"domain": "contoso.example", "resolver_error": _NESTED_TARGET}]}}
+    if scenario == "unclassified":
+        return {"spfRecords": {"value": [], "status": "failed", "error": _LEGACY_ERRORS[1],
+                               "message": _LEGACY_ERRORS[0], "reason": _LEGACY_URL, "diagnostic": _LEGACY_URL}}
     return {
+        "doh_endpoint": _LEGACY_URL.replace("db8::53", "db8::54"),
         "domains": {"value": [{domain_key: "contoso.example", "isVerified": True, "verified": True}]},
         "domainPosture": {"value": [
             {"domain": "contoso.example", "resolver_error": _LEGACY_ERRORS[0],
@@ -37,15 +59,15 @@ def _dns_payload(domain_key: str) -> dict[str, Any]:
              "spf": {"present": None}, "dmarc": {"present": None}},
         ]},
         "spfRecords": {"value": [], "status": "failed", "error_class": "dns_resolver_error",
-                       "error": _LEGACY_ERRORS[1]},
+                       "error": _LEGACY_ERRORS[1], "diagnostics": [text for text, _ in _FUZZ_DIAGNOSTICS]},
     }
 
 
 def _assert_clean(tmp_path: Path, console: str, caplog: pytest.LogCaptureFixture) -> str:
-    logged = "\n".join(f"{record.name} {record.getMessage()} {record.args!r}" for record in caplog.records)
+    logged = caplog.text + "\n".join(f"{record.name} {record.getMessage()} {record.args!r}" for record in caplog.records)
     written = ""
     for path in sorted(tmp_path.rglob("*")):
-        if path.is_file() and path.name != "sample.json":
+        if path.is_file():
             data = path.read_bytes()
             for part in _SECRETS:
                 assert part.encode() not in data, (part, path.relative_to(tmp_path).as_posix())
@@ -60,60 +82,52 @@ def _gap_text(manifest: dict[str, Any]) -> str:
     return json.dumps(manifest.get("coverage_gaps"))
 
 
-def test_m365_replay_of_a_legacy_resolver_url_shows_only_its_host(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(("collector", "domain_key"), [("dns_posture", "id"), ("google_dns_posture", "domainName")])
+@pytest.mark.parametrize("scenario", ["configured", "nested_target", "unclassified"])
+def test_replay_sweeps_legacy_dns_diagnostics(
+    collector: str, domain_key: str, scenario: str, tmp_path: Path,
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    from auditex.google_workspace.run import run_google_offline
     from azure_tenant_audit.cli import run_offline
 
     sample = tmp_path / "sample.json"
-    sample.write_text(json.dumps({"dns_posture": _dns_payload("id")}), encoding="utf-8")
+    sample.write_text(json.dumps({collector: _dns_payload(domain_key, scenario)}), encoding="utf-8")
     out = tmp_path / "out"
     caplog.set_level(logging.DEBUG)
-    run_offline(sample, out, "contoso", "replay", auditor_profile="global-reader", plane="inventory")
+    if collector == "dns_posture":
+        run_offline(sample, out, "contoso", "replay", auditor_profile="global-reader", plane="inventory")
+    else:
+        run_google_offline(sample_path=sample, out=out, tenant_name="Example", run_name="replay",
+                           domain="contoso.example", customer_id=None)
     captured = capsys.readouterr()
 
-    written = _assert_clean(out, captured.out + captured.err, caplog)
     (manifest_path,) = out.glob("*/run-manifest.json")
     gaps = _gap_text(json.loads(manifest_path.read_text(encoding="utf-8")))
-    assert f"resolver at {_DISPLAY} " in gaps
-    assert _DISPLAY in written
-
-
-def test_google_replay_of_a_legacy_resolver_url_shows_only_its_host(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from auditex.google_workspace.run import run_google_offline
-
-    sample = tmp_path / "sample.json"
-    sample.write_text(json.dumps({"google_dns_posture": _dns_payload("domainName")}), encoding="utf-8")
-    out = tmp_path / "out"
-    caplog.set_level(logging.DEBUG)
-    run_google_offline(sample_path=sample, out=out, tenant_name="Example", run_name="replay",
-                       domain="contoso.example", customer_id=None)
-    captured = capsys.readouterr()
-
+    assert "fake-host-zz9" not in gaps
     written = _assert_clean(out, captured.out + captured.err, caplog)
-    (manifest_path,) = out.glob("*/run-manifest.json")
-    gaps = _gap_text(json.loads(manifest_path.read_text(encoding="utf-8")))
-    assert f"resolver at {_DISPLAY} " in gaps
-    assert _DISPLAY in written
+    assert "fake-host-zz9" not in written
+    assert f"resolver at {_DISPLAY} " not in gaps
+    if scenario == "configured":
+        assert f"resolver at {_CONFIGURED_DISPLAY} " in gaps
+    if scenario == "nested_target":
+        assert "endpoint unknown" in gaps
+    if scenario == "unclassified":
+        coverage = json.loads((manifest_path.parent / "coverage.json").read_text(encoding="utf-8"))
+        (row,) = [row for row in coverage if row["name"] == "spfRecords"]
+        assert row["status"] == "failed" and row["error_class"] == "unknown"
+        assert _DISPLAY in row["error"]
+    if scenario != "nested_target":
+        assert _DISPLAY in written
 
 
-@pytest.mark.parametrize(("text", "named"), [
-    (_LEGACY_ERRORS[0], _DISPLAY),
-    (_LEGACY_ERRORS[1], _DISPLAY),
-    (f"DoH resolver at {_LEGACY_URL}) could not answer", _DISPLAY),
-    # User info with a space: the host cannot be told apart from the user name, so none is named.
-    ("DoH resolver at https://synthetic user-zz9:pw@dns.corp.example/x could not answer", None),
-    (_PRE_R164_ERROR, None),
-    ("DoH resolver at https://2001:db8::53:8443 could not answer TXT x: SERVFAIL", None),
-    # Two different resolvers: neither is named.
-    ("at https://a.example/x and https://b.example/y", None),
-])
-def test_resolver_named_in_untrusted_text(text: str, named: str | None) -> None:
-    from azure_tenant_audit.dns_lookup import resolver_named_in
+@pytest.mark.parametrize(("text", "expected"), _FUZZ_DIAGNOSTICS,
+                         ids=("ipv6", "userinfo", "percent-encoding", "two-urls", "punctuation", "quotes"))
+def test_dns_diagnostic_scrubs_each_url(text: str, expected: str) -> None:
+    from azure_tenant_audit.dns_lookup import safe_resolver_diagnostic
 
-    assert resolver_named_in(text) == named
+    assert safe_resolver_diagnostic(text) == expected
+    assert safe_resolver_diagnostic(expected) == expected
 
 
 @pytest.mark.parametrize("text", [*_LEGACY_ERRORS, _PRE_R164_ERROR,
