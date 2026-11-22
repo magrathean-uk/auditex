@@ -405,3 +405,74 @@ def test_w2_19_per_scope_check_names_each_access_denied_scope() -> None:
         google_client._token_request = original  # type: ignore[assignment]
     assert missing == ["https://www.googleapis.com/auth/b", "https://www.googleapis.com/auth/c"]
 
+
+def test_w2_21_an_empty_completed_read_proves_the_collector_token_scopes() -> None:
+    from auditex.google_workspace.collectors import GoogleDevicesCollector
+    from auditex.google_workspace.run import build_google_capability_rows
+
+    class _Client:
+        def list_devices(self, resource: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            if resource == "chromeos":
+                raise _HttpError(403)
+            return []
+
+    result = GoogleDevicesCollector().run({"client": _Client()})
+    mobile = next(row for row in result.coverage if row["name"] == "mobileDevices")
+    assert mobile["status"] == "ok" and mobile["item_count"] == 0
+    row = build_google_capability_rows(
+        ["google_devices"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=result.coverage,
+    )[0]
+    assert row["status"] == "partial"
+    assert row["reason"] == "runtime_permission_block"
+    assert row["missing_permissions"] == []
+
+
+def test_w2_21_a_row_with_no_read_behind_it_proves_no_scope() -> None:
+    from auditex.google_workspace.run import build_google_capability_rows
+
+    coverage = [
+        {"collector": "google_gmail_settings", "type": "google", "name": "mailboxSettingsSkipped", "status": "ok",
+         "item_count": 0, "endpoint": "gmail.users.settings"},
+        {"collector": "google_gmail_settings", "type": "google", "name": "mailboxSettings:a", "status": "failed",
+         "item_count": 0, "error_class": "insufficient_permissions", "error": "HTTP 403"},
+    ]
+    row = build_google_capability_rows(
+        ["google_gmail_settings"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=coverage,
+    )[0]
+    assert row["status"] == "blocked_by_scope"
+
+
+def test_w2_25_a_dns_only_preflight_never_marks_the_google_scope_exact() -> None:
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
+
+    preflight = build_google_preflight_rows(object(), ["google_dns_posture"], domain="example.com")
+    assert [row.get("type") for row in preflight] == ["dns"]
+    row = build_google_capability_rows(
+        ["google_dns_posture"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=preflight,
+    )[0]
+    assert row["status"] != "supported_exact_scope"
+    assert row["status"] == "supported"
+
+
+def test_w2_25_a_completed_google_preflight_read_is_still_exact_scope() -> None:
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
+
+    class _Client:
+        def list_alerts(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            return []
+
+    preflight = build_google_preflight_rows(_Client(), ["google_alert_center"], domain="example.com")
+    row = build_google_capability_rows(
+        ["google_alert_center"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=preflight,
+    )[0]
+    assert row["status"] == "supported_exact_scope"
