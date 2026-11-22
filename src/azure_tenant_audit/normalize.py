@@ -2606,7 +2606,9 @@ def build_normalized_snapshot(
             internal_recipients=item.get("internal_recipients") or [],
             move_to_folder=item.get("move_to_folder"),
             delete_action=bool(item.get("delete_action")),
-            hide_from_user=bool(item.get("hide_from_user")),
+            # An unresolved move target is unknown, never false (R006): the field is left out and the state named.
+            hide_from_user=None if item.get("hide_from_user_state") == "unknown" else bool(item.get("hide_from_user")),
+            hide_from_user_state="unknown" if item.get("hide_from_user_state") == "unknown" else None,
         )
         for item in _values(collector_payloads.get("mailbox_forwarding", {}), "messageRules")
         if item.get("user_id") and item.get("rule_id")
@@ -2638,6 +2640,10 @@ def build_normalized_snapshot(
             redirect_uris=item.get("redirect_uris") or [],
             owner_count=item.get("owner_count"),
             federated_credentials=item.get("federated_credentials") or [],
+            # None from the collector means the read failed: keep that apart from none configured (R032).
+            federated_credentials_state=(
+                "unknown" if "federated_credentials" in item and item["federated_credentials"] is None else None
+            ),
             required_resource_access=item.get("required_resource_access") or [],
             # Populated from the beta /reports/servicePrincipalSignInActivities report
             # (AuditLog.Read.All). When that report is unavailable the collector sets
