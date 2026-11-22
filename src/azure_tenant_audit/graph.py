@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import math
 import random
@@ -675,11 +676,12 @@ class GraphClient:
                     {"method": "GET", "url": redacted_url(target), "error": type(exc).__name__, "hop": hops},
                 )
                 # R158: the original text names the signed download URL (its query is a credential) and collectors
-                # store str(exc). Re-raise the same exception type, so retries and classification are unchanged,
-                # naming only the host and path.
-                raise type(exc)(
-                    f"Redirect hop to {event['host']}{event['path']} failed ({type(exc).__name__})"
-                ) from None
+                # store str(exc). Re-raise a copy of the same exception type, so retries and classification are
+                # unchanged, naming only the host and path and holding no request or response.
+                safe = copy.copy(exc)
+                safe.args = (f"Redirect hop to {event['host']}{event['path']} failed ({type(exc).__name__})",)
+                safe.request = safe.response = None
+                raise safe from None
             current_url = target
         return response
 
