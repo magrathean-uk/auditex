@@ -306,3 +306,69 @@ def test_the_local_answer_reasons_give_the_installed_package_command() -> None:
         text = local_answer.REASONS[key]
         assert 'pipx install --force "auditex[local-answer]"' in text, key
         assert "/Users/" not in text and "/home/" not in text
+
+
+# -- Repair round 2 on PR #176.
+
+def _files_holding(run_dir: Path, needle: str) -> list[str]:
+    """Every file under run_dir (text, JSON, SQLite or any other bytes) whose content holds needle.
+
+    The one exception is the documented ``run_dir`` field (output-contract.md: ``run-manifest.json`` records where the
+    operator ran the audit and the customer pack reduces it to the run folder name), in the manifest and in the copy the
+    SQLite index keeps under ``run_meta``. Every other value is swept.
+    """
+    import json
+    import sqlite3
+
+    hits = []
+    for path in sorted(run_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name == "run-manifest.json":
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            assert manifest.pop("run_dir") == str(run_dir)
+            content = json.dumps(manifest).encode("utf-8")
+        elif path.suffix == ".sqlite":
+            conn = sqlite3.connect(path)
+            try:
+                tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
+                values = [repr(row) for table in tables for row in conn.execute(f'SELECT * FROM "{table}"')
+                          if not (table == "run_meta" and row[0] == "run_dir")]
+            finally:
+                conn.close()
+            content = "\n".join(values).encode("utf-8")
+        else:
+            content = path.read_bytes()
+        if needle.encode("utf-8") in content:
+            hits.append(str(path.relative_to(run_dir)))
+    return hits
+
+
+# Review blockers 1 and 2: a blocked Google probe (libraries missing) run with an absolute --out and an absolute,
+# missing --service-account-key wrote the key path into probe-result.json and the output path into the manifest and
+# the SQLite evidence index. A failed probe (libraries present, the key cannot be read) takes the other branch. Sweep
+# every file either run writes so no other absolute path can hide.
+@pytest.mark.parametrize("libraries", ["missing", "present"])
+def test_a_blocked_or_failed_google_probe_writes_no_absolute_path_anywhere(installed_package: Path, monkeypatch,
+                                                                           capsys, libraries: str) -> None:
+    from auditex import cli
+    from auditex.google_workspace import auth
+
+    root = installed_package / "secret place"
+    monkeypatch.setattr(sys, "executable", str(root / "env" / "bin" / "python3"))
+    if libraries == "missing":
+        monkeypatch.setattr(auth, "_module_available", lambda module: False)
+    else:
+        pytest.importorskip("google.oauth2.service_account")
+    out = root / "out"
+    rc = cli.main([
+        "google", "probe", "--tenant-name", "Example", "--out", str(out), "--run-name", "blocked",
+        "--domain", "example.com", "--customer-id", "C123", "--subject", "admin@example.com",
+        "--service-account-key", str(root / "keys" / "sa.json"), "--collectors", "google_directory",
+    ])
+    capsys.readouterr()
+    assert rc != 0
+    run_dir = out / "Example-blocked"
+    assert (run_dir / "probe-result.json").is_file() and (run_dir / "index" / "evidence.sqlite").is_file()
+    assert _files_holding(run_dir, str(root)) == []
+    assert _files_holding(run_dir, str(installed_package)) == []

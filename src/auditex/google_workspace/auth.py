@@ -282,8 +282,12 @@ def read_service_account_summary(path: Path | None) -> dict[str, Any]:
         return {"present": False}
     try:
         payload = json.loads(path.expanduser().read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        return {"present": path.expanduser().exists(), "error": str(exc)}
+    except OSError as exc:
+        # The OS message names the file ("[Errno 2] ...: '/home/...'"); this summary is written into the run bundle,
+        # so it keeps only the reason, never the operator's path.
+        return {"present": path.expanduser().exists(), "error": exc.strerror or type(exc).__name__}
+    except ValueError as exc:  # JSONDecodeError and UnicodeDecodeError: the message holds a position, not a path
+        return {"present": True, "error": str(exc)}
     return {
         "present": True,
         "type": payload.get("type"),

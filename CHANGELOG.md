@@ -24,6 +24,10 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   interpreter's `pip` for another environment (quoted, so a path with a space pastes cleanly), the downloaded wheel
   again for an install from a wheel, and the editable install only in a source checkout. What a run bundle records
   (the Google dependency status in a blocked probe) names no local path.
+- **A blocked or failed Google probe writes no absolute local path.** An unreadable service-account key is recorded by
+  its reason only, not the OS message that names the file, and the recorded command line reduces absolute paths
+  (`--out /home/...`) to `<local-path>/<name>`, as the customer pack already does. The manifest's documented `run_dir`
+  is unchanged.
 - **Shipped resources never come from the current folder or another installation (PR #151 review).** A shipped
   directory missing from the package is no longer listed from the current folder, shipped-file patterns match the whole
   path (so an operator file such as `customer/configs/input.json` is not mistaken for shipped content), and the release

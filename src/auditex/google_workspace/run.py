@@ -123,7 +123,11 @@ class GoogleRunConfig:
 
 
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
-    return redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)
+    """The command line as the run bundle records it: secret-bearing values redacted and every absolute path of the
+    operator's machine (``--out /home/...``) reduced to ``<local-path>/<name>``."""
+    from ..reporting import local_path_argument
+
+    return [local_path_argument(item) for item in redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)]
 
 
 def _selected_collectors(config: GoogleRunConfig) -> list[str]:
