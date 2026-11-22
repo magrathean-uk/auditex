@@ -295,3 +295,39 @@ def test_seeder_rejects_abbreviated_flags(kind, tmp_path, graph, az_calls):
         module.main(["--config", str(lab_config(tmp_path, LAB_TENANT)), "--run-name", "guard", "--dry"])
     assert exc.value.code == 2
     assert recorder.calls == []
+
+
+def run_verifier(config: Path, *extra: str) -> tuple[int, dict | None]:
+    module = load_module(ROOT / "scripts" / "verify-population-az.py")
+    run_dir = config.parent / "runs" / "verify"
+    result = module.main(["--config", str(config), "--run-name", "verify", "--run-dir", str(run_dir),
+                          "--bootstrap-root", str(ROOT), *extra])
+    manifest_path = run_dir / "population-verification-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+    return result, manifest
+
+
+def test_verifier_requests_its_token_for_the_named_tenant(tmp_path, graph, az_calls):
+    graph(LAB_TENANT)
+    run_verifier(lab_config(tmp_path, LAB_TENANT))
+    token_calls = [argv for argv in az_calls if argv[:3] == ["az", "account", "get-access-token"]]
+    assert token_calls and all("--tenant" in argv and argv[argv.index("--tenant") + 1] == LAB_TENANT for argv in token_calls)
+
+
+@pytest.mark.parametrize("token_tenant,org_tenant", [(OTHER_TENANT, LAB_TENANT), (LAB_TENANT, OTHER_TENANT)])
+def test_verifier_refuses_evidence_from_another_tenant(token_tenant, org_tenant, tmp_path, monkeypatch, graph, az_calls):
+    monkeypatch.setenv("AZURE_ACCESS_TOKEN", fake_jwt(token_tenant))
+    recorder = graph(org_tenant)
+    result, manifest = run_verifier(lab_config(tmp_path, LAB_TENANT))
+    assert result != 0
+    assert manifest is not None and manifest.get("status") == "failed" and manifest.get("error") == "tenant_mismatch"
+    assert [url for _, url in recorder.calls if "/organization" not in url] == []
+
+
+def test_verifier_refuses_placeholder_tenant_before_any_read(tmp_path, monkeypatch, graph, az_calls):
+    monkeypatch.setenv("AZURE_ACCESS_TOKEN", fake_jwt(ZERO_TENANT))
+    recorder = graph(ZERO_TENANT)
+    result, manifest = run_verifier(lab_config(tmp_path, ZERO_TENANT))
+    assert result != 0
+    assert recorder.calls == []
+    assert manifest is not None and manifest.get("error") == "tenant_id_required"
