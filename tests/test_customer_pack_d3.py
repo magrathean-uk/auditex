@@ -112,6 +112,8 @@ def test_customer_pack_run_manifest_relabels_flag_equals_paths(tmp_path: Path) -
         "--tenant-name=r021",
         "--resume-from",
         str(operator / "previous"),
+        "--out=\\\\fileserver\\Clients\\Acme\\audits",
+        "\\\\fileserver\\Clients\\Acme\\waivers.json",
     ]
     manifest_path.write_text(json.dumps(manifest))
     rehash(run)
@@ -127,6 +129,9 @@ def test_customer_pack_run_manifest_relabels_flag_equals_paths(tmp_path: Path) -
         "--tenant-name=r021",
         "--resume-from",
         "<local-path>/previous",
+        "--out=<local-path>/audits",
+        "<local-path>/waivers.json",
     ]
     text = json.dumps(copied)
     assert "operator-home" not in text and "C:\\\\Users" not in text
+    assert "fileserver" not in text and "Acme" not in text

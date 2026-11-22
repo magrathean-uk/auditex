@@ -1807,7 +1807,7 @@ _VERBATIM_IF_UNCHANGED = frozenset({"bundle-hashes.json"})
 _LOCAL_PATH_LABEL = "<local-path>"
 
 
-_LOCAL_ABSOLUTE_PATH = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
+_LOCAL_ABSOLUTE_PATH = re.compile(r"^(?:/|\\\\|[A-Za-z]:[\\/])")  # POSIX, UNC (\\server\share) or drive path
 
 
 def _local_path_label(value: Any) -> Any:
