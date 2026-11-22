@@ -739,6 +739,7 @@ class GraphClient:
                 if graph_hop
                 else {name: value for name, value in headers.items() if name.lower() != "authorization"}
             )
+            safe: RequestException | None = None
             try:
                 response = self.session.request(
                     "GET", target, headers=hop_headers, timeout=self.auth.timeout_seconds, allow_redirects=False
@@ -755,7 +756,10 @@ class GraphClient:
                 safe = copy.copy(exc)
                 safe.args = (f"Redirect hop to {event['host']}{event['path']} failed ({type(exc).__name__})",)
                 safe.request = safe.response = None
-                raise safe from None
+                safe.__cause__ = safe.__context__ = None
+            if safe is not None:
+                # Raised outside the except block, so the original error does not ride along as hidden context.
+                raise safe
             current_url = target
         return response
 

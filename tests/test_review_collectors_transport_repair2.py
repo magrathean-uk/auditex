@@ -168,3 +168,26 @@ def test_the_declared_folder_scope_is_the_grant_documented_for_the_routes_the_co
     for guide in ("guides/admin-permission-guide.md", "guides/reader-app-permissions.md"):
         text = (docs / guide).read_text(encoding="utf-8")
         assert all(f"`{grant}`" in text for grant in documented), guide
+
+
+def test_a_failed_redirect_hop_error_keeps_no_signed_url_in_its_context(monkeypatch) -> None:
+    """R033/R158 (round 2 review): the re-raised hop error must not hold the original error as its hidden context."""
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+
+    client = fake_graph_client(throttle_mode="safe")
+    client.sleep = lambda _seconds: None
+    signed = "https://reports.office.com/data/download/abc123?sig=SIGNEDQUERY&se=2026"
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ARG001
+        if url.startswith("https://graph.microsoft.com"):
+            return graph_response(302, {}, headers={"Location": signed})
+        raise RequestsConnectionError(f"could not reach {url}")
+
+    monkeypatch.setattr(client.session, "request", _request)
+    with pytest.raises(RequestsConnectionError) as caught:
+        client.get_content("/reports/getMailboxUsageDetail(period='D7')")
+    chained, seen = caught.value, []
+    while chained is not None and chained not in seen:
+        seen.append(chained)
+        assert "SIGNEDQUERY" not in repr(chained.args)
+        chained = chained.__cause__ or chained.__context__
