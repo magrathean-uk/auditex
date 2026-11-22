@@ -1714,6 +1714,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
         # One verified capture per run, before any section adapter, kept across ``Bundle.reset()`` (a failure too),
         # so SS 2.1's private config and the anti-phish coverage check agree whatever the section order.
         bundle.sensitive_users = _capture_sensitive_users(bundle.root)
+    variant_built = set()
     for section in sections:
         bundle.reset()
         try:
@@ -1812,6 +1813,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                 result.rule_sections[section] = dict(NOT_COLLECTED)
                 try:
                     result.rule_sections[section] = variant(bundle)
+                    variant_built.add(section)
                 except Unavailable as exc:
                     # A fresh source/coverage/scan failure must never become rule evidence.
                     if exc.reason != "incomplete_shape":
@@ -1828,6 +1830,13 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             # redaction cannot grow and enum annotation does not touch, so the check above already passed it.
             report[section].pop("dropped_conditions", None)
             report[section].pop("null_lists_read_as_empty", None)
+    # Review R106: a section withheld from the model can still feed the value rules (its adapter succeeded before a
+    # model-only gate, or a rule variant built it); the report says which, so no verdict rests on unnamed evidence.
+    for section, detail in report.items():
+        rule = result.rule_sections.get(section)
+        if (detail["status"] == "not_collected" and section in result.rule_sections
+                and not (isinstance(rule, dict) and rule.get("collection_status") == "not_collected")):
+            detail["rule_view"] = "variant" if section in variant_built else "adapter"
     result.report = {"schema_version": PROJECTION_VERSION, "sections": report, "redaction": redaction,
                      "bounds": bounds}
     return result

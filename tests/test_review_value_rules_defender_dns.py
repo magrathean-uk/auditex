@@ -376,8 +376,8 @@ def test_r103_partial_noncompliant_custom_policy_stays_undecided():
 
 
 # ---- R003 / R099: Safe Links reads the Built-In Protection rule's exclusions once the 7.x rows list that section ----
-# The shipped rows do not list built_in_protection_rules yet (a catalogue change outside this lane), so these tests call
-# the kind with a row that does; the shipped rows keep their current answers until the catalogue lists the section.
+# These tests call the kind with a row that lists built_in_protection_rules; the shipped rows list it since lane
+# rules-followup (tests/test_review_rules_followup.py pins the shipped answers).
 
 SL_FLAGS = {"EnableSafeLinksForEmail": True, "EnableSafeLinksForTeams": True, "EnableSafeLinksForOffice": True,
             "EnableForInternalSenders": True, "ScanUrls": True, "DeliverMessageAfterScan": True, "TrackClicks": True}
@@ -417,7 +417,7 @@ def _kind(sections):
 def test_r003_built_in_exclusions_without_a_covering_rule_are_not_met():
     partial_compliant = [_sl_rule("x", GROUP_ONLY)]
     shipped = assess(SL_POLICY, _safelinks(partial_compliant, [SL_BUILTIN, {"Identity": "x", **SL_FLAGS}], BI_EXCLUDES))
-    assert (shipped["verdict"], shipped["cell"]) == ("met", "policy_flags_ok")          # the finding, on the shipped row
+    assert (shipped["verdict"], shipped["cell"]) == ("not_assessed", "partial_tier_may_cover")   # fixed on the shipped row
     record = _kind(_safelinks([], [SL_BUILTIN], BI_EXCLUDES))
     assert (record["verdict"], record["cell"], record["reason_code"]) == (
         "not_met", "no_policy_covers_all", "no_policy_covers_all_recipients")
@@ -449,9 +449,9 @@ def test_r003_covering_rule_or_preset_needs_no_built_in_reading():
 
 
 def test_r099_empty_rule_lists_follow_the_built_in_policy():
-    shipped = assess(SL_POLICY, _safelinks([], [SL_BUILTIN]))
-    disabled = assess(SL_POLICY, _safelinks([_sl_rule("x", GROUP_ONLY, state="Disabled")], [SL_BUILTIN]))
-    assert (shipped["verdict"], disabled["verdict"]) == ("not_met", "met")             # the finding, on the shipped row
+    shipped = assess(SL_POLICY, _safelinks([], [SL_BUILTIN], BI_ALL))
+    disabled = assess(SL_POLICY, _safelinks([_sl_rule("x", GROUP_ONLY, state="Disabled")], [SL_BUILTIN], BI_ALL))
+    assert (shipped["verdict"], disabled["verdict"]) == ("met", "met")                 # fixed on the shipped row
     for rules in ([], [_sl_rule("x", GROUP_ONLY, state="Disabled")]):
         record = _kind(_safelinks(rules, [SL_BUILTIN], BI_ALL))
         assert (record["verdict"], record["cell"]) == ("met", "policy_flags_ok")

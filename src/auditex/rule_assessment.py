@@ -51,7 +51,7 @@ from .scuba_projection import (
     rule_policy_section,
 )
 
-SCHEMA_VERSION = "2026-11-05"
+SCHEMA_VERSION = "2026-11-22"
 PROMPT_CONVENTION = "named-enums-v1"
 # The recorded SHA-256 of the retired P1 system prompt. The assessment schema and older readers expect the envelope
 # key, so it stays a pinned literal; no prompt is built or sent.

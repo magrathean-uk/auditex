@@ -28,10 +28,16 @@ The public audit surface does not write to production tenants. It also does not 
 - Offline imports and control-by-control review of Maester, ScubaGear and Monkey365 JSON assessments, with source hashes and strict tenant identity checks.
 - Read-only privilege graph: potential routes from users, groups and applications to tier-0 control, with evidence per hop, explicit unverified prerequisites and candidate breakpoints.
 - Detection coverage ("could this tenant see an attack?") and the tenant's public footprint, including MTA-STS and TLS-RPT.
-- Baseline alignment with CIS Microsoft 365 Foundations v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, the Microsoft cloud security benchmark, and the NCSC Cyber Essentials requirements (v3.3), where device-side requirements show as manual or assessor-tested, the ones Intune and Exchange Online evidence in part (updates, anti-malware) show as partial, and tenant-backed ones never read pass. See [framework mappings](docs/reference/framework-mappings.md).
+- Mapping of findings to CIS Microsoft 365 Foundations v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, the Microsoft cloud security benchmark, and the NCSC Cyber Essentials requirements (v3.3). A mapping shows which control a finding relates to; it is not an assessment against that framework. For Cyber Essentials, device-side requirements show as manual or assessor-tested, the ones Intune and Exchange Online evidence in part (updates, anti-malware) show as partial, and tenant-backed ones never read pass. See [framework mappings](docs/reference/framework-mappings.md).
 - `auditex demo`, a guided walkthrough on a fictional company, and `auditex report explorer`, a self-contained interactive HTML view of any run.
 
 The package is Python 3.11 or newer. Its required runtime dependencies are `requests` and `msal`. Google Workspace and MCP support are optional extras.
+
+## Evidence, not a certificate
+
+An Auditex report is evidence from an automated, read-only run. It is not a certificate, an assurance opinion, a penetration test or legal advice, and it does not show that a tenant is secure or that it meets Cyber Essentials, a CIS Benchmark, the CISA SCuBA baselines or any other standard. It covers only what the run could read with the access it was given; the coverage gaps are recorded in the report and are part of the result. A person still makes the judgement.
+
+Run Auditex only against a tenant you own or have the owner's written authorisation to audit. A run folder holds personal data about the tenant's users (names, addresses, sign-in records and similar); whoever runs the audit is responsible for handling it lawfully. See [the security and privacy model](docs/reference/security-privacy.md).
 
 ## Install and check locally
 
@@ -92,7 +98,7 @@ auditex guided-run --flow app-audit
 
 The guided flow audits as the reader app and creates nothing in the tenant. The tenant administrator sets the app up once; every permission and setting is in [Reader app permissions](docs/guides/reader-app-permissions.md).
 
-Offline runs are safe for local checking:
+Offline runs contact no tenant and need no credentials:
 
 ```bash
 auditex run --offline --tenant-name demo --out outputs/offline
@@ -146,8 +152,9 @@ Each policy's status is in the run's `model_assessment.json`; see [AI assessment
 For an optional plain-language answer, `auditex explain <run-dir>` (or `auditex run ... --explain`) has a local model say
 what is wrong in the tenant, the most severe first, and what is right. The value rules still decide every verdict and the
 order; the model only selects prepared sentences, Auditex renders every word, and a selection that fails the checks shows
-fixed text. It needs the optional `local-answer` extra and downloads one pinned model file on first use, then runs
-offline with nothing sent anywhere; see [the local answer guide](docs/guides/local-answer.md).
+fixed text. It needs the optional `local-answer` extra and downloads one pinned model file from Hugging Face on first
+use, under that model's own licence, then runs offline: nothing about the run or the tenant is sent anywhere. See
+[the local answer guide](docs/guides/local-answer.md).
 
 ```bash
 auditex report render <run-dir> --format md
@@ -192,11 +199,14 @@ Keep `.venv/`, `.secrets/`, tenant evidence, and generated output directories lo
 
 ## Licence
 
-Auditex is open source under the Apache License 2.0. See [LICENSE](LICENSE) and
+Auditex is open source under the Apache License 2.0, which provides it "as is", without warranties. See [LICENSE](LICENSE) and
 [NOTICE](NOTICE); the fuller dependency inventory is in
 [third-party notices](docs/legal/third-party-notices.md). Security reporting instructions
 are in [.github/SECURITY.md](.github/SECURITY.md). Trademark information is in
 [docs/legal/trademarks.md](docs/legal/trademarks.md). Contributions: see
 [CONTRIBUTING](.github/CONTRIBUTING.md).
+
+Auditex is independent. It is not affiliated with, endorsed by or supported by Microsoft, Google, CISA, the NCSC, IASME
+or the Center for Internet Security. Their names are used only to say what Auditex reads or maps to.
 
 <sub>© 2026 MAGRATHEAN UK LTD · [Legal](https://github.com/magrathean-uk/.github/blob/main/LEGAL.md)</sub>

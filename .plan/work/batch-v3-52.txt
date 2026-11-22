@@ -1,1 +1,0 @@
---task REV-M05-T04 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M05-T04/request-2.md --readonly --sha task/M05-T04-d5-docs --tags debug

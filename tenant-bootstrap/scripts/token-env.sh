@@ -41,10 +41,11 @@ _is_token_valid_heuristic() {
   fi
 
   local expired
-  expired="$(python3 - "$token" <<'PY'
-import sys, time
+  # The token reaches Python through its environment only: argv is visible to every local user via ps.
+  expired="$(AUDITEX_TOKEN_UNDER_CHECK="$token" python3 - <<'PY'
+import os, time
 
-token = sys.argv[1]
+token = os.environ.get("AUDITEX_TOKEN_UNDER_CHECK", "")
 parts = token.split(".")
 if len(parts) < 2:
     print("unknown")

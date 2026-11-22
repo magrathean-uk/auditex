@@ -1,2 +1,0 @@
---task M07-T18 --role sol --brief .plan/work/M07-T18/brief-src-4.md --branch --slug kit-round-7s --tags hard --account claude-4 --max-turns 150 --timeout 9000 --budget 25 --rounds-ok "DEC-054: repair plus F3 merged into one run after a session restart"
---task CHK-M08-T01 --role terra --account claude-3 --readonly --sha task/M08-T01-certauth-teams --tags risk:high --timeout 9000 --max-turns 120 --budget 12 --brief .plan/work/CHK-M08-T01/brief-src-3.md

@@ -374,10 +374,14 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 `model_assessment.json` is an optional root artefact written by `auditex assess`.
 Assessment is rules only: the model layer is removed and nothing is called. Current outputs use
 `endpoint_host: "none"`, `model_name: "rules-only"` and omit `serving`.
-Its schema is `schemas/model_assessment.schema.json` (version `2026-11-05`), listed
-by the schema manifest and checked when present by bundle validation. The known
-older versions `2026-10-27`, `2026-10-27.1`, `2026-10-28` and `2026-10-29` use their
-byte-preserved, date-named schema files; `2026-10-29` is the most recent of these.
+Its schema is `schemas/model_assessment.schema.json` (version `2026-11-22`), listed
+by the schema manifest and checked when present by bundle validation. `2026-11-22` is
+`2026-11-05` plus the optional projection-section field `rule_view` (`adapter` or `variant`),
+which names the value-rule view still built for a `not_collected` section; nothing else differs,
+and both versions are validated by the same rules. The known older versions `2026-10-27`,
+`2026-10-27.1`, `2026-10-28`, `2026-10-29` and `2026-11-05` use their byte-preserved,
+date-named schema files; `2026-11-05` is the most recent of these and never carries `rule_view`.
+Earlier Auditex releases reject a `2026-11-22` file on its version.
 Malformed or unknown-version optional assessments produce warnings and never change
 the deterministic gate result. It contains
 `generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention
@@ -997,7 +1001,8 @@ the hash manifest cannot be replaced and a symbolic link is refused. `CONTRACT_V
 It holds `run_id`, `generated_at`, the digest and frame versions it was made with (`answer-digest-v2`,
 `answer-frames-v1`), `status` (`model`, or `fixed_text` when no model ran), `reason` (null, `runtime_missing`,
 `runtime_version`, `download_failed`, `model_unverified` or `model_failed`), `model` (the choice and the pinned
-repository, revision, file, size and SHA-256, or null), `runtime` (`llama-cpp-python` and its version, or null), the
+repository, revision, file, size, SHA-256 and the publisher's licence, or null; an answer saved without the licence is
+refused as made by another Auditex version and is made again), `runtime` (`llama-cpp-python` and its version, or null), the
 counts by verdict, `fixed_text_items`, the run `summary`, one entry per item of the run's digest (`item`, `policy_id`,
 `verdict`, the model's `selection` of sentence ids and value references or null, `fallback`, `failures` and the rendered
 `text`) and the whole printed `text`.

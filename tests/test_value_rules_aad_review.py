@@ -95,7 +95,6 @@ def test_r001_block_beside_terms_of_use_stays_decided_by_block():
 MFA = {"BuiltInControls": ["mfa"], "Operator": "OR"}
 
 
-@pytest.mark.xfail(strict=True, reason="pinned v3.9.1 vectors two_partial_no_role_excl (D57) require union_possible; needs a spec and vector change")
 def test_r027_shared_excluded_role_is_not_met_not_union_possible():
     one = ca(MFA, users={"ExcludeRoles": ["synthetic-role"]})
     assert cell("MS.AAD.3.2v2", ca_sections(one)) == ("not_met", "no_policy_meets")

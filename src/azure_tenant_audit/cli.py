@@ -25,6 +25,7 @@ from .break_glass import load_accounts_argument as load_break_glass_accounts
 from .capability_gate import relabel_intune_license_blockers
 from .certificate_auth import (
     CertificateAuthError,
+    certificate_authority,
     load_certificate_credential,
     refuse_sources_in_output,
 )
@@ -50,9 +51,10 @@ from .data_handling import collector_activity_notices
 from .data_minimisation import minimise_user_text
 from .diagnostics import build_diagnostics as _build_diagnostics
 from .diagnostics import load_permission_hints as _load_permission_hints
+from .dns_lookup import DEFAULT_DOH_ENDPOINT, DOH_ENDPOINT_ENV, resolve_doh_endpoint
 from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
-from .graph import GraphClient
+from .graph import GraphClient, GraphError
 from .guarded_io import current_context
 from .normalize import (
     build_ai_safe_summary,
@@ -165,6 +167,46 @@ def _certificate_selected(args: argparse.Namespace) -> bool:
     return any(getattr(args, name, None) for name in _CERTIFICATE_OPTIONS)
 
 
+class _BuiltInDefault(str):
+    """A parser default the operator did not type: still a plain string for every reader of the parsed arguments,
+    but marked so an environment value (AZURE_* or AUDIT_*, an --env file included) can take its place."""
+
+
+DEFAULT_AUTHORITY = _BuiltInDefault("https://login.microsoftonline.com/")
+DEFAULT_GRAPH_SCOPE = _BuiltInDefault("https://graph.microsoft.com/.default")
+DEFAULT_OUT = _BuiltInDefault("audit-output")
+DEFAULT_SAMPLE = _BuiltInDefault("examples/sample_audit_bundle/sample_result.json")
+
+
+# Path options are not taken from the environment: the guarded argument admission checks only typed --out and
+# --sample values, so an environment path (a link to another folder, say) would bypass it.
+_IGNORED_PATH_VARIABLES = (("AUDIT_OUTPUT_DIR", "--out"), ("AUDIT_SAMPLE_FILE", "--sample"))
+
+
+def apply_run_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    """Replace options the command line left out with the environment's value (an --env file is loaded into it
+    first); a typed flag always wins. Idempotent."""
+    # Literal attribute stores, not a computed setattr: the HTTP verb allow-list scan cannot resolve any opener
+    # once a module calls setattr with a computed name.
+    authority = _environment_override(getattr(args, "authority", None), "AZURE_AUTHORITY")
+    if authority is not None:
+        args.authority = authority
+    graph_scope = _environment_override(getattr(args, "graph_scope", None), "AZURE_GRAPH_SCOPE")
+    if graph_scope is not None:
+        args.graph_scope = graph_scope
+    collectors = _environment_override(getattr(args, "collectors", None), "AUDIT_COLLECTORS")
+    if collectors is not None:
+        args.collectors = collectors
+    return args
+
+
+def _environment_override(current: object, variable: str) -> str | None:
+    """The environment's value for an option the command line left out (absent or a built-in default), else None."""
+    if current is None or isinstance(current, _BuiltInDefault):
+        return (os.environ.get(variable) or "").strip() or None
+    return None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
     parser.add_argument("--version", action="version", version=package_version_line("azure-tenant-audit"))
@@ -190,9 +232,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--certificate-password-file", default=None, metavar="FILE",
         help="File holding the key password, readable only by its owner. No option takes the password itself.",
     )
-    parser.add_argument("--authority", default="https://login.microsoftonline.com/", help="Identity authority URL.")
-    parser.add_argument("--graph-scope", default="https://graph.microsoft.com/.default", help="Graph scope.")
-    parser.add_argument("--out", default="audit-output", help="Base output directory.")
+    parser.add_argument("--authority", default=DEFAULT_AUTHORITY,
+                        help=f"Identity authority URL (else AZURE_AUTHORITY, else {DEFAULT_AUTHORITY}).")
+    parser.add_argument("--graph-scope", default=DEFAULT_GRAPH_SCOPE,
+                        help=f"Graph scope (else AZURE_GRAPH_SCOPE, else {DEFAULT_GRAPH_SCOPE}).")
+    parser.add_argument("--out", default=DEFAULT_OUT, help=f"Base output directory (default {DEFAULT_OUT}).")
     parser.add_argument("--config", default="configs/collector-definitions.json", help="Collector configuration file.")
     parser.add_argument(
         "--collector-preset",
@@ -223,7 +267,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Essentials window for installing updates. Also read from AUDITEX_STALE_SYNC_DAYS."
         ),
     )
-    parser.add_argument("--collectors", default=None, help="Comma-separated collectors to run.")
+    parser.add_argument("--collectors", default=None, help="Comma-separated collectors to run (else AUDIT_COLLECTORS).")
+    parser.add_argument("--doh-endpoint", default=None, metavar="URL", help=(
+        "DNS-over-HTTPS resolver that dns_posture asks for the tenant's domain names: a plain https:// URL "
+        f"(else {DOH_ENDPOINT_ENV}, else {DEFAULT_DOH_ENDPOINT})."
+    ))
     parser.add_argument("--exclude", default=None, help="Comma-separated collectors to skip.")
     parser.add_argument("--include-exchange", action="store_true", help="Enable optional exchange collectors.")
     parser.add_argument(
@@ -270,7 +318,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--as-of", type=parse_as_of, default=None, metavar="YYYY-MM-DD", help=AS_OF_HELP)
     parser.add_argument("--sensitive-users", metavar="FILE", help="Local sensitive-user list (else AUDITEX_SENSITIVE_USERS_FILE); never uploaded or logged.")
     parser.add_argument("--partner-domains", metavar="FILE", help="Local partner-domain list (else AUDITEX_PARTNER_DOMAINS_FILE); never uploaded or logged.")
-    parser.add_argument("--sample", default="examples/sample_audit_bundle/sample_result.json", help="Sample bundle path when offline.")
+    parser.add_argument("--sample", default=DEFAULT_SAMPLE,
+                        help=f"Sample bundle path when offline (default {DEFAULT_SAMPLE}).")
     parser.add_argument(
         "--permission-hints",
         default="configs/collector-permissions.json",
@@ -611,11 +660,15 @@ def _publish_staged_rerun(output: CollectorRunOutput, retained: dict[str, Any]) 
 
 def _collector_extra(
     name: str, collector_payloads: dict[str, dict[str, Any]], sensitive_users: SensitiveUsers, binding: Any,
+    *, doh_endpoint: str | None = None,
 ) -> dict[str, Any]:
-    """Run-scoped private context: accepted domains for ``dns_posture``; SensitiveUsers and its opaque writer binding
-    for ``exchange_policy`` only (never the key, a session, an event or a checkpoint)."""
+    """Run-scoped private context: accepted domains and the DoH resolver for ``dns_posture``; SensitiveUsers and its
+    opaque writer binding for ``exchange_policy`` only (never the key, a session, an event or a checkpoint)."""
     if name == "dns_posture":
-        return {"exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains")}
+        return {
+            "exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains"),
+            "doh_endpoint": doh_endpoint or resolve_doh_endpoint(),
+        }
     if name == "exchange_policy":
         from .collectors.targeted_users_coverage import CONTEXT_BINDING, CONTEXT_USERS
         return {CONTEXT_USERS: sensitive_users, CONTEXT_BINDING: binding}
@@ -640,6 +693,13 @@ def run_live(
     args: argparse.Namespace, event_listener: Callable[[dict[str, Any]], None] | None = None,
     *, sensitive_users: SensitiveUsers | None = None, partner_domains: PartnerDomains | None = None,
 ) -> int:
+    apply_run_defaults(args)
+    try:
+        # The option, else AUDITEX_DOH_ENDPOINT, else Cloudflare; a malformed value stops the run before any read.
+        doh_endpoint = resolve_doh_endpoint(getattr(args, "doh_endpoint", None))
+    except ValueError as exc:
+        LOG.error("%s", exc)
+        return 2
     try:
         sensitive_users = sensitive_users if sensitive_users is not None else load_sensitive_users(getattr(args, "sensitive_users", None))
         partner_domains = partner_domains if partner_domains is not None else load_partner_domains(getattr(args, "partner_domains", None))
@@ -671,6 +731,9 @@ def run_live(
         LOG.error("Certificate authentication needs both --certificate-path and --certificate-thumbprint. %s.", CERTIFICATE_WAY)
         return 2
     try:
+        # Before anything is written: an authority outside the Entra allowlist (a flag or AZURE_AUTHORITY) is
+        # refused with the fixed message, so its text never reaches a log or the run folder.
+        certificate_authority(args.authority, args.tenant_id)
         # Before the key is read or the run folder exists: a source inside the output or resume folder,
         # or linked from one, would be swept into the bundle or overwritten by an output file.
         refuse_sources_in_output(
@@ -785,6 +848,18 @@ def run_live(
         LOG.error("%s", MIXED_CREDENTIALS_MESSAGE)
         return 2
     client = GraphClient(auth, audit_event=writer.log_event)
+    if hasattr(client, "ensure_token"):
+        # A certificate Entra refuses (thumbprint not on the app, wrong tenant) is one credential fault, not every
+        # Graph permission missing: stop before collection with the fixed certificate message.
+        try:
+            client.ensure_token()
+        except GraphError as exc:
+            if not str(exc.error_code or "").startswith("certificate_"):
+                raise
+            LOG.error("%s Check that the thumbprint is on the reader app registration and the tenant ID is right.", exc)
+            writer.log_event("run.aborted", "The certificate app token could not be acquired.",
+                             {"error_code": exc.error_code})
+            return 2
     # An app-only run has no signed-in user: the session context is empty (older bundles may carry one).
     session_context: dict[str, Any] = {}
     token_claims: dict[str, Any] = client.token_claims() if hasattr(client, "token_claims") else {}
@@ -955,7 +1030,8 @@ def run_live(
                 hooks=writer_adapter.hooks(),
                 # Only completed evidence from this run (including a validated resume),
                 # never another tenant read or an arbitrary raw artefact from disk.
-                extra=_collector_extra(name, collector_payloads, sensitive_users, sensitive_binding),
+                extra=_collector_extra(name, collector_payloads, sensitive_users, sensitive_binding,
+                                       doh_endpoint=doh_endpoint),
             ),
             name=name,
             # A staged re-run writes no raw file or checkpoint of its own: its raw evidence is published below once
@@ -1198,10 +1274,10 @@ def main(
     for ignored in ("AZURE_CLIENT_SECRET", "AZURE_ACCESS_TOKEN"):
         if os.environ.get(ignored) is not None:
             LOG.warning("Ignoring %s: Microsoft 365 audits authenticate only with the reader app's certificate.", ignored)
-    if args.authority is None:
-        args.authority = os.environ.get("AZURE_AUTHORITY", args.authority)
-    if args.graph_scope is None:
-        args.graph_scope = os.environ.get("AZURE_GRAPH_SCOPE", args.graph_scope)
+    apply_run_defaults(args)
+    for variable, flag in _IGNORED_PATH_VARIABLES:
+        if (os.environ.get(variable) or "").strip():
+            LOG.warning("Ignoring %s: give the path with %s.", variable, flag)
     if args.offline:
         try:
             offline_break_glass = load_break_glass_accounts(args.break_glass_accounts)

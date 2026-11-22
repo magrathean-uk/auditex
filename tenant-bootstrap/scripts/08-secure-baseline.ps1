@@ -65,7 +65,7 @@ if (-not $DryRun) {
       }
     }
 
-    $existing = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies?$filter=displayName eq '$($payload.displayName.Replace(\"'\", \"''\"))'" |
+    $existing = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies?`$filter=displayName eq '$($payload.displayName.Replace("'", "''"))'" |
       Select-Object -ExpandProperty Value |
       Where-Object displayName -eq $payload.displayName
     if ($existing) {

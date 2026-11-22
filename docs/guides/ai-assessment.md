@@ -1,7 +1,8 @@
 # AI assessment
 
-`auditex assess <run-dir>` writes an optional rule-only CISA SCuBA assessment from a finished
-Microsoft 365 run's local evidence. It writes private `model_assessment.json` (the file name is kept for
+`auditex assess <run-dir>` writes an optional rule-only assessment against the CISA SCuBA baselines from a finished
+Microsoft 365 run's local evidence. Despite the page name, no AI model takes part. It is Auditex's own reading of
+the published baselines: it is not a CISA or ScubaGear result and CISA has not reviewed or endorsed it. It writes private `model_assessment.json` (the file name is kept for
 compatibility) without changing findings, scores, reports, exports or customer packs. Nothing is sent anywhere:
 the assessment is computed locally from the run bundle.
 
@@ -81,7 +82,7 @@ verdicts can agree or disagree with baseline pass/fail statuses; not-assessed ro
 A value rule uses the shared closed gate first (the rule's `closed_gate` cell, rendered by
 `value_rules/gates.py`), then its own ordered section list, then its kind. The rule engine and catalogue follow
 spec v3.9.1 with addenda A1 and A2 (the catalogue's `spec_version` is `v3.9.1`); the cell inventory and reason
-codes are checked by the `2026-11-05` assessment validator. The [output contract](../reference/output-contract.md)
+codes are checked by the assessment validator, which applies the same rules to `2026-11-22` (current; it adds only the optional projection `rule_view`) and `2026-11-05` files, except the earlier Safe Links citation for MS.SECURITYSUITE 7.1-7.3 (including its `no_rules_configured` cell), accepted only in `2026-11-05` files. The [output contract](../reference/output-contract.md)
 lists the policy ids each rule covers. A rule that raises answers the catalogued `rule_evaluation_failed` reason
 with the `report_product_fault` recommendation, and logs only the rule id and the exception class.
 
@@ -135,13 +136,15 @@ contract, `scuba_config` row): ScubaGear's default configuration, the tenant's c
 policy's outcome). The cloud comes from the `dns_posture` OpenID discovery when the run has it, else from US
 Government licence SKUs, else it is taken as `commercial`.
 
-**DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** The opt-in `dns_posture` collector saves `spf_records`,
+**DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** The `dns_posture` collector saves `spf_records`,
 `dkim_records` and `dmarc_records` for tenant Exchange accepted domains (coexistence excluded) when complete
 same-run `acceptedDomains` evidence is available; otherwise it uses Graph-verified domains with the Email service
 (a missing or non-list `supportedServices` field is kept). Records include resolver logs, which the private rule
 view keeps and the projection drops before its shape and budget checks. Failed or truncated reads withhold the
-dependent sections. `dns_posture` remains outside default collector sets; its public lookups and OpenID discovery
-are described in the [privacy model](../reference/security-privacy.md).
+dependent sections. `dns_posture` is selected by default in the `auto`, `global-reader` and `app-readonly-full`
+profiles and the `full` preset; `--exclude dns_posture` omits it (see
+[default Exchange and public DNS collection](setup-guide.md#default-exchange-and-public-dns-collection)). Its public
+lookups and OpenID discovery are described in the [privacy model](../reference/security-privacy.md).
 
 The value-rule test vectors live in `tests/fixtures/value-rules/` (constructed rows with vector ids and origins;
 see [provenance](../provenance/provenance.md)). `AUDITEX_TEST_VALUE_RULE_VECTORS_V391=<kit vectors.jsonl>`

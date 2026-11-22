@@ -29,6 +29,7 @@ import json
 import os
 import re
 import stat
+import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -72,10 +73,11 @@ _PRIVATE_TEMPORARY = re.compile(
 # ``model_assessment_prompts.jsonl`` is no longer written by any command; bundles from older runs may still carry
 # it, so it stays accepted as an unhashed post-finalisation file.
 _LEGACY_POST_FINALIZATION_OUTPUTS = frozenset({"model_assessment_prompts.jsonl"})
+# Matched with ``fullmatch``: a name that only ends in a newline is another file (``$`` would accept it).
 _POST_FINALIZATION_OUTPUT = re.compile(
-    r"^reports/(?:explorer\.html"
+    r"reports/(?:explorer\.html"
     r"|rendered-report\.(?:json|md|csv|html|sarif\.json|oscal\.json)"
-    r"|(?:api-calls|permissions|proof-table|handoff)\.(?:json|md))$"
+    r"|(?:api-calls|permissions|proof-table|handoff)\.(?:json|md))"
 )
 # Directories whose files consumers open by name. A file at the root counts too.
 _CONSUMED_DIRECTORIES = ("normalized/", "findings/", "blockers/", "reports/", "ai_safe/")
@@ -86,8 +88,42 @@ def is_post_finalization_output(relative: str) -> bool:
     return (
         relative in ("model_assessment.json", "local_answer.json")
         or relative in _LEGACY_POST_FINALIZATION_OUTPUTS
-        or bool(_POST_FINALIZATION_OUTPUT.match(relative))
+        or bool(_POST_FINALIZATION_OUTPUT.fullmatch(relative))
     )
+
+
+def _folded(name: str) -> str | None:
+    """The basename ``name`` as a case- and normalisation-insensitive volume may match it (``MODEL_ASSESSMENT.json``,
+    a long s), or ``None`` when folding would turn it into a path (a fullwidth solidus becomes ``/``): no volume
+    opens such a file as another directory's file, so it is never a generated output."""
+    folded = unicodedata.normalize("NFKC", name).casefold()
+    return None if "/" in folded or "\\" in folded else folded
+
+
+def post_finalization_outputs(run_dir: str | Path) -> list[str]:
+    """The post-finalisation outputs present in ``run_dir`` (root files and ``reports/``), as relative paths.
+
+    They describe the evidence of the session that wrote them, so a resumed run removes them (R052). Names match
+    whatever their case: on a case-insensitive volume ``MODEL_ASSESSMENT.json`` is the file a reader opens as
+    ``model_assessment.json``.
+    """
+    root = Path(run_dir)
+    found: list[str] = []
+    for directory in ("", "reports"):
+        try:
+            entries = sorted(os.scandir(root / directory) if directory else os.scandir(root), key=lambda entry: entry.name)
+        except OSError:
+            continue
+        for entry in entries:
+            relative = f"{directory}/{entry.name}" if directory else entry.name
+            folded = _folded(entry.name)
+            if folded is None:
+                continue
+            if is_post_finalization_output(f"{directory}/{folded}" if directory else folded) and entry.is_file(
+                follow_symlinks=False
+            ):
+                found.append(relative)
+    return found
 
 
 def _read_by_consumers(relative: str) -> bool:

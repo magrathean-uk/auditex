@@ -6,6 +6,7 @@ from typing import Any
 from ..collection_gaps import (
     FANOUT_OBJECT_LIMIT,
     REASON_INPUT_LIMITED,
+    REASON_PAGINATION_FAILED,
     TRUNCATION_ERROR_CLASS,
     fanout_gap_row,
     section_total,
@@ -20,7 +21,13 @@ from ._endpoint_reads import (
     mark_section_scoped,
     scoped_gap_message,
 )
-from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
+from .base import (
+    Collector,
+    CollectorResult,
+    _classify_graph_error,
+    record_truncation,
+    run_graph_endpoints,
+)
 
 # deviceManagementScripts returns ``scriptContent`` (the base64 script body) unless
 # $select excludes it. Script bodies are file content and must never be collected,
@@ -43,6 +50,18 @@ _UPDATE_PROFILE_LISTS = frozenset(list_name for list_name, _assignments, _scope 
 # The per-policy assignment reads of the first device configuration profiles (and the fan-out gap past them) belong to the
 # unassigned-policy rule alone: a tenant with more than ten profiles must not lose its update ring rules over them.
 _POLICY_ASSIGNMENT_SECTIONS = frozenset({"deviceConfigurationAssignments", "deviceConfigurationAssignmentsFanout"})
+
+
+def _follow_next_link(client: Any, rows: list[Any], next_link: str) -> tuple[list[Any], Exception | None]:
+    """Rows of a fan-out item plus its later pages; a failed page ends the list with the rows read so far and the error
+    (R045), so one page never crashes the collector and loses the sections already read."""
+    rows = list(rows)
+    try:
+        for item in client.iter_items(next_link):
+            rows.append(item)
+    except Exception as exc:  # noqa: BLE001
+        return rows, exc
+    return rows, None
 
 
 class IntuneDepthCollector(Collector):
@@ -151,29 +170,35 @@ class IntuneDepthCollector(Collector):
                     if not isinstance(assignments, list):
                         assignments = []
                     next_link = body.get("@odata.nextLink")
+                    page_error: Exception | None = None
                     if isinstance(next_link, str) and next_link:
-                        assignments = assignments + list(client.iter_items(next_link))
-                    assignment_rows.append(
-                        {
-                            "policyId": policy_id,
-                            "displayName": policy.get("displayName"),
-                            "assignments": assignments,
-                        }
-                    )
-                    coverage.append(
-                        {
-                            "collector": self.name,
-                            "type": "graph",
-                            "name": "deviceConfigurationAssignments",
-                            "endpoint": endpoint,
-                            "policy_id": policy_id,
-                            "status": "ok",
-                            "item_count": len(assignments),
-                            "duration_ms": round((time.perf_counter() - batch_start) * 1000, 2),
-                            "error_class": None,
-                            "error": None,
-                        }
-                    )
+                        assignments, page_error = _follow_next_link(client, assignments, next_link)
+                    entry = {
+                        "policyId": policy_id,
+                        "displayName": policy.get("displayName"),
+                        "assignments": assignments,
+                    }
+                    row = {
+                        "collector": self.name,
+                        "type": "graph",
+                        "name": "deviceConfigurationAssignments",
+                        "endpoint": endpoint,
+                        "policy_id": policy_id,
+                        "status": "ok",
+                        "item_count": len(assignments),
+                        "duration_ms": round((time.perf_counter() - batch_start) * 1000, 2),
+                        "error_class": None,
+                        "error": None,
+                    }
+                    if page_error is not None:
+                        # The assignments read so far stay, marked cut; the policy's read is a failed, truncated gap.
+                        entry["collection_truncated"] = True
+                        error_class, error = _classify_graph_error(page_error)
+                        row.update(status="failed", error_class=error_class, error=error)
+                        record_truncation(row, list_name="deviceConfigurationAssignments", rows=len(assignments),
+                                          limit=None, reason=REASON_PAGINATION_FAILED)
+                    assignment_rows.append(entry)
+                    coverage.append(row)
                     continue
 
                 error_code = result.get("error_code") if isinstance(result, dict) else None

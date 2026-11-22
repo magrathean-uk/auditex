@@ -59,17 +59,19 @@ def assessment_for(template, record, *, legacy=False):
 
 
 def test_a1_exception_set_is_pinned_and_does_not_register_policies():
-    # A2 citation-domains.json supplies 64 source-derived domains (190 variants).
+    # A2 citation-domains.json supplies 64 source-derived domains (190 variants); review R003 adds
+    # built_in_protection_rules to the three SS 7.x not-a-list domains (193).
     # The immutable catalogue supplies the three fixed SS7 order exceptions.
     serial = {p + ":" + c: variants for (p, c), variants in VARIANTS.items()}
     assert len(VARIANTS) == 67
     assert sum(len(v) > 1 for v in VARIANTS.values()) == 64
-    assert sum(len(v) for v in VARIANTS.values() if len(v) > 1) == 190
-    assert sum(map(len, VARIANTS.values())) == 193
-    assert sha256(canonical(serial).encode()).hexdigest() == "00fd8197ded5350556d989e70be23d6c53c30ff536833ae426f0a15d85f192b7"
+    assert sum(len(v) for v in VARIANTS.values() if len(v) > 1) == 193
+    assert sum(map(len, VARIANTS.values())) == 196
+    assert sha256(canonical(serial).encode()).hexdigest() == "23364537a797676bf43fbc60113b76919ae157c92793ff86964f515917b54009"
     # v3.9.1: all 102 policies are registered, including SS 1.1, 6.1 and 6.2 (previously held for the collector).
     assert len(SOURCE["policies"]) == 102
-    assert sum(len(r["cells"]) for r in SOURCE["policies"].values()) == 1084
+    # Review R003/R099: SS 7.1 to 7.3 retire no_rules_configured and add three Built-In cells each.
+    assert sum(len(r["cells"]) for r in SOURCE["policies"].values()) == 1090
     assert "cell_contracts" not in SOURCE and "rule_failure" not in SOURCE
     assert set(TWO_CODES) == {"data_unusable_sub_domain_root_case", "data_unusable_sub_domain_without_root"}
     assert TWO_CODES == {
@@ -288,15 +290,17 @@ def test_all_external_final_vectors_have_valid_contracts(tmp_path):
     assert set(ref) == set(shipped)
     counts = Counter()
     dual_codes = Counter()
+    from test_value_rules_replay import review_relabel
     for line in Path(vectors).open():
         v = json.loads(line)
+        counts[v["policy"] + ":" + v["rule_cell"]] += 1
+        v = review_relabel(v)[0]          # review lane rules-followup: labels its rulings moved (no_rules_configured retired)
         text = v["rule_reason_text"]
         if v["rule_reason_code"] == D29_REASON_CODE and text == D29_V391_TEXT:
             text = D29_PRODUCT_TEXT  # M08-T10's shared D29 reason text, as in test_value_rules_replay.py
         record = _rec(v["policy"], v["rule_verdict"], v["rule_reason_code"], text,
                       v["rule_cell"], v["rule_cited_sections"])
         checked(record)
-        counts[v["policy"] + ":" + v["rule_cell"]] += 1
         if v["policy"] == "MS.AAD.6.1v1" and v["rule_cell"] == "orphan_sub_domain":
             dual_codes[v["rule_reason_code"]] += 1
         entry = ref[v["policy"]]["cells"][v["rule_cell"]]
@@ -323,7 +327,7 @@ def test_shared_reasons_are_catalogued_once_and_are_not_cells():
         "rule_not_implemented": {"reason_code": "rule_not_implemented", "verdict": "not_assessed",
                                  "reason_text": A1_NO_RULE_TEXT, "recommendation": None}}
     assert all(not set(shared) & set(row["cells"]) for row in loader.catalogue()["policies"].values())
-    assert sum(len(row["cells"]) for row in loader.catalogue()["policies"].values()) == 1084
+    assert sum(len(row["cells"]) for row in loader.catalogue()["policies"].values()) == 1090
 
 
 @pytest.mark.parametrize("policy", sorted(loader.rule_policies()))

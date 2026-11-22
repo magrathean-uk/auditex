@@ -161,8 +161,13 @@ These reads feed `report_pack["detection_coverage"]` and `report_pack["public_fo
 | `dns_posture` | DoH `TXT _dmarc.<domain>` and up to seven parent labels (Exchange accepted domains excluding coexistence; fallback: verified domains with the Email service) | Complete DMARC TXT answers, public DNS without sign-in | Public DNS |
 | `dns_posture` | DoH `TXT selector1._domainkey.<domain>`, `selector2._domainkey.<domain>`, `selector1-<domain with dots as dashes>._domainkey.<domain>`, `selector2-<domain with dots as dashes>._domainkey.<domain>` | Complete DKIM TXT answers for the same accepted-domain universe or Graph fallback, public DNS without sign-in | Public DNS |
 | `dns_posture` | DoH `TXT _smtp._tls.<domain>` | TLS-RPT record (RFC 8460) | <https://datatracker.ietf.org/doc/html/rfc8460> |
+| `dns_posture` | DoH `TXT _mta-sts.<domain>` | MTA-STS record presence and id; only when it exists is the policy file below fetched | <https://datatracker.ietf.org/doc/html/rfc8461> |
+| `dns_posture` | DoH `TXT default._bimi.<domain>` | BIMI record: logo and authority locations and whether each is HTTPS; neither is fetched | <https://datatracker.ietf.org/doc/draft-brand-indicators-for-message-identification/> |
 | `dns_posture` | `GET https://mta-sts.<domain>/.well-known/mta-sts.txt` | MTA-STS policy mode, only when `_mta-sts` TXT exists; no redirects, 64 KiB cap | <https://learn.microsoft.com/en-us/exchange/security-and-compliance/enhance-mail-flow-using-strict-transport-security> |
 | `dns_posture` | `GET https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration` | Public tenant ID, region scope, cloud instance | <https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc> |
+| `google_dns_posture` | DoH `TXT <domain>`, `TXT _dmarc.<domain>`, `TXT _mta-sts.<domain>`, `TXT _smtp._tls.<domain>`, `TXT default._bimi.<domain>` and DKIM `TXT google._domainkey.<domain>` (then `s1`, `s2`, `default`, `k1` and `mail` when `google` has no key) for each verified Google Workspace domain | SPF, DMARC, MTA-STS, TLS-RPT, BIMI and DKIM answers; domain names only, no HTTPS read of the domain | Public DNS |
+
+Every DoH query above goes to the configured resolver: `https://cloudflare-dns.com/dns-query` unless `--doh-endpoint URL` (Microsoft 365 runs) or `AUDITEX_DOH_ENDPOINT` (Microsoft 365 and Google Workspace runs) names another plain `https://` resolver that speaks the DoH JSON API. Only domain names are sent. `data-handling.json` records the resolver host as `dns_resolver`.
 
 The four Security & Compliance reads run only in an app-only certificate run: each PowerShell process first connects with
 `Connect-IPPSSession -AccessToken` (a certificate token for `https://ps.compliance.protection.outlook.com/.default`, the
@@ -172,7 +177,7 @@ the section-scoped gap `ipps_session_not_opened` on each of the four reads and i
 
 SPF, DKIM and DMARC raw-record collection uses complete `exchange_policy.acceptedDomains` evidence from the same run when available: `DomainName` values de-duplicated case-insensitively with the first-seen spelling retained, excluding rows with `IsCoexistenceDomain=true`. When both collectors are selected, the runner delays `dns_posture` until `exchange_policy` finishes; it adds no collector or tenant read. Missing, failed, truncated or malformed accepted-domain evidence (including old rows without the coexistence flag) falls back to verified domains with the Email service; an absent or non-list `supportedServices` field is kept exactly as before. Each raw-record coverage row records `domain_universe` as `accepted_domains` or `graph_email_service`. The 200-domain cap, truncation and fail-closed resolver and Graph failure handling are unchanged. Posture checks still cover every verified domain.
 
-Public HTTPS lookups target only domains that Microsoft Graph reports as verified for the audited tenant (at most 25). They are unauthenticated, never probe usernames, and do not use `getuserrealm.srf`. Offline runs make none of these calls. Entra diagnostic-settings export (Azure Resource Manager `microsoft.aadiam/diagnosticSettings`) is not collected, so the `siem_log_export` signal is always `unknown`.
+Public HTTPS lookups target only domains that Microsoft Graph reports as verified for the audited tenant. The OpenID discovery read covers the first 25 verified domains. The MTA-STS policy read is not capped: it covers every verified domain outside `onmicrosoft.com` whose `_mta-sts` TXT record exists. Both are unauthenticated, never probe usernames, and do not use `getuserrealm.srf`. Offline runs make none of these calls. Entra diagnostic-settings export (Azure Resource Manager `microsoft.aadiam/diagnosticSettings`) is not collected, so the `siem_log_export` signal is always `unknown`.
 
 ## Device, Update And Mail Protection Reads
 
@@ -224,6 +229,22 @@ Defender settings of a Windows compliance policy (not returned by Graph v1.0), c
 settings-catalog templates (not listed by `deviceCompliancePolicies`), the edition of a Windows device (not in
 `osVersion`) and enrolment in the Windows 10 Extended Security Updates programme. Each is reported as unknown or
 not assessed, never as a pass.
+
+## Inbox Rule Folder Reads (optional permission)
+
+An inbox rule that moves mail names its target folder by ID. To tell whether that folder hides mail from the user,
+`mailbox_forwarding` reads folder metadata for users who have such a rule, and only when the reader app holds the
+optional `Mail.ReadBasic.All` permission. It is never part of the default reader-app plan.
+
+| Collector | Call | Fields read | Permission |
+| --- | --- | --- | --- |
+| `mailbox_forwarding` | `GET /users/{id}/mailFolders` (`$select=id,displayName`, `$top=100`) and `GET /users/{id}/mailFolders/junkemail`, `/mailFolders/deleteditems`, `/mailFolders/archive`, `/mailFolders/conversationhistory` (`$select=id`), sent together in one Graph `$batch` of GET requests (further pages of the folder list as plain GETs) | Folder IDs and display names; never a message, header or body | `Mail.ReadBasic.All` (optional) |
+
+Blast radius: by the permission's nature the app could read basic message properties (subject, sender, recipients,
+dates) of every mailbox, never a body, preview or attachment; Auditex calls only these folder routes. Without the
+permission the folder lookup is refused, the rule's hide-from-user state is recorded as unknown (never false) and the
+collector is partial with one `mailFolders` gap row. RSS Feeds has no well-known name, so it is matched by its English
+display name only; in a mailbox in another language a move to RSS Feeds is not recognised.
 
 ## Teams Policy Reads
 

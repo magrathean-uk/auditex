@@ -13,6 +13,8 @@ from .secret_hygiene import (
 SENSITIVE_CLI_ARGS = {
     "--client-secret", "--access-token", "--sensitive-users", "--partner-domains",
     "--env", "--break-glass-accounts", *CERTIFICATE_ARG_FLAGS,
+    # A DoH resolver URL path can carry an account token (resolve_doh_endpoint never repeats it either).
+    "--doh-endpoint",
 }
 
 # Engine flags of the removed Microsoft 365 sign-in ways (DEC-107). They are refused by name with the certificate

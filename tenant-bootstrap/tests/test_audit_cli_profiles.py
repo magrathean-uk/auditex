@@ -234,10 +234,11 @@ def test_collector_script_loads_its_configs_and_reaches_the_sign_in_boundary(tmp
     record = json.loads((tmp_path / "boundary.json").read_text(encoding="utf-8"))
     # Every connection attempt was a blocked sign-in request: the collection never reached the network.
     assert record["attempts"] and all("login.microsoftonline.com" in attempt for attempt in record["attempts"])
-    manifests = list((tmp_path / "out").glob("*/run-manifest.json"))
-    assert len(manifests) == 1, output
-    manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
-    assert manifest["mode"] == "app" and manifest["selected_collectors"] == ["identity"]
+    # A certificate Entra refuses stops the run before collection with the fixed message (R089), so no manifest
+    # is written and the throwaway thumbprint and key path never reach the output.
+    assert result.returncode == 2, output
+    assert "A certificate app token could not be acquired" in output
+    assert not list((tmp_path / "out").glob("*/run-manifest.json"))
     assert thumbprint not in output and str(key_path) not in output
 
 

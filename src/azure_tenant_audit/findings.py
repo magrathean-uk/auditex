@@ -16,7 +16,7 @@ from .attack_graph import (
     TIER0_ROLE_TEMPLATES,
     analyze_attack_graph,
 )
-from .autopilot import build_board_report_sections
+from .autopilot import build_board_report_sections, completed_collector_count
 from .baselines import (
     SECURE_SCORE_LOW_THRESHOLD_PERCENT,
     build_baseline_alignment,
@@ -4512,6 +4512,13 @@ def build_report_pack(
         evidence_paths=evidence_paths,
         blocker_count=blocker_count,
         coverage_gaps=coverage_gap_rows,
+        completed_collectors=(
+            completed_collector_count(
+                [str(row.get("coverage_status") or "") for row in coverage_ledger if isinstance(row, dict)]
+            )
+            if coverage_ledger is not None
+            else None
+        ),
     )
     enriched_findings = board_sections["findings"]
     severity_counts = Counter(str(item.get("severity") or "unknown") for item in findings)

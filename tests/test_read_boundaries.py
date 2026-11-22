@@ -111,7 +111,7 @@ _UNRESOLVED_RUNNER_INPUTS: dict[tuple[str, str], str] = {
     ("src/auditex/auth_runtime.py", "exchange_module_status"): _RUNTIME_ARGV,
     ("src/auditex/bootstrap.py", "_run_json_command"): _CALLER_ARGV,
     ("src/auditex/bootstrap.py", "run_setup"): _CALLER_ARGV,
-    ("src/auditex/command_runner.py", "run_cli_command"): _CALLER_ARGV,
+    ("src/auditex/command_runner.py", "_run_process"): _CALLER_ARGV,
     ("src/azure_tenant_audit/adapters/m365dsc.py", "M365DSCAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "PowerShellGraphAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "_run_bounded"): _ADAPTER_ENTRY,
@@ -3217,7 +3217,7 @@ def test_every_google_api_call_is_a_read_method() -> None:
         "users.list", "groups.list", "orgunits.list", "domains.list", "roles.list", "roleAssignments.list",
         "members.list", "users.aliases.list", "tokens.list", "activities.list", "alerts.list",
         "getAutoForwarding", "filters.list", "forwardingAddresses.list", "sendAs.list", "getImap", "getPop",
-        "getVacation", "delegates.list", "files.list", "drives.list", "groups.get", "resources.calendars.list",
+        "getVacation", "delegates.list", "files.list", "permissions.list", "drives.list", "groups.get", "resources.calendars.list",
         "calendarList.list", "acl.list", "list", "mobiledevices.list", "chromeosdevices.list",
     }
     violations = [

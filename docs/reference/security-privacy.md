@@ -10,6 +10,28 @@ given explicit written authorization. The operator remains responsible for the
 applicable Microsoft, Google, legal, regulatory, and data-protection
 requirements.
 
+## Who is responsible for the data
+
+Auditex is software you run yourself. MAGRATHEAN UK LTD does not receive, store or
+see the evidence, the reports or the credentials, so it is neither a controller nor
+a processor of that data.
+
+A run folder holds personal data about the tenant's users. Under UK GDPR and
+similar laws:
+
+- If you audit your own organisation's tenant, your organisation is the controller
+  of that data, as it already is for the tenant.
+- If you audit a customer's tenant, you normally act for the customer as their
+  processor. Agree the audit in writing first, including what you may collect, who
+  may see the result, how long you keep it and when you delete it. If you are not
+  already covered by a data processing agreement with the customer, put one in
+  place.
+- Keep run folders and packs on encrypted storage, share them only with the people
+  the tenant owner has agreed, and delete them when the agreed period ends. Deleting
+  the output directory removes the evidence; Auditex keeps no other copy.
+
+This is a description of how the tool works, not legal advice on your duties.
+
 The audit plane must not write to production tenants. This covers Microsoft
 365 and Google Workspace audit runs, probes, reports, exports, MCP audit tools,
 customer-pack creation, and customer-pack verification. Lab-only response
@@ -23,8 +45,17 @@ The Teams policy reader adds `api.interfaces.records.teams.microsoft.com` for fi
 Audit collectors must not read Gmail or Exchange message bodies, or Drive,
 SharePoint, or OneDrive file content. Metadata and settings can still contain
 personal data, including user names, email addresses, group membership, device
-metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
+metadata, OAuth grant metadata, sharing metadata (file and folder names, owners and
+the addresses a file is shared with), and audit-event metadata such as sign-in and
+activity records with their IP addresses, locations and device details.
 Treat every bundle as confidential.
+With the optional `Mail.ReadBasic.All` permission, `mailbox_forwarding` reads mailbox folder metadata
+(folder IDs and display names) for users whose inbox rules move mail, never a message or header. The
+permission itself also allows basic message properties (subject, sender, recipients, dates), which
+Auditex never requests.
+Google Workspace directory users are read through a field mask (ID, primary e-mail, full name, admin and 2-step
+verification flags, suspension, archive state, sign-in and creation times and organisational unit): recovery e-mail,
+recovery phone, phone numbers, addresses and notes are not received.
 Value-rule records carry policy, cell, code, section names and controlled reason
 text, not tenant evidence values. Serving rules read a separate in-memory view
 on both the run-bundle and internal ScubaGear export paths after source, ledger,
@@ -35,7 +66,7 @@ serialised into prompts, assessment files, sidecars or logs. This includes
 Defender ATP preset-rule recipient and exclusion lists (`SentTo`,
 `SentToMemberOf`, `RecipientDomainIs` and their `ExceptIf*` counterparts),
 DNS resolver `log` entries and the Security Suite unsuccessful-command ledger.
-The model layer is removed: assessment makes no network request and no model endpoint is a permitted outbound destination. `auditex assess` rejects the removed model, endpoint, dry-run and
+The model layer is removed: assessment makes no network request and no model endpoint is a permitted outbound destination. (The optional local answer, `auditex explain`, is separate: it downloads a model file once and then runs on the same computer; see [External lookups](#external-lookups).) `auditex assess` rejects the removed model, endpoint, dry-run and
 redaction options (exit 2) and reads no `AUDITEX_MODEL_*` or `AUDITEX_DISABLE_VALUE_RULES` setting;
 redaction is always on. Each view uses its own per-policy `scuba_config` synthesis outcome: an unprojected
 view receives the not-collected marker. The private rule view can retain recognised
@@ -96,7 +127,7 @@ call, and the audit log records both what ran and what was refused.
 | Control | Enforced in | What it does | Where it shows |
 | --- | --- | --- | --- |
 | Microsoft Graph methods | `GraphClient._request` (`graph.py`) | Allows `GET`, and `POST` only to the Graph `/$batch` endpoint when every inner request is a relative `GET` without a body. Anything else raises `GraphError` (`ReadOnlyViolation`) before a token is requested or the network is touched. Every request must be HTTPS to `graph.microsoft.com` (also for `get_json(..., full_url=True)`), so the bearer token cannot go to another host, and `X-HTTP-Method-Override`, `X-HTTP-Method` and `X-Method-Override` headers are refused, on the request and on each `$batch` inner request. A redirect is never followed by the HTTP library: `GraphClient` follows it by hand (at most three hops), keeps the bearer token only for a hop on Graph, and fetches any other hop without the token, over HTTPS and only on a Microsoft download host (`.office.com`, `.office.net`, `.office365.com`, `.microsoft.com`, `.microsoftonline.com`, `.sharepoint.com`, `.azureedge.net`, `.windows.net`); anything else is refused (`RedirectRefused`, event `graph.request.redirect_refused`). The usage-report functions answer 302 to a pre-authenticated download URL, so each hop is logged as `graph.request.redirect` with host and path only, never the query (it is a credential), and an error after a redirect names the host and path without the query. The OAuth token endpoint is the only other call the client makes. | `graph.request.refused` event; `observed_ledger.graph.refused` |
-| Command adapters | `adapters/read_guard.py`, called by the PowerShell, Microsoft365DSC and m365 CLI adapters before any process starts (a live run never starts `m365`; its guard still refuses a non-read) | Both languages are checked as plain ASCII: any non-ASCII or control character (other than tab, LF, CR) is refused, because the parsers treat Unicode quotes, dashes and line breaks differently from this check; a CR ends a statement like an LF. m365: the executable must be `m365`, the command must end in `list`, `get` or `status` (or be an `outlook report <name>` usage report), and after the command words every token must be a known option (`--output`/`-o`, `--period`, `--top`, `--help`/`-h`, `--verbose`, `--debug`) or that option's value, so a later bare word or `--` cannot extend the command inside the CLI parser. PowerShell: only `Get-*`, a few read-shaping pipeline cmdlets and `Search-UnifiedAuditLog`; comments, backticks, redirection, here-strings, `::`, a call operator on anything but a script block, subexpressions in double-quoted strings, dynamic member access (`.` followed by a quote or `$`) and method calls other than a few string helpers are refused. Microsoft365DSC also allows `Export-M365DSCConfiguration`, which reads the tenant and writes only local files. The lab response plane runs through the same adapters, so `--command-override` is held to the same allowlist. It is a syntactic allowlist that fails closed, not a PowerShell parser; the read-only role and scopes remain the authoritative boundary. Refusal reasons are redacted and clipped before they are logged. | `command.refused` event; `observed_ledger.commands.refused` |
+| Command adapters | `adapters/read_guard.py`, called by the PowerShell, Microsoft365DSC and m365 CLI adapters before any process starts (a live run never starts `m365`; its guard still refuses a non-read) | Both languages are checked as plain ASCII: any non-ASCII or control character (other than tab, LF, CR) is refused, because the parsers treat Unicode quotes, dashes and line breaks differently from this check; a CR ends a statement like an LF. m365: the executable must be `m365`, the command must end in `list`, `get` or `status` (or be an `outlook report <name>` usage report), and after the command words every token must be a known option (`--output`/`-o`, `--period`, `--top`, `--help`/`-h`, `--verbose`, `--debug`) or that option's value, so a later bare word or `--` cannot extend the command inside the CLI parser. PowerShell: only `Get-*`, a few read-shaping pipeline cmdlets and `Search-UnifiedAuditLog`; comments, backticks, redirection, here-strings, `::`, a call operator on anything but a script block, subexpressions in double-quoted strings, dynamic member access (`.` followed by a quote or `$`) and method calls other than a few string helpers are refused. `CONTENT_CMDLET_DENY` then refuses the `Get-*` cmdlets that return message, chat, event, attachment or file content (Microsoft Graph, Exchange and PnP, with Graph pattern rules, and no `-ExpandProperty` or `-Property` naming a content property) and those that read the auditor's own machine: local files and logs (`Get-Content`, `Get-ChildItem`, `Get-WinEvent`, `Get-EventLog`), the registry and environment, and session state such as variables (`Get-Variable`, `env:` among them), history (`Get-History`), the clipboard and secret stores. Microsoft365DSC also allows `Export-M365DSCConfiguration`, which reads the tenant and writes only local files. The lab response plane runs through the same adapters, so `--command-override` is held to the same allowlist. It is a syntactic allowlist that fails closed, not a PowerShell parser; the read-only role and scopes remain the authoritative boundary. Refusal reasons are redacted and clipped before they are logged. | `command.refused` event; `observed_ledger.commands.refused` |
 | SharePoint admin REST | `check_sharepoint_admin_request` (`adapters/read_guard.py`), the first statement of `_send` in `collectors/sharepoint_admin.py`, the collector's only network call | The opt-in `sharepoint_admin` collector may send exactly one request: `GET https://<prefix>-admin.sharepoint.com/_api/SPO.Tenant`, canonical printable-ASCII URL (no port, user information, query, fragment, parameters or percent-encoding), no body, only the Authorization, Accept (`application/json;odata=verbose`) and User-Agent headers, redirects not followed. Anything else raises `RequestRefused` before the request is sent. The host prefix comes from the tenant's current SharePoint host, the root site's `siteCollection.hostname` (Graph `GET /sites/root`, which follows a SharePoint rename); it must be a plain `<prefix>.sharepoint.com`, otherwise the read is the named skip `sharepoint_admin_host_unresolved` and nothing is sent. The initial `onmicrosoft.com` domain is never used for the host. Before sending, the token's audience must be the admin host or the SharePoint resource; an app-only token must carry the certificate credential claim. `graph.py` `app_token_for` never mints a SharePoint token from a client secret. | audit log `sharepoint_admin_rest.request` (method, the host template `{tenant}-admin.sharepoint.com`, path, status, attempt, duration; no headers or token) and `sharepoint_admin_rest.refused`; `api-inventory.json` `observed_ledger.sharepoint_admin_rest` |
 | API ledger | `api_inventory.py`, attached by `AuditWriter.write_json_artifact` to every `api-inventory.json` it writes | `safety.read_only` and `safety.no_content_reads` are re-derived from the audit log. A write method, a non-read command, any refused call, a `$batch` whose inner calls or methods were not all recorded, a malformed or unreadable log line, a body-reading endpoint (message, attachment and content endpoints, calendar events and `calendarView`, group threads, conversations and posts, chat messages, SharePoint list items, To Do tasks), a `$select` of a body field or an `$expand` of a content collection (also when it sits in a next-page URL or a `$batch` inner URL) makes them false, whatever the collectors declared. Logged command words are cross-checked against the logged command text. `teams_admin_rest.request` records method, host, path, status and duration without headers or tokens; `observed_ledger.teams_admin_rest` counts attempts and endpoints, and non-GET or missing methods feed `safety.observed_write_calls`; `observed_ledger.sharepoint_admin_rest` does the same for the SharePoint admin read and also counts refused requests into `safety.refused_calls`. Observed calls outside the declared set are listed (including `outside_declared.teams_admin_rest` and `outside_declared.sharepoint_admin_rest`), and redirect hops under `observed_ledger.graph.redirects`. Endpoint templates replace only identifiers with `{id}`, so a long resource name such as `deviceCompliancePolicies` stays visible. The handoff, `api-calls.md`, the pack README and `report.md` print the observation basis next to `read_only` and `no_content_reads` and render the ledger; a declaration is never printed as an observed fact. | `api-inventory.json` `observed_ledger`, `safety.observation_basis` |
 | Bundle files | `output.py` (`AuditWriter`, `harden_bundle`), `evidence_db.py` | Run directories and every directory under them are `0700`; every file is `0600`; the audit log, evidence database and temporary files are created that way, whatever the caller's umask. A final sweep covers files other code wrote into the bundle. Files the tooling writes later are private on creation too, through one writer (`private_io.py`): rendered reports (`report render`, the exporters, the guided `--report-format`), the explorer page (default `reports/explorer.html`), report payloads sent to `--output`, and customer packs are `0600` in `0700` directories whatever the umask. Directories that already exist are not changed; a pack directory is tightened. A file is replaced through a temporary file, never written through a symbolic link. The sweep leaves symbolic links alone, and a symbolic link anywhere in a run makes the bundle fail its integrity check. The private key `operator-inputs/pseudonym.key` is `0600` in an `operator-inputs/` folder of `0700`; a key or folder with any group or other bit is refused, never tightened. | `ls -l` of the bundle |
@@ -139,8 +170,8 @@ a method check and write no per-call audit events, so Google bundles say
 `observation_basis: "coverage_ledger_only"` and rely on read-only scopes and the
 collectors' use of list and get methods; the `dns_posture`, exposure, `power_platform`
 and `power_bi` lookups use their own GET-only sessions rather than `GraphClient`, and the
-`probe` toolchain checks that start `pwsh` or `az` directly are outside the
-adapters.
+`probe` toolchain checks that start `pwsh` directly are outside the adapters. No
+code path starts the Azure CLI (`az`).
 
 The optional Power BI / Power Platform collectors are extended scope, off by default
 and absent from `full` and all default presets. In the commercial cloud they
@@ -266,13 +297,48 @@ HTTP verb scanner:
 | A parameter annotation is trusted, so an argument that contradicts it is not seen | named limit (v2 DEC-011) |
 | Send methods of clients the source does not use (such as an `httpx` `stream`), a verb chosen by `getattr` with a computed name, and `googleapiclient` request chains | named limit (v2 DEC-011) |
 
+## Notifications
+
+`auditex notify send <run-dir> --sink <sink>` builds the notification locally and prints it with `status: planned`;
+nothing leaves the machine. Only `--execute` sends it. The sinks are `teams`, `slack`, `smtp`, `jira` and `github`,
+each configured only through environment variables.
+
+What is sent: the run's tenant name, overall status, finding, open, accepted and blocker counts, the provider
+scorecard, live readiness, the coverage gaps, the action plan, the run, report and action-plan locations (relabelled,
+never a local path) and `run_fingerprint` (a one-way 16-hex digest of the tenant name and the resolved run folder).
+The citations stay in the printed result and are not sent. The payload, the citations and every service reply pass the customer-pack redaction with the run's pseudonym
+key before any send, and the run folder is checked unchanged before anything is sent.
+
+| Sink | Settings | Calls |
+| --- | --- | --- |
+| `teams`, `slack` | `AUDITEX_TEAMS_WEBHOOK_URL`, `AUDITEX_SLACK_WEBHOOK_URL` (a credential) | One POST to the webhook URL: a text summary and the redacted payload. The scheme is not checked; use the `https://` URL the service issues. |
+| `smtp` | `AUDITEX_SMTP_HOST` and `AUDITEX_SMTP_TO` (required), `AUDITEX_SMTP_FROM` (default `auditex@localhost`), `AUDITEX_SMTP_PORT` (default 25), `AUDITEX_SMTP_USER` and `AUDITEX_SMTP_PASSWORD` (login only when both are set), `AUDITEX_SMTP_ALLOW_SELF_SIGNED` | One SMTP session with STARTTLS: a text summary and the whole payload JSON. A server that does not offer STARTTLS is refused; nothing is sent in plain text. |
+| `jira` | `AUDITEX_JIRA_BASE_URL`, `AUDITEX_JIRA_PROJECT_KEY`, `AUDITEX_JIRA_EMAIL`, `AUDITEX_JIRA_API_TOKEN` (required), `AUDITEX_JIRA_ISSUE_TYPE` (default `Task`) | `GET <base>/rest/api/3/search/jql` for an issue in the project with the run's `auditex-fp-<fingerprint>` label; when none is found, `POST <base>/rest/api/3/issue` with a summary, the labels `auditex` and the fingerprint label, and a description holding a text summary and the whole payload JSON. Basic authentication with the e-mail and API token. |
+| `github` | `AUDITEX_GITHUB_TOKEN` and `AUDITEX_GITHUB_REPO` (required), `AUDITEX_GITHUB_API_ROOT` (default `https://api.github.com`), `AUDITEX_GITHUB_LABELS` (default `auditex`, comma-separated) | `GET <api>/search/issues` for an open issue whose title carries `fp:<fingerprint>`; when one is found, `POST <api>/repos/<repo>/issues/<number>/comments`, otherwise `POST <api>/repos/<repo>/issues` with a title, the labels and a body holding a text summary and the whole payload JSON. Bearer token. |
+
+- SMTP verifies the server certificate and host name against the system CA store. `AUDITEX_SMTP_ALLOW_SELF_SIGNED=1`
+  turns both TLS checks off, for a lab relay with a private CA only; the send result then says
+  `tls_verification_relaxed: true`.
+- A GitHub issue in a public repository is public: anyone can read the payload, including the tenant name, the
+  coverage gaps and the action plan. Point `AUDITEX_GITHUB_REPO` at a private repository.
+- Ticket de-duplication keys on the tenant and the resolved run folder. Sending the same run again leaves a Jira issue
+  as it is (`status: deduped`) and adds a comment to an open GitHub issue; a closed GitHub issue is never commented on.
+  When the de-duplication search fails, the result says `dedup: skipped` (with `dedup_http_status` when the service
+  answered) and a new ticket is created.
+- A transport failure returns `status: failed` with `error_class` and no exception text, because that text can carry
+  the webhook URL (an SMTP TLS handshake failure reports the TLS error text instead). A failing webhook reply keeps only a short service code, otherwise `HTTP <status>`. The CLI still
+  exits 0 with a failed result.
+
 ## External lookups
 
-Live Microsoft 365 runs with the `dns_posture` collector make unauthenticated,
+Besides the audited tenant's own Microsoft or Google services, Auditex contacts
+only the destinations in this section. None of them receives evidence, findings
+or credentials.
+
+Live Microsoft 365 runs with the `dns_posture` collector (in the default set) make unauthenticated,
 read-only requests about the audited tenant's domains:
 
-- DNS-over-HTTPS queries (default resolver `cloudflare-dns.com`) for SPF,
-  DMARC and DKIM TXT records cover the tenant's Exchange accepted domains,
+- DNS-over-HTTPS queries for SPF, DMARC and DKIM TXT records cover the tenant's Exchange accepted domains,
   excluding coexistence domains, when complete same-run `acceptedDomains`
   evidence is available. Otherwise they cover Graph-verified domains with the
   Email service (a missing or non-list `supportedServices` field is kept).
@@ -294,9 +360,64 @@ that verified list. Offline runs make no external lookups; embedded callers
 can pass `public_lookups: False` in the collector
 context to skip the HTTPS reads.
 
+The DNS-over-HTTPS resolver is `https://cloudflare-dns.com/dns-query` unless
+`--doh-endpoint URL` (on `auditex run`, `azure-tenant-audit` and
+`auditex guided-run`) or the environment variable `AUDITEX_DOH_ENDPOINT` names
+another; the option wins over the variable, and a blank variable means the
+default. Only a plain `https://host[:port]/path` is accepted: no credentials,
+query string or fragment, and a refused value is never repeated in messages
+because it may carry a token. The resolver must speak the DoH JSON API
+(`application/dns-json`, `name` and `type` parameters). The console notice,
+`data-handling.json` and the handoff name the resolver in use, and
+`data-handling.json` records its host as `dns_resolver`.
+
+Google Workspace runs with the `google_dns_posture` collector (in the
+`core-security`, `mail` and `everything` presets) send each verified domain
+name to the same resolver: SPF, DMARC, MTA-STS, TLS-RPT and BIMI TXT lookups
+and up to six DKIM selector names. Only domain names are sent, and a Google run
+makes no HTTPS read of the domains. A Google run reads the resolver only from
+`AUDITEX_DOH_ENDPOINT`; it has no `--doh-endpoint` option. Deselect the
+collector with `--exclude google_dns_posture`; the `identity` and
+`collaboration` presets omit it. The run prints the notice on stderr before
+collection and writes it to `data-handling.json` and the report.
+
+The optional local answer (`auditex explain`, `--explain`) downloads one model file
+from Hugging Face (`huggingface.co` and its download servers) the first time a
+model is used. The request shows Hugging Face the IP address of the computer; it
+carries nothing about the run or the tenant. After the download the answer runs on
+the same computer with no network use. See the [local answer guide](../guides/local-answer.md).
+
+Notifications are off unless you configure a sink. When you do, a redacted title
+and summary of a finding go to the sink you chose: a Microsoft Teams or Slack
+webhook, an SMTP server, Jira or GitHub.
+
+The local MCP server sends nothing by itself, but whatever an AI tool reads through
+it goes wherever that tool sends it. If the tool uses a hosted model, the text it
+reads from a run, which can include personal data, leaves the computer under that
+provider's terms. Connect only a tool the tenant owner has agreed to.
+
 The opt-in `identity_protection` collector stores only aggregate risky-user
 counts, never user names or UPNs. The `exchange_policy` mailbox audit bypass
 check stores only a count of bypassed accounts.
+
+## Outbound destinations
+
+Every host an audit, probe, report, export, explain or notify command can contact, for an egress allowlist. Offline replay contacts none of them. Installing tools (`auditex setup`, guided-run `--install-tools`) also reaches PyPI, PSGallery and the operating system's package repositories.
+
+| Destination | When | What |
+| --- | --- | --- |
+| `login.microsoftonline.com` | Every live Microsoft 365 run | Certificate token requests to the tenant's token endpoint; with `dns_posture`, the public OpenID discovery document per verified domain. |
+| `graph.microsoft.com` | Every live Microsoft 365 run | Read-only Graph GETs. Report downloads may be redirected (at most three hops) to a Microsoft download host (`*.office.com`, `*.office.net`, `*.office365.com`, `*.microsoft.com`, `*.microsoftonline.com`, `*.sharepoint.com`, `*.azureedge.net`, `*.windows.net`); any other redirect target is refused. |
+| `outlook.office365.com` | `exchange_policy` (default) | Exchange Online PowerShell session for read-only `Get-*` cmdlets. |
+| `ps.compliance.protection.outlook.com` | `exchange_policy` in an app-only certificate run | Security & Compliance PowerShell session for the alert and DLP policy reads. |
+| `api.interfaces.records.teams.microsoft.com` | `teams_policy`, commercial and GCC | Five allowlisted Teams admin GETs. |
+| `<tenant>-admin.sharepoint.com` | `sharepoint_admin` (opt-in) | SharePoint admin settings reads. |
+| `api.bap.microsoft.com`, `api.powerbi.com` | `power-platform` preset (opt-in) | Power Platform and Power BI admin reads. |
+| The DNS-over-HTTPS resolver: `cloudflare-dns.com` unless `--doh-endpoint` or `AUDITEX_DOH_ENDPOINT` names another | `dns_posture` (default) and `google_dns_posture` | TXT lookups; domain names only. |
+| `mta-sts.<domain>` | `dns_posture`, a verified domain that publishes `_mta-sts` | One GET of the MTA-STS policy file. |
+| `*.googleapis.com` (including `www.googleapis.com` and `oauth2.googleapis.com`), `accounts.google.com` for an OAuth sign-in | Google Workspace runs | Read-only Google API calls and token requests. |
+| `huggingface.co` and the download hosts it redirects to | `auditex explain` model download on first use (opt-in, [local answer](../guides/local-answer.md)) | One model file download; no tenant data is sent. |
+| The notification sink you configure (webhook URL, SMTP relay, Jira site, GitHub API) | `auditex notify send --sink <sink> --execute` only | The redacted notification described under [Notifications](#notifications). |
 
 ## Guarded run and pack reads
 
@@ -309,7 +430,7 @@ raise `FileNotFoundError`.
 Control files, including manifests, summaries, validation and AI context,
 have a 32 MiB limit (`MAX_RUN_FILE_BYTES`). The pseudonym key is read with an
 exact 32-byte bound instead: any other size is `damaged`. Evidence and other data
-files have a 256 MiB limit (`MAX_RUN_DATA_BYTES`). Hashing and copies use
+files have a 512 MiB limit (`MAX_RUN_DATA_BYTES`). Hashing and copies use
 guarded streams. Guarded reads during writer finalisation have no size cap.
 Bundle hash manifest generation and verification stream without a size cap;
 they still reject unsafe file types and links. Identity discovery has its own
@@ -441,7 +562,9 @@ selected artifacts and include checksums. Selected artifacts can still contain
 customer-sensitive metadata. Create each pack in a fresh review directory,
 inspect its contents and intended recipients before transfer, then store it
 under the customer's retention rules and delete stale bundles when that period
-ends.
+ends. Where the customer has set no period, agree one before the audit; keeping
+evidence only for the engagement and a short review period afterwards is a
+sensible default.
 
 Before handoff, verify the pack:
 
@@ -453,7 +576,8 @@ If verification fails, regenerate the pack from the original run directory.
 
 Notification preview is local by default. `auditex notify send --execute`
 sends the chosen notification to an external sink. Review the recipient and
-payload separately from pack verification before using `--execute`.
+payload separately from pack verification before using `--execute`; every sink,
+its settings and the calls it makes are listed under [Notifications](#notifications).
 
 ### Partner domains: customer-confidential operator input
 
@@ -506,6 +630,18 @@ every person in the run's directory records (see
 paths. Public baseline example addresses are kept. A pseudonym is keyed with the
 run's private key (see [Pseudonym key](#pseudonym-key)). GUIDs become `Guid` plus a digest,
 which is stable on another pass without reserving a range of real GUIDs.
+
+Credential masking in the shareable profiles covers:
+
+- PEM private-key blocks (in rendered markup only complete blocks whose BEGIN and END labels match);
+- `client_assertion`, `private_key`, `passphrase`, `token`, `pwd`, `passwd`, `certificate_path`, `certificate_thumbprint`
+  and `certificate_password` assignments in text;
+- any value whose key's last word names a credential (secret, password, passphrase, token, credential,
+  authorization, assertion, private key, shared key), including numbered or `...Value` forms;
+- lists and mappings under such keys, except mappings under a `...Credential` key, which hold credential metadata.
+
+Google customer ids (under `tenant_id` and `customer_id` keys) are masked as `Id <pseudonym>` in shareable output;
+local output keeps the real id.
 
 The report structure is redacted before rendering, so free-text keys work in
 Markdown and HTML as well as JSON. Customer-pack source JSON is a redacted
@@ -684,8 +820,11 @@ the table above.
 
 Before sharing, identity discovery reads all `normalized/**/*.json` files. It
 refuses malformed, unreadable or non-regular entries, symbolic and hard links, changes
-during discovery and scans exceeding 5,000 files, 64 MiB per file, 256 MiB
-in total per run or 32 directory levels. A subsequent snapshot also refuses scan
+during discovery and scans exceeding 5,000 files, 512 MiB per file, 1024 MiB
+in total per run or 32 directory levels. These sizes cover a run at the identity
+collector's 250,000-user cap with up to about 2,100 bytes per user record (a full
+users section is about 189 MiB with Latin names and about 265 MiB with Japanese
+names and departments); a larger run has no shareable output. A subsequent snapshot also refuses scan
 problems or changed fingerprints. These checks cover shareable reports, exports,
 customer packs, notifications and MCP tools. A size-limit refusal reports the
 supported sizes without naming files; other refusals identify the reason using
@@ -700,7 +839,7 @@ instead of relying on numbers quoted here. The harness measures the child
 process's resident memory and compares it with the baseline times the ratio;
 memory use also depends on the evidence and output.
 
-On adversarial JSON, worst-case scanner memory is about 64 times the file size, up to about 4 GiB at the 64 MiB per-file cap. This is an upper bound that ordinary evidence does not reach.
+On adversarial JSON, worst-case scanner memory is about 64 times the file size, up to about 32 GiB at the 512 MiB per-file cap. This is an upper bound that ordinary evidence does not reach.
 
 These are pattern and structure rules, not a guarantee that every personal
 value in arbitrary prose is recognised. URL userinfo passwords are matched
@@ -805,6 +944,14 @@ local Git-excluded path. Do not place those paths in repository defaults.
 
 No command or MCP tool accepts a bearer token: Microsoft 365 tokens are minted in memory from the reader app's certificate.
 
+The Google OAuth token cache is written owner-only (0600); a folder Auditex creates for it is 0700, and an existing
+folder keeps its mode. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
+others can read, or a link, is refused with `service_account_key_refused`.
+
+`--verbose` raises Auditex's own logging to DEBUG but keeps `urllib3` and `msal` at WARNING, because their request
+lines can carry a pre-authenticated download query. Redirect-hop and download-host errors name only the host, path and
+status.
+
 Use AI and MCP only with bundle artifacts intended for reasoning, such as
 `summary.json`, `summary.md`, `data-handling.json`, `audit-plan.json`,
 `api-inventory.json`, report-pack data, proof-table rows, `ai_context.json`,
@@ -859,7 +1006,7 @@ the explainer profile again, including for local reports, so modified
 assessment text does not bypass that boundary. If the context or assessment is
 unusable, explanations are omitted. The support address in the fixed fault
 step currently has its local part masked by this profile.
-It has no inference dependency, endpoint or model fallback. Reintroducing any model use would need
+The explainer has no inference dependency, endpoint or model fallback. Reintroducing any model use in it would need
 explicit authorisation, the same input and output boundary and no redaction opt-out.
 
 Explainer test material follows the public-repository fixture rule: stored fixtures hold only constructed rows and

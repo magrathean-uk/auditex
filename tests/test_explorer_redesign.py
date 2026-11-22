@@ -289,3 +289,29 @@ def test_the_demo_judges_its_devices_as_of_the_snapshot_date_not_today(tmp_path:
     later_rules = {item["rule_id"]: {x["affected_objects"][0] for x in later_findings if x["rule_id"] == item["rule_id"]} for item in later_findings}
     assert {"HFL-LT-011", "HFL-LT-019"} <= later_rules["intune.device_os_end_of_life"], "Windows 11 23H2 Enterprise ended 2026-11-10"
     assert len(later_rules["intune.device_stale_sync"]) == 10
+
+
+def test_review_r098_tampered_counts_still_render_the_integrity_banner(halcyon_runs: tuple[Path, Path], tmp_path: Path) -> None:
+    """A report pack edited after finalization to hold non-numeric counts renders with the integrity banner."""
+    run = tmp_path / "tampered"
+    shutil.copytree(halcyon_runs[0], run)
+    pack_path = run / "reports" / "report-pack.json"
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    alignment = pack.setdefault("baseline_alignment", {})
+    alignment.setdefault("frameworks", {})["cisa_scuba"] = {
+        "title": "CISA SCuBA",
+        "controls": [{"control_id": "MS.AAD.1.1v1", "status": "fail", "open_finding_count": "two", "finding_ids": ["a"]}],
+    }
+    alignment["secure_score"] = {
+        "available": True,
+        "overall": {},
+        "controls": [{"control_profile_id": "x", "agreement": "agrees", "auditex_open_finding_count": "n/a"}],
+    }
+    pack_path.write_text(json.dumps(pack), encoding="utf-8")
+
+    data = build_explorer_data(run)
+    payload = data["runs"][0] if "runs" in data else data
+    assert any(banner["kind"] == "integrity" and banner["title"] == "Bundle changed since it was finalized"
+               for banner in payload["banners"])
+    control = next(card for card in payload["baselines"]["frameworks"] if card["key"] == "cisa_scuba")["controls"][0]
+    assert control["linked"] == 1

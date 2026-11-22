@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -94,13 +95,20 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
             raise ValueError("--service-account-key is required for domain-delegation auth")
         if not config.subject:
             raise ValueError("--subject is required for domain-delegation auth")
+        from google.auth.exceptions import GoogleAuthError
         from google.oauth2 import service_account
 
         shared_scopes = [scope for scope in config.scopes if scope not in config.isolated_scopes]
-        credentials = service_account.Credentials.from_service_account_file(
-            str(config.service_account_key.expanduser()),
-            scopes=shared_scopes,
-        )
+        key_path = config.service_account_key.expanduser()
+        # Built from the bytes the owner-only check read through one descriptor: the path is never opened again.
+        key_info = _parse_service_account_key(_check_private_key_file(key_path))
+        try:
+            credentials = service_account.Credentials.from_service_account_info(
+                key_info,
+                scopes=shared_scopes,
+            )
+        except GoogleAuthError as exc:  # a key file missing fields (MalformedError)
+            raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); check the service-account key file.") from None
         return credentials.with_subject(config.subject)
 
     if config.auth_mode == "oauth":
@@ -108,24 +116,132 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
             raise ValueError("--oauth-client is required for oauth auth")
         if config.token_cache is None:
             raise ValueError("--token-cache is required for oauth auth")
+        from google.auth.exceptions import GoogleAuthError, RefreshError, TransportError
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
 
         token_cache = config.token_cache.expanduser()
         credentials = None
-        if token_cache.exists():
-            credentials = Credentials.from_authorized_user_file(str(token_cache), list(config.scopes))
-        if credentials and credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-        if not credentials or not credentials.valid:
-            flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
-            credentials = flow.run_local_server(port=0)
-        token_cache.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if token_cache.exists():
+                # Loaded with the scopes it was granted (not this run's), so a run that needs more signs in again
+                # rather than reusing a token its new collectors cannot use.
+                credentials = Credentials.from_authorized_user_file(str(token_cache))
+                if not _has_scopes(credentials, config.scopes) or not credentials.refresh_token:
+                    credentials = None
+            if credentials is not None:
+                # The cache's scopes are what was asked for (an older cache may claim scopes never granted), so it is
+                # refreshed every run and trusted only for the scopes Google's token endpoint grants now.
+                try:
+                    credentials.refresh(Request())
+                except (RefreshError, TransportError) as exc:
+                    if isinstance(exc, TransportError) or not _is_grant_error(exc):
+                        # The token endpoint is down or busy: that says nothing about the grant. A token still in
+                        # date is used as it is; an expired one cannot be, and signing in again would not help.
+                        if not credentials.valid:
+                            raise RuntimeError(
+                                "Google sign-in could not be refreshed (temporary error); run again later."
+                            ) from None
+                    else:
+                        # Revoked, expired (Testing-status clients expire refresh tokens after 7 days) or narrower
+                        # than asked: sign in again.
+                        credentials = None
+                    refreshed = False
+                else:
+                    refreshed = True
+                if refreshed and not _granted(credentials, config.scopes):
+                    credentials = None
+            if not credentials or not credentials.valid:
+                flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
+                try:
+                    credentials = flow.run_local_server(port=0)
+                except Exception as exc:  # noqa: BLE001 - oauthlib's denial and scope-change errors are not GoogleAuthError
+                    raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
+        except GoogleAuthError as exc:
+            # A fixed message: the library's text can carry token material.
+            raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
+        # Creates any missing folder owner-only; an existing folder (the working directory, a shared one) keeps its mode.
         secure_write_text(token_cache, credentials.to_json(), mode=0o600)
         return credentials
 
     raise ValueError(f"unsupported Google auth mode: {config.auth_mode}")
+
+
+# A service-account JSON key is a few KB; anything larger is not one.
+_SERVICE_ACCOUNT_KEY_LIMIT = 64 * 1024
+
+
+def _check_private_key_file(path: Path) -> bytes:
+    """Refuse a domain-wide delegation key that is not a small, owner-only regular file (no link).
+
+    The key can act as any user in the domain, so it gets the same check as the Microsoft 365 certificate. The
+    message is fixed and never repeats the path or the file's content.
+    """
+    if not os.path.lexists(path):
+        raise ValueError("service_account_key_missing: the service-account key file was not found.")
+    from azure_tenant_audit.certificate_auth import (
+        CertificateAuthError,
+        _read_private_file,
+    )
+
+    try:
+        return _read_private_file(path, _SERVICE_ACCOUNT_KEY_LIMIT, "service_account_key_refused")
+    except CertificateAuthError:
+        raise ValueError(
+            "service_account_key_refused: the service-account key must be an owner-only regular file "
+            "(chmod 600, not a link) of at most 64 KB."
+        ) from None
+
+
+def _parse_service_account_key(raw: bytes) -> dict[str, Any]:
+    """The key file's JSON object; a fixed message otherwise, never the content."""
+    try:
+        info = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        info = None
+    if not isinstance(info, dict):
+        raise ValueError("service_account_key_invalid: the service-account key file is not a JSON key.")
+    return info
+
+
+def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:
+    """Whether cached OAuth credentials were granted every scope this run asks for."""
+    has_scopes = getattr(credentials, "has_scopes", None)
+    if has_scopes is None:
+        return False
+    try:
+        return bool(has_scopes(list(scopes)))
+    except Exception:  # noqa: BLE001 - an unreadable cache is signed in again, never trusted
+        return False
+
+
+# Token endpoint errors that say the grant itself is gone or narrower (RFC 6749 5.2); a fresh consent fixes those.
+# Anything else (a 5xx page, a timeout, a busy endpoint) is temporary and says nothing about the grant.
+_GRANT_ERRORS = ("invalid_grant", "invalid_scope", "invalid_client", "unauthorized_client", "necessary fields")
+
+
+def _is_grant_error(exc: Exception) -> bool:
+    """Whether a failed refresh means the user must consent again (matched only; the text is never kept)."""
+    if getattr(exc, "retryable", False):
+        return False
+    text = str(exc)
+    return any(code in text for code in _GRANT_ERRORS)
+
+
+def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
+    """Whether the last refresh granted every scope this run asks for.
+
+    Google reports the grant in the token response's ``scope`` field, which RFC 6749 (5.1) lets it leave out when
+    the grant is exactly the scopes the refresh asked for (the cache's own); google-auth then sets no
+    ``granted_scopes``, so the scopes asked for are the grant. A refresh asking for a scope never granted fails.
+    """
+    granted = getattr(credentials, "granted_scopes", None)
+    if granted is None:
+        granted = getattr(credentials, "scopes", None)
+    if not granted:
+        return False
+    return set(scopes).issubset(set(granted))
 
 
 def user_delegated_credentials(credentials: Any, subject: str, *, scopes: tuple[str, ...] | None = None) -> Any:

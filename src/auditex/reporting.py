@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import functools
 import hashlib
+import hmac
 import html
 import json
 import os
@@ -12,7 +14,10 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.autopilot import build_basic_license_intelligence
+from azure_tenant_audit.autopilot import (
+    build_basic_license_intelligence,
+    completed_collector_count,
+)
 from azure_tenant_audit.bundle_integrity import (
     BUNDLE_HASHES_SCHEMA_VERSION,
     integrity_failed,
@@ -60,7 +65,12 @@ from azure_tenant_audit.run_files import (
     hash_run_file,
     read_run_file,
 )
-from azure_tenant_audit.waivers import accepted_risk_summary
+from azure_tenant_audit.waivers import (
+    accepted_risk_summary,
+    has_expired_waiver,
+    has_matching_waiver,
+    is_accepted_status,
+)
 
 from .run_bundle import RunBundle, summarize_recomputed_validation
 
@@ -100,6 +110,13 @@ class PackOutputError(RuntimeError):
 
 AUDITEX_SARIF_TOOL_URI = "https://github.com/magrathean-uk/auditex"
 AUDITEX_OSCAL_NS = "https://magrathean.uk/auditex/oscal"
+
+# Legal review C1: the fixed scope line every report, customer pack README, handoff and explorer page carries.
+REPORT_DISCLAIMER = (
+    "This report is evidence from an automated, read-only audit run on the date shown. It is not a certificate, an "
+    "assurance opinion or legal advice, and it covers only what the run could read. Coverage gaps are listed and are "
+    "part of the result."
+)
 
 _SECTION_ORDER = (
     "summary",
@@ -287,7 +304,8 @@ def _scope_risk_limitation(
         subject = f"{provider} auth included write-capable scopes."
         closing = "reviewers should treat the scope set as a higher-trust limitation."
     elif scope_risk == "content_capable_scope_present":
-        subject = f"{provider} auth included scopes that can read content (for example Drive readonly); Auditex uses metadata and list endpoints only."
+        example = "Drive readonly" if platform == "google_workspace" else "Sites.Read.All"
+        subject = f"{provider} auth included scopes that can read content (for example {example}); Auditex uses metadata and list endpoints only."
         closing = "reviewers should confirm the scope set matches the intended audit surface."
     else:
         subject = f"{provider} read settings can require broad scopes."
@@ -678,6 +696,7 @@ def analyze_report(run_dir: str | Path) -> dict[str, Any]:
         findings=findings,
         evidence_paths=[str(item) for item in evidence_paths],
         coverage_gaps=[dict(item) for item in coverage_gaps if isinstance(item, Mapping)] if isinstance(coverage_gaps, list) else [],
+        completed_collectors=completed_collector_count([str(row["status"]) for row in bundle.collector_coverage().values()]),
     )
     citations = _dedupe_citations(
         (
@@ -1626,6 +1645,8 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
     lines = [
         "# Auditex Enterprise Handoff",
         "",
+        REPORT_DISCLAIMER,
+        "",
         f"- Run: {_markdown_cell(payload.get('run_dir'))}",
         f"- Status: {_markdown_cell(payload.get('handoff_status'))}"
         + (f" ({_markdown_cell(', '.join(payload.get('status_reasons') or []))})" if payload.get("status_reasons") else ""),
@@ -1997,6 +2018,8 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
     lines = [
         "# Auditex Customer Pack",
         "",
+        REPORT_DISCLAIMER,
+        "",
         f"- Status: {_markdown_cell(manifest.get('handoff_status'))}",
         f"- Tenant: {_markdown_cell(tenant.get('name'))}",
         f"- Platform: {_markdown_cell(tenant.get('platform'))}",
@@ -2012,7 +2035,7 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         "",
         "1. Read `handoff.md`.",
         "2. Check `validation.json` and the validation summary before trusting the pack.",
-        "3. Review `report.md` for the client-ready report and reviewer index.",
+        "3. Review `report.md` for the report and reviewer index.",
         "4. Review `api-calls.md`: the declared calls and, where the run has a transport ledger, every Graph request and command the audit log observed, with any call outside the declared set.",
         "5. Review `permissions.md` for required and missing scopes.",
         "6. Review `proof-table.md` for finding-to-evidence rows.",
@@ -2836,12 +2859,29 @@ def verify_enterprise_handoff_pack(
     }
 
 
+class UnknownReportSectionError(ValueError):
+    """An --include-section or --exclude-section name that is no report section (review R126): a misspelt exclusion
+    must not silently publish the section it meant to drop."""
+
+
+def validate_section_names(include_sections: list[str] | None, exclude_sections: list[str] | None) -> None:
+    """Refuse section names outside ``_SECTION_ORDER``, naming the valid ids."""
+    unknown = sorted(
+        {str(name) for name in [*(include_sections or []), *(exclude_sections or [])] if str(name) not in _SECTION_ORDER}
+    )
+    if unknown:
+        raise UnknownReportSectionError(
+            f"Unknown report section(s): {', '.join(unknown)}. Valid sections: {', '.join(_SECTION_ORDER)}."
+        )
+
+
 def _select_sections(
     bundle: dict[str, Any],
     *,
     include_sections: list[str] | None = None,
     exclude_sections: list[str] | None = None,
 ) -> dict[str, Any]:
+    validate_section_names(include_sections, exclude_sections)
     sections = _mapping(bundle.get("sections"))
     if include_sections is None:
         include = [key for key in _SECTION_ORDER if key in sections]
@@ -3165,12 +3205,14 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     lines = [
         "# Auditex Report",
         "",
+        REPORT_DISCLAIMER,
+        "",
         f"- Tenant: {_markdown_cell(_text(summary.get('tenant_name'), 'unknown'))}",
         f"- Status: {_markdown_cell(_text(summary.get('overall_status'), 'unknown'))}",
         f"- Findings: {_markdown_cell(_text(summary.get('finding_count'), str(len(findings))))}",
         f"- Open: {_markdown_cell(_text(summary.get('open_count'), '0'))}",
         f"- Risk: {_markdown_cell(_text(risk.get('grade'), 'unknown'))} / {_markdown_cell(_text(risk.get('score'), '0'))}",
-        f"- Assurance: {_markdown_cell(_text(assurance.get('grade'), 'unknown'))} / {_markdown_cell(_text(assurance.get('score'), '0'))}",
+        f"- Evidence coverage: {_markdown_cell(_text(assurance.get('grade'), 'unknown'))} / {_markdown_cell(_text(assurance.get('score'), '0'))}",
         f"- Scorecard: {_markdown_cell(_text(provider_scorecard.get('grade'), 'unknown'))} / {_markdown_cell(_text(provider_scorecard.get('score'), '0'))}",
     ]
     if live_readiness:
@@ -3369,14 +3411,25 @@ def _csv_sort_key(row: Mapping[str, Any]) -> tuple:
     return (severity_rank, rule_id, record_key, finding_id)
 
 
+# Review R129: the closing row of a CSV that holds action-plan rows because the findings section was not selected.
+CSV_ACTION_PLAN_NOTICE = (
+    "Rows above are action plan items, not findings: the findings section was not selected for this export."
+)
+
+
 def _render_csv(selected_sections: dict[str, Any]) -> str:
-    rows = _dict_rows(selected_sections.get("findings")) or _dict_rows(selected_sections.get("action_plan"))
-    rows = sorted(rows, key=_csv_sort_key)
+    # Finding rows; action-plan rows only when the findings section was left out (never for a run with no findings),
+    # and then a closing ``row_source`` row says so.
+    from_action_plan = "findings" not in selected_sections
+    source = "action_plan" if from_action_plan else "findings"
+    rows = sorted(_dict_rows(selected_sections.get(source)), key=_csv_sort_key)
     buffer = StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(_CSV_COLUMNS), extrasaction="ignore")
     writer.writeheader()
     for row in rows:
         writer.writerow({column: _csv_value(row.get(column, "")) for column in _CSV_COLUMNS})
+    if from_action_plan and rows:
+        csv.writer(buffer).writerow(["row_source", CSV_ACTION_PLAN_NOTICE, *([""] * (len(_CSV_COLUMNS) - 2))])
     return buffer.getvalue()
 
 
@@ -3473,6 +3526,7 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
         "<style>body{font-family:system-ui,sans-serif;margin:2rem;line-height:1.4}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #ccc;padding:.45rem;text-align:left;vertical-align:top}pre{white-space:pre-wrap;background:#f6f6f6;padding:1rem;overflow:auto}</style>",
         "</head><body>",
         "<h1>Auditex Report</h1>",
+        f"<p class=\"report-disclaimer\">{_html(REPORT_DISCLAIMER)}</p>",
         f"<p><strong>Tenant:</strong> {_html(summary.get('tenant_name') or 'unknown')}</p>",
         f"<p><strong>Status:</strong> {_html(summary.get('overall_status') or 'unknown')}</p>",
     ]
@@ -3598,6 +3652,10 @@ def _sarif_finding_fingerprint(finding: Mapping[str, Any]) -> str:
     Excludes wall-clock and run-derived fields so a re-run against a
     static bundle yields byte-identical fingerprints.
     """
+    return hashlib.sha256(_sarif_fingerprint_payload(finding).encode("utf-8")).hexdigest()
+
+
+def _sarif_fingerprint_payload(finding: Mapping[str, Any]) -> str:
     rule_id = _text(finding.get("rule_id"))
     finding_id = _text(finding.get("id"))
     record_key = ""
@@ -3606,8 +3664,82 @@ def _sarif_finding_fingerprint(finding: Mapping[str, Any]) -> str:
         first = refs[0]
         if isinstance(first, Mapping):
             record_key = _text(first.get("record_key"))
-    payload = f"{rule_id}|{finding_id}|{record_key}"
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"{rule_id}|{finding_id}|{record_key}"
+
+
+def _affected_values(finding: Mapping[str, Any]) -> list[Any]:
+    affected = finding.get("affected_objects")
+    return affected if isinstance(affected, list) else []
+
+
+# Review R066: the operator's private key for dedup-stable shareable SARIF and OSCAL ids. Unset, a shareable export
+# keeps per-run ids (private, but a new alert set on each upload); the local ``report render`` route stays stable.
+EXPORT_FINGERPRINT_KEY_ENV = "AUDITEX_EXPORT_FINGERPRINT_KEY"
+_EXPORT_FINGERPRINT_KEY_MIN = 16
+
+
+def export_fingerprint_key(environ: Mapping[str, str] | None = None) -> bytes | None:
+    """The key from ``AUDITEX_EXPORT_FINGERPRINT_KEY``, or ``None`` when it is unset or blank. A key shorter than 16
+    characters is refused; the error never repeats the value."""
+    value = (os.environ if environ is None else environ).get(EXPORT_FINGERPRINT_KEY_ENV)
+    if value is None or not value.strip():
+        return None
+    if len(value.strip()) < _EXPORT_FINGERPRINT_KEY_MIN:
+        raise ValueError(
+            f"{EXPORT_FINGERPRINT_KEY_ENV} must be at least {_EXPORT_FINGERPRINT_KEY_MIN} characters of private, "
+            "random text; it keys the dedup ids of shareable SARIF and OSCAL exports."
+        )
+    return value.strip().encode("utf-8")
+
+
+def stable_export_keys(findings: list[dict[str, Any]], tenant_id: str, secret: bytes) -> list[dict[str, Any]]:
+    """Review R066: dedup keys for shareable SARIF and OSCAL, one per finding row, from the UNREDACTED finding.
+
+    A shareable export pseudonymises ids with the run's own key, so a fingerprint taken after redaction changes on
+    every run. These keys are HMAC-SHA256 digests under the operator's private ``secret``
+    (``AUDITEX_EXPORT_FINGERPRINT_KEY``), over the tenant id and the finding, taken before redaction: the same finding
+    of the same tenant gets the same keys in every run. The secret never leaves the machine, so a recipient who knows
+    the tenant id and guesses a user name or domain still cannot test the guess against the digests.
+    """
+    tenant = tenant_id.strip().lower()
+
+    def digest(label: str, text: str) -> str:
+        return hmac.new(secret, f"auditex|{label}|{tenant}|{text}".encode(), hashlib.sha256).hexdigest()
+
+    keys: list[dict[str, Any]] = []
+    for finding in findings:
+        affected = _affected_values(finding)
+        keys.append(
+            {
+                "fingerprint": digest("fingerprint", _sarif_fingerprint_payload(finding)),
+                "finding": digest("finding", _text(finding.get("id"))),
+                "affected": digest("affected", ",".join(_text(item) for item in affected)) if affected else None,
+                "subjects": [digest("subject", _text(item)) for item in affected if _text(item).strip()],
+            }
+        )
+    return keys
+
+
+# Review R125: how SARIF shows a finding the run did not leave open. An accepted risk is a suppressed result (Code
+# Scanning shows it as dismissed); a closed or resolved one is left out (the alert closes as fixed). A waiver that has
+# expired accepts nothing, so its finding stays an open result.
+_CLOSED_STATUSES = frozenset({"closed", "resolved"})
+
+
+def _export_disposition(finding: Mapping[str, Any]) -> str:
+    """``accepted``, ``closed`` or ``open``, as the gate counts it (``auditex.gate._status_class``): an accepted or
+    closed status counts only with a matching, unexpired waiver behind it; anything else stays open."""
+    status = _text(finding.get("status")).strip().lower()
+    claimed = "accepted" if is_accepted_status(status) else "closed" if status in _CLOSED_STATUSES else "open"
+    if claimed != "open" and (not has_matching_waiver(finding) or has_expired_waiver(finding)):
+        return "open"
+    return claimed
+
+
+def _waiver_justification(finding: Mapping[str, Any]) -> str:
+    waiver = finding.get("waiver") if isinstance(finding.get("waiver"), Mapping) else {}
+    reason = _text(waiver.get("reason") or waiver.get("comment")).strip()
+    return reason or f"Accepted risk (status {_text(finding.get('status'))})"
 
 
 def render_sarif(
@@ -3615,7 +3747,10 @@ def render_sarif(
     findings: list[dict[str, Any]] | None,
     summary: Mapping[str, Any] | None,
     manifest: Mapping[str, Any] | None,
+    stable_keys: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """SARIF 2.1.0 for the findings of a run. ``stable_keys`` (``stable_export_keys``, aligned with ``findings``)
+    replace the fingerprints a shareable export would otherwise take from pseudonymised ids."""
     findings_rows = [dict(item) for item in (findings or []) if isinstance(item, Mapping)]
     summary_dict = _mapping(summary)
     manifest_dict = _mapping(manifest)
@@ -3663,13 +3798,17 @@ def render_sarif(
         )
 
     results: list[dict[str, Any]] = []
-    for finding in findings_rows:
+    for position, finding in enumerate(findings_rows):
         rule_id = _text(finding.get("rule_id") or finding.get("id"))
         if not rule_id:
             continue
+        disposition = _export_disposition(finding)
+        if disposition == "closed":
+            continue
+        stable = stable_keys[position] if stable_keys is not None and position < len(stable_keys) else None
         affected = finding.get("affected_objects")
         if isinstance(affected, list) and affected:
-            partial_fingerprints = {"affected": ",".join(_text(item) for item in affected)}
+            partial_fingerprints = {"affected": stable["affected"] if stable else ",".join(_text(item) for item in affected)}
         else:
             partial_fingerprints = {}
         result_entry = {
@@ -3700,7 +3839,7 @@ def render_sarif(
             # across runs. Content-derived (rule_id + id + record_key); the
             # ``auditex/v1`` key is the version sentinel — bumping the
             # algorithm in a future release means a new key.
-            "fingerprints": {"auditex/v1": _sarif_finding_fingerprint(finding)},
+            "fingerprints": {"auditex/v1": stable["fingerprint"] if stable else _sarif_finding_fingerprint(finding)},
             "properties": {
                 "auditex.finding_id": _text(finding.get("id")),
                 "auditex.severity": _text(finding.get("severity")),
@@ -3710,6 +3849,10 @@ def render_sarif(
         }
         if partial_fingerprints:
             result_entry["partialFingerprints"] = partial_fingerprints
+        if disposition == "accepted":
+            result_entry["suppressions"] = [
+                {"kind": "external", "status": "accepted", "justification": _waiver_justification(finding)}
+            ]
         confidence = _text(finding.get("confidence"))
         if confidence:
             result_entry["properties"]["auditex.confidence"] = confidence
@@ -3816,8 +3959,13 @@ def render_oscal(
     findings: list[dict[str, Any]] | None,
     summary: Mapping[str, Any] | None,
     manifest: Mapping[str, Any] | None,
+    stable_keys: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """OSCAL Assessment Results 1.1.2 for the findings of a run.
+
+    ``stable_keys`` (``stable_export_keys``, aligned with ``findings``) name the observation, finding and subject
+    UUIDs of a shareable export, whose ids are pseudonymised per run. An accepted risk keeps the documented
+    not-satisfied target (the control is still not met) with an ``auditex.status`` property and a remark.
 
     The collection time is the run manifest's ``created_utc`` (an observation takes the earliest
     ``collected_at`` of its own evidence); only a bundle with no usable ``created_utc`` falls back
@@ -3848,10 +3996,12 @@ def render_oscal(
 
     observations: list[dict[str, Any]] = []
     findings_oscal: list[dict[str, Any]] = []
-    for finding in findings_rows:
+    for position, finding in enumerate(findings_rows):
         finding_key = _text(finding.get("id")) or _text(finding.get("rule_id"))
-        observation_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/observation/{_text(finding.get('id'))}"))
-        finding_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/finding/{_text(finding.get('id'))}"))
+        stable = stable_keys[position] if stable_keys is not None and position < len(stable_keys) else None
+        uuid_name = f"stable/{stable['finding']}" if stable else _text(finding.get("id"))
+        observation_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/observation/{uuid_name}"))
+        finding_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/finding/{uuid_name}"))
         framework_mappings = finding.get("framework_mappings") if isinstance(finding.get("framework_mappings"), Mapping) else {}
         control_props: list[dict[str, str]] = []
         for framework in sorted(framework_mappings):
@@ -3886,14 +4036,19 @@ def render_oscal(
                 ("auditex.confidence", _text(finding.get("confidence"))),
             ),
         }
+        subject_items = [item for item in _affected_values(finding) if _text(item).strip()]
+        subject_names = (
+            [f"stable/{name}" for name in stable["subjects"]]
+            if stable and len(stable["subjects"]) == len(subject_items)
+            else [_text(item) for item in subject_items]
+        )
         subjects = [
             {
-                "subject-uuid": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/subject/{_text(item)}")),
+                "subject-uuid": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/subject/{name}")),
                 "type": "inventory-item",
                 "title": _text(item),
             }
-            for item in (finding.get("affected_objects") or [])
-            if _text(item).strip()
+            for item, name in zip(subject_items, subject_names, strict=True)
         ]
         if subjects:
             observation["subjects"] = subjects
@@ -3910,6 +4065,7 @@ def render_oscal(
                     ("auditex.finding_id", _text(finding.get("id"))),
                     ("auditex.severity", _text(finding.get("severity"))),
                     ("auditex.rule_id", _text(finding.get("rule_id"))),
+                    ("auditex.status", _export_disposition(finding)),
                 ),
                 *control_props,
             ],
@@ -3926,6 +4082,10 @@ def render_oscal(
         remediation = _text(finding.get("remediation")).strip()
         if remediation:
             finding_entry["remarks"] = remediation
+        if _export_disposition(finding) == "accepted":
+            finding_entry["target"]["status"]["remarks"] = (
+                f"Accepted risk: {_waiver_justification(finding)}. The control stays not satisfied."
+            )
         findings_oscal.append(finding_entry)
 
     result: dict[str, Any] = {
@@ -3969,18 +4129,18 @@ def render_oscal(
     }
 
 
-def _render_sarif(selected_sections: dict[str, Any]) -> str:
+def _render_sarif(selected_sections: dict[str, Any], stable_keys: list[dict[str, Any]] | None = None) -> str:
     findings = _dict_rows(selected_sections.get("findings"))
     summary = _mapping(selected_sections.get("summary"))
     manifest = _mapping(selected_sections.get("manifest"))
-    return _json(render_sarif(findings=findings, summary=summary, manifest=manifest))
+    return _json(render_sarif(findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys))
 
 
-def _render_oscal(selected_sections: dict[str, Any]) -> str:
+def _render_oscal(selected_sections: dict[str, Any], stable_keys: list[dict[str, Any]] | None = None) -> str:
     findings = _dict_rows(selected_sections.get("findings"))
     summary = _mapping(selected_sections.get("summary"))
     manifest = _mapping(selected_sections.get("manifest"))
-    return _json(render_oscal(findings=findings, summary=summary, manifest=manifest))
+    return _json(render_oscal(findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys))
 
 
 _STRUCTURED_FORMATS = frozenset({"json", "sarif", "oscal"})
@@ -4058,6 +4218,7 @@ def preview_report(
         raise ValueError(f"Unsupported report format: {format_name}")
     if profile not in PROFILES:
         raise KeyError(profile)  # a typo must not silently publish under a weaker profile
+    validate_section_names(include_sections, exclude_sections)
     before = snapshot_run(run_dir) if profile != PROFILE_LOCAL else None
 
     bundle = load_report_bundle(run_dir, shareable=profile != PROFILE_LOCAL)
@@ -4092,6 +4253,19 @@ def preview_report(
     # rules such as privileged-user names apply in every format) and the rendered text is passed through the
     # same function again (idempotent) as the last step. Citations above were built from the real paths.
     redaction = context_for_run(run_path)
+    render = renderers[format_name]
+    if format_name in {"sarif", "oscal"}:
+        # Review R066: with the operator's private key, dedup keys come from the unredacted findings, before
+        # redaction, so they are the same in every run of the tenant and reveal nothing to a recipient.
+        secret = export_fingerprint_key()
+        if secret is not None:
+            manifest = RunBundle(run_path).manifest()
+            tenant_id = _text(
+                manifest.get("tenant_id") or manifest.get("customer_id") or manifest.get("tenant_name")
+                or _mapping(selected.get("summary")).get("tenant_name")
+            ).strip()
+            stable_keys = stable_export_keys(_dict_rows(selected.get("findings")), tenant_id, secret)
+            render = functools.partial(renderers[format_name], stable_keys=stable_keys)
     # Masking can make two citations equal: every nested citation list, count and summary is re-derived after
     # redaction, before any format renders the sections.
     safe_sections = _settle_citations(redact_output(selected, profile=profile, context=redaction))
@@ -4100,7 +4274,7 @@ def preview_report(
     )
     content = _final_pass(
         _with_temporary_key_notice(
-            _with_unmatched_names_note(renderers[format_name](safe_sections), format_name, redaction), format_name, redaction
+            _with_unmatched_names_note(render(safe_sections), format_name, redaction), format_name, redaction
         ),
         format_name,
         redaction,

@@ -8,6 +8,8 @@ from .evidence_refs import confidence_for, ref_proof_status, refs_checked
 
 SCHEMA_VERSION = "2026-04-21"
 
+# The surfaces a default audit covers. Opt-in collectors (exchange, mailbox_forwarding, app_credentials) are not
+# listed: no profile selects them by default, so listing them would mark every default run as incomplete.
 _EXPECTED_COLLECTORS = {
     "m365": (
         "identity",
@@ -16,13 +18,10 @@ _EXPECTED_COLLECTORS = {
         "security",
         "reports_usage",
         "intune",
-        "exchange",
         "exchange_policy",
-        "mailbox_forwarding",
         "sharepoint_access",
         "onedrive_posture",
         "app_consent",
-        "app_credentials",
         "consent_policy",
         "dns_posture",
     ),
@@ -245,13 +244,24 @@ def _infer_platform(findings: list[dict[str, Any]]) -> str:
     return "m365"
 
 
+def completed_collector_count(statuses: list[str]) -> int | None:
+    """How many collectors finished (complete, partial or ok) out of their coverage statuses; None when no status
+    says anything (empty, or every collector not applicable), so the score falls back to coverage alone."""
+    rows = [str(status or "") for status in statuses]
+    if not [status for status in rows if status != "not_applicable"]:
+        return None
+    return sum(1 for status in rows if status == "ok" or status.startswith(("complete", "partial")))
+
+
 def build_auditor_score(
     *,
     findings: list[dict[str, Any]],
     overall_status: str,
     evidence_paths: list[str],
     coverage_gaps: list[dict[str, Any]] | None = None,
+    completed_collectors: int | None = None,
 ) -> dict[str, Any]:
+    """``completed_collectors`` (when the caller knows it): 0 means no collector finished, which is graded blocked."""
     rows = enrich_findings_for_autopilot(findings)
     total = len(rows)
     evidenced = sum(1 for item in rows if _has_supported_ref(item))
@@ -259,10 +269,12 @@ def build_auditor_score(
     unsupported = total - evidenced
     gaps = _rows(coverage_gaps)
 
-    evidence_depth = int(round((evidenced / total) * 100)) if total else 100
-    finding_confidence = int(round((high_confidence / total) * 100)) if total else 100
     coverage = 100 if overall_status == "ok" else 80
     coverage = max(0, coverage - len(gaps) * 15)
+    # No findings proves no weakness only as far as the collection reached: with gaps, evidence and confidence
+    # are no better than the coverage behind them.
+    evidence_depth = int(round((evidenced / total) * 100)) if total else coverage
+    finding_confidence = int(round((high_confidence / total) * 100)) if total else coverage
     report_usability = 100 if evidence_paths and (rows or not gaps) else 70
     false_positive_resistance = max(0, 100 - unsupported * 25)
     license_fit = 100
@@ -286,7 +298,7 @@ def build_auditor_score(
     )
     return {
         "score": score,
-        "grade": _score_grade(score),
+        "grade": "blocked" if coverage == 0 or completed_collectors == 0 else _score_grade(score),
         "components": components,
         "finding_count": total,
         "unsupported_claim_count": unsupported,
@@ -394,6 +406,8 @@ def build_report_qa(findings: list[dict[str, Any]], coverage_gaps: list[dict[str
     unsupported = [str(item.get("id")) for item in rows if not _has_supported_ref(item)]
     low_confidence = [str(item.get("id")) for item in rows if item.get("confidence") != "high"]
     gaps = _rows(coverage_gaps)
+    # Zero findings beside coverage gaps is no evidence at all, not every finding evidenced.
+    no_evidence = not rows and bool(gaps)
     status = "pass"
     if unsupported:
         status = "fail"
@@ -405,9 +419,12 @@ def build_report_qa(findings: list[dict[str, Any]], coverage_gaps: list[dict[str
         "low_confidence_findings": low_confidence,
         "coverage_gap_count": len(gaps),
         "checks": {
-            "every_finding_has_evidence": not unsupported,
-            "all_findings_high_confidence": not low_confidence,
-            "limitations_declared": bool(gaps) or not gaps,
+            "every_finding_has_evidence": not unsupported and not no_evidence,
+            "all_findings_high_confidence": not low_confidence and not no_evidence,
+            "limitations_declared": all(
+                any(str(gap.get(key) or "").strip() for key in ("surface", "message", "collector", "reason"))
+                for gap in gaps
+            ),
         },
     }
 
@@ -576,13 +593,15 @@ def build_basic_license_intelligence(
     findings: list[dict[str, Any]],
     evidence_paths: list[str],
     coverage_gaps: list[dict[str, Any]] | None = None,
+    completed_collectors: int | None = None,
 ) -> dict[str, Any]:
     enriched = enrich_findings_for_autopilot(findings)
     return {
         "tenant_name": tenant_name,
         "platform": platform or "m365",
         "license_profile": {
-            "minimum_live_access": "delegated_read_login",
+            # Microsoft 365 is read only by the reader app with a certificate (DEC-107).
+            "minimum_live_access": "delegated_read_login" if platform == "google_workspace" else "reader_app_certificate",
             "requires_premium_license": False,
             "works_from_saved_bundle": True,
             "supports_synthetic_evidence": True,
@@ -593,6 +612,7 @@ def build_basic_license_intelligence(
             overall_status=overall_status,
             evidence_paths=evidence_paths,
             coverage_gaps=coverage_gaps,
+            completed_collectors=completed_collectors,
         ),
         "attack_paths": build_attack_paths(enriched),
         "control_simulator": build_control_simulator(enriched),
@@ -614,6 +634,7 @@ def build_board_report_sections(
     evidence_paths: list[str],
     blocker_count: int,
     coverage_gaps: list[dict[str, Any]] | None = None,
+    completed_collectors: int | None = None,
 ) -> dict[str, Any]:
     rows = enrich_findings_for_autopilot(findings)
     open_findings = [item for item in rows if str(item.get("status") or "open") == "open"]
@@ -653,6 +674,7 @@ def build_board_report_sections(
         findings=rows,
         evidence_paths=evidence_paths,
         coverage_gaps=gaps,
+        completed_collectors=completed_collectors,
     )
     reviewer_index = _build_reviewer_index(
         top_findings=top_findings,

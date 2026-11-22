@@ -3,8 +3,9 @@
 Each vector's evidence goes through the whole value-rule precheck order (closed gate, absent section, kind) and the
 product answer is compared with the spec's expected verdict, cell, reason code, reason text and cited sections. The
 pack response is compared with the vector's gold. The default run replays a bounded, deterministic sample
-(``vectors-v391-sample.jsonl.xz``: 2,233 of the 26,898 vectors, every one of the 1,084 cells, built by
-``scripts/build-value-rule-sample-v391.py``); the full replay is the explicit acceptance job:
+(``vectors-v391-sample.jsonl.xz``: 2,233 of the 26,898 vectors built by ``scripts/build-value-rule-sample-v391.py``,
+plus the nine review R003 Built-In vectors, every one of the 1,090 cells; review lane rules-followup relabelled the
+rows its rulings moved, see ``review_relabel``); the full replay is the explicit acceptance job:
 
     AUDITEX_TEST_VALUE_RULE_VECTORS_V391=<value-rules-v391>/vectors.jsonl \\
         .venv/bin/python -B -I -m pytest tests/test_value_rules_replay.py -m value_rule_acceptance -o addopts= -q
@@ -76,6 +77,69 @@ def _lines(path: Path):
         for line in handle:
             if line.strip():
                 yield json.loads(line)
+
+
+# ---- Review lane rules-followup: product answers that depart from the frozen v3.9.1 kit ----
+# The shipped fixtures (s4, s7 and this sample) carry these rows relabelled; the full kit keeps the spec's labels, so
+# every full-kit replay maps them through ``review_relabel`` (a documented class, like D29 and A2 above).
+REVIEW_BI_POLICIES = frozenset(f"MS.SECURITYSUITE.7.{n}v1" for n in (1, 2, 3))
+REVIEW_R027_POLICIES = frozenset({"MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2",
+                                  "MS.AAD.3.6v1", "MS.AAD.3.7v1", "MS.AAD.3.8v1", "MS.AAD.3.9v1"})
+REVIEW_BI_ROW = {"ExceptIfRecipientDomainIs": None, "ExceptIfSentTo": None, "ExceptIfSentToMemberOf": None,
+                 "Identity": "ATP Built-In Protection Rule", "RecipientDomainIs": None, "SentTo": None, "SentToMemberOf": None}
+REVIEW_R099_CELLS = frozenset({"policy_flags_ok", "policy_flag_off", "policy_flag_unusable", "policy_not_in_export",
+                               "policy_duplicated"})
+REVIEW_D24 = ("expected: D24 Safe Links resolution cannot be established from the export (domain-scoped or excepted "
+              "rule, tie, unexported or duplicated policy, null flag)")
+
+
+def review_relabel(vector: dict) -> tuple[dict, str | None, int]:
+    """The kit vector as the product labels it after review lane rules-followup: (vector, class or None, change in
+    agreement with the gold: -1, 0 or +1).
+
+    R003: SS 7.x rows read built_in_protection_rules; a row without it gains a Built-In rule that excludes no one (what
+    every v3.9.1 vector assumed), and its pack gold, which predates the section, is not compared (as licensed twins).
+    R099: a no_rules_configured label follows the Built-In policy. R100: a met label where a partly scoped rule with an
+    unreadable policy applies first is not assessed. R027: union_possible where every policy excludes the same role is
+    no_policy_meets. Any other difference is left for the caller's own assertion to name."""
+    policy = vector["policy"]
+    if policy not in REVIEW_BI_POLICIES and not (policy in REVIEW_R027_POLICIES
+                                                 and vector.get("rule_cell") == "union_possible"):
+        return vector, None, 0
+    v, label = deepcopy(vector), None
+    if policy in REVIEW_BI_POLICIES and "built_in_protection_rules" not in v["sections"]:
+        v["sections"]["built_in_protection_rules"] = [dict(REVIEW_BI_ROW)]
+        v.pop("pack_response_matches", None)
+        v["flags"] = sorted({*v.get("flags", []), "built_in_section_added"})
+        label = "R003"
+    record = assess(policy, v["sections"])
+    if record["cell"] == v["rule_cell"]:
+        return v, label, 0
+    if policy in REVIEW_BI_POLICIES and v["rule_cell"] == "no_rules_configured" and record["cell"] in REVIEW_R099_CELLS:
+        label = "R099"
+    elif (policy in REVIEW_BI_POLICIES and v["rule_cell"] == "policy_flags_ok" and record["verdict"] == "not_assessed"
+          and record["detail"].get("partial_scope")):
+        label = "R100"
+    elif policy in REVIEW_R027_POLICIES and v["rule_cell"] == "union_possible" and record["cell"] == "no_policy_meets":
+        label = "R027"
+    else:
+        return v, label, 0
+    was = v["rule_verdict"] == v.get("gold_verdict")
+    v.update(rule_verdict=record["verdict"], rule_cell=record["cell"], rule_reason_code=record["reason_code"],
+             rule_reason_text=record["reason_text"], rule_cited_sections=record["cited_sections"])
+    now = record["verdict"] == v.get("gold_verdict")
+    if now:
+        v["disagreement"] = None
+        v.pop("divergence_id", None)
+    else:
+        assert record["verdict"] == "not_assessed", v["vector_id"]
+        v["disagreement"], v["divergence_id"] = REVIEW_D24, "D24"
+    return v, label, int(now) - int(was)
+
+
+def review_vectors() -> list[dict]:
+    """The constructed vectors review lane rules-followup added for the new SS 7.x Built-In cells (in the sample)."""
+    return [v for v in _lines(SAMPLE) if ":review_r003_" in v["vector_id"]]
 
 
 def override_gold(vector: dict, entry: dict | None):
@@ -164,6 +228,10 @@ def replay_one(vector: dict, entry: dict | None, tally: Counter, reached: set) -
 def replay(vectors, overrides: dict[str, dict]) -> tuple[Counter, set]:
     tally, reached = Counter(), set()
     for vector in vectors:
+        vector, label, delta = review_relabel(vector)
+        if label is not None:
+            tally["review:" + label] += 1
+            tally["review_gold_delta"] += delta
         replay_one(vector, overrides.get(vector["vector_id"]), tally, reached)
         tally["vectors"] += 1
     return tally, reached
@@ -186,7 +254,7 @@ def test_sample_is_the_bounded_deterministic_selection_and_pinned(sample):
     manifest = json.loads(MANIFEST.read_text())
     assert sha256(SAMPLE.read_bytes()).hexdigest() == manifest["sample_sha256"]
     assert sha256(OVERRIDES.read_bytes()).hexdigest() == manifest["overrides_sha256"]
-    assert len(sample) == manifest["rows"] == 2233 and 0 < len(sample) < 26898
+    assert len(sample) == manifest["rows"] == 2242 and 0 < len(sample) < 26898
     assert manifest["spec_version"] == "v3.9.1+A2" and manifest["source_vectors"] == 26898
     assert manifest["source_vectors_sha256"] == "3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e"
     assert manifest["a2_vectors_sha256"] == "0351259550c0a87d27d65cfac8f98b8547334cbd1d94321af244ad06b622ac0b"
@@ -197,15 +265,16 @@ def test_sample_is_the_bounded_deterministic_selection_and_pinned(sample):
                                                   "pbi-pack-train", "pbi-pack-validation", "aad-pack-train",
                                                   "a2-constructed"}
     assert Counter(v["source_kind"] for v in sample) == manifest["by_source"]
-    assert manifest["cells_reached"] == 1084 and manifest["policies"] == 102
+    assert manifest["cells_reached"] == 1090 and manifest["policies"] == 102
 
 
 def test_sample_replay_agrees_with_the_spec_on_every_cell(sample):
     overrides = _overrides(OVERRIDES)
     tally, reached = replay(sample, overrides)
     expected = {(policy, cell) for policy in rule_policies() for cell in cells_for(policy)}
-    assert reached == expected and len(reached) == 1084
-    assert tally["vectors"] == len(sample) == 2233
+    assert reached == expected and len(reached) == 1090
+    assert tally["vectors"] == len(sample) == 2242
+    assert not any(k.startswith("review:") for k in tally), "the shipped sample already carries the review labels"
     assert tally["a2_constructed"] == 3
     assert tally["a2_override_applied"] == len(overrides) == 3
     assert tally["reason_text_d29"] == 10
@@ -349,13 +418,18 @@ def test_full_v391_replay_acceptance():
     def stream():
         yield from _lines(vectors)
         yield from _lines(directory / "a2-vectors.jsonl")
+        yield from review_vectors()
 
     tally, reached = replay(stream(), overrides)
     expected = {(policy, cell) for policy in rule_policies() for cell in cells_for(policy)}
-    assert reached == expected and len(reached) == 1084
-    assert tally["vectors"] == 26898 + 3 and tally["a2_constructed"] == 3
-    assert tally["rule_equals_gold"] == 19118
-    assert sum(n for k, n in tally.items() if k.startswith("expected_divergence:")) == 7779
+    assert reached == expected and len(reached) == 1090
+    review = len(review_vectors())
+    assert tally["vectors"] == 26898 + 3 + review and tally["a2_constructed"] == 3
+    # The kit's own agreement counts, before review lane rules-followup moved some labels (review_relabel).
+    review_equal = sum(v["disagreement"] is None for v in review_vectors())
+    assert tally["rule_equals_gold"] - review_equal - tally["review_gold_delta"] == 19118
+    assert sum(n for k, n in tally.items() if k.startswith("expected_divergence:")) - (review - review_equal) + tally[
+        "review_gold_delta"] == 7779
     assert tally["d4_dkim_empty_equals_gold"] == 1
     assert tally["a2_override_applied"] == 190
     print("replay tally", json.dumps(dict(sorted(tally.items())), sort_keys=True))

@@ -18,6 +18,7 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
     ),
     'auditex.guided:*': (
         'auditex.guided:ProgressRenderer.__call__',
+        'auditex.guided:_ensure_local_tools',
         'auditex.guided:_read_prompt',
         'auditex.guided:run_guided',
     ),

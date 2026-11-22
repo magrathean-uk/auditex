@@ -1,25 +1,35 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from typing import Any
 
-from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT, fanout_gap_row
+from azure_tenant_audit.collection_gaps import (
+    REASON_OPERATOR_LIMIT,
+    REASON_PAGINATION_FAILED,
+    fanout_gap_row,
+)
 from azure_tenant_audit.collectors.base import (
     CollectorResult,
     context_limit,
     record_truncation,
 )
 from azure_tenant_audit.dns_lookup import (
-    DEFAULT_DOH_ENDPOINT,
     DohClient,
     DohError,
     collect_domain_posture,
+    resolve_doh_endpoint,
     unknown_posture,
 )
 
 from .auth import POLICIES_SCOPE
-from .client import classify_google_error, minimise_gmail_settings
+from .client import (
+    classify_google_error,
+    classify_page_error,
+    gmail_settings_status,
+    minimise_gmail_settings,
+)
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
@@ -115,6 +125,7 @@ def _call(
     start = time.perf_counter()
     truncated = False
     result_limit: int | None = None
+    page_error: Exception | None = None
     try:
         rows = func()
         status = "ok"
@@ -122,6 +133,11 @@ def _call(
         error = None
         truncated = bool(getattr(rows, "truncated", False))
         result_limit = getattr(rows, "result_limit", None)
+        page_error = getattr(rows, "page_error", None)
+        if page_error is not None:
+            # A later page failed: the rows read before it are kept, and the list is a partial read.
+            status = "partial"
+            error_class, error = classify_page_error(page_error)
     except Exception as exc:  # noqa: BLE001
         rows = []
         status = "failed"
@@ -140,7 +156,9 @@ def _call(
     )
     if result_limit:
         row["result_limit"] = result_limit
-    if truncated and bounded_sample:
+    if page_error is not None:
+        record_truncation(row, list_name=name, rows=len(rows), limit=result_limit, reason=REASON_PAGINATION_FAILED)
+    elif truncated and bounded_sample:
         row["bounded_sample"] = True
         row["collection_truncated"] = False
     elif truncated:
@@ -472,8 +490,9 @@ class GoogleGmailSettingsCollector:
                         error_class="subject_scope",
                         error=(
                             f"Gmail settings were read for the signed-in mailbox only; the other {len(emails)} users were "
-                            "not read because these credentials cannot act as another user. Use domain-wide delegation "
-                            "for per-user evidence."
+                            "not read because these credentials cannot act as another user, and mailbox delegates "
+                            "can be listed only under domain-wide delegation. Use domain-wide delegation for per-user "
+                            "evidence."
                         ),
                         subject_scoped=SUBJECT_SCOPE_ADMIN,
                     )
@@ -498,10 +517,10 @@ class GoogleGmailSettingsCollector:
         for user_email in targets:
             start = time.perf_counter()
             try:
-                rows.append(minimise_gmail_settings(client.get_gmail_settings_for_user(user_email)))
-                status = "ok"
-                error_class = None
-                error = None
+                settings = minimise_gmail_settings(client.get_gmail_settings_for_user(user_email))
+                rows.append(settings)
+                # The client keeps each failed settings read as ``<name>_error``: all failing fails the mailbox.
+                status, error_class, error = gmail_settings_status(settings)
             except Exception as exc:  # noqa: BLE001
                 status = "failed"
                 error_class, error = classify_google_error(exc)
@@ -511,7 +530,7 @@ class GoogleGmailSettingsCollector:
                     self.name,
                     f"mailboxSettings:{user_email}",
                     status=status,
-                    item_count=1 if status == "ok" else 0,
+                    item_count=0 if status == "failed" else 1,
                     duration_ms=duration_ms,
                     endpoint="gmail.users.settings",
                     error_class=error_class,
@@ -605,7 +624,16 @@ class GoogleDnsPostureCollector:
         client = context.get("client")
         top = _context_limit(context)
         domain = context.get("domain")
-        resolver = context.get("dns_resolver") or DohClient(endpoint=context.get("doh_endpoint", DEFAULT_DOH_ENDPOINT))
+        resolver = context.get("dns_resolver")
+        if resolver is None:
+            # The run's resolver: an explicit endpoint, else AUDITEX_DOH_ENDPOINT, else Cloudflare.
+            try:
+                resolver = DohClient(endpoint=resolve_doh_endpoint(context.get("doh_endpoint")))
+            except ValueError as exc:
+                row = _coverage(self.name, "dohEndpoint", status="failed", item_count=0, duration_ms=0,
+                                surface_type="dns", endpoint="doh", error_class="config_error", error=str(exc))
+                return CollectorResult(self.name, "partial", {"domains": {"value": []}, "domainPosture": {"value": []}}, 0,
+                                       "DNS-over-HTTPS endpoint is not valid", coverage=[row])
         log_event: AuditLogger | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         domains: list[dict[str, Any]] = []
@@ -647,16 +675,16 @@ class GoogleDnsPostureCollector:
                 if posture.get("resolver_error"):
                     status = "failed"
                     error_class = "dns_resolver_error"
-                    error = str(posture["resolver_error"])
+                    posture["resolver_error"] = error = _resolver_error(str(posture["resolver_error"]), resolver)
             except DohError as exc:
+                error = _resolver_error(str(exc), resolver)
                 posture = {
                     "domain": domain_name,
-                    "resolver_error": str(exc),
+                    "resolver_error": error,
                     **unknown_posture(("google",)),
                 }
                 status = "failed"
                 error_class = "dns_resolver_error"
-                error = str(exc)
             assessments.append(posture)
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
             coverage.append(
@@ -680,6 +708,72 @@ class GoogleDnsPostureCollector:
             len(domains) + len(assessments),
             coverage=coverage,
         )
+
+
+_URL = re.compile(r"\b(https?)://([^/\s'\"<>?#]+)[^\s'\"<>]*")
+# A failed connection names the request path alone (requests: "Max retries exceeded with url: /path?query").
+_BARE_URL_PATH = re.compile(r"\b(url:\s*)/[^\s'\"<>]*", re.IGNORECASE)
+
+
+def _host_only(text: str) -> str:
+    """``text`` with every URL cut to its scheme and host: a configured resolver's path can hold a private profile id."""
+    text = _URL.sub(lambda match: f"{match.group(1)}://{match.group(2)}", text)
+    return _BARE_URL_PATH.sub(lambda match: f"{match.group(1)}/", text)
+
+
+# The transport failure that DohClient wraps: "DoH query failed for <type> <name>: <library text>".
+_TRANSPORT_FAILURE = re.compile(r"^(DoH query failed for \S+ \S+): (.*)$", re.DOTALL)
+_HTTP_STATUS = re.compile(r"^\s*(\d{3}) (?:Client|Server) Error\b")
+
+
+def _resolver_error(text: str, resolver: Any) -> str:
+    """A failed lookup described by Auditex's own wording, the resolver's host and the HTTP status only.
+
+    The library text of a transport failure (the HTTP reason, the request URL or path) can repeat the configured
+    resolver's private profile path, so none of it is kept. Answer errors (SERVFAIL, truncated) are Auditex's
+    own wording and are kept, with any URL cut to its host.
+    """
+    match = _TRANSPORT_FAILURE.match(text)
+    if match is None:
+        return _host_only(text)
+    status = _HTTP_STATUS.match(match.group(2))
+    detail = f"HTTP {status.group(1)}" if status else "request failed"
+    endpoint = str(getattr(resolver, "endpoint", "") or "")
+    url = _URL.search(endpoint) or _URL.search(match.group(2))
+    host = f"{url.group(1)}://{url.group(2)}" if url else "the DNS-over-HTTPS resolver"
+    return f"{match.group(1)} at {host} ({detail})"
+
+
+def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: list[dict[str, Any]]) -> None:
+    """A coverage row for the files whose permissions had to be read one by one, failing where they could not be."""
+    errors = [item for item in getattr(drive_files, "permission_errors", None) or [] if isinstance(item, dict)]
+    reads = int(getattr(drive_files, "permission_reads", 0) or 0)
+    if not errors and not reads:
+        return
+    error_class = error = None
+    status = "ok"
+    if errors:
+        classes = [str(item.get("error_class") or "client_error") for item in errors]
+        error_class = max(set(classes), key=classes.count)
+        status = "failed" if not reads else "partial"
+        # Error classes only: a request error names the file's id and the request URL.
+        error = (
+            f"Sharing of {len(errors)} of {len(errors) + reads} Drive files (shared-drive items or files the subject "
+            f"cannot share) could not be read, so their exposure is unknown ({', '.join(sorted(set(classes)))})."
+        )
+    coverage.append(
+        _coverage(
+            collector,
+            "drivePermissions",
+            status=status,
+            item_count=reads,
+            duration_ms=0,
+            endpoint="drive.permissions.list",
+            error_class=error_class,
+            error=error,
+            subject_scoped=SUBJECT_SCOPE_ADMIN,
+        )
+    )
 
 
 class GoogleDrivePostureCollector:
@@ -712,6 +806,7 @@ class GoogleDrivePostureCollector:
             bounded_sample=sampled,
             subject_scoped=SUBJECT_SCOPE_ADMIN,
         )
+        _record_drive_permission_reads(self.name, drive_files, coverage)
         shared_drives = _call(
             collector=self.name,
             name="sharedDrives",

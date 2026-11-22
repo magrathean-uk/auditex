@@ -51,11 +51,25 @@ def _kind(row):
     raise ValueError("Value-rule kind is not implemented")
 
 
+def _sections_gate(policy_id: str, row: dict, sections: dict):
+    """section_not_collected for the rule's missing or marked sections. A kind's late sections (``LATE_SECTIONS``) are
+    read on one path only: when they alone are missing the kind runs and gates them on the path that reads them."""
+    record = _not_collected(policy_id, sections, row["sections"])
+    if record and set(record["cited_sections"]) <= _late_sections().get(row["kind"], frozenset()):
+        return None
+    return record
+
+
+def _late_sections() -> dict:
+    from .defender_resolution import LATE_SECTIONS
+    return LATE_SECTIONS
+
+
 def assess(policy_id: str, sections: dict):
     row = row_for(policy_id)
     if row is None:
         return None
-    record = (closed_gate(policy_id, sections) or _not_collected(policy_id, sections, row["sections"])
+    record = (closed_gate(policy_id, sections) or _sections_gate(policy_id, row, sections)
               or _kind(row)(policy_id, row, sections))
     return checked(record)
 

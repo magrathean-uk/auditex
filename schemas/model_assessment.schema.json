@@ -6,7 +6,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "2026-11-05"
+      "const": "2026-11-22"
     },
     "generated_at": {
       "type": "string",
@@ -1050,6 +1050,14 @@
             "pattern": "^(?:raw|normalized|chunks)/[^\\\\]+$|^(?:run-manifest|coverage)\\.json$"
           },
           "uniqueItems": true
+        },
+        "rule_view": {
+          "type": "string",
+          "description": "Present only on a withheld (not_collected) section whose private value-rule view was still built: by its model adapter before a model-only gate (adapter) or by a rule variant (variant).",
+          "enum": [
+            "adapter",
+            "variant"
+          ]
         },
         "unsupported_conditions": {
           "type": "array",

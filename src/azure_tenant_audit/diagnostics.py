@@ -9,14 +9,26 @@ from .collection_gaps import collector_gap_reason
 from .profiles import get_profile
 
 
+class PermissionHintsNotFoundError(FileNotFoundError, ValueError):
+    """An explicit --permission-hints path that does not exist. A ValueError too, so run callers exit 2."""
+
+
+_DEFAULT_PERMISSION_HINTS = "configs/collector-permissions.json"
+
+
 def load_permission_hints(path: Path) -> dict[str, dict[str, Any]]:
     from .guarded_io import UnsafeRunFileError
     from .resources import read_selected_resource
 
     try:
-        payload = json.loads(read_selected_resource(path, default="configs/collector-permissions.json", field="permission-hints"))
+        payload = json.loads(read_selected_resource(path, default=_DEFAULT_PERMISSION_HINTS, field="permission-hints"))
     except UnsafeRunFileError:
         raise
+    except FileNotFoundError:
+        if str(path) != _DEFAULT_PERMISSION_HINTS:
+            # An explicit path the operator typed must exist: a silent {} would drop role hints and tool requirements.
+            raise PermissionHintsNotFoundError(f"The --permission-hints file was not found: {path}") from None
+        return {}
     except (OSError, ValueError):
         return {}
     raw = payload.get("collector_permissions") or {}

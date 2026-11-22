@@ -8,6 +8,7 @@ from typing import Any
 from .citations import build_citation_summary, dedupe_citations
 from .guarded_io import UnsafeRunFileError
 from .run_files import read_run_file
+from .tenant_identity import canonical_tenant_uuid
 from .waivers import accepted_risk_summary, is_accepted_status
 
 
@@ -117,11 +118,38 @@ def _collect_changed_paths(before: Any, after: Any, *, prefix: str = "") -> list
     return []
 
 
+def _collector_coverage(run_dir: Path) -> dict[str, bool]:
+    """Whether each collector the run recorded completed: the coverage ledger, else the ``summary.json`` statuses."""
+    ledger = _load_json(run_dir, "normalized/coverage_ledger.json")
+    coverage: dict[str, bool] = {}
+    for row in ledger.get("records") if isinstance(ledger.get("records"), list) else []:
+        if isinstance(row, dict) and row.get("collector"):
+            coverage[str(row["collector"])] = str(row.get("coverage_status") or "unknown").startswith("complete")
+    if coverage:
+        return coverage
+    summary = _load_json(run_dir, "summary.json")
+    for row in summary.get("collectors") if isinstance(summary.get("collectors"), list) else []:
+        if isinstance(row, dict) and row.get("name"):
+            coverage[str(row["name"])] = str(row.get("status") or "unknown") == "ok"
+    return coverage
+
+
 def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
     before = _finding_index(_load_findings(left))
     after = _finding_index(_load_findings(right))
     new_keys = sorted(set(after) - set(before))
     resolved_keys = sorted(set(before) - set(after))
+    # R054: a finding is resolved only when the later run's collector for it completed. When the later run records
+    # its collector coverage and the finding's collector did not complete there (or did not run), the finding was not
+    # reassessed. ``auditex compare`` refines this with the rule inputs and the bundle and tenant checks.
+    later_coverage = _collector_coverage(right)
+    not_reassessed_keys: list[str] = []
+    if later_coverage:
+        for key in list(resolved_keys):
+            collector = str(before[key].get("collector") or "")
+            if collector and not later_coverage.get(collector, False):
+                not_reassessed_keys.append(key)
+        resolved_keys = [key for key in resolved_keys if key not in set(not_reassessed_keys)]
     worsened: list[str] = []
     improved: list[str] = []
     state_transitions: list[dict[str, Any]] = []
@@ -163,6 +191,7 @@ def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
     return {
         "new_findings": new_keys,
         "resolved_findings": resolved_keys,
+        "not_reassessed_findings": not_reassessed_keys,
         "worsened_findings": worsened,
         "improved_findings": improved,
         "state_transitions": state_transitions,
@@ -171,6 +200,7 @@ def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
         "stale_accepted_risks": [dict(row) for row in accepted_summary.get("stale") or [] if isinstance(row, dict)],
         "new_count": len(new_keys),
         "resolved_count": len(resolved_keys),
+        "not_reassessed_count": len(not_reassessed_keys),
         "worsened_count": len(worsened),
         "improved_count": len(improved),
         "state_transition_count": len(state_transitions),
@@ -226,8 +256,41 @@ def _load_records(run_dir: Path, path: Path) -> tuple[str, list[dict[str, Any]]]
     return kind, [item for item in records if isinstance(item, dict)]
 
 
-def _record_key(record: dict[str, Any], kind: str) -> str:
-    return str(record.get("key") or f"{kind}:{record.get('id') or record.get('display_name') or 'unknown'}")
+def _record_key(record: dict[str, Any], kind: str, index: int) -> str:
+    """The row's identity, in the order the evidence index and the validator use (R053)."""
+    for field in ("key", "id", "display_name", "name", "collector", "surface"):
+        value = record.get(field)
+        if value is not None and str(value).strip():
+            return str(value) if field == "key" else f"{kind}:{value}"
+    return f"{kind}:{index}"
+
+
+def _record_index(
+    records: list[dict[str, Any]], kind: str, reserved: frozenset[str] = frozenset()
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Rows by key, and the keys more than one row carries.
+
+    A repeated key is reported, not overwritten: its later rows get ``#2``, ``#3`` suffixes so every row is compared.
+    A suffix that is also a real key, in this run or in ``reserved`` (the other run's real keys), is skipped, so a
+    generated key never replaces or pairs with a real one.
+    """
+    keys = [_record_key(record, kind, position) for position, record in enumerate(records)]
+    taken = set(keys) | reserved
+    index: dict[str, dict[str, Any]] = {}
+    duplicates: list[str] = []
+    seen: Counter[str] = Counter()
+    for key, record in zip(keys, records, strict=True):
+        seen[key] += 1
+        if seen[key] > 1:
+            if seen[key] == 2:
+                duplicates.append(key)
+            suffix = seen[key]
+            while f"{key}#{suffix}" in taken:
+                suffix += 1
+            key = f"{key}#{suffix}"
+            taken.add(key)
+        index[key] = record
+    return index, duplicates
 
 
 def _records_for_run(run_dir: Path) -> tuple[dict[str, str], dict[str, list[dict[str, Any]]]]:
@@ -290,6 +353,25 @@ def _diff_citations(
     return dedupe_citations(rows), sorted(set(missing))
 
 
+def _tenant_key(info: dict[str, Any]) -> str | None:
+    value = info.get("tenant_id")
+    if not value or value == "my_customer":
+        return None
+    return canonical_tenant_uuid(value) or str(value).strip().lower() or None
+
+
+def _same_tenant(left_info: dict[str, Any], right_info: dict[str, Any]) -> bool:
+    """Whether two runs read the same tenant.
+
+    Known tenant IDs decide: two different IDs are two tenants whatever their operator-chosen names say. A shared
+    tenant name counts only when at most one side records an ID.
+    """
+    left_id, right_id = _tenant_key(left_info), _tenant_key(right_info)
+    if left_id and right_id:
+        return left_id == right_id
+    return bool(left_info.get("tenant_name")) and left_info.get("tenant_name") == right_info.get("tenant_name")
+
+
 def diff_run_directories(run_a: str | Path, run_b: str | Path, *, classic: bool = False) -> dict[str, Any]:
     left = Path(run_a)
     right = Path(run_b)
@@ -297,16 +379,7 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path, *, classic: bool 
     right_files, right_records = _records_for_run(right)
     left_info = _run_metadata(left)
     right_info = _run_metadata(right)
-    same_tenant = (
-        (
-            bool(left_info.get("tenant_id"))
-            and left_info.get("tenant_id") == right_info.get("tenant_id")
-        )
-        or (
-            bool(left_info.get("tenant_name"))
-            and left_info.get("tenant_name") == right_info.get("tenant_name")
-        )
-    )
+    same_tenant = _same_tenant(left_info, right_info)
     same_platform = str(left_info.get("platform") or "m365") == str(right_info.get("platform") or "m365")
 
     if not same_platform:
@@ -343,8 +416,12 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path, *, classic: bool 
     suppressed_path_counts: Counter[str] = Counter()
 
     for kind in sorted(set(left_records) | set(right_records)):
-        before_index = {_record_key(item, kind): item for item in left_records.get(kind, [])}
-        after_index = {_record_key(item, kind): item for item in right_records.get(kind, [])}
+        before_rows, after_rows = left_records.get(kind, []), right_records.get(kind, [])
+        real_keys = frozenset(
+            _record_key(record, kind, position) for rows in (before_rows, after_rows) for position, record in enumerate(rows)
+        )
+        before_index, before_duplicates = _record_index(before_rows, kind, real_keys)
+        after_index, after_duplicates = _record_index(after_rows, kind, real_keys)
         added_keys = sorted(set(after_index) - set(before_index))
         removed_keys = sorted(set(before_index) - set(after_index))
         shared_keys = sorted(set(before_index) & set(after_index))
@@ -354,6 +431,9 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path, *, classic: bool 
             "removed": [before_index[key] for key in removed_keys],
             "changed": changed,
         }
+        duplicate_keys = sorted(set(before_duplicates) | set(after_duplicates))
+        if duplicate_keys:
+            changes[kind]["duplicate_keys"] = duplicate_keys
         if suppressed:
             changes[kind]["suppressed"] = suppressed
             suppressed_changes[kind] = suppressed

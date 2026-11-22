@@ -42,8 +42,8 @@ why the model did not run. The audit is never lost.
 
 ## What it downloads
 
-The first use of a model downloads one file from its publisher's hub on the Hugging Face site, at the revision Auditex
-pins, into the user cache: `~/Library/Caches/auditex/models` on macOS, `%LOCALAPPDATA%\auditex\models` on Windows, and
+The first use of a model downloads one file from the Hugging Face site (`huggingface.co` and its download servers), at
+the revision Auditex pins, into the user cache: `~/Library/Caches/auditex/models` on macOS, `%LOCALAPPDATA%\auditex\models` on Windows, and
 `$XDG_CACHE_HOME/auditex/models` (or `~/.cache/auditex/models`) elsewhere. Set `AUDITEX_MODEL_DIR` to keep the files
 somewhere else. The command prints the size before it starts and shows progress; an interrupted download resumes.
 
@@ -51,16 +51,32 @@ Auditex checks the file's size and SHA-256 against the pinned values before it i
 before every load. A file that does not match is deleted and not used. After the download the answer runs offline. Keep
 free disk space for the file you choose: the sizes are in the table above.
 
+Auditex does not include or redistribute any model. The file comes from the repository named below, under that
+model's own licence, which you accept by downloading and using it. Like any download, the request shows Hugging Face
+your IP address; it carries nothing about your run or your tenant.
+
+| `--model` | Downloaded from (Hugging Face repository) | Model by | Licence |
+| --- | --- | --- | --- |
+| `qwen` | `unsloth/Qwen3.5-9B-GGUF` (a conversion by Unsloth) | Alibaba Cloud (Qwen) | Apache-2.0 |
+| `mistral` | `mistralai/Ministral-3-8B-Instruct-2512-GGUF` | Mistral AI | Apache-2.0 |
+| `gemma` | `google/gemma-4-E4B-it-qat-q4_0-gguf` | Google | Apache-2.0 |
+| `small` | `unsloth/Qwen3.5-4B-GGUF` (a conversion by Unsloth) | Alibaba Cloud (Qwen) | Apache-2.0 |
+
+The licences were read on the model pages on 21 November 2026 at the pinned revisions. Auditex is not affiliated with
+or endorsed by these publishers.
+
 ## What it never does
 
-- It never sends anything about your run or your tenant anywhere. The model download is the only network call, and there
-  is no telemetry.
+- It never sends anything about your run or your tenant anywhere. The model download (from Hugging Face and its
+  download servers) is the only network call, and there is no telemetry.
 - It never changes a verdict, the order or the number of checks. The model's output is only a list of sentence and value
   ids; Auditex checks every id and renders every word. Every check that is not met is always shown, in the rules' order,
   whatever the model selects.
-- It never follows instructions inside your tenant's text. Reasons, settings and names from the tenant are shown quoted
-  and labelled as data, and a selection that does not pass the checks shows that check's fixed text. The answer states
-  how many checks used the fixed text.
+- Text from your tenant cannot add words to the answer or change a verdict. Reasons, settings and names from the tenant
+  are shown to the model quoted and labelled as data, the model can only pick from prepared sentences, and a selection
+  that does not pass the checks shows that check's fixed text. The answer states how many checks used the fixed text.
+  In the acceptance runs no instruction hidden in tenant text changed an answer; that is a test result, not a promise
+  about every possible input.
 - It never writes to a tenant, and it reads only the run's rule assessment and its run id: no message bodies and no file
   content.
 - It never runs unless you ask for it (`auditex explain` or `--explain`).

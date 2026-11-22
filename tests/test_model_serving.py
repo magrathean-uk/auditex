@@ -206,6 +206,7 @@ def test_assessment_resources_are_shipped_and_schema_is_registered():
     assert "schemas/model_assessment-2026-10-27.1.schema.json" in resources
     assert "schemas/model_assessment-2026-10-28.schema.json" in resources
     assert "schemas/model_assessment-2026-10-29.schema.json" in resources
+    assert "schemas/model_assessment-2026-11-05.schema.json" in resources
     assert "schemas/model_assessment.schema.json" in resources
     assert "model_assessment.schema.json" in contract_schema_manifest()["schemas"]
 
@@ -213,7 +214,7 @@ def test_assessment_resources_are_shipped_and_schema_is_registered():
 def test_value_rule_schema_rejects_wrong_cell_code_section_and_text(optional_collection_bundle, monkeypatch):
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     result = assess_run(optional_collection_bundle, policies=["MS.POWERBI.1.1v1"])
-    assert result["schema_version"] == "2026-11-05"
+    assert result["schema_version"] == "2026-11-22"
     detail = result["policies"][0]["rule_precheck"]
     assert detail["class"] == "value_rule" and detail["cell"] == "section_not_collected"
     validate_assessment(result)

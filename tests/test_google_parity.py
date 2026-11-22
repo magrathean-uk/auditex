@@ -938,13 +938,18 @@ def test_a_client_without_the_policies_resource_fails_with_an_actionable_message
     assert row["status"] == "failed" and "upgrade it" in row["error"]
 
 
-def test_the_policy_scope_is_requested_on_its_own_token_so_a_missing_grant_fails_only_that_read(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_policy_scope_is_requested_on_its_own_token_so_a_missing_grant_fails_only_that_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     captured: dict[str, Any] = {}
+    key = tmp_path / "key.json"
+    key.write_text("{}", encoding="utf-8")
+    key.chmod(0o600)  # the delegation key must be owner-only (R092)
 
     class _Factory:
         @staticmethod
-        def from_service_account_file(path: str, *, scopes: list[str]) -> _Credentials:
-            captured["path"], captured["scopes"] = path, scopes
+        def from_service_account_info(info: dict[str, Any], *, scopes: list[str]) -> _Credentials:
+            captured["info"], captured["scopes"] = info, scopes
             return _Credentials(None, tuple(scopes))
 
     service_account = types.ModuleType("google.oauth2.service_account")
@@ -954,9 +959,13 @@ def test_the_policy_scope_is_requested_on_its_own_token_so_a_missing_grant_fails
     monkeypatch.setitem(sys.modules, "google.oauth2.service_account", service_account)
     monkeypatch.setitem(sys.modules, "google", types.ModuleType("google"))
     monkeypatch.setitem(sys.modules, "google.oauth2", oauth2)
+    exceptions = types.ModuleType("google.auth.exceptions")
+    exceptions.GoogleAuthError = type("GoogleAuthError", (Exception,), {})  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "google.auth", types.ModuleType("google.auth"))
+    monkeypatch.setitem(sys.modules, "google.auth.exceptions", exceptions)
     monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
     config = google_run._auth_config(
-        GoogleRunConfig(tenant_name="T", out=Path("."), subject="admin@example.com", service_account_key=Path("/key.json"), collectors="google_directory,google_policies"),
+        GoogleRunConfig(tenant_name="T", out=Path("."), subject="admin@example.com", service_account_key=key, collectors="google_directory,google_policies"),
         ["google_directory", "google_policies"],
     )
 

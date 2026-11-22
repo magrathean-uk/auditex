@@ -23,3 +23,6 @@ tenant-bootstrap/.secrets/
 .env
 .env.*
 !.env.example
+
+# Plan Creator state stays local (owner, 22 Nov 2026)
+.plan/

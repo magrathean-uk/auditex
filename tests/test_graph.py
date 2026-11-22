@@ -257,6 +257,7 @@ def test_failed_redirect_hop_error_has_no_signed_query(monkeypatch) -> None:
     from requests.exceptions import ConnectionError as RequestsConnectionError
 
     client = fake_graph_client(throttle_mode="safe")
+    client.sleep = lambda _seconds: None  # the failed hop is retried within the transport bound (R033)
     signed = "https://reports.office.com/data/download/abc123?sig=TOPSECRETSIGNATURE&se=2026"
 
     def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ANN001, ANN003
@@ -270,7 +271,7 @@ def test_failed_redirect_hop_error_has_no_signed_query(monkeypatch) -> None:
     message, classified = str(caught.value), _classify_graph_error(caught.value)
     assert "TOPSECRETSIGNATURE" not in message and "sig=" not in message
     assert "reports.office.com" in message
-    assert classified[0] == "client_error" and "TOPSECRETSIGNATURE" not in classified[1]
+    assert classified[0] == "graph_transient" and "TOPSECRETSIGNATURE" not in classified[1]
     assert caught.value.__cause__ is None and caught.value.__suppress_context__
 
 
@@ -304,6 +305,7 @@ def test_failed_redirect_hop_error_holds_no_signed_request(monkeypatch) -> None:
     from requests.exceptions import ConnectionError as RequestsConnectionError
 
     client = fake_graph_client(throttle_mode="safe")
+    client.sleep = lambda _seconds: None  # the failed hop is retried within the transport bound (R033)
     signed = "https://reports.office.com/data/download/abc123?sig=TOPSECRETSIGNATURE&se=2026"
 
     def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ANN001, ANN003

@@ -4,9 +4,13 @@ Use this guide when preparing audit evidence for an enterprise customer, legal r
 
 ## Handoff Rule
 
-Create each pack in a fresh directory. Review its contents and send it through the customer's approved evidence channel only after integrity verification. The verifier does not prove that every file is safe to disclose or that the audit is complete. Do not send local auth material or unredacted credential material.
+Create each pack in a fresh directory. Review its contents and send it through the customer's approved evidence channel only after integrity verification. The verifier does not prove that every file is safe to disclose or that the audit is complete. Do not send local auth material or credential material of any kind.
 
-A pack vouches for the run it was built from, so `customer-pack` first checks that the run directory still matches the hashes recorded when the run was finalized (`bundle-hashes.json`) and that it validates as it stands now, whatever its `validation.json` says. If a file changed or is missing, or the bundle no longer validates, it refuses to build the pack (see "If The Run Directory Changed").
+Say what the pack is when you hand it over: evidence from an automated, read-only run on the date shown, limited to what the run could read. It is not a certificate, an assurance opinion or legal advice, and the recorded coverage gaps are part of the result.
+
+The pack holds personal data about the tenant's users. Send it only to people the tenant owner has agreed may see it, keep it no longer than the engagement needs, and delete your own copies when the customer asks or the engagement ends.
+
+A pack is tied to the run it was built from, so `customer-pack` first checks that the run directory still matches the hashes recorded when the run was finalized (`bundle-hashes.json`) and that it validates as it stands now, whatever its `validation.json` says. If a file changed or is missing, or the bundle no longer validates, it refuses to build the pack (see "If The Run Directory Changed").
 
 ## Create The Pack
 
@@ -136,7 +140,7 @@ Some provider APIs expose read settings behind broad OAuth scopes. Auditex recor
 
 ### Can the customer reproduce the report?
 
-Yes. Keep the run directory and pack together. Use `auditex report render`, `auditex report api-calls`, `auditex report permissions`, and `auditex report proof-table` against the run directory.
+Yes, from the same run directory: the reports are rendered again from the stored evidence, without contacting the tenant. A new run against the tenant can differ, because the tenant changes. Keep the run directory and pack together. Use `auditex report render`, `auditex report api-calls`, `auditex report permissions`, and `auditex report proof-table` against the run directory.
 
 ## Handoff Checklist
 

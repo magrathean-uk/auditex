@@ -261,7 +261,7 @@ def test_render_report_supports_md_csv_and_html(tmp_path: Path) -> None:
     md_content = Path(md_result["output_path"]).read_text(encoding="utf-8")
     assert md_content.startswith("# Auditex Report")
     assert "Risk: high / 40" in md_content
-    assert "Assurance: usable / 75" in md_content
+    assert "Evidence coverage: usable / 75" in md_content
     assert "Scorecard: usable / 80" in md_content
     assert "Live readiness: partial" in md_content
     assert "Cannot trust: google_gmail_settings" in md_content

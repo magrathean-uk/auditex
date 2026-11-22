@@ -105,7 +105,7 @@ def test_command_runner_redacts_secret_values_echoed_by_child(flag: str, inline:
         assert argv == command  # Execution still receives the original credential/path.
         return subprocess.CompletedProcess(argv, 0, stdout=CANARY, stderr=CANARY)
 
-    monkeypatch.setattr("auditex.command_runner.subprocess.run", echo)
+    monkeypatch.setattr("auditex.command_runner._run_process", echo)
     result = run_cli_command(command)
     assert result["returncode"] == 0
     assert CANARY not in str(result)

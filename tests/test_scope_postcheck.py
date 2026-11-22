@@ -558,20 +558,23 @@ MUTATIONS = {
 }
 
 
-@pytest.mark.parametrize("version", ["2026-10-29", "2026-11-05"])
+@pytest.mark.parametrize("version", ["2026-10-29", "2026-11-05", "2026-11-22"])
 @pytest.mark.parametrize("claim_status", ["confirmed", "inferred"])
 @pytest.mark.parametrize("condition", ["conditions.locations", "grantControls.operator"])
 def test_schema_and_validators_accept_the_marked_result(marked, version, claim_status, condition):
     marked["schema_version"] = version
     if version == "2026-10-29":
         marked["projection"]["redaction"]["strategy"] = "run-salted-sha256-v1"  # what writers of that version wrote
+    if version in {"2026-10-29", "2026-11-05"}:
+        for section in marked["projection"]["sections"].values():
+            section.pop("rule_view", None)                                # added in 2026-11-22 (R106)
     marked["policies"][0]["post_check"]["conditions"] = [condition]
     marked["policies"][0]["claims"][0]["status"] = claim_status
     marked["policies"][0]["comparison"]["model_status"] = "pass" if claim_status == "confirmed" else None
     validate_assessment(marked)
     jsonschema.Draft202012Validator.check_schema(SCHEMA)
-    schema_path = ("schemas/model_assessment-2026-10-29.schema.json" if version == "2026-10-29"
-                   else "schemas/model_assessment.schema.json")
+    schema_path = ("schemas/model_assessment.schema.json" if version == "2026-11-22"
+                   else f"schemas/model_assessment-{version}.schema.json")
     schema = json.loads((ROOT / schema_path).read_text())
     jsonschema.validate(marked, schema)
     assert marked["projection"]["schema_version"] == "2026-10-29"

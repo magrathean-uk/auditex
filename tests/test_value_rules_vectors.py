@@ -429,8 +429,15 @@ def test_optional_full_source_vectors():
     if not path:
         pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     from hashlib import sha256
+    from itertools import chain
 
-    from test_value_rules_replay import MANIFEST, _overrides, override_gold
+    from test_value_rules_replay import (
+        MANIFEST,
+        _overrides,
+        override_gold,
+        review_relabel,
+        review_vectors,
+    )
 
     override_path = Path(path).with_name("a2-label-overrides.jsonl")
     overrides = _overrides(override_path) if override_path.is_file() else None
@@ -446,7 +453,9 @@ def test_optional_full_source_vectors():
     parity_exempt = {}
     d94_controls = 0
     overlays_applied = set()
-    for row in _rows(Path(path)):
+    # Review lane rules-followup: kit labels its rulings moved are mapped (review_relabel), and its constructed
+    # Built-In vectors reach the cells the kit predates.
+    for row in chain((review_relabel(row)[0] for row in _rows(Path(path))), review_vectors()):
         if row["policy"] not in STAGE_POLICIES:
             continue
         detail = precheck_policy(row["policy"], row["sections"], list(row["sections"]), value_rules=True)
@@ -463,7 +472,8 @@ def test_optional_full_source_vectors():
         criticality = policy_items[row["policy"]]["policy_item"]["criticality"]
         item = {"policy_id": row["policy"], "criticality": criticality}
         response = precheck_response(detail, item, list(row["sections"]), named_limitations=False)
-        if row.get("gold_response") is not None and row.get("disagreement") is None:
+        if (row.get("gold_response") is not None and row.get("disagreement") is None
+                and "built_in_section_added" not in row.get("flags", [])):
             if row["source_kind"].startswith("packlic-"):
                 # Match the reference checker: these twins' gold predates the
                 # licence section. All exact rule assertions above still run.

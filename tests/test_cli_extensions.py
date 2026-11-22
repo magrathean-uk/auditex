@@ -384,7 +384,7 @@ def test_guided_run_installs_exchange_tooling_when_it_is_missing(monkeypatch, tm
     setup: dict[str, object] = {}
     monkeypatch.setattr(guided, "run_setup", lambda **kwargs: setup.update(kwargs) or 0)
 
-    rc = guided.run_guided(build_guided_parser().parse_args([*_certificate_args(tmp_path), "--non-interactive"]))
+    rc = guided.run_guided(build_guided_parser().parse_args([*_certificate_args(tmp_path), "--non-interactive", "--install-tools"]))
 
     assert rc == 0
     assert setup == {"with_mcp": False, "with_exchange": True, "with_pwsh": True}
@@ -399,7 +399,7 @@ def test_guided_run_stops_when_tool_setup_fails(monkeypatch, tmp_path) -> None: 
     })
     monkeypatch.setattr(guided, "run_setup", lambda **kwargs: 7)
 
-    rc = guided.run_guided(build_guided_parser().parse_args([*_certificate_args(tmp_path), "--non-interactive"]))
+    rc = guided.run_guided(build_guided_parser().parse_args([*_certificate_args(tmp_path), "--non-interactive", "--install-tools"]))
 
     assert rc == 7
     assert "argv" not in seen

@@ -17,6 +17,8 @@ from typing import Any
 from azure_tenant_audit.secret_hygiene import redact_output
 
 JsonCommand = Callable[[list[str]], dict[str, Any]]
+# A readiness command that runs longer than this is reported as blocked, so auditex doctor always returns.
+COMMAND_TIMEOUT_SECONDS = 60
 
 
 def _default_run_json_command(command: list[str]) -> dict[str, Any]:
@@ -26,12 +28,19 @@ def _default_run_json_command(command: list[str]) -> dict[str, Any]:
             text=True,
             capture_output=True,
             check=False,
+            timeout=COMMAND_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
         return {
             "status": "blocked",
             "command": command,
             "error": "command_not_found",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "blocked",
+            "command": command,
+            "error": "command_timeout",
         }
 
     return {
@@ -51,19 +60,28 @@ def exchange_module_status() -> dict[str, Any]:
             "error_class": "command_not_found",
             "error": "pwsh not installed",
         }
-    completed = subprocess.run(
-        [
-            pwsh_exe,
-            "-NoLogo",
-            "-NoProfile",
-            "-Command",
-            "Get-Module -ListAvailable ExchangeOnlineManagement | "
-            "Select-Object -First 1 Name,Version | ConvertTo-Json -Compress",
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                pwsh_exe,
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                "Get-Module -ListAvailable ExchangeOnlineManagement | "
+                "Select-Object -First 1 Name,Version | ConvertTo-Json -Compress",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "blocked",
+            "pwsh_path": pwsh_exe,
+            "error_class": "command_timeout",
+            "error": f"command_timeout:{COMMAND_TIMEOUT_SECONDS}s",
+        }
     stdout = (completed.stdout or "").strip()
     stderr = (completed.stderr or "").strip()
     if completed.returncode == 0 and stdout and stdout != "null":

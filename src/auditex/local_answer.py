@@ -90,7 +90,7 @@ class ModelSpec:
     file: str
     size: int
     sha256: str
-    licence: str = "apache-2.0"
+    licence: str            # the publisher's licence for the file, stated before the download (L5)
 
     @property
     def url(self) -> str:
@@ -98,23 +98,24 @@ class ModelSpec:
 
     def record(self) -> dict[str, Any]:
         return {"choice": self.choice, "family": self.family, "repo": self.repo, "revision": self.revision,
-                "file": self.file, "size": self.size, "sha256": self.sha256}
+                "file": self.file, "size": self.size, "sha256": self.sha256, "licence": self.licence}
 
 
 # Chosen and pinned by measurement (M10-T01); M10-T04 keeps only the models that pass acceptance.
 MODELS: dict[str, ModelSpec] = {
     "qwen": ModelSpec("qwen", "Qwen", "unsloth/Qwen3.5-9B-GGUF", "3885219b6810b007914f3a7950a8d1b469d598a5",
                       "Qwen3.5-9B-Q4_K_M.gguf", 5680522464,
-                      "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"),
+                      "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8", "apache-2.0"),
     "mistral": ModelSpec("mistral", "Mistral", "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
                          "0102285ad796bd99af90f58de616092e5630e970", "Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
-                         5198911904, "33e7a72cf5e6e2cfc2f2847075acc013d68bba023e35310cef86b5cf8fdca761"),
+                         5198911904, "33e7a72cf5e6e2cfc2f2847075acc013d68bba023e35310cef86b5cf8fdca761",
+                         "apache-2.0"),
     "gemma": ModelSpec("gemma", "Gemma", "google/gemma-4-E4B-it-qat-q4_0-gguf",
                        "4b4a2c1d584be7264f87aac328a1bc739ce81b6c", "gemma-4-E4B_q4_0-it.gguf", 5154941280,
-                       "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee"),
+                       "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee", "apache-2.0"),
     "small": ModelSpec("small", "Qwen", "unsloth/Qwen3.5-4B-GGUF", "e87f176479d0855a907a41277aca2f8ee7a09523",
                        "Qwen3.5-4B-Q4_K_M.gguf", 2740937888,
-                       "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4"),
+                       "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4", "apache-2.0"),
 }
 DEFAULT_MODEL = "qwen"
 
@@ -637,7 +638,8 @@ def fetch_model(spec: ModelSpec, target: Path, progress: Notice | None = None) -
         have, digest = 0, hashlib.sha256()
     if progress:
         progress(f"Downloading the {spec.choice} model {spec.file} ({_gigabytes(spec.size)}) from "
-                 f"{HUB}/{spec.repo} at revision {spec.revision[:12]}; one time only, then Auditex answers offline."
+                 f"{HUB}/{spec.repo} at revision {spec.revision[:12]}, licensed by its publisher under {spec.licence}; "
+                 "one time only, then Auditex answers offline."
                  + (f" Resuming at {_gigabytes(have)}." if have else ""))
     headers = {"Range": f"bytes={have}-"} if have else {}
     try:
@@ -724,9 +726,21 @@ def _indent(number: int, text: str) -> list[str]:
     return [f"{number}. {first}", *(f"   {line}" for line in rest)]
 
 
+def _partial_note(coverage: Any) -> str | None:
+    """The header line for an assessment that covers only part of the shipped catalogue (R096), else None."""
+    if not isinstance(coverage, Mapping):
+        return None
+    total, assessed = coverage.get("policies"), coverage.get("assessed")
+    if not isinstance(total, int) or not isinstance(assessed, int) or assessed >= total:
+        return None
+    return (f"Partial: the rules assessed {assessed} of the {total} SCuBA checks in the shipped catalogue; "
+            f"the other {total - assessed} are not in this answer.")
+
+
 def answer_text(answer: Mapping[str, Any]) -> str:
     """The whole answer as Auditex prints it, from the answer's own fields: header, how many items used the fixed
-    text, the run summary, then every item in the rules' order under its verdict heading."""
+    text, the run summary, then every item in the rules' order under its verdict heading. An assessment over part
+    of the catalogue says so in the run summary's first line (``assemble_answer``)."""
     model, runtime, reason = answer["model"], answer["runtime"], answer["reason"]
     run_id = answer.get("run_id")
     lines = [f"Auditex answer for run {quoted(run_id)}" if run_id else "Auditex answer"]
@@ -785,6 +799,10 @@ def assemble_answer(digest: Mapping[str, Any], item_answers: Mapping[int, Any], 
     else:
         summary = answer_summary(summary_raw, digest)
         summary_failures = summary["failures"]
+    partial = _partial_note(digest.get("catalogue"))
+    if partial:
+        # R096: the structured run summary carries the catalogue denominator too, not only the printed answer.
+        summary = {**summary, "text": f"{partial}\n{summary['text']}"}
     counts = {verdict: sum(1 for item in digest["items"] if item["verdict"] == verdict) for verdict in VERDICT_ORDER}
     answer: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -941,6 +959,9 @@ def verify_answer(payload: Mapping[str, Any], digest: Mapping[str, Any]) -> dict
     if payload["run_id"] != digest.get("run_id"):
         raise LocalAnswerError("the local answer belongs to another run")
     if payload["digest_version"] != DIGEST_VERSION or payload["frames_version"] != frames()["version"]:
+        raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
+    if payload["model"] and "licence" not in payload["model"]:
+        # L5: an answer saved before the licence was recorded with its model.
         raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
     model = MODELS.get(payload["model"]["choice"]) if payload["model"] else None
     if payload["model"] and (model is None or model.record() != payload["model"]):

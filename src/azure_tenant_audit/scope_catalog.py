@@ -87,6 +87,11 @@ def build_m365_scope_catalog(
                 list(definition.required_permissions if definition else [])
                 + [str(item) for item in hint.get("graph_scopes") or []]
             ),
+            # Optional Graph scopes widen a collector's reads but are never part of the default grant (R006).
+            "optional_permissions": _dedupe([str(item) for item in hint.get("optional_graph_scopes") or []]),
+            "optional_permission_notes": {
+                str(scope): str(note) for scope, note in _mapping(hint.get("optional_graph_scope_notes")).items()
+            },
             "minimum_role_hints": _dedupe([str(item) for item in hint.get("minimum_role_hints") or []]),
             # SharePoint (Office 365 SharePoint Online) application permissions, not Microsoft Graph scopes.
             "sharepoint_permissions": _application_permissions(hint.get("sharepoint_permissions")),
@@ -143,6 +148,7 @@ def aggregate_catalog_rows(
     selected_collectors: list[str],
 ) -> dict[str, Any]:
     required_permissions: list[str] = []
+    optional_permissions: list[str] = []
     minimum_role_hints: list[str] = []
     sharepoint_permissions: list[str] = []
     tool_requirements: list[str] = []
@@ -158,6 +164,7 @@ def aggregate_catalog_rows(
             continue
         collector_rows.append(row)
         required_permissions.extend([str(item) for item in row.get("required_permissions") or []])
+        optional_permissions.extend([str(item) for item in row.get("optional_permissions") or []])
         minimum_role_hints.extend([str(item) for item in row.get("minimum_role_hints") or []])
         sharepoint_permissions.extend([str(item) for item in row.get("sharepoint_permissions") or []])
         tool_requirements.extend([str(item) for item in row.get("tool_requirements") or []])
@@ -175,6 +182,10 @@ def aggregate_catalog_rows(
     return {
         "collectors": collector_rows,
         "required_permissions": _dedupe(required_permissions),
+        # A scope one selected collector requires is required, not optional.
+        "optional_permissions": [
+            item for item in _dedupe(optional_permissions) if item not in set(required_permissions)
+        ],
         "minimum_role_hints": _dedupe(minimum_role_hints),
         "sharepoint_permissions": _dedupe(sharepoint_permissions),
         "tool_requirements": _dedupe(tool_requirements),

@@ -7,8 +7,10 @@ remove all of it afterwards. Nothing outside this guide is needed, and nothing i
 full audit unless it says so.
 
 The reader app never uses a client secret, never uses a delegated permission and never opens a sign-in
-window. Auditex only reads: it never changes a setting, never reads a message, file or chat, and never
-writes to your tenant.
+window. Auditex only makes read requests: it does not change a setting, does not open a message, file or chat, and
+does not write to your tenant. Some of the permissions below allow more than Auditex does with them, because
+Microsoft offers nothing narrower; [If the private key is stolen](#if-the-private-key-is-stolen) says what they
+would allow in the wrong hands, so that you can decide with the full picture.
 
 Who does what:
 
@@ -305,12 +307,16 @@ registration); without a certificate nobody can sign in as it. Upload a new cert
 
 ## Optional collectors (not part of the grant)
 
-A full audit does not use these collectors and does not need their permissions. Add a permission only if the
-person running Auditex plans to select that collector with `--collectors`, and remove it afterwards with the app.
+The full audit in step 7 does not use these collectors and does not need their permissions. Add a permission only
+if the person running Auditex plans to select that collector, and remove it afterwards with the app. One profile
+selects one of them by default: the `app-readonly-full` auditor profile adds `ediscovery` (with `purview` and
+`intune_depth`, which need nothing beyond this guide), so a run with that profile needs `eDiscovery.Read.All`
+below. Without it the `ediscovery` collector fails on the missing permission and the run is partial.
 
 | Collector | Adds | API | Type | Admin consent | Why |
 | --- | --- | --- | --- | --- | --- |
 | mailbox_forwarding | `MailboxSettings.Read` | Microsoft Graph | Application | Yes | Reads the inbox rules and mailbox settings of every mailbox (no messages). The full audit reads mailbox forwarding through Exchange Online instead. |
+| mailbox_forwarding (inbox-rule move targets) | `Mail.ReadBasic.All` | Microsoft Graph | Application | Yes | The least-privileged grant Microsoft documents for `/users/{id}/mailFolders`. By its nature it allows basic message properties (subject, sender, recipients, dates, never a body or attachment) in every mailbox; Auditex calls only the folder routes and reads folder metadata (folder IDs and names, never a message) to tell whether an inbox rule moves mail to a folder that hides it (Junk Email, Deleted Items, Archive, Conversation History, RSS Feeds). Without it those rules are reported as not assessed, never as clean. |
 | identity_protection | `IdentityRiskyUser.Read.All` | Microsoft Graph | Application | Yes | Counts risky users (Microsoft Entra ID P2). |
 | defender_cloud_apps | `ConsentRequest.Read.All` | Microsoft Graph | Application | Yes | Reads app consent requests. |
 | ediscovery | `eDiscovery.Read.All` | Microsoft Graph | Application | Yes | Reads eDiscovery cases with their searches and operations. |

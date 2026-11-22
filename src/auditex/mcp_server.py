@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import inspect
+import json
 import sys
 from functools import wraps
 from pathlib import Path
@@ -11,7 +12,6 @@ from azure_tenant_audit.adapters import list_adapters as _list_adapters
 from azure_tenant_audit.citations import build_citation_summary
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.contracts import contract_schema_manifest
-from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.guarded_io import (
     current_context,
     guard_session,
@@ -25,6 +25,7 @@ from azure_tenant_audit.output_redaction import (
     snapshot_run,
 )
 from azure_tenant_audit.profiles import PROFILES
+from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.response import response_actions
 from azure_tenant_audit.scope_catalog import (
     build_google_scope_catalog,
@@ -134,6 +135,9 @@ def list_collectors(config_path: str = "configs/collector-definitions.json", pro
 
     path = Path(config_path)
     if not path.exists():
+        # R024: the default names a shipped resource; an installed server or another working directory finds it there.
+        path = resolve_resource_path(config_path)
+    if not path.exists():
         return _with_static_citations(
             {"error": "collector definitions file not found", "path": str(path)},
             [{"artifact_path": str(path), "reason": "Collector definition source requested by this MCP helper."}],
@@ -150,7 +154,7 @@ def list_collectors(config_path: str = "configs/collector-definitions.json", pro
 
     catalog = build_m365_scope_catalog(
         collector_config=config,
-        permission_hints=load_permission_hints(Path("configs/collector-permissions.json")),
+        permission_hints=load_permission_hints(resolve_resource_path("configs/collector-permissions.json")),
     )
 
     collectors = [
@@ -280,11 +284,12 @@ def setup_guide(
 def contract_schema_inventory(schema_dir: str = "schemas") -> dict[str, Any]:
     payload = contract_schema_manifest(schema_dir=schema_dir)
     path = Path(schema_dir)
+    resolved = path if path.exists() else resolve_resource_path(schema_dir)
     citations = [
         {"artifact_path": "src/azure_tenant_audit/contracts.py", "reason": "Contract schema manifest builder and bundle validation rules."},
         {"artifact_path": str(path), "reason": "Shipped schema directory requested by this MCP helper."},
     ]
-    evidence_missing = [] if path.exists() else [str(path)]
+    evidence_missing = [] if resolved.exists() else [str(path)]
     return _with_static_citations(payload, citations, evidence_missing=evidence_missing)
 
 
@@ -466,15 +471,238 @@ def build_response_command(
     )
 
 
+# MCP clients cap a tool result at tens of kilobytes; a summary over this size drops its heaviest sections (R025).
+SUMMARY_RESPONSE_BUDGET_BYTES = 48_000
+# Sections a size-capped summary may drop, and the tool that reads each one in full.
+_SUMMARY_DROPPABLE_SECTIONS = {
+    "report_pack": "auditex_report_analyze",
+    "findings": "auditex_proof_table",
+    "action_plan": "auditex_report_analyze",
+    "api_inventory": "auditex_api_inventory",
+    "ai_context": "auditex_report_preview",
+    "audit_plan": "auditex_enterprise_handoff",
+    "coverage_ledger": "auditex_enterprise_handoff",
+    "capability_matrix": "auditex_permissions_ledger",
+    "blockers": "auditex_list_blockers",
+    "diagnostics": "auditex_list_blockers",
+    "validation": "auditex_enterprise_handoff",
+    "data_handling": "auditex_enterprise_handoff",
+    "live_readiness": "auditex_enterprise_handoff",
+    "toolchain_readiness": "auditex_enterprise_handoff",
+    "auth_context": "auditex_enterprise_handoff",
+    "summary_md": "auditex_report_preview",
+    "report_pack_citation_summary": "auditex_report_analyze",
+}
+
+
+_MANIFEST_ARTIFACTS = "manifest.artifacts"
+
+
+def _json_size(value: Any) -> int:
+    return len(json.dumps(value, default=str))
+
+
+def _cap_summary(result: dict[str, Any], budget: int = SUMMARY_RESPONSE_BUDGET_BYTES) -> dict[str, Any]:
+    """Drop the largest droppable sections until the summary fits ``budget``; each is listed in ``omitted_sections``.
+
+    Identity, the summary, validation status, coverage gaps, the scorecard and citations always stay. A section that
+    is dropped keeps its path, its size and item count, and the tool that reads it in full.
+    """
+    if _json_size(result) <= budget:
+        return result
+    capped = dict(result)
+    omitted: dict[str, Any] = {}
+    sizes = sorted(
+        ((_json_size(capped[key]), key) for key in _SUMMARY_DROPPABLE_SECTIONS if key in capped), reverse=True
+    )
+    manifest = capped.get("manifest")
+    if isinstance(manifest, dict) and isinstance(manifest.get("artifacts"), list):
+        # The manifest stays, but its artifact list grows with every raw page and chunk of a large run.
+        sizes = sorted([*sizes, (_json_size(manifest["artifacts"]), _MANIFEST_ARTIFACTS)], reverse=True)
+    for size, key in sizes:
+        if key == _MANIFEST_ARTIFACTS:
+            capped["manifest"] = {name: item for name, item in capped["manifest"].items() if name != "artifacts"}
+            value: Any = manifest["artifacts"]
+            entry: dict[str, Any] = {"bytes": size}
+            path = capped.get("manifest_path")
+        else:
+            value = capped.pop(key)
+            entry = {"bytes": size, "read_with": _SUMMARY_DROPPABLE_SECTIONS[key]}
+            path = capped.get(f"{key}_path")
+        if isinstance(value, list):
+            entry["items"] = len(value)
+        elif isinstance(value, dict) and isinstance(value.get("findings"), list):
+            entry["findings"] = len(value["findings"])
+        if isinstance(path, str) and path:
+            entry["path"] = path
+        omitted[key] = entry
+        capped["omitted_sections"] = omitted
+        capped["summary_truncated"] = True
+        if _json_size(capped) <= budget:
+            return capped
+    return _cap_kept_sections(capped, omitted, budget)
+
+
+# Field names a capped section lists as left out; the rest are only counted. A name longer than the limit is only
+# counted too, so the record of what was left out stays small however long the names are (R025).
+_OMITTED_FIELDS_LISTED = 20
+_OMITTED_FIELD_NAME_CHARS = 64
+# Keys the capped summary never drops: what the client needs to know the answer was cut and where to read the rest.
+_SUMMARY_CORE_KEYS = frozenset({"omitted_sections", "summary_truncated", "citations", "citation_summary", "evidence_missing"})
+# Scalar fields that identify the run; a kept section loses every other field before these.
+_SUMMARY_IDENTITY_FIELDS = frozenset(
+    {"tenant_name", "tenant_id", "run_id", "created_utc", "platform", "mode", "overall_status", "status", "schema_version"}
+)
+
+
+def _record_omitted_field(capped: dict[str, Any], omitted: dict[str, Any], key: str, name: str, size: int) -> None:
+    # One entry per section, so the record of what was left out stays small however many fields it lost.
+    entry = omitted.setdefault(f"{key}.fields", _omitted_entry(capped, key, None, 0) | {"fields": [], "more_fields": 0})
+    entry["bytes"] += size
+    if len(entry["fields"]) < _OMITTED_FIELDS_LISTED and len(name) <= _OMITTED_FIELD_NAME_CHARS:
+        entry["fields"].append(name)
+    else:
+        entry["more_fields"] += 1
+
+
+class _Measure:
+    """The summary's JSON size, kept as a running estimate as fields are dropped and re-measured exactly only when
+    the estimate says it fits, so capping a wide section stays linear (R025)."""
+
+    def __init__(self, capped: dict[str, Any], budget: int) -> None:
+        self.capped, self.budget = capped, budget
+        self.estimate = _json_size(capped)
+
+    def fits(self) -> bool:
+        if self.estimate > self.budget:
+            return False
+        self.estimate = _json_size(self.capped)
+        return self.estimate <= self.budget
+
+    def dropped(self, size: int) -> None:
+        self.estimate -= size
+
+
+def _drop_fields(capped: dict[str, Any], omitted: dict[str, Any], measure: _Measure, rows: list[tuple[int, str, str | None]]) -> bool:
+    for size, key, name in sorted(rows, key=lambda row: row[0], reverse=True):
+        if measure.fits():
+            return True
+        if name is None:
+            omitted[key] = _omitted_entry(capped, key, capped.pop(key), size)
+        else:
+            section = dict(capped[key])
+            section.pop(name)
+            capped[key] = section
+            _record_omitted_field(capped, omitted, key, name, size)
+        measure.dropped(size)
+    return measure.fits()
+
+
+def _drop_sections(capped: dict[str, Any], measure: _Measure, *, keep_identity: bool) -> bool:
+    keys = [
+        key for key in capped
+        if key not in _SUMMARY_CORE_KEYS
+        and not (keep_identity and isinstance(capped[key], dict) and _SUMMARY_IDENTITY_FIELDS & set(capped[key]))
+    ]
+    for key in sorted(keys, key=lambda item: _json_size(capped[item]), reverse=True):
+        if measure.fits():
+            return True
+        value = capped.pop(key)
+        size = _json_size(value)
+        record = capped["omitted_sections"]
+        if set(record) == {"sections"}:
+            record["sections"] += 1
+        else:
+            record[key] = _omitted_entry(capped, key, value, size)
+        measure.dropped(size)
+    return measure.fits()
+
+
+def _cap_kept_sections(capped: dict[str, Any], omitted: dict[str, Any], budget: int) -> dict[str, Any]:
+    """Second stage of ``_cap_summary`` (R025): the kept sections alone are over ``budget`` (hundreds of coverage gaps
+    repeated in the manifest, the summary and the run metadata). Drop their nested lists and mappings, largest first,
+    then their other fields, keeping each section's identity (tenant, run id, status); then whole sections that carry
+    no identity. Only if that is not enough are the omitted record and the citations trimmed and, last, the identity
+    sections dropped. The result never exceeds ``budget``.
+    """
+    capped["omitted_sections"] = omitted
+    capped["summary_truncated"] = True
+    measure = _Measure(capped, budget)
+    nested: list[tuple[int, str, str | None]] = []
+    for key, value in capped.items():
+        if key in _SUMMARY_CORE_KEYS:
+            continue
+        if isinstance(value, dict):
+            nested.extend(
+                # The pair's size, key included, so the running estimate does not over-count what is left.
+                (_json_size({name: item}), key, name) for name, item in value.items() if isinstance(item, (dict, list)) and item
+            )
+        elif isinstance(value, list) and value:
+            nested.append((_json_size({key: value}), key, None))
+    if _drop_fields(capped, omitted, measure, nested):
+        return capped
+    scalars = [
+        (_json_size({name: item}), key, name)
+        for key, value in capped.items()
+        if key not in _SUMMARY_CORE_KEYS and isinstance(value, dict)
+        for name, item in value.items()
+        if name not in _SUMMARY_IDENTITY_FIELDS
+    ]
+    if _drop_fields(capped, omitted, measure, scalars) or _drop_sections(capped, measure, keep_identity=True):
+        return capped
+    # The run's identity outweighs the detail of the omitted record and the citations.
+    _shrink_core(capped, budget)
+    measure.estimate = _json_size(capped)
+    if not _drop_sections(capped, measure, keep_identity=False):
+        _shrink_core(capped, budget)
+    return capped
+
+
+def _shrink_core(capped: dict[str, Any], budget: int) -> dict[str, Any]:
+    """Last resort: the kept core keys themselves are over ``budget``. Field lists become counts, then the omitted
+    record becomes a count of sections, then the citations are emptied and counted, so the answer always fits."""
+    omitted = capped.get("omitted_sections")
+    if _json_size(capped) > budget and isinstance(omitted, dict):
+        for entry in omitted.values():
+            if isinstance(entry, dict) and isinstance(entry.get("fields"), list):
+                entry["more_fields"] = int(entry.get("more_fields") or 0) + len(entry["fields"])
+                entry["fields"] = []
+    if _json_size(capped) > budget and isinstance(omitted, dict):
+        capped["omitted_sections"] = {"sections": len(omitted)}
+    for key in ("citations", "evidence_missing", "citation_summary"):
+        if _json_size(capped) <= budget:
+            break
+        value = capped.get(key)
+        if isinstance(value, list) and value:
+            capped[key] = []
+            capped[f"{key}_omitted"] = len(value)
+        elif isinstance(value, dict) and value:
+            capped[key] = {}
+            capped[f"{key}_omitted"] = len(value)
+    return capped
+
+
+def _omitted_entry(capped: dict[str, Any], key: str, value: Any, size: int) -> dict[str, Any]:
+    entry: dict[str, Any] = {"bytes": size}
+    if isinstance(value, list):
+        entry["items"] = len(value)
+    path = capped.get(f"{key}_path")
+    if isinstance(path, str) and path:
+        entry["path"] = path
+    return entry
+
+
 @guarded_operation
 def summarize_run(run_dir: str) -> dict[str, Any]:
     """The run summary an MCP client receives: the shareable redaction over the complete payload (its citation
-    summary re-derived). The operator's own terminal reads ``summarize_run_raw``."""
+    summary re-derived), capped at ``SUMMARY_RESPONSE_BUDGET_BYTES`` by dropping its heaviest sections. The
+    operator's own terminal reads ``summarize_run_raw``."""
     current_context().bind_run(run_dir)
     before = snapshot_run(run_dir)
     result = redact_payload(summarize_run_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
     assert_snapshot_stable(run_dir, before)
-    return result
+    # Dropping keys after redaction cannot reveal anything the redaction removed.
+    return _cap_summary(result)
 
 
 def summarize_run_raw(run_dir: str) -> dict[str, Any]:
@@ -520,6 +748,13 @@ def summarize_run_raw(run_dir: str) -> dict[str, Any]:
         bundle["report_pack_citation_summary"] = dict(report_pack.get("citation_summary") or {})
     bundle["evidence_missing"] = evidence_missing
     return bundle
+
+
+def diff_run_directories(run_a: str, run_b: str, *, classic: bool = False) -> dict[str, Any]:
+    """The gated two-run diff: the same tenant gate, bundle verification and reassessment check as compare (R054)."""
+    from .compare import diff_two_runs
+
+    return diff_two_runs(run_a, run_b, classic=classic)
 
 
 def diff_runs(run_a: str, run_b: str, classic: bool = False) -> dict[str, Any]:
@@ -769,8 +1004,29 @@ def main(argv: list[str] | None = None) -> int:
 
     server = FastMCP("auditex")
     register_fastmcp_tools(server, tool_handlers())
+    _install_shutdown_handlers()
     server.run()
     return 0
+
+
+def _install_shutdown_handlers() -> None:
+    """On SIGTERM or SIGHUP, stop the commands this server started, then end as the signal would (R063).
+
+    A command runs in its own session (so a timeout can stop its whole process group), which means a signal sent to
+    the server's process group no longer reaches it; without this a terminated server would leave an audit running.
+    """
+    import signal
+
+    from .command_runner import stop_running_commands
+
+    def handle(signum: int, _frame: Any) -> None:
+        stop_running_commands()
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
+
+    for name in ("SIGTERM", "SIGHUP"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), handle)
 
 
 def _guard_tool(handler):
@@ -908,7 +1164,7 @@ def tool_handlers() -> dict[str, Any]:
             )
         except ValueError as exc:
             return {"status": "blocked", "error": str(exc)}
-        return run_cli_command(command)
+        return run_cli_command(command, resumable=True)
 
     def auditex_google_doctor(
         auth: str = "domain-delegation",

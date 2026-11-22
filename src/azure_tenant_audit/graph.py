@@ -12,7 +12,8 @@ from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
-from requests.exceptions import RequestException
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import RequestException, Timeout
 
 from . import auth_context, certificate_auth
 from .certificate_auth import CERTIFICATE_ERRORS, CertificateAuthError
@@ -232,7 +233,7 @@ THROTTLE_POLICIES: dict[str, ThrottlePolicy] = {
 
 @dataclass
 class _WaitBudget:
-    """The seconds one ``$batch`` chunk may still spend waiting to retry, shared by its item and transport retries."""
+    """The seconds one ``$batch`` chunk or one request may still spend waiting to retry, shared by all its retries."""
 
     remaining: float
     spent: float = 0.0
@@ -243,6 +244,35 @@ class _WaitBudget:
     def take(self, seconds: float) -> None:
         self.remaining -= seconds
         self.spent += seconds
+
+
+# Phrases and error codes of a Graph answer that refuses a read for a missing licence, not a missing permission. The
+# phrases match those collectors.base._classify_graph_error maps to license_required.
+_LICENCE_PHRASES = (
+    "premium license",
+    "spo license",
+    "not licensed",
+    "does not have a license",
+    "license is required",
+    "needs to have microsoft entra id p2",
+    "governance license",
+)
+
+
+def _licence_refusal(response: Any) -> bool:
+    """Whether a 403 answer names a missing licence rather than a missing permission."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    code, message = "", str(getattr(response, "text", "") or "")
+    if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+        code = str(payload["error"].get("code") or "")
+        message = str(payload["error"].get("message") or message)
+    if "license" in code.lower() or "licence" in code.lower():
+        return True
+    lower = message.lower()
+    return any(phrase in lower for phrase in _LICENCE_PHRASES)
 
 
 def _off_graph_reason(response: Any) -> str:
@@ -481,7 +511,8 @@ class GraphClient:
         self._enforce_read_only(method, url, kwargs)
         # Send one Graph request, retrying 429 and 5xx answers within the throttle policy. The read guard above stays
         # the first statement (tests/test_http_verb_allowlist.py). ``wait_budget`` is the shared retry-wait allowance
-        # of a ``$batch`` chunk: a retry whose wait would pass it is not slept and the last answer is returned instead.
+        # of a ``$batch`` chunk, or of this one request when None: a retry whose wait would pass it is not slept and the
+        # last answer is returned instead.
         token = self.ensure_token()
         headers = kwargs.pop("headers", {})
         headers.update(
@@ -491,6 +522,10 @@ class GraphClient:
                 "User-Agent": package_user_agent(),
             }
         )
+        if wait_budget is None:
+            # Every read has a retry-wait bound, not only a $batch chunk (R104): a Retry-After past it is not slept, and
+            # the throttled answer is returned so the read becomes a recorded gap instead of a run that looks hung.
+            wait_budget = _WaitBudget(self._throttle_policy().max_retry_wait_seconds)
         attempt = 0
         family = self._request_family(url)
         permission_stop_after = self._throttle_policy().permission_stop_after
@@ -532,7 +567,8 @@ class GraphClient:
                     "Graph request raised exception",
                     {"method": method, "url": url, "error": str(exc), "attempt": attempt},
                 )
-                raise
+                self._retry_transport_error(exc, method=method, url=url, attempt=attempt, wait_budget=wait_budget)
+                continue
             duration_ms = round((time.time() - request_start) * 1000, 2)
             self._emit(
                 "graph.request.completed",
@@ -547,9 +583,18 @@ class GraphClient:
                 },
             )
             if response.status_code in _REDIRECT_STATUSES:
-                response = self._follow_redirects(response, method, url, headers)
+                try:
+                    response = self._follow_redirects(response, method, url, headers)
+                except (Timeout, RequestsConnectionError) as exc:
+                    # A blip on an allowed download hop is retried from the Graph URL, which mints a fresh signed
+                    # link, within the same bound as a blip on Graph itself (R033). The error is already redacted.
+                    self._retry_transport_error(exc, method=method, url=url, attempt=attempt, wait_budget=wait_budget)
+                    continue
             if response.status_code == 403 and permission_stop_after:
-                self._permission_failures[family] = self._permission_failures.get(family, 0) + 1
+                # A licence answer is not a permission refusal: sibling reads of the family may still be licensed or
+                # take another path (R004), so only genuine authorisation refusals count toward the stop.
+                if not _licence_refusal(response):
+                    self._permission_failures[family] = self._permission_failures.get(family, 0) + 1
             elif response.status_code < 400:
                 self._permission_failures.pop(family, None)
 
@@ -601,6 +646,35 @@ class GraphClient:
             self._arm_next_request_delay()
             return response
 
+    def _retry_transport_error(
+        self, exc: RequestException, *, method: str, url: str, attempt: int, wait_budget: _WaitBudget | None
+    ) -> None:
+        """Wait before retrying a read timeout or dropped connection, or re-raise ``exc`` when it may not be retried.
+
+        A transport blip is retried like a 5xx (R033): one network blip must not fail an endpoint or cut a long paged
+        list. Other request errors (a bad URL, a refused redirect) are not retried.
+        """
+        if not isinstance(exc, (Timeout, RequestsConnectionError)):
+            raise exc
+        if attempt > self._throttle_policy().server_error_retries:
+            raise exc
+        backoff_seconds = self._retry_delay(attempt)
+        if wait_budget is not None and not wait_budget.allows(backoff_seconds):
+            raise exc
+        self._emit(
+            "graph.request.retry",
+            "Transport error, retrying request",
+            {
+                "method": method,
+                "url": url,
+                "error": type(exc).__name__,
+                "attempt": attempt,
+                "backoff_seconds": backoff_seconds,
+                "reason": "transport_error",
+            },
+        )
+        self._take_wait(wait_budget, backoff_seconds)
+
     def _over_wait_budget(
         self, wait_budget: _WaitBudget | None, seconds: float, *, method: str, url: str, attempt: int
     ) -> bool:
@@ -608,7 +682,7 @@ class GraphClient:
             return False
         self._emit(
             "graph.request.retry_budget_exhausted",
-            "Retry wait would pass the $batch wait bound; not retrying",
+            "Retry wait would pass the retry-wait bound; not retrying",
             {
                 "method": method,
                 "url": url,
@@ -665,6 +739,7 @@ class GraphClient:
                 if graph_hop
                 else {name: value for name, value in headers.items() if name.lower() != "authorization"}
             )
+            safe: RequestException | None = None
             try:
                 response = self.session.request(
                     "GET", target, headers=hop_headers, timeout=self.auth.timeout_seconds, allow_redirects=False
@@ -681,7 +756,10 @@ class GraphClient:
                 safe = copy.copy(exc)
                 safe.args = (f"Redirect hop to {event['host']}{event['path']} failed ({type(exc).__name__})",)
                 safe.request = safe.response = None
-                raise safe from None
+                safe.__cause__ = safe.__context__ = None
+            if safe is not None:
+                # Raised outside the except block, so the original error does not ride along as hidden context.
+                raise safe
             current_url = target
         return response
 
