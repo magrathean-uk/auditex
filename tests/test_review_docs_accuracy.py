@@ -206,3 +206,34 @@ def test_api_catalogue_lists_every_dns_posture_query_and_scopes_the_lookup_cap()
     paragraph = catalogue[catalogue.index("Public HTTPS lookups target only domains") :][:900]
     assert f"first {MAX_PUBLIC_LOOKUP_DOMAINS}" in paragraph and "OpenID" in paragraph
     assert "MTA-STS" in paragraph and "every" in paragraph
+
+
+# R127 ------------------------------------------------------------------------------------------------------------
+
+
+def test_product_manual_sends_client_output_through_the_shareable_route(monkeypatch):
+    import auditex.cli as cli
+    import auditex.exporters as exporters
+    import auditex.reporting as reporting
+    from azure_tenant_audit.output_redaction import PROFILE_LOCAL, PROFILE_SHAREABLE
+
+    seen: dict[str, object] = {}
+
+    def capture(**kwargs):
+        seen["profile"] = kwargs["profile"]
+        return {"output_path": "x"}
+
+    monkeypatch.setattr(reporting, "render_report", capture)
+    cli.render_report(run_dir="r", format_name="html")
+    assert seen["profile"] == PROFILE_LOCAL
+    monkeypatch.setattr(exporters, "render_report", capture)
+    exporters.run_exporter(name="html", run_dir="r")
+    assert seen["profile"] == PROFILE_SHAREABLE
+
+    section = _section(_doc("docs/guides/product-manual.md"), "## Render Reports")
+    for line in section.splitlines():
+        if line.startswith("auditex report render"):
+            assert "client" not in line, f"report render is the unredacted local view, not client output: {line}"
+    assert re.search(r"(?m)^auditex export run html <run-dir> --output \S*client", section)
+    flat = _flat(section)
+    assert "`auditex report render`" in flat and "local" in flat and "unredacted" in flat

@@ -264,12 +264,27 @@ raise `dns_posture.mta_sts_missing`, `dns_posture.mta_sts_testing_mode`,
 
 ```bash
 auditex report render <run-dir> --format md
-auditex report render <run-dir> --format html --output reports/client-report.html
-auditex report render <run-dir> --format json --output reports/client-report.json
+auditex report render <run-dir> --format html --output reports/operator-report.html
+auditex report render <run-dir> --format json --output reports/operator-report.json
 auditex report render <run-dir> --format csv --output reports/findings.csv
 auditex report render <run-dir> --format sarif --output reports/findings.sarif.json
 auditex report render <run-dir> --format oscal --output reports/oscal.json
 ```
+
+`auditex report render` is the operator's local view: it keeps the original, unredacted values, and its default
+sections include every normalised evidence section and the run manifest (user principal names, privileged users,
+guest lists, the command line and local paths). Keep it with the run folder. For anything that leaves the operator,
+use the shareable exporters, which apply the shareable redaction profile, or the [customer pack](#customer-pack):
+
+```bash
+auditex export list
+auditex export run html <run-dir> --output reports/client-report.html
+auditex export run json <run-dir> --output reports/client-report.json
+```
+
+`auditex export run` takes the same formats (`csv`, `html`, `json`, `md`, `oscal`, `sarif`) and the same
+`--include-section` and `--exclude-section` options. Both commands refuse an unknown section name with exit status 2:
+they print "Unknown report section(s): X. Valid sections: ..." and write nothing.
 
 The SARIF export is SARIF 2.1.0 and the OSCAL export is OSCAL 1.1.2 Assessment Results; both are validated against the official JSON Schemas in the test suite. The OSCAL collection time is the run's `created_utc`, not the time of the export. See the [output contract](../reference/output-contract.md#sarif-and-oscal-exports).
 
