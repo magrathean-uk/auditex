@@ -119,7 +119,7 @@ def _domain_settings(bundle: Bundle) -> Any:
 _ENTRY_KEYS = ("restrictionType", "state", "restrictForAppsCreatedAfterDateTime", "maxLifetime")
 
 
-def _scope(value: Any, applies_to: list[dict[str, str]] | None = None) -> Any:
+def _scope(value: Any, applies_to: list[dict[str, str]] | None = None, *, enforced: bool = True) -> Any:
     if value is None:
         return None
     _require(isinstance(value, dict), kind="invalid_type")
@@ -135,6 +135,12 @@ def _scope(value: Any, applies_to: list[dict[str, str]] | None = None) -> Any:
         result[key] = []
         for entry in entries:
             item = _select(entry, _ENTRY_KEYS)
+            # Review R042 (proposed D114): actors an excludeActors exemption names can still add or keep the credential, so
+            # the entry is not the unqualified restriction the rule reads. The pinned Rego never reads the field; a populated
+            # one withholds the section (not assessed) rather than reading as "enabled for every app".
+            # An entry that is not enforced, or a disabled custom policy, cannot widen a pass, so its exemption does not withhold.
+            if enforced and entry.get("state") != "disabled":
+                _require(_blank(entry.get("excludeActors")), "ExcludeActors", "unexpected_field")
             if applies_to is not None:
                 item["AppliesTo"] = _pascal(applies_to)
             result[key].append(item)
@@ -173,7 +179,7 @@ def _app_policies(bundle: Bundle) -> Any:
         _require(_text(row.get("id")) and row["id"] in targets, "AppliesTo", "missing_field")
         item = _select(row, ("id", "displayName", "isEnabled"))
         if "restrictions" in row:
-            item["Restrictions"] = _scope(row["restrictions"], targets[row["id"]])
+            item["Restrictions"] = _scope(row["restrictions"], targets[row["id"]], enforced=row.get("isEnabled") is not False)
         result.append(item)
     return result
 
@@ -231,6 +237,8 @@ def _ca_rule(bundle: Bundle) -> Any:
                         "ServicePrincipalRiskLevels": _strings, "InsiderRiskLevels": _strings},
         "conditions.applications.": {"ApplicationFilter": _pascal,
                                     "IncludeAuthenticationContextClassReferences": _strings},
+        # Review R001: further ways to satisfy the grant; the rule reads each populated one as an alternative that never qualifies alone.
+        "grantControls.": {"TermsOfUse": _strings, "CustomAuthenticationFactors": _strings},
     }
     restriction_names = {"locations", "devices", "platforms", "sessionControls", "includeGroups",
                          "includeGuestsOrExternalUsers", "authenticationContextClassReferences",
@@ -265,10 +273,16 @@ def _ca_rule(bundle: Bundle) -> Any:
                 check = extensions.get(path, {}).get(target)
                 if path == "conditions.clientApplications." and key not in {"id", "displayName"}:
                     check = _pascal
+                if check is None and path == "grantControls." and key not in {"id", "displayName"} and not _blank(value):
+                    # Review R001: an unknown populated grant control reaches the rule, which reads it as unknown.
+                    check = _pascal
                 if check is None:
                     # _restricted also reads unknown keys inside these two
                     # containers. Dropping a populated one could broaden a pass.
-                    if path in {"conditions.locations.", "conditions.platforms."} and key not in {"id", "displayName"}:
+                    # Review R001: so could an unknown populated condition the rule
+                    # cannot read at all, so it withholds the rule view as well.
+                    if path in {"conditions.locations.", "conditions.platforms.", "conditions.",
+                                "conditions.applications."} and key not in {"id", "displayName"}:
                         _require(_blank(value), kind="unexpected_field")
                     continue
             else:
@@ -296,7 +310,9 @@ def _ca_rule(bundle: Bundle) -> Any:
             model_safe = False
     # On every shape the model adapter can represent, return precisely its value,
     # including its omission of empty restrictions and disabled-policy extras.
-    return base if model_safe else [convert(row, spec, variant=True) for row in rows]
+    # A disabled or report-only policy cannot change a verdict, so it keeps the model view and its extras never withhold.
+    return base if model_safe else [item if item.get("State") in {"disabled", "enabledForReportingButNotEnforced"}
+                                    else convert(row, spec, variant=True) for row, item in zip(rows, base, strict=True)]
 
 
 def _spo_rule(bundle: Bundle) -> Any:
