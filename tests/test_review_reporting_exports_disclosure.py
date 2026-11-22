@@ -60,7 +60,16 @@ def _oscal(run_dir: Path, profile: str = "shareable") -> dict[str, Any]:
 
 # R066 ---------------------------------------------------------------------------------------------------------------
 
-def test_r066_shareable_sarif_fingerprints_are_stable_across_runs_of_one_tenant(tmp_path: Path) -> None:
+EXPORT_KEY = "a-private-export-key-for-tests-only"
+
+
+@pytest.fixture
+def export_key(monkeypatch: pytest.MonkeyPatch) -> str:
+    monkeypatch.setenv("AUDITEX_EXPORT_FINGERPRINT_KEY", EXPORT_KEY)
+    return EXPORT_KEY
+
+
+def test_r066_shareable_sarif_fingerprints_are_stable_across_runs_of_one_tenant(tmp_path: Path, export_key: str) -> None:
     runs = [_write_run(tmp_path / name, [dict(APP_FINDING)]) for name in ("run-a", "run-b")]
     for run in runs:
         ensure_pseudonym_key(run)
@@ -71,7 +80,7 @@ def test_r066_shareable_sarif_fingerprints_are_stable_across_runs_of_one_tenant(
     assert APP_ID not in json.dumps(first["fingerprints"]) + json.dumps(first["partialFingerprints"])
 
 
-def test_r066_shareable_oscal_uuids_are_stable_across_runs_of_one_tenant(tmp_path: Path) -> None:
+def test_r066_shareable_oscal_uuids_are_stable_across_runs_of_one_tenant(tmp_path: Path, export_key: str) -> None:
     runs = [_write_run(tmp_path / name, [dict(APP_FINDING)]) for name in ("run-a", "run-b")]
     for run in runs:
         ensure_pseudonym_key(run)
@@ -81,7 +90,7 @@ def test_r066_shareable_oscal_uuids_are_stable_across_runs_of_one_tenant(tmp_pat
     assert first["observations"][0]["subjects"][0]["subject-uuid"] == second["observations"][0]["subjects"][0]["subject-uuid"]
 
 
-def test_r066_shareable_fingerprints_differ_between_tenants(tmp_path: Path) -> None:
+def test_r066_shareable_fingerprints_differ_between_tenants(tmp_path: Path, export_key: str) -> None:
     run_a = _write_run(tmp_path / "run-a", [dict(APP_FINDING)])
     run_b = _write_run(tmp_path / "run-b", [dict(APP_FINDING)], tenant_id="0f0e0d0c-aaaa-4bbb-8ccc-dddddddddddd")
     for run in (run_a, run_b):
@@ -89,7 +98,40 @@ def test_r066_shareable_fingerprints_differ_between_tenants(tmp_path: Path) -> N
     assert _sarif_results(run_a)[0]["fingerprints"] != _sarif_results(run_b)[0]["fingerprints"]
 
 
-def test_r066_local_sarif_fingerprint_is_unchanged(tmp_path: Path) -> None:
+def test_r066_a_recipient_who_knows_the_tenant_id_cannot_test_a_guess(tmp_path: Path, export_key: str) -> None:
+    import hashlib
+    import hmac
+
+    run = _write_run(tmp_path / "run-a", [dict(APP_FINDING)])
+    ensure_pseudonym_key(run)
+    result = _sarif_results(run)[0]
+    guesses = {
+        hmac.new(TENANT_ID.encode(), f"auditex|affected|{APP_ID}".encode(), hashlib.sha256).hexdigest(),
+        hmac.new(TENANT_ID.encode(), f"auditex|affected|{TENANT_ID}|{APP_ID}".encode(), hashlib.sha256).hexdigest(),
+        hashlib.sha256(APP_ID.encode()).hexdigest(),
+    }
+    assert result["partialFingerprints"]["affected"] not in guesses
+
+
+def test_r066_without_the_export_key_shareable_ids_stay_per_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AUDITEX_EXPORT_FINGERPRINT_KEY", raising=False)
+    runs = [_write_run(tmp_path / name, [dict(APP_FINDING)]) for name in ("run-a", "run-b")]
+    for run in runs:
+        ensure_pseudonym_key(run)
+    first, second = (_sarif_results(run)[0] for run in runs)
+    assert first["fingerprints"] != second["fingerprints"]
+    assert APP_ID not in json.dumps(first)
+
+
+def test_r066_a_short_export_key_is_refused_without_echoing_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUDITEX_EXPORT_FINGERPRINT_KEY", "short-key-9")
+    run = _write_run(tmp_path / "run-a", [dict(APP_FINDING)])
+    with pytest.raises(ValueError) as caught:
+        _sarif_results(run)
+    assert "short-key-9" not in str(caught.value)
+
+
+def test_r066_local_sarif_fingerprint_is_unchanged(tmp_path: Path, export_key: str) -> None:
     run = _write_run(tmp_path / "run-a", [dict(APP_FINDING)])
     direct = render_sarif(findings=[dict(APP_FINDING)], summary={}, manifest={})["runs"][0]["results"][0]
     assert _sarif_results(run, profile="local")[0]["fingerprints"] == direct["fingerprints"]
@@ -122,8 +164,17 @@ def test_r125_sarif_keeps_an_expired_waiver_open() -> None:
 
 @pytest.mark.parametrize("status", ["closed", "resolved"])
 def test_r125_sarif_leaves_out_closed_findings(status: str) -> None:
-    finding = {**APP_FINDING, "status": status}
-    assert render_sarif(findings=[finding], summary={}, manifest={})["runs"][0]["results"] == []
+    assert render_sarif(findings=[_waived(status)], summary={}, manifest={})["runs"][0]["results"] == []
+
+
+@pytest.mark.parametrize("status", ["closed", "resolved", "accepted_risk", "waived"])
+def test_r125_a_status_without_a_matching_waiver_stays_an_open_result(status: str) -> None:
+    """As in the gate: a status no waiver stands behind is an edit, so the finding stays open."""
+    unbacked = {**APP_FINDING, "status": status}
+    other = {**_waived(status), "waiver": {"finding_id": "some_other_finding", "reason": "x", "expires_on": "2999-01-01"}}
+    for finding in (unbacked, other):
+        result = render_sarif(findings=[finding], summary={}, manifest={})["runs"][0]["results"]
+        assert len(result) == 1 and "suppressions" not in result[0]
 
 
 def test_r125_open_finding_has_no_suppression() -> None:
@@ -136,7 +187,10 @@ def test_r125_oscal_records_the_accepted_status(tmp_path: Path) -> None:
 
     finding = render_oscal(findings=[_waived("accepted_risk")], summary={}, manifest={})["assessment-results"]["results"][0]["findings"][0]
     props = {prop["name"]: prop["value"] for prop in finding["props"]}
-    assert props["auditex.status"] == "accepted_risk"
+    assert props["auditex.status"] == "accepted"
+    lapsed = render_oscal(findings=[_waived("accepted_risk", expires_on="2000-01-01")], summary={}, manifest={})
+    lapsed_props = {prop["name"]: prop["value"] for prop in lapsed["assessment-results"]["results"][0]["findings"][0]["props"]}
+    assert lapsed_props["auditex.status"] == "open"
     assert "accepted risk" in finding["target"]["status"]["remarks"].lower()
 
 
@@ -258,3 +312,14 @@ def test_l4_report_header_says_evidence_coverage_not_assurance(tmp_path: Path) -
     markdown = preview_report(run_dir=str(run), format_name="md", profile="local")["content"]
     assert "- Evidence coverage:" in markdown
     assert "- Assurance:" not in markdown
+
+
+def test_r088_m365_content_capable_limitation_names_an_m365_scope() -> None:
+    from auditex.reporting import _scope_risk_limitation
+
+    m365 = json.dumps(_scope_risk_limitation(platform="m365", scope_risk="content_capable_scope_present", write_capable_scopes=[]))
+    google = json.dumps(
+        _scope_risk_limitation(platform="google_workspace", scope_risk="content_capable_scope_present", write_capable_scopes=[])
+    )
+    assert "Sites.Read.All" in m365 and "Drive readonly" not in m365
+    assert "Drive readonly" in google

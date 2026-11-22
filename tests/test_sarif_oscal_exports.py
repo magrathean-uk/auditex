@@ -874,9 +874,12 @@ def test_review_r066_r125_shareable_exports_with_accepted_risk_are_schema_valid(
         "severity": "critical",
         "status": "accepted_risk",
         "affected_objects": ["11111111-2222-4333-8444-555555555555"],
-        "waiver": {"finding_id": "x", "reason": "Retiring", "owner": "sec", "expires_on": "2999-01-01"},
+        "waiver": {
+            "finding_id": "app_credentials:11111111-2222-4333-8444-555555555555:secret_expired",
+            "reason": "Retiring", "owner": "sec", "expires_on": "2999-01-01",
+        },
     }
-    keys = stable_export_keys([finding], "9a8b7c6d-1111-4222-8333-444455556666")
+    keys = stable_export_keys([finding], "9a8b7c6d-1111-4222-8333-444455556666", b"a-private-export-key-for-tests")
     sarif = render_sarif(findings=[finding], summary={}, manifest={"run_id": "r"}, stable_keys=keys)
     oscal = render_oscal(findings=[finding], summary={}, manifest={"run_id": "r"}, stable_keys=keys)
     assert sarif["runs"][0]["results"][0]["suppressions"][0]["status"] == "accepted"

@@ -65,6 +65,7 @@ from azure_tenant_audit.run_files import (
 from azure_tenant_audit.waivers import (
     accepted_risk_summary,
     has_expired_waiver,
+    has_matching_waiver,
     is_accepted_status,
 )
 
@@ -300,7 +301,8 @@ def _scope_risk_limitation(
         subject = f"{provider} auth included write-capable scopes."
         closing = "reviewers should treat the scope set as a higher-trust limitation."
     elif scope_risk == "content_capable_scope_present":
-        subject = f"{provider} auth included scopes that can read content (for example Drive readonly); Auditex uses metadata and list endpoints only."
+        example = "Drive readonly" if platform == "google_workspace" else "Sites.Read.All"
+        subject = f"{provider} auth included scopes that can read content (for example {example}); Auditex uses metadata and list endpoints only."
         closing = "reviewers should confirm the scope set matches the intended audit surface."
     else:
         subject = f"{provider} read settings can require broad scopes."
@@ -3666,18 +3668,39 @@ def _affected_values(finding: Mapping[str, Any]) -> list[Any]:
     return affected if isinstance(affected, list) else []
 
 
-def stable_export_keys(findings: list[dict[str, Any]], tenant_id: str) -> list[dict[str, Any]]:
+# Review R066: the operator's private key for dedup-stable shareable SARIF and OSCAL ids. Unset, a shareable export
+# keeps per-run ids (private, but a new alert set on each upload); the local ``report render`` route stays stable.
+EXPORT_FINGERPRINT_KEY_ENV = "AUDITEX_EXPORT_FINGERPRINT_KEY"
+_EXPORT_FINGERPRINT_KEY_MIN = 16
+
+
+def export_fingerprint_key(environ: Mapping[str, str] | None = None) -> bytes | None:
+    """The key from ``AUDITEX_EXPORT_FINGERPRINT_KEY``, or ``None`` when it is unset or blank. A key shorter than 16
+    characters is refused; the error never repeats the value."""
+    value = (os.environ if environ is None else environ).get(EXPORT_FINGERPRINT_KEY_ENV)
+    if value is None or not value.strip():
+        return None
+    if len(value.strip()) < _EXPORT_FINGERPRINT_KEY_MIN:
+        raise ValueError(
+            f"{EXPORT_FINGERPRINT_KEY_ENV} must be at least {_EXPORT_FINGERPRINT_KEY_MIN} characters of private, "
+            "random text; it keys the dedup ids of shareable SARIF and OSCAL exports."
+        )
+    return value.strip().encode("utf-8")
+
+
+def stable_export_keys(findings: list[dict[str, Any]], tenant_id: str, secret: bytes) -> list[dict[str, Any]]:
     """Review R066: dedup keys for shareable SARIF and OSCAL, one per finding row, from the UNREDACTED finding.
 
     A shareable export pseudonymises ids with the run's own key, so a fingerprint taken after redaction changes on
-    every run. These keys are HMAC-SHA256 digests keyed by the tenant id, taken before redaction: the same finding of
-    the same tenant gets the same keys in every run, and the digests carry no object id, domain or name. The tenant
-    id is a GUID that every shareable output masks, so a recipient cannot test guessed values against the digests.
+    every run. These keys are HMAC-SHA256 digests under the operator's private ``secret``
+    (``AUDITEX_EXPORT_FINGERPRINT_KEY``), over the tenant id and the finding, taken before redaction: the same finding
+    of the same tenant gets the same keys in every run. The secret never leaves the machine, so a recipient who knows
+    the tenant id and guesses a user name or domain still cannot test the guess against the digests.
     """
-    secret = tenant_id.strip().lower().encode("utf-8")
+    tenant = tenant_id.strip().lower()
 
     def digest(label: str, text: str) -> str:
-        return hmac.new(secret, f"auditex|{label}|{text}".encode(), hashlib.sha256).hexdigest()
+        return hmac.new(secret, f"auditex|{label}|{tenant}|{text}".encode(), hashlib.sha256).hexdigest()
 
     keys: list[dict[str, Any]] = []
     for finding in findings:
@@ -3700,14 +3723,13 @@ _CLOSED_STATUSES = frozenset({"closed", "resolved"})
 
 
 def _export_disposition(finding: Mapping[str, Any]) -> str:
-    if has_expired_waiver(finding):
-        return "open"
+    """``accepted``, ``closed`` or ``open``, as the gate counts it (``auditex.gate._status_class``): an accepted or
+    closed status counts only with a matching, unexpired waiver behind it; anything else stays open."""
     status = _text(finding.get("status")).strip().lower()
-    if is_accepted_status(status):
-        return "accepted"
-    if status in _CLOSED_STATUSES:
-        return "closed"
-    return "open"
+    claimed = "accepted" if is_accepted_status(status) else "closed" if status in _CLOSED_STATUSES else "open"
+    if claimed != "open" and (not has_matching_waiver(finding) or has_expired_waiver(finding)):
+        return "open"
+    return claimed
 
 
 def _waiver_justification(finding: Mapping[str, Any]) -> str:
@@ -4039,7 +4061,7 @@ def render_oscal(
                     ("auditex.finding_id", _text(finding.get("id"))),
                     ("auditex.severity", _text(finding.get("severity"))),
                     ("auditex.rule_id", _text(finding.get("rule_id"))),
-                    ("auditex.status", _text(finding.get("status"))),
+                    ("auditex.status", _export_disposition(finding)),
                 ),
                 *control_props,
             ],
@@ -4229,11 +4251,16 @@ def preview_report(
     redaction = context_for_run(run_path)
     render = renderers[format_name]
     if format_name in {"sarif", "oscal"}:
-        # Review R066: dedup keys come from the unredacted findings, keyed by the tenant id, before redaction.
-        manifest = RunBundle(run_path).manifest()
-        tenant_id = _text(manifest.get("tenant_id") or _mapping(selected.get("summary")).get("tenant_id")).strip()
-        if tenant_id:
-            stable_keys = stable_export_keys(_dict_rows(selected.get("findings")), tenant_id)
+        # Review R066: with the operator's private key, dedup keys come from the unredacted findings, before
+        # redaction, so they are the same in every run of the tenant and reveal nothing to a recipient.
+        secret = export_fingerprint_key()
+        if secret is not None:
+            manifest = RunBundle(run_path).manifest()
+            tenant_id = _text(
+                manifest.get("tenant_id") or manifest.get("customer_id") or manifest.get("tenant_name")
+                or _mapping(selected.get("summary")).get("tenant_name")
+            ).strip()
+            stable_keys = stable_export_keys(_dict_rows(selected.get("findings")), tenant_id, secret)
             render = functools.partial(renderers[format_name], stable_keys=stable_keys)
     # Masking can make two citations equal: every nested citation list, count and summary is re-derived after
     # redaction, before any format renders the sections.
