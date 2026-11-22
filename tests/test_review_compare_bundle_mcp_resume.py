@@ -139,6 +139,22 @@ def test_resume_removes_post_finalisation_answers_under_a_case_folded_name(tmp_p
     assert stale not in os.listdir(run_dir)
 
 
+def test_resume_keeps_a_root_file_whose_name_only_folds_to_a_generated_report_path(tmp_path: Path) -> None:
+    # Repair round 2 (R052): NFKC turns a fullwidth solidus (U+FF0F) into "/". A root file named
+    # "reports\uff0fhandoff.md" is not reports/handoff.md on any volume, so a resume must leave it alone.
+    import os
+
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    operator_file = "reports\uff0fhandoff.md"
+    (run_dir / operator_file).write_text("operator notes", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    assert operator_file in os.listdir(run_dir)
+
+
 def test_resume_under_another_tenant_name_keeps_one_run_id(tmp_path: Path) -> None:
     from azure_tenant_audit.output import AuditWriter
 

@@ -91,10 +91,12 @@ def is_post_finalization_output(relative: str) -> bool:
     )
 
 
-def _folded(name: str) -> str:
-    """``name`` as a case- and normalisation-insensitive volume may match it (``MODEL_ASSESSMENT.json``, a long s).
-    Folding more widely than a volume does only removes more stale look-alikes on resume."""
-    return unicodedata.normalize("NFKC", name).casefold()
+def _folded(name: str) -> str | None:
+    """The basename ``name`` as a case- and normalisation-insensitive volume may match it (``MODEL_ASSESSMENT.json``,
+    a long s), or ``None`` when folding would turn it into a path (a fullwidth solidus becomes ``/``): no volume
+    opens such a file as another directory's file, so it is never a generated output."""
+    folded = unicodedata.normalize("NFKC", name).casefold()
+    return None if "/" in folded or "\\" in folded else folded
 
 
 def post_finalization_outputs(run_dir: str | Path) -> list[str]:
@@ -113,7 +115,12 @@ def post_finalization_outputs(run_dir: str | Path) -> list[str]:
             continue
         for entry in entries:
             relative = f"{directory}/{entry.name}" if directory else entry.name
-            if is_post_finalization_output(_folded(relative)) and entry.is_file(follow_symlinks=False):
+            folded = _folded(entry.name)
+            if folded is None:
+                continue
+            if is_post_finalization_output(f"{directory}/{folded}" if directory else folded) and entry.is_file(
+                follow_symlinks=False
+            ):
                 found.append(relative)
     return found
 
