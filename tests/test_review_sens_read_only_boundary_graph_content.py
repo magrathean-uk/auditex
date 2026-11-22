@@ -103,3 +103,21 @@ def test_graph_content_expansions_are_refused(adapter: str, command: str) -> Non
 @pytest.mark.parametrize("command", METADATA)
 def test_graph_metadata_reads_stay_allowed(command: str) -> None:
     assert check_command("powershell_graph", command)
+
+
+# Review round 1: projections supplied in a form the guard cannot read literally, and nested OData projections.
+UNRESOLVED_PROJECTIONS = (
+    "$p = @{ExpandProperty='messages'}; Get-MgChat @p",
+    "$p = @{ UserId = 'u' }; Get-MgUserChat @p",
+    "$p = 'messages'; Get-MgChat -ExpandProperty $p",
+    "Get-MgUserChat -UserId u -ExpandProperty:'lastMessagePreview'",
+    "Get-MgSiteList -SiteId s -ExpandProperty 'items($expand=fields)'",
+    "Get-MgUserChat -UserId u -ExpandProperty @('members', $x)",
+)
+
+
+@pytest.mark.parametrize("adapter", ["powershell_graph", "m365dsc"])
+@pytest.mark.parametrize("command", UNRESOLVED_PROJECTIONS)
+def test_graph_projections_the_guard_cannot_read_are_refused(adapter: str, command: str) -> None:
+    with pytest.raises(CommandRefused):
+        check_command(adapter, command)

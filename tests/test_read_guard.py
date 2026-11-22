@@ -668,3 +668,24 @@ def test_powershell_child_gets_no_credential_from_the_environment(monkeypatch) -
         assert not set(secrets.values()) & set(env.values())
     assert with_session["AUDITEX_EXO_ACCESS_TOKEN"] == "fresh-token"
     assert "AUDITEX_EXO_ACCESS_TOKEN" not in without_session
+
+
+# Review round 1 on the guard: a command in a hashtable value, local file readers and a numeric-only script.
+@pytest.mark.parametrize(
+    "command",
+    [
+        "$p = @{ k = New-InboxRule = @q }",
+        "Get-Mailbox | Select-Object @{ n = Remove-Mailbox = 'a' }",
+        "$p = @{ k = 1; j = Set-Mailbox = 'x' }",
+        "Get-FileHash -Path secrets.pfx",
+        "Get-PfxCertificate -FilePath reader.pfx",
+        "Get-AuthenticodeSignature -FilePath x.ps1",
+        "Get-WinEvent -LogName Security",
+        "Get-EventLog -LogName Security",
+        "42",
+        "1; 2",
+    ],
+)
+def test_review_round_one_guard_bypasses_are_refused(command: str) -> None:
+    with pytest.raises(CommandRefused):
+        check_command("powershell_graph", command)

@@ -163,6 +163,12 @@ CONTENT_CMDLET_DENY = frozenset(
         "get-history",
         "get-secret",
         "get-azaccesstoken",
+        # Local files and logs read whole by a metadata-shaped cmdlet
+        "get-filehash",
+        "get-pfxcertificate",
+        "get-authenticodesignature",
+        "get-winevent",
+        "get-eventlog",
     }
 )
 _GRAPH_PREFIX = "get-mg"
@@ -194,6 +200,7 @@ GRAPH_CONTENT_PROPERTIES = frozenset(
     }
 )
 _GRAPH_PROPERTY_PARAMETERS = ("expandproperty", "property", "select")
+_PROPERTY_NAME = re.compile(r"[A-Za-z_]+")
 POWERSHELL_READ_METHODS = frozenset(
     {"tostring", "tolower", "toupper", "trim", "contains", "startswith", "endswith"}
 )
@@ -423,24 +430,31 @@ def _graph_property_parameter(word: str) -> bool:
     return any(parameter.startswith(name) for parameter in _GRAPH_PROPERTY_PARAMETERS)
 
 
-def _graph_property_values(tokens: list[_Token], index: int) -> list[str]:
-    """Property names given to the parameter at ``tokens[index]`` (``-P a,b``, ``-P:a``, ``-P 'a'``, ``-P @('a')``)."""
+def _graph_property_values(tokens: list[_Token], index: int) -> tuple[list[str], bool]:
+    """Property names given to the parameter at ``tokens[index]``, and whether any value is not a literal.
+
+    Handles ``-P a,b``, ``-P:a``, ``-P:'a'``, ``-P 'a'`` and ``-P @('a')``; a nested OData projection such as
+    ``items($expand=fields)`` yields every name in it. A variable value cannot be judged, so it is reported.
+    """
     values: list[str] = []
+    unresolved = False
     _, colon, inline = tokens[index].text.partition(":")
-    if colon:
+    if inline:
         values.append(inline)
-    else:
+    if not inline or not colon:
         for token in tokens[index + 1 :]:
             if token.kind == "word" and token.text.startswith("-"):
                 break
             if token.kind == "op" and token.text not in {",", "@(", "(", ")"}:
                 break
-            if token.kind in {"word", "string"}:
+            if token.kind == "var":
+                unresolved = True
+            elif token.kind in {"word", "string"}:
                 values.append(token.text)
-    names: list[str] = []
-    for value in values:
-        names.extend(part.strip().strip("'\"").lower() for part in value.split(","))
-    return [name for name in names if name]
+            if colon and token.kind in {"word", "string", "var"} and not inline:
+                break
+    names = [name.lower() for value in values for name in _PROPERTY_NAME.findall(value)]
+    return names, unresolved
 
 
 def _allowed_word(word: str, extra: frozenset[str]) -> bool:
@@ -474,25 +488,34 @@ def _command_words(script: str, adapter: str, extra: frozenset[str]) -> list[str
                 method = previous.text.rsplit(".", 1)[1].lower()
                 if method not in POWERSHELL_READ_METHODS:
                     raise CommandRefused(f"method call .{method or '()'} is not a read", adapter=adapter)
+        current = commands[-1].lower().rsplit("\\", 1)[-1] if commands else ""
+        if token.kind == "var" and token.text.startswith("@") and current.startswith(_GRAPH_PREFIX):
+            # A splat can carry -ExpandProperty or -Property values the guard cannot see.
+            raise CommandRefused("a splatted argument to a Graph cmdlet is not allowed", adapter=adapter)
         if token.kind != "word":
             continue
         at_command = previous is None or (previous.kind == "op" and previous.text in _SEPARATORS)
         if not at_command:
-            current = commands[-1].lower().rsplit("\\", 1)[-1] if commands else ""
             if current.startswith(_GRAPH_PREFIX) and _graph_property_parameter(token.text):
-                content = sorted(set(_graph_property_values(tokens, index)) & GRAPH_CONTENT_PROPERTIES)
+                names, unresolved = _graph_property_values(tokens, index)
+                if unresolved:
+                    raise CommandRefused(f"{token.text} must name literal properties", adapter=adapter)
+                content = sorted(set(names) & GRAPH_CONTENT_PROPERTIES)
                 if content:
                     raise CommandRefused(f"{token.text} {content[0]} inlines content", adapter=adapter)
             continue
+        # A hashtable key sits directly inside @{ } at the start of an entry (after ';' or a line break); a word
+        # after '=' is the entry's value, and a bare word there is a command.
         in_hashtable = bool(brackets) and brackets[-1] == "@{"
-        if in_hashtable and following is not None and following.kind == "op" and following.text == "=":
-            continue  # a hashtable key, not a command
+        at_key = previous is not None and previous.kind == "op" and previous.text in {";", "\n"}
+        if in_hashtable and at_key and following is not None and following.kind == "op" and following.text == "=":
+            continue
         # Anywhere else a bare word before '=' is a command: pwsh passes '=' to it as an argument. An assignment
         # target is always a $variable, never a word.
         if not _allowed_word(token.text, extra):
             raise CommandRefused(f"{token.text} is not on the read allowlist", adapter=adapter)
-        if token.text.lower() not in POWERSHELL_LANGUAGE_WORDS:
-            commands.append(token.text)
+        if token.text.lower() not in POWERSHELL_LANGUAGE_WORDS and not _NUMBER.fullmatch(token.text):
+            commands.append(token.text)  # a bare number is an expression, not a cmdlet
     return commands
 
 
