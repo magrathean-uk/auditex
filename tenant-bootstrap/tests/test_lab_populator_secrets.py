@@ -387,3 +387,19 @@ def test_a_failed_run_never_removes_a_secret_another_run_saved(populator_config,
     assert secret_file.exists(), "a failed run removed the credential another run had saved"
     assert secret_file.read_text(encoding="utf-8") == other_run
     assert sorted(path.name for path in secret_file.parent.iterdir()) == [secret_file.name]
+
+
+def test_auth_never_changes_the_mode_of_a_folder_it_did_not_create(tmp_path, monkeypatch):
+    module = load_module("auth-lab-populator.py")
+    token = _token({"tid": LAB_TENANT})
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=json.dumps({"accessToken": token}), stderr=""))
+    work = tmp_path / "work"
+    work.mkdir()
+    work.chmod(0o755)
+    monkeypatch.chdir(work)
+    assert module.main([
+        "--tenant-id", LAB_TENANT, "--out", "claims.json", "--write-env", "token.env",
+    ]) == 0
+    assert mode(work) == 0o755
+    assert mode(work / "token.env") == 0o600

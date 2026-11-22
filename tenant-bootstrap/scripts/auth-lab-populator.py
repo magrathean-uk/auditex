@@ -28,9 +28,17 @@ def write_owner_only(path: Path, text: str) -> None:
         handle.write(text)
 
 
+SECRETS_DIR_NAME = ".secrets"
+
+
 def ensure_private_dir(path: Path) -> None:
+    """Create a missing folder owner-only. An existing folder is tightened only when it is a kit
+    secrets folder (`.secrets`); any other folder the operator chose, such as the working directory,
+    keeps its mode."""
+    existed = path.exists()
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(path, 0o700)
+    if not existed or path.name == SECRETS_DIR_NAME:
+        os.chmod(path, 0o700)
 
 
 def decode_claims(token: str) -> dict:
@@ -98,7 +106,7 @@ def main(argv: list[str]) -> int:
     token = payload.get("accessToken") or payload.get("access_token") or ""
     claims = decode_claims(token)
     if args.write_env:
-        # The env file holds a bearer token: its folder is made owner-only even when it exists.
+        # The env file holds a bearer token: a new folder, or an existing .secrets folder, is made owner-only.
         ensure_private_dir(args.write_env.parent)
         write_owner_only(args.write_env, f"AZURE_ACCESS_TOKEN={token}\n")
     result = {
