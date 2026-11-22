@@ -131,6 +131,100 @@ def doh_resolver_disclosure(endpoint: str) -> str:
     return f"the configured DNS-over-HTTPS resolver at {address.host_port if address else 'a host that is not shown'}"
 
 
+# A resolver diagnostic read back from a bundle (an offline sample, an older run) is untrusted text: it may name the
+# resolver by its full URL (user info, a path token, a query) or carry library text that repeats the request path
+# without a scheme. It is never cut apart by hand: each URL in it is parsed by ``doh_resolver_address`` and only its
+# display form is ever shown (review R164, follow-up to #179).
+_DIAGNOSTIC_URL = re.compile(r"https?://\S*", re.IGNORECASE)
+_TRAILING_PUNCTUATION = ".,;:)]}'\">"
+_UNNAMED_ORIGIN = "the DNS-over-HTTPS resolver"
+
+
+def _origin_of_token(token: str) -> str | None:
+    """Display origin of one whitespace-delimited URL token, trailing sentence punctuation allowed."""
+    while token:
+        address = doh_resolver_address(token)
+        if address is not None:
+            return address.origin
+        if token[-1] not in _TRAILING_PUNCTUATION:
+            return None
+        token = token[:-1]
+    return None
+
+
+def resolver_named_in(text: object) -> str | None:
+    """The display origin of the one resolver an untrusted diagnostic names, or None.
+
+    None when the text names no URL, names URLs that are not all the same resolver, or holds an ``@`` outside its
+    URLs (user info with a space in it: the host could not be told apart from the user name).
+    """
+    value = str(text or "")
+    tokens = [match.group(0) for match in _DIAGNOSTIC_URL.finditer(value)]
+    if not tokens or value.count("@") != sum(token.count("@") for token in tokens):
+        return None
+    origins = {_origin_of_token(token) for token in tokens}
+    if len(origins) != 1:
+        return None
+    return origins.pop()
+
+
+_ORIGIN = r"(?P<origin>https?://\S+|the DNS-over-HTTPS resolver)"
+_QUESTION = r"[A-Za-z0-9]{1,16} [A-Za-z0-9_*.-]{1,253}"
+# DohClient's own wording (and the replay wording below): the only free text a resolver diagnostic keeps.
+_AUDITEX_DIAGNOSTICS = tuple(re.compile(pattern) for pattern in (
+    rf"DoH query failed for {_QUESTION} at {_ORIGIN} \((?:HTTP \d{{3}}|request failed(?:: [A-Za-z_][A-Za-z0-9_]*)?)\)",
+    rf"DoH response from {_ORIGIN} (?:was not an object|carried no usable status|was truncated \(TC\)) for {_QUESTION}",
+    rf"DoH resolver at {_ORIGIN} could not answer {_QUESTION}: (?:[A-Z]{{1,16}}|rcode -?\d{{1,5}})",
+    rf"DoH resolver at {_ORIGIN} did not answer; the recorded diagnostic is not repeated",
+))
+# Text with no URL syntax at all (no slash, at sign, query or percent sign) cannot carry user info, a path or a query.
+_PLAIN_DIAGNOSTIC = re.compile(r"[A-Za-z0-9 _.,;:()'-]{1,300}")
+
+
+def safe_resolver_diagnostic(text: object) -> str:
+    """A resolver diagnostic from a bundle, safe to copy, summarise or write.
+
+    Auditex's own DohClient wording naming a resolver by its display form, and text with no URL syntax, are kept as
+    they are. Anything else is replaced by a fixed sentence naming the resolver's display form (when it can be told)
+    and nothing of the original text. The result is stable: passing it through again returns it unchanged.
+    """
+    value = str(text or "")
+    for pattern in _AUDITEX_DIAGNOSTICS:
+        match = pattern.fullmatch(value)
+        if match is not None:
+            origin = match.group("origin")
+            if origin == _UNNAMED_ORIGIN or doh_resolver_display(origin) == origin:
+                return value
+    if _PLAIN_DIAGNOSTIC.fullmatch(value) and "http" not in value.lower():
+        return value
+    origin = resolver_named_in(value) or _UNNAMED_ORIGIN
+    return f"DoH resolver at {origin} did not answer; the recorded diagnostic is not repeated"
+
+
+def sanitise_resolver_fields(value: Any) -> Any:
+    """A copy of replayed collector data whose resolver diagnostics went through ``safe_resolver_diagnostic``.
+
+    Every ``resolver_error``, the ``error`` of any record or section whose ``error_class`` is ``dns_resolver_error``
+    and any ``doh_endpoint`` (reduced to its display form) are rewritten, at any depth; nothing else changes.
+    """
+    if isinstance(value, list):
+        return [sanitise_resolver_fields(item) for item in value]
+    if not isinstance(value, Mapping):
+        return value
+    resolver_row = value.get("error_class") == "dns_resolver_error"
+    cleaned: dict[Any, Any] = {}
+    for key, item in value.items():
+        if key == "resolver_error" and item:
+            cleaned[key] = safe_resolver_diagnostic(item)
+        elif key == "error" and resolver_row and item:
+            cleaned[key] = safe_resolver_diagnostic(item)
+        elif key == "doh_endpoint" and item:
+            cleaned[key] = doh_resolver_display(item)
+        else:
+            cleaned[key] = sanitise_resolver_fields(item)
+    return cleaned
+
+
 # Requests and urllib3 log each request target (the resolver's path, which can hold a token, and the query) at DEBUG,
 # and urllib3 names the URL in its retry and redirect lines. While a DoH request runs, their records are dropped.
 _DOH_REQUEST_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar("auditex_doh_request", default=False)

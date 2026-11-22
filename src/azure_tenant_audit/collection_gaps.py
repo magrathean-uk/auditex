@@ -11,7 +11,6 @@ safety ceiling is reached or a page cannot be read.
 """
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -83,18 +82,17 @@ _DNS_RESOLVER_REASON = (
     "Not assessed: {resolver} could not answer or was unreachable; "
     "DNS records are unknown, not absent. Check resolver connectivity and rerun {collector}."
 )
-# DohClient's own wording names the resolver as "at https://host[:port]". The URL after "at" (in an older or replayed
-# diagnostic it may still carry user info, a path or a query) is reduced to its safe display form; nothing else of the
-# error's free text is kept (review R164).
-_RESOLVER_URL = re.compile(r"\bat (https?://[^\s()'\"<>]+)")
 
 
 def _dns_resolver_reason(collector: str, error: Any) -> str:
-    """The resolver gap reason, naming the resolver that failed when the error states it."""
-    from .dns_lookup import doh_resolver_display
+    """The resolver gap reason, naming the resolver that failed when the error states it.
 
-    match = _RESOLVER_URL.search(str(error or ""))
-    origin = doh_resolver_display(match.group(1).rstrip(":.,;")) if match else None
+    The error may come from an older or replayed diagnostic and is untrusted: ``resolver_named_in`` parses every URL in
+    it and returns only a display form it can be sure of; nothing else of the error's free text is kept (review R164).
+    """
+    from .dns_lookup import resolver_named_in
+
+    origin = resolver_named_in(error)
     resolver = f"the DNS-over-HTTPS resolver at {origin}" if origin else _UNNAMED_RESOLVER
     return _DNS_RESOLVER_REASON.format(resolver=resolver, collector=collector)
 

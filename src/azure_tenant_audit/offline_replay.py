@@ -40,6 +40,7 @@ from .collection_gaps import (
     section_was_cut,
 )
 from .collectors.exchange_policy import DLP_READS, IPPS_OPERATIONS
+from .dns_lookup import safe_resolver_diagnostic
 from .resources import resolve_resource_path
 
 OFFLINE_ROW_TYPE = "offline_sample"
@@ -139,7 +140,8 @@ def resolver_error_rows(collector: str, payload: Mapping[str, Any]) -> list[dict
                     "status": "failed",
                     "item_count": 1,
                     "error_class": DNS_RESOLVER_ERROR_CLASS,
-                    "error": str(record["resolver_error"]),
+                    # Untrusted text from the sample: only its safe form is copied (review R164).
+                    "error": safe_resolver_diagnostic(record["resolver_error"]),
                     "message": "Replayed from an offline sample whose DNS resolver did not answer for this domain.",
                 }
             )
@@ -191,7 +193,8 @@ def replay_coverage_rows(collector: str, payload: Mapping[str, Any]) -> list[dic
             "result_limit": limit,
             "collection_truncated": bool(cut),
             "error_class": str(error_class or "unknown") if failed else TRUNCATION_ERROR_CLASS,
-            "error": str(error or error_class) if failed else None,
+            "error": (safe_resolver_diagnostic(error or error_class) if error_class == DNS_RESOLVER_ERROR_CLASS
+                      else str(error or error_class)) if failed else None,
             "message": "Replayed from an offline sample that recorded this read as failed or cut short.",
         }
         if cut:

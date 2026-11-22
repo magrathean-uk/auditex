@@ -21,6 +21,7 @@ from azure_tenant_audit.dns_lookup import (
     collect_domain_posture,
     doh_resolver_display,
     resolve_doh_endpoint,
+    safe_resolver_diagnostic,
     unknown_posture,
 )
 
@@ -733,17 +734,18 @@ def _resolver_error(text: str, resolver: Any) -> str:
 
     The library text of a transport failure (the HTTP reason, the request URL or path) can repeat the configured
     resolver's private profile path, so none of it is kept. Answer errors (SERVFAIL, truncated) are Auditex's
-    own wording and are kept, with any URL cut to its host.
+    own wording and are kept, with any URL cut to its host. The result goes through ``safe_resolver_diagnostic``, the
+    one check every resolver diagnostic passes before it is stored.
     """
     match = _TRANSPORT_FAILURE.match(text)
     if match is None:
-        return _host_only(text)
+        return safe_resolver_diagnostic(_host_only(text))
     status = _HTTP_STATUS.match(match.group(2))
     detail = f"HTTP {status.group(1)}" if status else "request failed"
     url = _URL.search(match.group(2))
     host = (doh_resolver_display(getattr(resolver, "endpoint", None))
             or (doh_resolver_display(url.group(0)) if url else None) or "the DNS-over-HTTPS resolver")
-    return f"{match.group(1)} at {host} ({detail})"
+    return safe_resolver_diagnostic(f"{match.group(1)} at {host} ({detail})")
 
 
 def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: list[dict[str, Any]]) -> None:
