@@ -258,3 +258,20 @@ def test_r094_defaults_without_env(monkeypatch, tmp_path) -> None:  # noqa: ANN0
     assert seen["graph_scope"] == "https://graph.microsoft.com/.default"
     assert seen["out"] == "audit-output"
     assert seen["collectors"] is None
+
+
+# R118: google probe is always live, so it refuses --offline and --sample instead of ignoring them.
+
+@pytest.mark.parametrize("flag", [["--offline"], ["--sample", "examples/google_workspace_sample.json"]])
+def test_r118_google_probe_refuses_offline_flags(monkeypatch, capsys, flag) -> None:  # noqa: ANN001
+    from auditex import cli as product_cli
+
+    probed: list[object] = []
+    monkeypatch.setattr(product_cli, "run_google_probe", lambda cfg, **_: probed.append(cfg) or 0)
+
+    with pytest.raises(SystemExit) as exc:
+        product_cli.main(["google", "probe", *flag, "--domain", "corp.example", "--subject", "admin@corp.example"])
+
+    assert exc.value.code == 2
+    assert probed == []
+    assert flag[0] in capsys.readouterr().err

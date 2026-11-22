@@ -309,14 +309,16 @@ def _add_google_selection_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--until", default=None)
 
 
-def _add_google_run_args(parser: argparse.ArgumentParser) -> None:
+def _add_google_run_args(parser: argparse.ArgumentParser, *, offline: bool = True) -> None:
     _add_google_common_args(parser)
     _add_google_selection_args(parser)
     parser.add_argument("--tenant-name", default="google-workspace", help="Label for the output folder.")
     parser.add_argument("--out", default="outputs/google", help="Base output directory.")
     parser.add_argument("--run-name", default=None, help="Optional run name.")
-    parser.add_argument("--offline", action="store_true")
-    parser.add_argument("--sample", default="examples/google_workspace_sample.json")
+    if offline:
+        # The probe is always live, so it takes neither option (an ignored --offline would still contact Google).
+        parser.add_argument("--offline", action="store_true")
+        parser.add_argument("--sample", default="examples/google_workspace_sample.json")
 
 
 def _google_positive_days(value: str) -> int:
@@ -363,7 +365,7 @@ def _build_google_parser() -> argparse.ArgumentParser:
     _add_google_selection_args(doctor)
     doctor.add_argument("--json", action="store_true")
     probe = subparsers.add_parser("probe", allow_abbrev=False, help="Probe Google Workspace auth and dependency readiness.")
-    _add_google_run_args(probe)
+    _add_google_run_args(probe, offline=False)
     run = subparsers.add_parser("run", allow_abbrev=False, help="Run a Google Workspace audit.")
     _add_google_run_args(run)
     _add_google_findings_args(run)
@@ -1349,6 +1351,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if argv[0] == "google":
         parser = _build_google_parser()
+        if len(argv) > 1 and argv[1] == "probe":
+            offline_flag = next((token.split("=", 1)[0] for token in argv[2:]
+                                 if token.split("=", 1)[0] in {"--offline", "--sample"}), None)
+            if offline_flag is not None:
+                parser.error_prevalidated(f"{offline_flag} applies only to google run: google probe always contacts "
+                                          "Google with the credentials given")
         args = parse_guarded(parser, argv[1:])
         if getattr(args, "as_of", None) is not None and not args.offline:
             parser.error_prevalidated("--as-of applies only to offline runs (--offline)")
