@@ -675,9 +675,9 @@ class GoogleDnsPostureCollector:
                 if posture.get("resolver_error"):
                     status = "failed"
                     error_class = "dns_resolver_error"
-                    posture["resolver_error"] = error = _host_only(str(posture["resolver_error"]))
+                    posture["resolver_error"] = error = _resolver_error(str(posture["resolver_error"]), resolver)
             except DohError as exc:
-                error = _host_only(str(exc))
+                error = _resolver_error(str(exc), resolver)
                 posture = {
                     "domain": domain_name,
                     "resolver_error": error,
@@ -719,6 +719,29 @@ def _host_only(text: str) -> str:
     """``text`` with every URL cut to its scheme and host: a configured resolver's path can hold a private profile id."""
     text = _URL.sub(lambda match: f"{match.group(1)}://{match.group(2)}", text)
     return _BARE_URL_PATH.sub(lambda match: f"{match.group(1)}/", text)
+
+
+# The transport failure that DohClient wraps: "DoH query failed for <type> <name>: <library text>".
+_TRANSPORT_FAILURE = re.compile(r"^(DoH query failed for \S+ \S+): (.*)$", re.DOTALL)
+_HTTP_STATUS = re.compile(r"^\s*(\d{3}) (?:Client|Server) Error\b")
+
+
+def _resolver_error(text: str, resolver: Any) -> str:
+    """A failed lookup described by Auditex's own wording, the resolver's host and the HTTP status only.
+
+    The library text of a transport failure (the HTTP reason, the request URL or path) can repeat the configured
+    resolver's private profile path, so none of it is kept. Answer errors (SERVFAIL, truncated) are Auditex's
+    own wording and are kept, with any URL cut to its host.
+    """
+    match = _TRANSPORT_FAILURE.match(text)
+    if match is None:
+        return _host_only(text)
+    status = _HTTP_STATUS.match(match.group(2))
+    detail = f"HTTP {status.group(1)}" if status else "request failed"
+    endpoint = str(getattr(resolver, "endpoint", "") or "")
+    url = _URL.search(endpoint) or _URL.search(match.group(2))
+    host = f"{url.group(1)}://{url.group(2)}" if url else "the DNS-over-HTTPS resolver"
+    return f"{match.group(1)} at {host} ({detail})"
 
 
 def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: list[dict[str, Any]]) -> None:
