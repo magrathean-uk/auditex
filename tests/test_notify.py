@@ -213,3 +213,22 @@ def test_send_notification_smtp_transport_error_returns_failed(tmp_path: Path, m
     result = send_notification(run_dir=str(run_dir), sink="smtp", dry_run=False)
     assert result["status"] == "failed"
     assert result["error_class"] == "ConnectionRefusedError"
+
+
+def test_send_notification_webhook_error_body_echoing_url_is_scrubbed(tmp_path: Path, monkeypatch) -> None:
+    """R065 (review): a 4xx body that echoes the webhook path or query does not reach the result."""
+    run_dir = tmp_path / "run"
+    _write_run_bundle(run_dir)
+    secret_url = "https://hooks.slack.example.test/services/T000/B000/SECRETPART?sig=SIGSECRET"
+
+    class _Response:
+        status_code = 404
+        text = "no_service: POST /services/T000/B000/SECRETPART?sig=SIGSECRET not found"
+
+    monkeypatch.setenv("AUDITEX_SLACK_WEBHOOK_URL", secret_url)
+    monkeypatch.setattr("auditex.notify.requests.post", lambda *_a, **_k: _Response())
+    result = send_notification(run_dir=str(run_dir), sink="slack", dry_run=False)
+    dumped = json.dumps(result)
+    assert result["status"] == "failed" and result["http_status"] == 404
+    assert "SECRETPART" not in dumped and "SIGSECRET" not in dumped
+    assert "no_service" in result["response_text"]

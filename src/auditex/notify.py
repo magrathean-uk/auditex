@@ -9,6 +9,7 @@ import ssl
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -315,8 +316,17 @@ def _send_webhook(sink: str, payload: dict[str, Any]) -> dict[str, Any]:
         "sink": sink,
         "payload": payload,
         "http_status": response.status_code,
-        "response_text": response.text,
+        "response_text": _without_webhook_url(str(response.text or ""), url),
     }
+
+
+def _without_webhook_url(text: str, url: str) -> str:
+    """The service's reply with every spelling of the webhook URL (whole, path, query) removed: it is a credential."""
+    parsed = urlparse(url)
+    pieces = [url, parsed.path + (f"?{parsed.query}" if parsed.query else ""), parsed.query, parsed.path]
+    for piece in sorted({piece for piece in pieces if piece and piece != "/"}, key=len, reverse=True):
+        text = text.replace(piece, "<webhook-url>")
+    return text
 
 
 def _smtp_ssl_context(allow_self_signed: bool) -> ssl.SSLContext:
