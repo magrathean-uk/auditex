@@ -651,6 +651,30 @@ def test_a_search_in_both_the_retired_search_list_and_a_graph_case_is_one_record
     assert records[0]["case_id"] == "c1"  # the Graph read names the case the retired list left out
 
 
+def test_a_search_in_a_shared_historical_chunk_has_no_known_case(tmp_path) -> None:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, "acme", "historical")
+    chunk = writer.write_chunk_records("ediscovery", "searches", 1, [{"id": "s2"}])
+    shared_searches = {"chunk_files": [chunk.relative_to(writer.run_dir).as_posix()], "item_count": 1}
+    payload = {
+        "cases": {"value": [{"id": "c1"}, {"id": "c2"}]},
+        "case_c1": {"searches": shared_searches},
+        "case_c2": {"searches": shared_searches},
+    }
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="historical", collector_payloads={"ediscovery": payload}, run_dir=writer.run_dir,
+    )
+
+    (search,) = snapshot["ediscovery_searches"]["records"]
+    assert search["id"] == "s2"
+    assert search.get("case_id") is None
+    assert snapshot["snapshot"]["normalization_incomplete_sections"] == [
+        "ediscovery.case_c1.searches", "ediscovery.case_c2.searches",
+    ]
+
+
 @pytest.mark.parametrize("old_chunk_key", ["searches", "case-c1-searches"])
 def test_resume_drops_historical_chunks_when_case_searches_are_withheld(tmp_path, monkeypatch, old_chunk_key) -> None:
     import json

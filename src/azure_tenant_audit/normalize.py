@@ -2846,7 +2846,7 @@ def build_normalized_snapshot(
     searched_case_ids: set[str] = set()
     # One record per search key: a Graph search replaces the retired searchList row for the same id.
     search_index = {record["key"]: index for index, record in enumerate(ediscovery_searches)}
-    graph_search_keys: set[str] = set()
+    graph_search_cases: dict[str, str] = {}
     for item in _values(ediscovery_payload, "cases"):
         case_id = str(item.get("id") or "")
         if not case_id or case_id in searched_case_ids:
@@ -2880,13 +2880,24 @@ def build_normalized_snapshot(
                 case_id=case_id,
                 status=search.get("status"),
             )
-            if record["key"] in graph_search_keys:
+            key = record["key"]
+            earlier_case = graph_search_cases.get(key)
+            if earlier_case is not None:
+                if earlier_case != case_id:
+                    # Old bundles could point several cases at one overwritten chunk.
+                    ediscovery_searches[search_index[key]].pop("case_id", None)
+                    for conflicting_case in (earlier_case, case_id):
+                        report = sources.reports[f"ediscovery.case_{conflicting_case}.searches"]
+                        issue = {"code": "ambiguous_search_case"}
+                        if issue not in report["issues"]:
+                            report["issues"].append(issue)
+                        report.update(complete=False, status="partial")
                 continue
-            graph_search_keys.add(record["key"])
-            if record["key"] in search_index:
-                ediscovery_searches[search_index[record["key"]]] = record
+            graph_search_cases[key] = case_id
+            if key in search_index:
+                ediscovery_searches[search_index[key]] = record
             else:
-                search_index[record["key"]] = len(ediscovery_searches)
+                search_index[key] = len(ediscovery_searches)
                 ediscovery_searches.append(record)
     ediscovery_export_jobs = [
         _record(
