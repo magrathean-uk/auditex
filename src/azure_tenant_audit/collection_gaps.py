@@ -11,6 +11,7 @@ safety ceiling is reached or a page cannot be read.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -34,9 +35,9 @@ def collector_gap_reason(collector: str, error_class: Any, error: Any = None) ->
         if error_class in {"command_not_found", "module_not_found", "toolchain_unavailable"}:
             return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
         return _COLLECTOR_FAILURE_REASON_TEXT["exchange_policy_failed"]
+    if collector in _DNS_POSTURE_COLLECTORS and error_class == "dns_resolver_error":
+        return _dns_resolver_reason(collector, error)
     if collector == "dns_posture":
-        if error_class == "dns_resolver_error":
-            return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
         if error_class == "public_lookup_error":
             return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
         return _COLLECTOR_FAILURE_REASON_TEXT["dns_posture_failed"]
@@ -75,6 +76,25 @@ SECTION_GAP_REASON_TEXT = {
     REASON_TEAMS_POWERSHELL_NOT_SUPPORTED: "not collected: Teams PowerShell sessions are not supported",
 }
 
+_DNS_POSTURE_COLLECTORS = frozenset({"dns_posture", "google_dns_posture"})
+_UNNAMED_RESOLVER = ("the run's DNS-over-HTTPS resolver (public Cloudflare unless --doh-endpoint or "
+                     "AUDITEX_DOH_ENDPOINT chose another)")
+_DNS_RESOLVER_REASON = (
+    "Not assessed: {resolver} could not answer or was unreachable; "
+    "DNS records are unknown, not absent. Check resolver connectivity and rerun {collector}."
+)
+# DohClient's own wording names the resolver as "at https://host[:port]"; only that origin is taken from the error,
+# never its free text (review R164).
+_RESOLVER_ORIGIN = re.compile(r"\bat (https?://[A-Za-z0-9.-]+(?::\d{1,5})?)(?=[\s(:]|$)")
+
+
+def _dns_resolver_reason(collector: str, error: Any) -> str:
+    """The resolver gap reason, naming the resolver that failed when the error states it."""
+    match = _RESOLVER_ORIGIN.search(str(error or ""))
+    resolver = f"the DNS-over-HTTPS resolver at {match.group(1)}" if match else _UNNAMED_RESOLVER
+    return _DNS_RESOLVER_REASON.format(resolver=resolver, collector=collector)
+
+
 _COLLECTOR_FAILURE_REASON_TEXT = {
     "collection_limit": (
         "Not assessed: the policy input is incomplete because collection stopped at an operator or safety limit; "
@@ -92,11 +112,7 @@ _COLLECTOR_FAILURE_REASON_TEXT = {
         "Interactive, delegated and access-token authentication cannot open an Exchange Online policy session; "
         "use app authentication or deselect exchange_policy."
     ),
-    "dns_resolver_error": (
-        "Not assessed: the run's DNS-over-HTTPS resolver (public Cloudflare unless --doh-endpoint or "
-        "AUDITEX_DOH_ENDPOINT chose another) could not answer or was unreachable; "
-        "DNS records are unknown, not absent. Check resolver connectivity and rerun dns_posture."
-    ),
+    "dns_resolver_error": _DNS_RESOLVER_REASON.format(resolver=_UNNAMED_RESOLVER, collector="dns_posture"),
     "public_lookup_error": "Not assessed: the verified domain's MTA-STS or public OpenID discovery HTTPS read failed.",
     "dns_posture_failed": (
         "Not assessed: DNS posture could not be collected. Check the same-run Exchange accepted-domain read "

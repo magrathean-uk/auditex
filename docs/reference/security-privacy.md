@@ -368,8 +368,12 @@ default. Only a plain `https://host[:port]/path` is accepted: no credentials,
 query string or fragment, and a refused value is never repeated in messages
 because it may carry a token. The resolver must speak the DoH JSON API
 (`application/dns-json`, `name` and `type` parameters). The console notice,
-`data-handling.json` and the handoff name the resolver in use, and
-`data-handling.json` records its host as `dns_resolver`.
+`data-handling.json` and the handoff name the resolver in use, a configured
+one by its host alone (its path may carry a token), and `data-handling.json`
+records that host as `dns_resolver`. A failed lookup is described by the
+resolver's `https://host`, the record asked for and the HTTP status or error
+class only, never the transport library's text, and the DNS coverage gap of
+either provider names that host.
 
 Google Workspace runs with the `google_dns_posture` collector (in the
 `core-security`, `mail` and `everything` presets) send each verified domain

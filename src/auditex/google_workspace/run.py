@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.assurance import build_live_readiness_summary
@@ -19,7 +18,6 @@ from azure_tenant_audit.collector_runner import (
     CollectorRunner,
 )
 from azure_tenant_audit.dns_lookup import (
-    DEFAULT_DOH_ENDPOINT,
     DOH_ENDPOINT_ENV,
     doh_resolver_disclosure,
     resolve_doh_endpoint,
@@ -750,9 +748,7 @@ def run_google_offline(
 
 def _resolver_label(doh_endpoint: str) -> str:
     """The resolver as the notice and run log name it: a configured one by host only, since a path can hold a profile id."""
-    if doh_endpoint == DEFAULT_DOH_ENDPOINT:
-        return doh_resolver_disclosure(doh_endpoint)
-    return f"the configured DNS-over-HTTPS resolver at {urlsplit(doh_endpoint).netloc}"
+    return doh_resolver_disclosure(doh_endpoint)
 
 
 def google_dns_notice(doh_endpoint: str) -> str:

@@ -45,12 +45,38 @@ def resolve_doh_endpoint(value: str | None = None, environ: Mapping[str, str] | 
     return text
 
 
+def doh_resolver_origin(endpoint: str) -> str | None:
+    """``https://host[:port]`` of a resolver URL: never its path, which can hold an account token, nor user info."""
+    try:
+        parts = urlsplit(str(endpoint))
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    if not host or parts.scheme.lower() not in {"http", "https"}:
+        return None
+    return f"{parts.scheme.lower()}://{host}{f':{port}' if port else ''}"
+
+
 def doh_resolver_disclosure(endpoint: str) -> str:
-    """Notice wording for the resolver that receives the tenant's domain names; a query string is never shown."""
+    """Notice wording for the resolver that receives the tenant's domain names.
+
+    A configured resolver is named by its host alone: its path can hold an account token (review R164).
+    """
     if endpoint == DEFAULT_DOH_ENDPOINT:
         return f"the public Cloudflare DNS-over-HTTPS resolver ({DEFAULT_DOH_ENDPOINT})"
-    parts = urlsplit(endpoint)
-    return f"the configured DNS-over-HTTPS resolver ({parts.scheme}://{parts.netloc}{parts.path})"
+    origin = doh_resolver_origin(endpoint)
+    host = origin.split("://", 1)[1] if origin else "a host that is not shown"
+    return f"the configured DNS-over-HTTPS resolver at {host}"
+
+
+def _transport_detail(exc: BaseException) -> str:
+    """A bounded description of a failed DoH request: the HTTP status or the error class, never the library text,
+    which can repeat the resolver URL and so a token in its path."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int) and not isinstance(status, bool):
+        return f"HTTP {status}"
+    return f"request failed: {type(exc).__name__}"
 
 
 # DNS response codes. NOERROR with no answer and NXDOMAIN are definite statements that the record is absent; every
@@ -86,6 +112,9 @@ class DohClient:
     def query(self, name: str, record_type: str) -> list[str]:
         return self.query_detailed(name, record_type).records
 
+    def _origin(self) -> str:
+        return doh_resolver_origin(self.endpoint) or "the DNS-over-HTTPS resolver"
+
     def query_detailed(self, name: str, record_type: str) -> DnsAnswer:
         try:
             response = self.session.get(
@@ -97,9 +126,12 @@ class DohClient:
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:  # noqa: BLE001
-            raise DohError(f"DoH query failed for {record_type} {name}: {exc}") from exc
+            # Bot review wave 2 item 13: the library text can carry the endpoint URL, so only the resolver's origin
+            # and a bounded detail are kept.
+            raise DohError(f"DoH query failed for {record_type} {name} at {self._origin()} "
+                           f"({_transport_detail(exc)})") from None
         if not isinstance(payload, dict):
-            raise DohError(f"DoH response was not an object for {record_type} {name}")
+            raise DohError(f"DoH response from {self._origin()} was not an object for {record_type} {name}")
         # A response with no ``Status`` (or one that is not a number) is not a statement about the record: only an
         # explicit NOERROR or NXDOMAIN says "absent".
         status = payload.get("Status")
@@ -108,14 +140,15 @@ class DohClient:
                 raise ValueError("no status")
             rcode = int(status)
         except (TypeError, ValueError) as exc:
-            raise DohError(f"DoH response carried no usable status for {record_type} {name}") from exc
+            raise DohError(f"DoH response from {self._origin()} carried no usable status for {record_type} {name}") from exc
         if payload.get("TC") is True:
             # The resolver cut the answer short: records may be missing from it, so nothing can be called absent.
-            raise DohError(f"DoH response was truncated (TC) for {record_type} {name}")
+            raise DohError(f"DoH response from {self._origin()} was truncated (TC) for {record_type} {name}")
         if rcode not in _ABSENT_RCODES:
             # SERVFAIL (2), REFUSED (5) and the other failure codes say the resolver could not answer; they
             # are not evidence that the record does not exist, so the domain reads unknown, never "missing".
-            raise DohError(f"DoH resolver could not answer {record_type} {name}: {_RCODE_NAMES.get(rcode, f'rcode {rcode}')}")
+            raise DohError(f"DoH resolver at {self._origin()} could not answer {record_type} {name}: "
+                           f"{_RCODE_NAMES.get(rcode, f'rcode {rcode}')}")
         answer = payload.get("Answer") or []
         records: list[str] = []
         record_types: list[int | None] = []

@@ -218,3 +218,84 @@ def test_output_contract_states_the_mcp_summary_cap_and_command_timeout() -> Non
 def test_local_answer_guide_states_the_licence_in_the_notice_and_record() -> None:
     text = _flat_doc("docs/guides/local-answer.md")
     assert "names the model's licence" in text and "`local_answer.json`" in text
+
+
+# Integration review of the R164 follow-up: a custom resolver is disclosed by host only (its path can hold an account
+# token), and the DNS coverage gap names the configured resolver for both providers.
+
+_TOKEN = "acct-token-zz9"
+
+
+def test_r164_custom_resolver_disclosure_never_shows_the_path() -> None:
+    from azure_tenant_audit.data_handling import collector_activity_notices
+    from azure_tenant_audit.dns_lookup import doh_resolver_disclosure
+
+    text = doh_resolver_disclosure(f"https://dns.corp.example/{_TOKEN}")
+    assert "dns.corp.example" in text and _TOKEN not in text
+    notices = " ".join(collector_activity_notices(["dns_posture"], "live", f"https://dns.corp.example/{_TOKEN}"))
+    assert "dns.corp.example" in notices and _TOKEN not in notices
+
+
+def test_r164_m365_run_never_writes_the_resolver_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from azure_tenant_audit import cli
+
+    args = _m365_dns_run(monkeypatch, tmp_path, "--doh-endpoint", f"https://dns.corp.example/{_TOKEN}")
+    with caplog.at_level(logging.INFO):
+        cli.run_live(args)
+
+    console = " ".join(record.getMessage() for record in caplog.records)
+    assert "dns.corp.example" in console and _TOKEN not in console
+    (path,) = tmp_path.glob("acme-*/data-handling.json")
+    assert _TOKEN not in path.read_text(encoding="utf-8")
+    assert "dns.corp.example" in " ".join(_data_handling(tmp_path)["collection_notices"])
+
+
+class _ServfailSession:
+    def get(self, _url: str, **_kwargs: Any) -> Any:
+        class _Response:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, Any]:
+                return {"Status": 2}
+
+        return _Response()
+
+
+@pytest.mark.parametrize("provider", ["m365", "google"])
+def test_r164_servfail_gap_reason_names_the_configured_resolver(provider: str) -> None:
+    from azure_tenant_audit.collection_gaps import collector_gap_reason
+    from azure_tenant_audit.dns_lookup import DohClient
+
+    resolver = DohClient(session=_ServfailSession(), endpoint=f"https://dns.corp.example/{_TOKEN}")
+    if provider == "m365":
+        from azure_tenant_audit.collectors.dns_posture import DnsPostureCollector
+
+        class _Domains:
+            def get_all(self, _path: str, params: Any = None) -> list[dict[str, Any]]:
+                return [{"id": "contoso.example", "isVerified": True}]
+
+        collector = "dns_posture"
+        result = DnsPostureCollector().run({"client": _Domains(), "dns_resolver": resolver, "public_lookups": False})
+    else:
+        from auditex.google_workspace.collectors import GoogleDnsPostureCollector
+
+        collector = "google_dns_posture"
+        result = GoogleDnsPostureCollector().run({"domain": "example.com", "dns_resolver": resolver})
+    rows = [row for row in result.coverage if row.get("error_class") == "dns_resolver_error"]
+    assert rows
+    for row in rows:
+        reason = collector_gap_reason(collector, row["error_class"], row.get("error"))
+        assert reason is not None
+        assert "https://dns.corp.example" in reason and _TOKEN not in reason
+        assert "Cloudflare" not in reason and collector in reason
+
+
+def test_r164_gap_reason_without_a_known_resolver_stays_generic() -> None:
+    from azure_tenant_audit.collection_gaps import collector_gap_reason
+
+    reason = collector_gap_reason("dns_posture", "dns_resolver_error", "DoH resolver could not answer TXT x: SERVFAIL")
+    assert reason is not None and "--doh-endpoint" in reason
+    assert collector_gap_reason("google_dns_posture", "dns_resolver_error", None) is not None
