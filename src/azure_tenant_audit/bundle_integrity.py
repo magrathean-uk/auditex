@@ -93,7 +93,9 @@ def is_post_finalization_output(relative: str) -> bool:
 def post_finalization_outputs(run_dir: str | Path) -> list[str]:
     """The post-finalisation outputs present in ``run_dir`` (root files and ``reports/``), as relative paths.
 
-    They describe the evidence of the session that wrote them, so a resumed run removes them (R052).
+    They describe the evidence of the session that wrote them, so a resumed run removes them (R052). Names match
+    whatever their case: on a case-insensitive volume ``MODEL_ASSESSMENT.json`` is the file a reader opens as
+    ``model_assessment.json``.
     """
     root = Path(run_dir)
     found: list[str] = []
@@ -104,7 +106,7 @@ def post_finalization_outputs(run_dir: str | Path) -> list[str]:
             continue
         for entry in entries:
             relative = f"{directory}/{entry.name}" if directory else entry.name
-            if is_post_finalization_output(relative) and entry.is_file(follow_symlinks=False):
+            if is_post_finalization_output(relative.lower()) and entry.is_file(follow_symlinks=False):
                 found.append(relative)
     return found
 

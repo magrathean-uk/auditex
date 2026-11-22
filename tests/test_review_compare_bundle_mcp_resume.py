@@ -107,6 +107,23 @@ def test_resume_removes_the_earlier_sessions_post_finalisation_answers(tmp_path:
     assert [relative for relative in stale if (run_dir / relative).exists()] == []
 
 
+def test_resume_removes_post_finalisation_answers_whatever_their_name_case(tmp_path: Path) -> None:
+    # Repair round 1 (R052): on a case-insensitive volume MODEL_ASSESSMENT.json is read as model_assessment.json.
+    import os
+
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path)
+    stale = ["MODEL_ASSESSMENT.json", "Local_Answer.json", "reports/HANDOFF.md"]
+    for relative in stale:
+        (run_dir / relative).write_text("{}", encoding="utf-8")
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir)
+
+    left = set(os.listdir(run_dir)) | {f"reports/{name}" for name in os.listdir(run_dir / "reports")}
+    assert [relative for relative in stale if relative in left] == []
+
+
 def test_resume_under_another_tenant_name_keeps_one_run_id(tmp_path: Path) -> None:
     from azure_tenant_audit.output import AuditWriter
 
