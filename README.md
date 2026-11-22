@@ -46,6 +46,8 @@ auditex doctor --json
 
 Run every command in this README from inside the `auditex` folder. The activation line is for Linux and macOS.
 
+Native Windows is not supported yet; use WSL2.
+
 Optional dependencies:
 
 ```bash
