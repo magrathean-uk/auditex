@@ -93,3 +93,42 @@ def test_transport_errors_stop_after_the_server_error_bound(monkeypatch) -> None
         client.get_json("/users")
     # safe: server_error_retries=3, so four attempts in all.
     assert calls["count"] == 4
+
+
+def test_a_huge_retry_after_on_an_ordinary_read_is_a_recorded_gap_not_an_hour_long_sleep(monkeypatch) -> None:
+    """R104: outside $batch, a Retry-After past the policy's wait bound is not slept; the 429 is returned as a gap."""
+    from azure_tenant_audit.graph import THROTTLE_POLICIES
+
+    client = fake_graph_client(throttle_mode="safe")
+    waits: list[float] = []
+    client.sleep = waits.append
+    monkeypatch.setattr(
+        client.session,
+        "request",
+        lambda *a, **k: graph_response(
+            429, {"error": {"code": "TooManyRequests", "message": "slow down"}}, headers={"Retry-After": "3600"}
+        ),
+    )
+    with pytest.raises(GraphError) as caught:
+        client.get_json("/users")
+    assert caught.value.status == 429
+    assert sum(waits) <= THROTTLE_POLICIES["safe"].max_retry_wait_seconds
+
+
+def test_ordinary_read_retry_waits_share_one_bound(monkeypatch) -> None:
+    """R104: repeated 429s on one read stop once their waits would pass max_retry_wait_seconds."""
+    from azure_tenant_audit.graph import THROTTLE_POLICIES
+
+    client = fake_graph_client(throttle_mode="safe")
+    waits: list[float] = []
+    client.sleep = waits.append
+    monkeypatch.setattr(
+        client.session,
+        "request",
+        lambda *a, **k: graph_response(429, {"error": {"code": "TooManyRequests"}}, headers={"Retry-After": "50"}),
+    )
+    with pytest.raises(GraphError):
+        client.get_json("/users")
+    retry_waits = [w for w in waits if w >= 50]
+    assert retry_waits == [50.0, 50.0]
+    assert sum(retry_waits) <= THROTTLE_POLICIES["safe"].max_retry_wait_seconds

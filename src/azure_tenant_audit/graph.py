@@ -233,7 +233,7 @@ THROTTLE_POLICIES: dict[str, ThrottlePolicy] = {
 
 @dataclass
 class _WaitBudget:
-    """The seconds one ``$batch`` chunk may still spend waiting to retry, shared by its item and transport retries."""
+    """The seconds one ``$batch`` chunk or one request may still spend waiting to retry, shared by all its retries."""
 
     remaining: float
     spent: float = 0.0
@@ -511,7 +511,8 @@ class GraphClient:
         self._enforce_read_only(method, url, kwargs)
         # Send one Graph request, retrying 429 and 5xx answers within the throttle policy. The read guard above stays
         # the first statement (tests/test_http_verb_allowlist.py). ``wait_budget`` is the shared retry-wait allowance
-        # of a ``$batch`` chunk: a retry whose wait would pass it is not slept and the last answer is returned instead.
+        # of a ``$batch`` chunk, or of this one request when None: a retry whose wait would pass it is not slept and the
+        # last answer is returned instead.
         token = self.ensure_token()
         headers = kwargs.pop("headers", {})
         headers.update(
@@ -521,6 +522,10 @@ class GraphClient:
                 "User-Agent": package_user_agent(),
             }
         )
+        if wait_budget is None:
+            # Every read has a retry-wait bound, not only a $batch chunk (R104): a Retry-After past it is not slept, and
+            # the throttled answer is returned so the read becomes a recorded gap instead of a run that looks hung.
+            wait_budget = _WaitBudget(self._throttle_policy().max_retry_wait_seconds)
         attempt = 0
         family = self._request_family(url)
         permission_stop_after = self._throttle_policy().permission_stop_after
@@ -663,7 +668,7 @@ class GraphClient:
             return False
         self._emit(
             "graph.request.retry_budget_exhausted",
-            "Retry wait would pass the $batch wait bound; not retrying",
+            "Retry wait would pass the retry-wait bound; not retrying",
             {
                 "method": method,
                 "url": url,
