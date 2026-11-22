@@ -684,10 +684,11 @@ the table above.
 
 Before sharing, identity discovery reads all `normalized/**/*.json` files. It
 refuses malformed, unreadable or non-regular entries, symbolic and hard links, changes
-during discovery and scans exceeding 5,000 files, 256 MiB per file, 512 MiB
+during discovery and scans exceeding 5,000 files, 512 MiB per file, 1024 MiB
 in total per run or 32 directory levels. These sizes cover a run at the identity
-collector's 250,000-user cap (a full users section is about 189 MiB); a larger
-run has no shareable output. A subsequent snapshot also refuses scan
+collector's 250,000-user cap with up to about 2,100 bytes per user record (a full
+users section is about 189 MiB with Latin names and about 265 MiB with Japanese
+names and departments); a larger run has no shareable output. A subsequent snapshot also refuses scan
 problems or changed fingerprints. These checks cover shareable reports, exports,
 customer packs, notifications and MCP tools. A size-limit refusal reports the
 supported sizes without naming files; other refusals identify the reason using
@@ -702,7 +703,7 @@ instead of relying on numbers quoted here. The harness measures the child
 process's resident memory and compares it with the baseline times the ratio;
 memory use also depends on the evidence and output.
 
-On adversarial JSON, worst-case scanner memory is about 64 times the file size, up to about 16 GiB at the 256 MiB per-file cap. This is an upper bound that ordinary evidence does not reach.
+On adversarial JSON, worst-case scanner memory is about 64 times the file size, up to about 32 GiB at the 512 MiB per-file cap. This is an upper bound that ordinary evidence does not reach.
 
 These are pattern and structure rules, not a guarantee that every personal
 value in arbitrary prose is recognised. URL userinfo passwords are matched

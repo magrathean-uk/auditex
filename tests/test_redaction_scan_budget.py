@@ -67,7 +67,24 @@ def test_scan_accepts_large_synthetic_file_sizes(
         assert redaction.redact_output({"owner": "private"}, profile=profile, context=context)["owner"] == "<redacted-text>"
 
 
-def _full_user_section_bytes(users: int) -> int:
+_LATIN_USER = {
+    "displayName": "Alexandra Konstantinopoulou-Smythe",
+    "userPrincipalName": "alexandra.konstantinopoulou-smythe@halcyonfreight-logistics.example",
+    "mail": "alexandra.konstantinopoulou-smythe@halcyonfreight-logistics.example",
+    "department": "Customer Service and Operations",
+}
+# Non-Latin names and departments are written as \uXXXX escapes, six bytes a character (repair round 2, R090).
+_JAPANESE_USER = {
+    "displayName": "\u5c71\u7530 \u82b1\u5b50\uff08\u6771\u4eac\u672c\u793e \u55b6\u696d\u4f01\u753b\u90e8 "
+    "\u30b7\u30cb\u30a2\u30de\u30cd\u30fc\u30b8\u30e3\u30fc\uff09",
+    "userPrincipalName": "hanako.yamada.tokyo-headquarters.sales-planning@halcyonfreight-logistics-japan.example",
+    "mail": "hanako.yamada.tokyo-headquarters.sales-planning@halcyonfreight-logistics-japan.example",
+    "department": "\u55b6\u696d\u4f01\u753b\u90e8 \u56fd\u969b\u7269\u6d41\u4e8b\u696d\u672c\u90e8 \u6771\u65e5\u672c\u30a8\u30ea\u30a2 "
+    "\u6cd5\u4eba\u55b6\u696d\u7b2c\u4e09\u30b0\u30eb\u30fc\u30d7 \u81ea\u52d5\u8eca\u7523\u696d\u62c5\u5f53",
+}
+
+
+def _full_user_section_bytes(users: int, person: dict[str, str] = _LATIN_USER) -> int:
     """Bytes of ``normalized/users.json`` for ``users`` users, in the writer's layout (indent 2), built by the real
     normaliser from Graph users with every field it keeps filled (sign-in activity included)."""
     from azure_tenant_audit.normalize import build_normalized_snapshot
@@ -75,10 +92,7 @@ def _full_user_section_bytes(users: int) -> int:
     rows = [
         {
             "id": f"0d3e1a7f-0000-4000-8000-{index:012d}",
-            "displayName": "Alexandra Konstantinopoulou-Smythe",
-            "userPrincipalName": "alexandra.konstantinopoulou-smythe@halcyonfreight-logistics.example",
-            "mail": "alexandra.konstantinopoulou-smythe@halcyonfreight-logistics.example",
-            "department": "Customer Service and Operations",
+            **person,
             "userType": "Member",
             "accountEnabled": True,
             "createdDateTime": "2021-03-04T10:11:12Z",
@@ -113,6 +127,23 @@ def test_the_per_file_cap_covers_a_full_users_section_at_the_250000_user_collect
     monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: None)
 
     assert len(redaction.snapshot_run(root)) == 2
+    assert not redaction.context_for_run(root).incomplete
+
+
+def test_the_caps_cover_250000_users_with_non_latin_names_and_long_addresses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Repair round 2 (R090): a Japanese display name and department, long addresses and sign-in activity take more
+    # than 1,100 bytes a user, so the users section alone is over 256 MiB at the 250,000-user collection cap.
+    per_user = _full_user_section_bytes(2, _JAPANESE_USER) - _full_user_section_bytes(1, _JAPANESE_USER)
+    assert per_user > 1_100
+    users_file = _full_user_section_bytes(1, _JAPANESE_USER) + per_user * (250_000 - 1)
+    assert users_file > 256 * 1024 * 1024
+    root = tmp_path / "run"
+    _sparse_run(root, (users_file, *_PROJECTED_250K))
+    monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: None)
+
+    assert len(redaction.snapshot_run(root)) == 3
     assert not redaction.context_for_run(root).incomplete
 
 
