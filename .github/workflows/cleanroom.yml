@@ -1,0 +1,473 @@
+name: cleanroom
+
+# Proves what a stranger gets from the README alone on a clean runner: no caches, nothing preinstalled
+# beyond what the runner image ships. Offline and demo only; nothing here touches a tenant.
+on:
+  push:
+    branches: [wt/cleanroom]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  # README path: source checkout, pip install -e, demo, offline run, reports.
+  source:
+    name: source ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.14"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # "Install and check locally"
+      - name: README - create the venv
+        id: s1
+        continue-on-error: true
+        run: python3 -m venv .venv
+      - name: README - activate the venv
+        id: s2
+        continue-on-error: true
+        run: source .venv/bin/activate
+      - name: README - install with the test extra
+        id: s3
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          python -m pip install -e '.[test]'
+      - name: README - auditex doctor --json
+        id: s4
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex doctor --json | tee doctor.json
+          python -c "import json,sys; sys.exit(0 if json.load(open('doctor.json'))['readiness']['core_ready'] else 1)"
+      - name: README - optional google and mcp extras
+        id: s5
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          python -m pip install -e '.[google]'
+          python -m pip install -e '.[mcp]'
+      - name: README - make contract-smoke
+        id: s6
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          make contract-smoke
+
+      # "Main commands"
+      - name: README - auditex demo --no-pause
+        id: s7
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex demo --no-pause
+          test -d outputs/demo/runs
+          ls outputs/demo
+          find outputs/demo -name '*.html' | grep .
+          find outputs/demo -name 'run-manifest.json' | grep .
+      - name: README - setup-guide m365 and google
+        id: s8
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex setup-guide m365 --collector-preset full --format md | tee setup-m365.md
+          auditex setup-guide google --collector-preset everything --format md | tee setup-google.md
+          test -s setup-m365.md
+          test -s setup-google.md
+      - name: README - offline run (m365)
+        id: s9
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex run --offline --tenant-name demo --out outputs/offline
+          ls outputs/offline
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          test -f "${RUN}run-manifest.json"
+          test -f "${RUN}summary.json"
+          test -d "${RUN}reports"
+          ls "${RUN}reports"
+      - name: README - offline run (google)
+        id: s10
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex google run --offline --sample examples/google_workspace_sample.json \
+            --domain example.com --tenant-name demo --out outputs/google
+          ls outputs/google
+          test -n "$(ls -A outputs/google)"
+
+      # "Read a run and prepare a handoff"
+      - name: README - assess
+        id: s11
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex assess "$RUN"
+          test -f "${RUN}model_assessment.json"
+      - name: README - report commands
+        id: s12
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex report render "$RUN" --format md
+          auditex report api-calls "$RUN" --format md
+          auditex report permissions "$RUN" --format md
+          auditex report proof-table "$RUN" --format md
+          auditex report customer-pack "$RUN" --output-dir customer-pack
+          auditex report verify-pack customer-pack
+          auditex report explorer "$RUN"
+          test -n "$(ls -A customer-pack)"
+          find outputs/offline -name '*.html' | grep .
+      - name: README - compare and export list
+        id: s13
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex run --offline --tenant-name demo --out outputs/offline2
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          RUN2=$(ls -d outputs/offline2/*/ | head -1)
+          auditex report explorer "$RUN" --compare "$RUN2"
+          auditex compare --run-dir "$RUN" --run-dir "$RUN2"
+          auditex export list
+      - name: README - auditex-mcp starts
+        id: s14
+        continue-on-error: true
+        run: |
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          # The server speaks on stdio; closing stdin must end it cleanly.
+          auditex-mcp < /dev/null
+
+      - name: Collect small report artefacts
+        if: always()
+        run: |
+          mkdir -p artefacts
+          for d in outputs/demo outputs/offline outputs/google customer-pack; do
+            [ -d "$d" ] || continue
+            find "$d" \( -name '*.md' -o -name 'summary.json' -o -name 'run-manifest.json' -o -name 'validation.json' -o -name '*.html' \) \
+              -size -2000k -not -path '*/raw/*' -not -path '*/chunks/*' | while read -r f; do
+              mkdir -p "artefacts/$(dirname "$f")"
+              cp "$f" "artefacts/$f"
+            done
+          done
+          cp doctor.json setup-m365.md setup-google.md artefacts/ 2>/dev/null || true
+          du -sh artefacts
+      - name: Gate - fail the job on any failed step not tied to an issue
+        if: always()
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 -c "
+          import json, os, sys
+          steps = json.loads(os.environ['STEPS'])
+          known = {}
+          if os.environ['RUNNER_OS'] == 'Windows':
+              known = {k: 18 for k in ['s2', 's4', 's6', 's7', 's8', 's9', 's10', 's11', 's12', 's13']}
+          bad = [k for k, v in steps.items() if v.get('outcome') == 'failure']
+          for k in bad:
+              print(k, 'KNOWN, issue #%s' % known[k] if k in known else 'NEW FAILURE')
+          sys.exit(1 if [k for k in bad if k not in known] else 0)
+          "
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: reports-source-${{ matrix.os }}-py${{ matrix.python }}
+          path: artefacts
+          retention-days: 14
+          if-no-files-found: warn
+
+  # Customer path: the v1.8.0 release wheel in a fresh venv, no source tree.
+  wheel:
+    name: wheel ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.14"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # No checkout on purpose: the runner has no copy of the repository.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Download the release wheel
+        id: s15
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/customer" && cd "$RUNNER_TEMP/customer"
+          curl -fsSL -O https://github.com/magrathean-uk/auditex/releases/download/v1.8.0/auditex-1.8.0-py3-none-any.whl
+          ls -l
+      - name: Install into a fresh venv
+        id: s16
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          python3 -m venv .venv
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          python -m pip install auditex-1.8.0-py3-none-any.whl
+          python -m pip list
+      - name: wheel - doctor --json
+        id: s17
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex doctor --json | tee doctor.json
+          python -c "import json,sys; sys.exit(0 if json.load(open('doctor.json'))['readiness']['core_ready'] else 1)"
+      - name: wheel - demo --no-pause
+        id: s18
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex demo --no-pause
+          find outputs/demo -name 'run-manifest.json' | grep .
+      - name: wheel - setup-guide m365
+        id: s19
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex setup-guide m365 --collector-preset full --format md | tee setup-m365.md
+          test -s setup-m365.md
+      - name: wheel - offline run
+        id: s20
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex run --offline --tenant-name demo --out outputs/offline
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          test -f "${RUN}run-manifest.json"
+      - name: wheel - assess
+        id: s21
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex assess "$RUN"
+      - name: wheel - report render
+        id: s22
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex report render "$RUN" --format md
+      - name: wheel - report api-calls
+        id: s23
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex report api-calls "$RUN" --format md
+      - name: wheel - report permissions
+        id: s24
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex report permissions "$RUN" --format md
+      - name: wheel - report proof-table
+        id: s25
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex report proof-table "$RUN" --format md
+      - name: wheel - report customer-pack and verify-pack
+        id: s26
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex report customer-pack "$RUN" --output-dir customer-pack
+          auditex report verify-pack customer-pack
+      - name: wheel - report explorer
+        id: s27
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          auditex report explorer "$RUN"
+      - name: wheel - export list
+        id: s28
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          auditex export list
+      - name: Extras from the wheel (google, mcp)
+        id: s29
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          python -m pip install "$(ls auditex-1.8.0-py3-none-any.whl)[google,mcp]"
+          auditex google doctor --json
+          auditex-mcp < /dev/null
+      - name: Collect small report artefacts
+        if: always()
+        run: |
+          cd "$RUNNER_TEMP/customer"
+          mkdir -p "$GITHUB_WORKSPACE/artefacts"
+          for d in outputs/demo outputs/offline customer-pack; do
+            [ -d "$d" ] || continue
+            find "$d" \( -name '*.md' -o -name 'summary.json' -o -name 'run-manifest.json' -o -name 'validation.json' -o -name '*.html' \) \
+              -size -2000k -not -path '*/raw/*' -not -path '*/chunks/*' | while read -r f; do
+              mkdir -p "$GITHUB_WORKSPACE/artefacts/$(dirname "$f")"
+              cp "$f" "$GITHUB_WORKSPACE/artefacts/$f"
+            done
+          done
+          cp doctor.json setup-m365.md "$GITHUB_WORKSPACE/artefacts/" 2>/dev/null || true
+      - name: Gate - fail the job on any failed step not tied to an issue
+        if: always()
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 -c "
+          import json, os, sys
+          steps = json.loads(os.environ['STEPS'])
+          known = {'s17': 17, 's18': 16}
+          if os.environ['RUNNER_OS'] == 'Windows':
+              known = {'s%d' % n: 18 for n in range(17, 30)}
+          bad = [k for k, v in steps.items() if v.get('outcome') == 'failure']
+          for k in bad:
+              print(k, 'KNOWN, issue #%s' % known[k] if k in known else 'NEW FAILURE')
+          sys.exit(1 if [k for k in bad if k not in known] else 0)
+          "
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: reports-wheel-${{ matrix.os }}-py${{ matrix.python }}
+          path: artefacts
+          retention-days: 14
+          if-no-files-found: warn
+
+  # Local answer: large model download and an hour of CPU time, so one OS only (ubuntu, Python 3.11) and only on
+  # manual dispatch. Size and time go to the summary.
+  explain:
+    name: explain ubuntu py3.11
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: README - install with the local-answer extra
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          s=$(date +%s)
+          python -m pip install -e '.[test]'
+          python -m pip install -e '.[local-answer]'
+          echo "local-answer install seconds: $(( $(date +%s) - s ))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: README - offline run
+        run: |
+          source .venv/bin/activate
+          auditex run --offline --tenant-name demo --out outputs/offline
+      - name: README - auditex explain (default model, first-use download)
+        run: |
+          source .venv/bin/activate
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          s=$(date +%s)
+          auditex explain "$RUN" 2>&1 | tee explain.log
+          t=$(( $(date +%s) - s ))
+          test -f "${RUN}local_answer.json"
+          du -sh ~/.cache/auditex/models | tee -a "$GITHUB_STEP_SUMMARY"
+          ls -l ~/.cache/auditex/models
+          echo "explain (download plus answer) seconds: $t" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Second explain run (model cached, offline answer time)
+        run: |
+          source .venv/bin/activate
+          RUN=$(ls -d outputs/offline/*/ | head -1)
+          s=$(date +%s)
+          auditex explain "$RUN"
+          echo "explain (cached model) seconds: $(( $(date +%s) - s ))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: explain-ubuntu-py3.11
+          path: |
+            explain.log
+            outputs/offline/*/local_answer.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  # The same command on the demo run, which has real findings, with the small model from the local-answer guide.
+  explain-demo:
+    name: explain-demo ubuntu py3.11 (small model)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: README - install with the local-answer extra
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -e '.[local-answer]'
+      - name: README - auditex demo --no-pause
+        run: |
+          source .venv/bin/activate
+          auditex demo --no-pause
+      - name: auditex explain on the demo run (--model small)
+        run: |
+          source .venv/bin/activate
+          RUN=outputs/demo/runs/halcyon-demo
+          s=$(date +%s)
+          auditex explain "$RUN" --model small 2>&1 | tee explain-demo.log
+          echo "explain-demo (small, download plus answer) seconds: $(( $(date +%s) - s ))" | tee -a "$GITHUB_STEP_SUMMARY"
+          test -f "$RUN/local_answer.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: explain-demo-ubuntu-py3.11
+          path: |
+            explain-demo.log
+            outputs/demo/runs/halcyon-demo/local_answer.json
+          retention-days: 14
+          if-no-files-found: warn
