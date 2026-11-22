@@ -539,8 +539,61 @@ def _cap_summary(result: dict[str, Any], budget: int = SUMMARY_RESPONSE_BUDGET_B
         capped["omitted_sections"] = omitted
         capped["summary_truncated"] = True
         if _json_size(capped) <= budget:
+            return capped
+    return _cap_kept_sections(capped, omitted, budget)
+
+
+# Keys the capped summary never drops: what the client needs to know the answer was cut and where to read the rest.
+_SUMMARY_CORE_KEYS = frozenset({"omitted_sections", "summary_truncated", "citations", "citation_summary", "evidence_missing"})
+
+
+def _cap_kept_sections(capped: dict[str, Any], omitted: dict[str, Any], budget: int) -> dict[str, Any]:
+    """Second stage of ``_cap_summary`` (R025): the kept sections alone are over ``budget`` (hundreds of coverage gaps
+    repeated in the manifest, the summary and the run metadata). Drop their nested lists and mappings, largest first,
+    keeping each section's scalar fields (tenant, run id, status); then, if still over, whole sections.
+    """
+    capped["omitted_sections"] = omitted
+    capped["summary_truncated"] = True
+    nested: list[tuple[int, str, str | None]] = []
+    for key, value in capped.items():
+        if key in _SUMMARY_CORE_KEYS:
+            continue
+        if isinstance(value, dict):
+            nested.extend(
+                (_json_size(item), key, name) for name, item in value.items() if isinstance(item, (dict, list)) and item
+            )
+        elif isinstance(value, list) and value:
+            nested.append((_json_size(value), key, None))
+    for size, key, name in sorted(nested, key=lambda row: row[0], reverse=True):
+        if _json_size(capped) <= budget:
+            return capped
+        if name is None:
+            value = capped.pop(key)
+            label = key
+        else:
+            section = dict(capped[key])
+            value = section.pop(name)
+            capped[key] = section
+            label = f"{key}.{name}"
+        omitted[label] = _omitted_entry(capped, key, value, size)
+    for key in sorted(
+        (key for key in capped if key not in _SUMMARY_CORE_KEYS), key=lambda item: _json_size(capped[item]), reverse=True
+    ):
+        if _json_size(capped) <= budget:
             break
+        value = capped.pop(key)
+        omitted[key] = _omitted_entry(capped, key, value, _json_size(value))
     return capped
+
+
+def _omitted_entry(capped: dict[str, Any], key: str, value: Any, size: int) -> dict[str, Any]:
+    entry: dict[str, Any] = {"bytes": size}
+    if isinstance(value, list):
+        entry["items"] = len(value)
+    path = capped.get(f"{key}_path")
+    if isinstance(path, str) and path:
+        entry["path"] = path
+    return entry
 
 
 @guarded_operation

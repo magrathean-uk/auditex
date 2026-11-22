@@ -80,6 +80,34 @@ def test_mcp_summary_of_a_run_with_many_artifacts_still_fits_the_cap(tmp_path: P
     assert omitted["path"] == "run-manifest.json"
 
 
+def test_mcp_summary_fits_the_cap_when_kept_sections_alone_are_too_large(tmp_path: Path) -> None:
+    # Repair round 1 (R025): 300 coverage gaps repeated in the manifest, the summary and the run metadata.
+    from support import RunBundleBuilder
+
+    from auditex.mcp_server import summarize_run, tool_handlers
+
+    gaps = [
+        {"collector": f"collector_{index}", "surface": f"surface {index}", "status": "blocked_permission",
+         "reason": "The reader app lacks the permission this read needs. " * 2}
+        for index in range(300)
+    ]
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .manifest(coverage_gaps=gaps)
+        .summary(coverage_gaps=gaps)
+        .report_pack(summary={"overall_status": "partial"}, findings=[], evidence_paths=[])
+        .build()
+    )
+
+    handlers = tool_handlers()
+    for result in (summarize_run(str(run_dir)), handlers["auditex_probe_summarize"](run_dir=str(run_dir))):
+        assert len(json.dumps(result, default=str)) <= 48_000
+        assert result["summary_truncated"] is True
+        assert result["manifest"]["tenant_name"]
+        assert result["manifest"]["run_id"]
+        assert result["omitted_sections"]
+
+
 def test_mcp_summary_of_a_small_run_keeps_every_section(tmp_path: Path) -> None:
     from support import RunBundleBuilder
 
