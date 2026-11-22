@@ -372,3 +372,20 @@ def test_a_blocked_or_failed_google_probe_writes_no_absolute_path_anywhere(insta
     assert (run_dir / "probe-result.json").is_file() and (run_dir / "index" / "evidence.sqlite").is_file()
     assert _files_holding(run_dir, str(root)) == []
     assert _files_holding(run_dir, str(installed_package)) == []
+
+
+# Review blocker 3: in a plain environment the Google hint put "(with the Python that runs Auditex)" inside the
+# command span, so pasting the command into Bash failed with a syntax error.
+def test_the_plain_environment_google_hint_command_pastes_into_bash(installed_package: Path, monkeypatch) -> None:
+    import re
+    import shlex
+    import subprocess
+
+    from auditex.google_workspace import auth
+
+    monkeypatch.setattr(auth, "_module_available", lambda module: False)
+    hint = auth.google_dependency_status()["install_hint"]
+    command = re.search(r"`([^`]+)`", hint).group(1)
+    assert shlex.split(command) == ["python", "-m", "pip", "install", "auditex[google]"]
+    assert subprocess.run(["bash", "-n", "-c", command], capture_output=True).returncode == 0
+    assert "Python that runs Auditex" in hint

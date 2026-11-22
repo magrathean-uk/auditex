@@ -72,8 +72,8 @@ def extra_install_command(extra: str, *, for_record: bool = False) -> str:
     installs through the interpreter that runs Auditex, never a bare `python` that may be another one. An Auditex
     installed from a downloaded wheel or sdist names that file again, not the package index.
 
-    ``for_record`` gives text that may be written into a run bundle: it never names a local path (the interpreter or
-    the wheel file), only a neutral description of the same step.
+    ``for_record`` gives a command that may be written into a run bundle: it never names a local path (the interpreter
+    or the wheel file). In a plain environment it starts with a bare ``python``; ``extra_install_note`` says which one.
     """
     if is_source_checkout():
         return f"python -m pip install -e '.[{extra}]'"
@@ -89,8 +89,16 @@ def extra_install_command(extra: str, *, for_record: bool = False) -> str:
     if pipx:
         return f"pipx install --force {spec}"
     if for_record:
-        return f"python -m pip install {spec} (with the Python that runs Auditex)"
+        return f"python -m pip install {spec}"
     return f"{shlex.quote(sys.executable)} -m pip install {spec}"
+
+
+def extra_install_note() -> str:
+    """What the operator must know beside a ``for_record`` command and outside it, so the command stays pasteable:
+    in a plain environment, that ``python`` means the interpreter that runs Auditex. Empty for pipx and a checkout."""
+    if is_source_checkout() or (Path(sys.prefix) / "pipx_metadata.json").is_file():
+        return ""
+    return "run it with the Python that runs Auditex"
 
 
 def detect_package_manager() -> str | None:
