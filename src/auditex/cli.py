@@ -370,6 +370,9 @@ def _build_google_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", allow_abbrev=False, help="Run a Google Workspace audit.")
     _add_google_run_args(run)
     _add_google_findings_args(run)
+    run.add_argument("--doh-endpoint", default=None, metavar="URL", help=(
+        "DNS-over-HTTPS resolver for google_dns_posture, a plain https:// URL "
+        "(else AUDITEX_DOH_ENDPOINT, else https://cloudflare-dns.com/dns-query)."))
     run.add_argument("--as-of", type=parse_as_of, default=None, metavar="YYYY-MM-DD", help=AS_OF_HELP)
     return parser
 
@@ -398,6 +401,7 @@ def _google_config_from_args(args: argparse.Namespace) -> GoogleRunConfig:
         waiver_file=Path(args.waiver_file).expanduser() if getattr(args, "waiver_file", None) else None,
         stale_user_days=getattr(args, "stale_user_days", 90),
         stale_device_days=getattr(args, "stale_device_days", 90),
+        doh_endpoint=getattr(args, "doh_endpoint", None),
     )
 
 

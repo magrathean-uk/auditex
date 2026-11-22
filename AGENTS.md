@@ -81,6 +81,16 @@ gitleaks git --pre-commit --staged --redact --no-banner
 
 Merging into `main` also runs `make test` once per batch. State every skipped check and why.
 
+## Code Review Rules
+
+Flag these as blocking in any pull request:
+- Audit, probe, report, export, MCP and customer-pack code that writes to a tenant or reads message bodies or file content.
+- Response features reachable without `AUDITEX_ENABLE_RESPONSE`.
+- A CLI parser without `allow_abbrev=False`, or a flag that can carry a secret missing from the argv redaction list or its test.
+- Credentials, tokens, keys, OAuth caches, live tenant evidence, sealed evaluation rows, workstation paths (`/Users/...`, `/Volumes/...`) or session URLs in the tree, in output files, logs or error text.
+- Schema, bundle, collector, normalisation or customer-pack changes without the matching contract test; a SCuBA verdict that comes from anything other than the value rules.
+- A fix without a test that fails before it and passes after it; shipped content added to only one of `pyproject.toml` and `shipped_content.py`.
+
 ## Read before changing
 
 `docs/reference/output-contract.md` for bundle artifacts, `docs/reference/security-privacy.md` for

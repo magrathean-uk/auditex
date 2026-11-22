@@ -73,11 +73,16 @@ auditex run --offline \
   --run-name release-smoke \
   --out "${SMOKE_ROOT}/${kind}-base-output" >/dev/null
 "${VPY}" - <<'PY'
+import sysconfig
+from pathlib import Path
+
 from azure_tenant_audit import resources
 from auditex import bootstrap
 
+# Only this environment's data tree: an older Auditex under the base interpreter must not supply missing files.
 adapters = resources._resource_adapters()
 assert adapters and {a.name for a in adapters} == {"installed"}, adapters
+assert {a.root for a in adapters} == {Path(sysconfig.get_paths()["data"]) / "auditex"}, adapters
 readiness = bootstrap.build_doctor_report()["readiness"]
 assert readiness["core_ready"], readiness
 PY

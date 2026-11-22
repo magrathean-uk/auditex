@@ -60,6 +60,8 @@ class ProviderFinalizePlan:
     run_metadata: dict[str, Any] = field(default_factory=dict)
     # An offline run's --as-of: the instant the attack graph judges credential expiry at. Live runs leave it None.
     as_of: datetime | None = None
+    # The run's resolved DNS-over-HTTPS endpoint, so data-handling.json names the resolver dns_posture really queried.
+    doh_endpoint: str | None = None
 
 
 def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
@@ -121,4 +123,5 @@ def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
         findings=findings,
         trust_coverage_rows=plan.trust_coverage_rows,
         trust_selected_collectors=plan.trust_selected_collectors,
+        doh_endpoint=plan.doh_endpoint,
     )

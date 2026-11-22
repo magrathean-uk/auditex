@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.assurance import build_live_readiness_summary
@@ -19,7 +18,6 @@ from azure_tenant_audit.collector_runner import (
     CollectorRunner,
 )
 from azure_tenant_audit.dns_lookup import (
-    DEFAULT_DOH_ENDPOINT,
     DOH_ENDPOINT_ENV,
     doh_resolver_disclosure,
     resolve_doh_endpoint,
@@ -91,7 +89,9 @@ def _merged_fixture_provenance(
             else:
                 merged[key] = value
     return merged or None
-_SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache"}
+# --doh-endpoint: a DoH resolver URL path can carry an account token.
+_SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache",
+                            "--doh-endpoint"}
 
 
 @dataclass(frozen=True)
@@ -120,10 +120,16 @@ class GoogleRunConfig:
     waiver_file: Path | None = None
     stale_user_days: int = DEFAULT_STALE_USER_DAYS
     stale_device_days: int = DEFAULT_STALE_DEVICE_DAYS
+    # The DNS-over-HTTPS resolver for google_dns_posture: this option, else AUDITEX_DOH_ENDPOINT, else Cloudflare.
+    doh_endpoint: str | None = None
 
 
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
-    return redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)
+    """The command line as the run bundle records it: secret-bearing values redacted and every absolute path of the
+    operator's machine (``--out /home/...``) reduced to ``<local-path>/<name>``."""
+    from ..reporting import local_path_argument
+
+    return [local_path_argument(item) for item in redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)]
 
 
 def _selected_collectors(config: GoogleRunConfig) -> list[str]:
@@ -482,6 +488,7 @@ def _write_google_bundle(
     replay: dict[str, Any] | None = None,
     as_of: datetime | None = None,
     data_handling_notices: list[str] | None = None,
+    doh_endpoint: str | None = None,
 ) -> int:
     normalized_snapshot = build_google_normalized_snapshot(
         tenant_name=config.tenant_name,
@@ -586,6 +593,7 @@ def _write_google_bundle(
                 "data_handling_notices": list(data_handling_notices or []),
             },
             as_of=as_of,
+            doh_endpoint=doh_endpoint,
         ),
     )
     return 1 if overall_status == "partial" else 0
@@ -740,9 +748,7 @@ def run_google_offline(
 
 def _resolver_label(doh_endpoint: str) -> str:
     """The resolver as the notice and run log name it: a configured one by host only, since a path can hold a profile id."""
-    if doh_endpoint == DEFAULT_DOH_ENDPOINT:
-        return doh_resolver_disclosure(doh_endpoint)
-    return f"the configured DNS-over-HTTPS resolver at {urlsplit(doh_endpoint).netloc}"
+    return doh_resolver_disclosure(doh_endpoint)
 
 
 def google_dns_notice(doh_endpoint: str) -> str:
@@ -751,7 +757,7 @@ def google_dns_notice(doh_endpoint: str) -> str:
         "Selected Google DNS posture collection sends the customer's verified domain names to "
         f"{_resolver_label(doh_endpoint)}. Only domain names, no user data, are sent to the resolver. "
         "Deselect it with --exclude google_dns_posture (the identity and collaboration presets omit it); "
-        f"set {DOH_ENDPOINT_ENV} to use another DNS-over-HTTPS resolver."
+        f"use --doh-endpoint or set {DOH_ENDPOINT_ENV} to use another DNS-over-HTTPS resolver."
     )
 
 
@@ -785,7 +791,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     doh_endpoint: str | None = None
     if "google_dns_posture" in selected:
         try:
-            doh_endpoint = resolve_doh_endpoint()
+            doh_endpoint = resolve_doh_endpoint(config.doh_endpoint)
         except ValueError as exc:
             print(json.dumps({"error": "invalid_doh_endpoint", "message": str(exc)}, indent=2), file=sys.stderr)
             return 2
@@ -866,6 +872,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         command_line=command_line,
         waiver_rows=waiver_rows,
         data_handling_notices=[google_dns_notice(doh_endpoint)] if doh_endpoint is not None else [],
+        doh_endpoint=doh_endpoint,
     )
 
 

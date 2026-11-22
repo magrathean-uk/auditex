@@ -45,6 +45,7 @@ SENSITIVE_ARG_FLAGS = frozenset(
         "--token-file",
         "--env",
         "--break-glass-accounts",
+        "--doh-endpoint",
     }
 )
 

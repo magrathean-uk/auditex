@@ -768,7 +768,7 @@ def run_live(
         return 2
     run_cfg = plan.run_config
     selected = plan.selected_collectors
-    for notice in collector_activity_notices(selected, "live"):
+    for notice in collector_activity_notices(selected, "live", doh_endpoint):
         LOG.info("%s", notice)
     if NON_FATAL_COLLECTORS.intersection(selected):
         LOG.info("Exchange/DNS failures leave overall status partial, process exit 0 when these are the only failures; "
@@ -1199,6 +1199,7 @@ def run_live(
             coverage_ledger=coverage_ledger,
             privacy=privacy,
             trust_selected_collectors=selected_before_preflight,
+            doh_endpoint=doh_endpoint,
             bundle_metadata={
                 "collector_preset": args.collector_preset,
                 "waiver_path": args.waiver_file,

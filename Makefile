@@ -153,6 +153,15 @@ dist:
 		rm -f "$(abspath $(DIST_DIR))"/auditex-*.whl "$(abspath $(DIST_DIR))"/auditex-*.tar.gz; \
 		cp "$$dir"/artifacts/*.whl "$$dir"/artifacts/*.tar.gz "$(abspath $(DIST_DIR))/"
 
+# Builds the wheel and sdist, then checks their metadata and README rendering as PyPI will (twine check). Twine is
+# in the dev extra (make audit-deps installs it into the tool environment). Nothing is uploaded.
+TWINE ?= $(firstword $(wildcard $(VENV)/bin/twine $(AUDIT_DEPS_DIR)/tool/bin/twine) twine)
+
+.PHONY: dist-check
+dist-check: dist
+	@command -v "$(TWINE)" >/dev/null 2>&1 || { echo "make dist-check: twine not found; run make audit-deps (it installs the dev extra into $(AUDIT_DEPS_DIR)/tool) or put twine on PATH" >&2; exit 2; }
+	"$(TWINE)" check --strict "$(abspath $(DIST_DIR))"/auditex-*.whl "$(abspath $(DIST_DIR))"/auditex-*.tar.gz
+
 # contract-smoke only: each sample run's collection made a private 32-byte pseudonym key; this asserts it and
 # replaces it with a fixed seed derived from the run folder name, through the file the product reads, so pseudonyms in
 # the digested artefacts stay byte-stable. The seed is public and protects nothing: it is for these sample runs only.
