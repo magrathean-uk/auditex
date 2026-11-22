@@ -3388,14 +3388,25 @@ def _csv_sort_key(row: Mapping[str, Any]) -> tuple:
     return (severity_rank, rule_id, record_key, finding_id)
 
 
+# Review R129: the closing row of a CSV that holds action-plan rows because the findings section was not selected.
+CSV_ACTION_PLAN_NOTICE = (
+    "Rows above are action plan items, not findings: the findings section was not selected for this export."
+)
+
+
 def _render_csv(selected_sections: dict[str, Any]) -> str:
-    rows = _dict_rows(selected_sections.get("findings")) or _dict_rows(selected_sections.get("action_plan"))
-    rows = sorted(rows, key=_csv_sort_key)
+    # Finding rows; action-plan rows only when the findings section was left out (never for a run with no findings),
+    # and then a closing ``row_source`` row says so.
+    from_action_plan = "findings" not in selected_sections
+    source = "action_plan" if from_action_plan else "findings"
+    rows = sorted(_dict_rows(selected_sections.get(source)), key=_csv_sort_key)
     buffer = StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(_CSV_COLUMNS), extrasaction="ignore")
     writer.writeheader()
     for row in rows:
         writer.writerow({column: _csv_value(row.get(column, "")) for column in _CSV_COLUMNS})
+    if from_action_plan and rows:
+        csv.writer(buffer).writerow(["row_source", CSV_ACTION_PLAN_NOTICE, *([""] * (len(_CSV_COLUMNS) - 2))])
     return buffer.getvalue()
 
 
