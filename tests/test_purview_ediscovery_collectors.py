@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from azure_tenant_audit.collectors.ediscovery import EDiscoveryCollector
 from azure_tenant_audit.collectors.purview import PurviewCollector
 
@@ -586,3 +588,64 @@ def test_r108_graph_cases_and_searches_are_normalised() -> None:
     assert case["id"] == "case-1" and case["display_name"] == "Board matter" and case["status"] == "active"
     (search,) = snapshot["ediscovery_searches"]["records"]
     assert search["id"] == "search-1" and search["case_id"] == "case-1"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("c1", "c2"), ("c:a", "c_a"), ("Case-A", "case-a")],
+)
+def test_each_case_streams_its_searches_to_its_own_chunk_files(tmp_path, first: str, second: str) -> None:
+    """Bot review of PR #148: two cases must not share, and overwrite, one searches or operations chunk file.
+
+    Case ids that sanitise to the same file name, or differ only in case, still get their own files.
+    """
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    base = "/security/cases/ediscoveryCases"
+    client = _PagedGraphClient(
+        responses={
+            base: [{"id": first, "displayName": "One"}, {"id": second, "displayName": "Two"}],
+            f"{base}/{first}/searches": [{"id": "s1", "displayName": "First"}],
+            f"{base}/{second}/searches": [{"id": "s2", "displayName": "Second"}],
+            f"{base}/{first}/operations": [{"id": "o1", "action": "estimateStatistics"}],
+            f"{base}/{second}/operations": [{"id": "o2", "action": "estimateStatistics"}],
+        }
+    )
+    result = EDiscoveryCollector().run(
+        {
+            "client": client,
+            "top": None,
+            "page_size": 100,
+            "plane": "inventory",
+            "audit_logger": None,
+            "chunk_writer": _chunk_writer(tmp_path),
+            "run_dir": tmp_path,
+        }
+    )
+    for key in ("searches", "operations"):
+        files = [result.payload[f"case_{case}"][key].get("chunk_files") for case in (first, second)]
+        assert files[0] and files[1], key
+        assert {name.lower() for name in files[0]}.isdisjoint(name.lower() for name in files[1]), (key, files)
+
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": result.payload}, run_dir=tmp_path
+    )
+    searches = sorted((row["case_id"], row["id"]) for row in snapshot["ediscovery_searches"]["records"])
+    assert searches == sorted([(first, "s1"), (second, "s2")])
+
+
+def test_a_search_in_both_the_retired_search_list_and_a_graph_case_is_one_record() -> None:
+    """Review of the fix above: a mixed bundle must not give one search two records with the same key."""
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payload = {
+        "caseOverview": {"value": [{"id": "c1", "name": "Board matter"}]},
+        "searchList": {"value": [{"id": "s1", "name": "Mailboxes"}]},
+        "cases": {"value": [{"id": "c1", "displayName": "Board matter"}]},
+        "case_c1": {"searches": {"value": [{"id": "s1", "displayName": "Mailboxes"}]}, "operations": {"value": []}},
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": payload})
+
+    records = snapshot["ediscovery_searches"]["records"]
+    assert [row["key"] for row in records] == ["ediscovery_search:s1"]
+    assert records[0]["case_id"] == "c1"  # the Graph read names the case the retired list left out

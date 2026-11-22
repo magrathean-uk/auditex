@@ -751,3 +751,24 @@ def test_a_role_policy_for_administrators_does_not_rescue_a_non_privileged_role_
     assert not row.get("covered_by_policy_ids")
     # The administrator verdict reads administrators only: the role policy covers the one who holds both.
     assert _admin(all_users, for_admins, scope=scope)["verdict"] == "enforced"
+
+
+def test_an_eligible_non_administrator_role_does_not_bring_a_role_scoped_mfa_policy_to_an_administrator() -> None:
+    # Entra applies a role-scoped policy only once the role is active: an eligible Global Reader is not covered.
+    reader = "f2ef992c-3afb-46b9-b7cf-a126ee74c451"
+    policy = _policy("ca-reader", users={"includeRoles": [reader]})
+    payloads = _payloads([policy])
+    payloads["identity"]["roleDefinitions"]["value"].append({"id": reader, "displayName": "Global Reader"})
+    payloads["identity_governance"] = {
+        "roleAssignmentSchedules": {"value": []},
+        "roleEligibilitySchedules": {
+            "value": [{"id": "elig-reader", "principalId": ADMIN, "roleDefinitionId": reader, "directoryScopeId": "/"}]
+        },
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="r", collector_payloads=payloads)
+    verdicts = {row["control"]: row["verdict"] for row in snapshot["identity_control_verdicts"]["records"]}
+    (admin,) = [row for row in snapshot["effective_admin_set"]["records"] if row.get("principal_id") == ADMIN]
+
+    assert verdicts["administrator_mfa"] == "not_enforced"
+    assert reader not in (admin.get("other_role_ids") or [])
+    assert admin["eligible_other_role_ids"] == [reader]

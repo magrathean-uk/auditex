@@ -439,25 +439,31 @@ def build_effective_admin_set(
         if entry:
             add_entry(str(row["principal_id"]), entry)
 
-    # Roles outside the privileged list that a principal also holds, by any route. They never make a principal an
-    # administrator, but a policy that excludes one (Global Reader, say) leaves the administrators holding it out.
+    # Roles outside the privileged list that a principal also holds. They never make a principal an administrator, but
+    # a policy that excludes or includes one (Global Reader, say) reaches the administrators holding it. Entra applies
+    # a role-scoped policy only to an active role, so an eligible one is kept apart and never feeds policy matching.
     other_roles: dict[str, set[str]] = defaultdict(set)
-    for row in [*role_assignments, *(
-        item for item in governance_objects if item.get("kind") in {SCHEDULE_KIND_ACTIVE, SCHEDULE_KIND_ELIGIBLE}
-    )]:
+    eligible_other_roles: dict[str, set[str]] = defaultdict(set)
+    other_role_rows = [
+        *((other_roles, row) for row in role_assignments),
+        *((other_roles, row) for row in governance_objects if row.get("kind") == SCHEDULE_KIND_ACTIVE),
+        *((eligible_other_roles, row) for row in governance_objects if row.get("kind") == SCHEDULE_KIND_ELIGIBLE),
+    ]
+    for target, row in other_role_rows:
         role_id = _text(row.get("role_definition_id"))
         if row.get("principal_id") and role_id and _key(role_id) not in privileged:
-            other_roles[_key(row.get("principal_id"))].add(_key(role_id))
-    for holder, roles in list(other_roles.items()):
-        seen_members = {holder}
-        pending = deque([holder])
-        while pending:
-            for edge in children.get(pending.popleft(), []):
-                member = _key(edge.get("member_id"))
-                if member and member not in seen_members:
-                    seen_members.add(member)
-                    other_roles[member] |= roles
-                    pending.append(member)
+            target[_key(row.get("principal_id"))].add(_key(role_id))
+    for roles_by_principal in (other_roles, eligible_other_roles):
+        for holder, roles in list(roles_by_principal.items()):
+            seen_members = {holder}
+            pending = deque([holder])
+            while pending:
+                for edge in children.get(pending.popleft(), []):
+                    member = _key(edge.get("member_id"))
+                    if member and member not in seen_members:
+                        seen_members.add(member)
+                        roles_by_principal[member] |= roles
+                        pending.append(member)
 
     def principal_type(principal: str) -> str:
         if principal in users_by_id:
@@ -562,6 +568,8 @@ def build_effective_admin_set(
             "global_administrator": any(entry["global_administrator"] for entry in entries),
             "expanded_member_count": expanded_member_count.get(principal) if kind == TYPE_GROUP else None,
             "other_role_ids": sorted(other_roles.get(principal, ())) or None,
+            "eligible_other_role_ids": sorted(eligible_other_roles.get(principal, set()) - other_roles.get(principal, set()))
+            or None,
             "state": state,
         }
         if counted:

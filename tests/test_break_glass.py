@@ -550,3 +550,47 @@ def test_a_role_the_account_is_only_eligible_for_does_not_exclude_it() -> None:
 
     assert _finding(snapshot) is not None
     assert snapshot["break_glass_assessment"]["records"][0]["policies_missing_exclusion"] == 1
+
+
+GLOBAL_READER_ROLE = "f2ef992c-3afb-46b9-b7cf-a126ee74c451"
+
+
+def test_an_active_role_a_role_assignable_group_holds_excludes_the_listed_account_in_it() -> None:
+    """Bot review of PR #147: Entra excludes a member of a group that actively holds an excluded role."""
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeRoles": [GLOBAL_READER_ROLE]})
+    payloads = _role_payloads([policy], held={BG1: [GLOBAL_ADMIN_ROLE], "g1": [GLOBAL_READER_ROLE]}, groups_members={"g1": [BG1]})
+    payloads["identity"]["roleDefinitions"]["value"].append({"id": GLOBAL_READER_ROLE, "displayName": "Global Reader"})
+    payloads["identity"]["groups"]["value"][0]["isAssignableToRole"] = True
+
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="r", collector_payloads=payloads, break_glass_accounts=["bg1@example.com"]
+    )
+
+    assert _finding(snapshot) is None
+    record = snapshot["break_glass_assessment"]["records"][0]
+    assert record["policies_in_scope"] == 1 and record["policies_missing_exclusion"] == 0
+
+
+@pytest.mark.parametrize("read", [False, True], ids=["members_not_read", "members_read_empty"])
+def test_an_excluded_role_assignable_group_whose_members_were_not_read_is_unverified_not_missing(read: bool) -> None:
+    """Bot review of PR #147: a role-assignable group with a failed or unexpanded member read is not an empty group."""
+    groups = [{"id": "g1", "displayName": "Role Group", "isAssignableToRole": True}]
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeGroups": ["g1"]})
+    payloads = _payloads([policy], groups=groups)
+    payloads["identity"]["roleAssignableGroupMembers"] = {
+        "value": [{"groupId": "g1", "displayName": "Role Group", "members": []}] if read else [],
+        "fanout": {"fanout_complete": read},
+    }
+
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="r", collector_payloads=payloads, break_glass_accounts=["bg1@example.com"]
+    )
+
+    record = snapshot["break_glass_assessment"]["records"][0]
+    finding = _finding(snapshot)
+    if read:
+        # A group whose members were read and is empty does not hold the account: the exclusion is missing.
+        assert record["policies_missing_exclusion"] == 1 and finding is not None
+    else:
+        assert record["policies_missing_exclusion"] == 0 and record["policies_exclusion_unverified"] == 1
+        assert finding is None or finding["severity"] != "high"

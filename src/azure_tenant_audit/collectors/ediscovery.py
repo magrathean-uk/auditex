@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -16,6 +18,30 @@ from .base import (
 
 # Cases whose searches and operations are read (two reads each); past it a fan-out gap row names the rest.
 CASE_FANOUT_LIMIT = 50
+
+
+class _CaseChunkWriter:
+    """Chunk callback that names a case's chunk files after the case, so cases never share or overwrite a file.
+
+    The readable part keeps only file-safe characters and is lower-cased; a hash of the exact case id
+    follows it, so ids that sanitise alike (``c:a`` and ``c_a``) or differ only in case stay apart.
+
+    Every other attribute, notably ``discard`` for withheld evidence, is the wrapped writer's own.
+    """
+
+    def __init__(self, chunk_writer: Any, case_id: str) -> None:
+        self._chunk_writer = chunk_writer
+        readable = re.sub(r"[^a-z0-9_.-]", "_", case_id.lower())[:64]
+        digest = hashlib.sha256(case_id.encode("utf-8")).hexdigest()[:12]
+        self._prefix = f"case-{readable}-{digest}"
+
+    def __call__(self, collector: Any, key: Any, page_number: Any, rows: Any, meta: Any = None) -> Any:
+        return self._chunk_writer(collector, f"{self._prefix}-{key}", page_number, rows, meta)
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._chunk_writer, name)
 
 
 class EDiscoveryCollector(Collector):
@@ -148,7 +174,7 @@ class EDiscoveryCollector(Collector):
                     },
                     top=case_top,
                     page_size=page_size,
-                    chunk_writer=context.get("chunk_writer"),
+                    chunk_writer=_CaseChunkWriter(writer, case_id) if (writer := context.get("chunk_writer")) else None,
                     log_event=log_event,
                 )
                 section = f"case_{case_id}"

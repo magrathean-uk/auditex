@@ -739,6 +739,11 @@ def _build_conditional_access_graph(
         role_definitions=role_definitions,
         admin_rows=admin_rows,
         membership_edges=membership_edges,
+        read_member_groups={
+            str(item["groupId"])
+            for item in values(identity_payload, "roleAssignableGroupMembers")
+            if item.get("groupId") and isinstance(item.get("members"), list)
+        },
     )
     break_glass_flagged: list[dict[str, Any]] = []
     break_glass_unverified: list[dict[str, Any]] = []
@@ -2838,21 +2843,28 @@ def build_normalized_snapshot(
     # The Graph reads: /security/cases/ediscoveryCases and each case's searches (section case_<id>). The CLI
     # sections above are retired and stay only for old bundles.
     seen_case_ids = {str(item.get("id")) for item in ediscovery_cases}
+    searched_case_ids: set[str] = set()
+    # One record per search key: a Graph search replaces the retired searchList row for the same id.
+    search_index = {record["key"]: index for index, record in enumerate(ediscovery_searches)}
+    graph_search_keys: set[str] = set()
     for item in _values(ediscovery_payload, "cases"):
         case_id = str(item.get("id") or "")
-        if not case_id or case_id in seen_case_ids:
+        if not case_id or case_id in searched_case_ids:
             continue
-        seen_case_ids.add(case_id)
-        ediscovery_cases.append(
-            _record(
-                "ediscovery_case",
-                "ediscovery.cases",
-                case_id,
-                display_name=item.get("displayName"),
-                status=item.get("status"),
-                created_date_time=item.get("createdDateTime"),
+        searched_case_ids.add(case_id)
+        # A case the retired caseOverview already listed is not listed twice, but its searches are still read.
+        if case_id not in seen_case_ids:
+            seen_case_ids.add(case_id)
+            ediscovery_cases.append(
+                _record(
+                    "ediscovery_case",
+                    "ediscovery.cases",
+                    case_id,
+                    display_name=item.get("displayName"),
+                    status=item.get("status"),
+                    created_date_time=item.get("createdDateTime"),
+                )
             )
-        )
         case_section = ediscovery_payload.get(f"case_{case_id}")
         searches = case_section.get("searches") if isinstance(case_section, dict) else None
         for search in _values(
@@ -2860,16 +2872,22 @@ def build_normalized_snapshot(
         ) if isinstance(searches, dict) else []:
             if not search.get("id"):
                 continue
-            ediscovery_searches.append(
-                _record(
-                    "ediscovery_search",
-                    "ediscovery.caseSearches",
-                    str(search["id"]),
-                    display_name=search.get("displayName"),
-                    case_id=case_id,
-                    status=search.get("status"),
-                )
+            record = _record(
+                "ediscovery_search",
+                "ediscovery.caseSearches",
+                str(search["id"]),
+                display_name=search.get("displayName"),
+                case_id=case_id,
+                status=search.get("status"),
             )
+            if record["key"] in graph_search_keys:
+                continue
+            graph_search_keys.add(record["key"])
+            if record["key"] in search_index:
+                ediscovery_searches[search_index[record["key"]]] = record
+            else:
+                search_index[record["key"]] = len(ediscovery_searches)
+                ediscovery_searches.append(record)
     ediscovery_export_jobs = [
         _record(
             "ediscovery_export_job",
