@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -16,6 +17,19 @@ PLACEHOLDER_TENANT_ID = "00000000-0000-0000-0000-000000000000"
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def write_owner_only(path: Path, text: str) -> None:
+    """Write a secret file as 0600 from the first byte; never follow a symlink at the final path."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(text)
+
+
+def ensure_private_dir(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
 
 
 def run_az(args: list[str], *, dry_run: bool) -> dict:
@@ -101,7 +115,7 @@ def main(argv: list[str]) -> int:
     cfg = json.loads(args.config.read_text(encoding="utf-8"))
     app_name = cfg["appDisplayName"]
     manifest_path = args.config.parent.parent / ".secrets" / "lab-populator-app.json"
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(manifest_path.parent)
 
     existing = run_az(
         ["ad", "app", "list", "--display-name", app_name, "--query", "[0]", "--output", "json"],
@@ -252,7 +266,7 @@ def main(argv: list[str]) -> int:
                 "password": secret.get("password"),
                 "endDateTime": secret.get("endDateTime"),
             }
-            secret_path.write_text(json.dumps(secret_payload, indent=2, sort_keys=True), encoding="utf-8")
+            write_owner_only(secret_path, json.dumps(secret_payload, indent=2, sort_keys=True))
             secret_stored = True
 
     manifest = {

@@ -10,12 +10,27 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import requests
+
 GRAPH_RESOURCE = "https://graph.microsoft.com"
 TOKEN_URL = "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def write_owner_only(path: Path, text: str) -> None:
+    """Write a secret file as 0600 from the first byte; never follow a symlink at the final path."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(text)
+
+
+def ensure_private_dir(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
 
 
 def decode_claims(token: str) -> dict:
@@ -42,32 +57,20 @@ def main(argv: list[str]) -> int:
         tenant_id = args.tenant_id or secret.get("tenantId")
         if not tenant_id:
             raise RuntimeError("tenant id is required for app secret token flow.")
-        response = subprocess.run(
-            [
-                "curl",
-                "-sS",
-                "-X",
-                "POST",
-                TOKEN_URL.format(tenant_id=tenant_id),
-                "-H",
-                "Content-Type: application/x-www-form-urlencoded",
-                "--data-urlencode",
-                f"client_id={secret['appId']}",
-                "--data-urlencode",
-                f"client_secret={secret['password']}",
-                "--data-urlencode",
-                "scope=https://graph.microsoft.com/.default",
-                "--data-urlencode",
-                "grant_type=client_credentials",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+        # The secret travels in the request body only, never in a process argv that ps can read.
+        response = requests.post(
+            TOKEN_URL.format(tenant_id=tenant_id),
+            data={
+                "client_id": secret["appId"],
+                "client_secret": secret["password"],
+                "scope": "https://graph.microsoft.com/.default",
+                "grant_type": "client_credentials",
+            },
             timeout=120,
         )
-        if response.returncode != 0:
-            raise RuntimeError(response.stderr.strip() or "app token request failed.")
-        payload = json.loads(response.stdout)
+        if not response.ok:
+            raise RuntimeError(f"app token request failed with HTTP {response.status_code}.")
+        payload = response.json()
         payload["tokenType"] = payload.get("token_type")
     else:
         command = [
@@ -90,9 +93,9 @@ def main(argv: list[str]) -> int:
     token = payload.get("accessToken") or payload.get("access_token") or ""
     claims = decode_claims(token)
     if args.write_env:
-        args.write_env.parent.mkdir(parents=True, exist_ok=True)
-        args.write_env.write_text(f"AZURE_ACCESS_TOKEN={token}\n", encoding="utf-8")
-        os.chmod(args.write_env, 0o600)
+        if not args.write_env.parent.exists():
+            ensure_private_dir(args.write_env.parent)
+        write_owner_only(args.write_env, f"AZURE_ACCESS_TOKEN={token}\n")
     result = {
         "generatedAt": utc_now(),
         "tenantId": args.tenant_id,
@@ -109,7 +112,8 @@ def main(argv: list[str]) -> int:
             "wids": claims.get("wids", []),
         },
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    if not args.out.parent.exists():
+        ensure_private_dir(args.out.parent)
     args.out.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
