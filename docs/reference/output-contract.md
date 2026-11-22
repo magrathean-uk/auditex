@@ -374,10 +374,14 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 `model_assessment.json` is an optional root artefact written by `auditex assess`.
 Assessment is rules only: the model layer is removed and nothing is called. Current outputs use
 `endpoint_host: "none"`, `model_name: "rules-only"` and omit `serving`.
-Its schema is `schemas/model_assessment.schema.json` (version `2026-11-05`), listed
-by the schema manifest and checked when present by bundle validation. The known
-older versions `2026-10-27`, `2026-10-27.1`, `2026-10-28` and `2026-10-29` use their
-byte-preserved, date-named schema files; `2026-10-29` is the most recent of these.
+Its schema is `schemas/model_assessment.schema.json` (version `2026-11-22`), listed
+by the schema manifest and checked when present by bundle validation. `2026-11-22` is
+`2026-11-05` plus the optional projection-section field `rule_view` (`adapter` or `variant`),
+which names the value-rule view still built for a `not_collected` section; nothing else differs,
+and both versions are validated by the same rules. The known older versions `2026-10-27`,
+`2026-10-27.1`, `2026-10-28`, `2026-10-29` and `2026-11-05` use their byte-preserved,
+date-named schema files; `2026-11-05` is the most recent of these and never carries `rule_view`.
+Earlier Auditex releases reject a `2026-11-22` file on its version.
 Malformed or unknown-version optional assessments produce warnings and never change
 the deterministic gate result. It contains
 `generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention

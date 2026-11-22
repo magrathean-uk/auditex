@@ -151,3 +151,21 @@ def test_r003_malformed_built_in_section_does_not_block_a_covering_rule(policy_i
     assert _answer(policy_id, _safelinks(rules, [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}], built_in)) == ("met", "policy_flags_ok")
     record = assess(policy_id, _safelinks([], [SL_BUILTIN], built_in))
     assert (record["cell"], record["cited_sections"]) == ("section_not_a_list", ["built_in_protection_rules"])
+
+
+# ---- R106: the output contract names the version current outputs carry; rule_view is never renamed ----
+
+
+def test_r106_output_contract_names_the_written_schema_version():
+    import re
+    from pathlib import Path
+
+    import auditex.rule_assessment as rule_assessment
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "docs/reference/output-contract.md").read_text(encoding="utf-8")
+    named = re.search(r"Its schema is `schemas/model_assessment\.schema\.json` \(version `([^`]+)`\)", text).group(1)
+    schema = json.loads((root / "schemas/model_assessment.schema.json").read_text(encoding="utf-8"))
+    assert named == rule_assessment.SCHEMA_VERSION == schema["properties"]["schema_version"]["const"]
+    paragraph = text[text.index("Its schema is `schemas/model_assessment.schema.json`"):]
+    paragraph = paragraph[:paragraph.index("\n\n")]
+    assert "`2026-11-05`" in paragraph and "rule_view" in paragraph
