@@ -710,11 +710,14 @@ class GoogleDnsPostureCollector:
 
 
 _URL = re.compile(r"\b(https?)://([^/\s'\"<>?#]+)[^\s'\"<>]*")
+# A failed connection names the request path alone (requests: "Max retries exceeded with url: /path?query").
+_BARE_URL_PATH = re.compile(r"\b(url:\s*)/[^\s'\"<>]*", re.IGNORECASE)
 
 
 def _host_only(text: str) -> str:
     """``text`` with every URL cut to its scheme and host: a configured resolver's path can hold a private profile id."""
-    return _URL.sub(lambda match: f"{match.group(1)}://{match.group(2)}", text)
+    text = _URL.sub(lambda match: f"{match.group(1)}://{match.group(2)}", text)
+    return _BARE_URL_PATH.sub(lambda match: f"{match.group(1)}/", text)
 
 
 def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: list[dict[str, Any]]) -> None:
