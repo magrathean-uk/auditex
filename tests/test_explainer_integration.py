@@ -31,7 +31,7 @@ FIX = ROOT / "tests/fixtures/explainer"
 PIN = FIX / "renderer/catalogue-v391-fixture.json.gz"
 CAT = json.loads(gzip.decompress(PIN.read_bytes()))
 # The pin with review lane rules-followup's documented SS 7.x Built-In deviation (explainer_checks/review_overlay.py).
-REVIEWED = review_catalogue(CAT, json.loads((ROOT / "configs/scuba-value-rules.json").read_text()))
+REVIEWED = review_catalogue(CAT)
 T = textkit.expand_template(json.loads((ROOT / "configs/explainer-template.json").read_text()))
 
 
@@ -241,7 +241,21 @@ def test_residual_differences_are_only_the_documented_classes():
 
 
 def test_product_catalogue_is_v391_and_agrees_with_the_independent_pin_on_every_decision():
+    _assert_agrees_with_the_reviewed_pin(json.loads((ROOT / "configs/scuba-value-rules.json").read_text()))
+
+
+@pytest.mark.parametrize("pid", R003_POLICIES)
+@pytest.mark.parametrize("cell", R003_ADDED)
+def test_a_changed_added_cell_disagrees_with_the_reviewed_pin(pid, cell):
+    # Bot review wave 2, item 62: the overlay once copied the shipped added cells, so a changed verdict still agreed.
     product = json.loads((ROOT / "configs/scuba-value-rules.json").read_text())
+    entry = product["policies"][pid]["cells"][cell]
+    entry["verdict"] = "met" if entry["verdict"] != "met" else "not_met"
+    with pytest.raises(AssertionError):
+        _assert_agrees_with_the_reviewed_pin(product)
+
+
+def _assert_agrees_with_the_reviewed_pin(product):
     assert product["spec_version"] == "v3.9.1"
     assert set(product["policies"]) == set(CAT)
     assert "rule_failure" not in product and "cell_contracts" not in product
@@ -255,6 +269,8 @@ def test_product_catalogue_is_v391_and_agrees_with_the_independent_pin_on_every_
                 assert cell.get(key) == expected.get(key), (pid, name, key)
             if name != "section_not_collected":
                 assert cell["cited"] == expected["cited"], (pid, name)
+            if pid in R003_POLICIES and name in R003_ADDED:
+                assert cell == expected, (pid, name)       # the reviewed overlay pins each added cell in full
 
 
 @pytest.mark.parametrize("code", shared_exceptions())

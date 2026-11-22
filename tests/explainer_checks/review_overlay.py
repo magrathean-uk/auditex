@@ -2,8 +2,10 @@
 
 Review lane rules-followup (R003, R099): SS 7.1 to 7.3 read built_in_protection_rules, retire no_rules_configured and
 add the three Built-In cells SS 1.3 already has. The pin predates this; tests that compare the product with the pin
-compare it with ``review_catalogue(pin, product)``, and ``test_review_overlay_is_exactly_the_documented_deviation``
-proves the overlay changes nothing else.
+compare it with ``review_catalogue(pin)``.
+
+Every value the overlay adds is written out here, never read from the shipped catalogue, so a changed shipped cell
+disagrees with the reviewed pin instead of being copied into it (bot review wave 2, item 62).
 """
 from __future__ import annotations
 
@@ -13,21 +15,51 @@ R003_POLICIES = tuple(f"MS.SECURITYSUITE.7.{n}v1" for n in (1, 2, 3))
 R003_RETIRED = ("no_rules_configured",)
 R003_ADDED = ("builtin_rule_unusable", "no_policy_covers_all", "partial_tier_may_cover")
 R003_SECTION = "built_in_protection_rules"
+R003_SECTIONS = ["atp_policy_rules", "built_in_protection_rules", "defender_license", "protection_policy_rules",
+                 "safe_links_policies", "safe_links_rules"]
+R003_WHAT = {"MS.SECURITYSUITE.7.1v1": "URL comparison with a block-list",
+             "MS.SECURITYSUITE.7.2v1": "direct download link scanning",
+             "MS.SECURITYSUITE.7.3v1": "user click tracking"}
 
 
-def review_catalogue(pin: dict, product: dict) -> dict:
+def _unusable(kind: str, recommendation: str) -> dict:
+    return {"evidence_kind": kind, "limitations": ["evidence_unusable", f"evidence_unusable:<section>:{kind}"],
+            "recommendations": [recommendation], "verdict": "not_assessed"}
+
+
+def r003_added_cells(policy_id: str) -> dict:
+    """The three Built-In cells SS 7.1 to 7.3 add, as reviewed."""
+    what = R003_WHAT[policy_id]
+    return {
+        "builtin_rule_unusable": {
+            "cited": [R003_SECTION], "reason_code": "data_unusable_builtin_rule",
+            "reason_texts": ["Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy "
+                             "was not assessed."],
+            **_unusable("unusable", "recollect_unusable_evidence")},
+        "no_policy_covers_all": {
+            "cited": list(R003_SECTIONS), "reason_code": "no_policy_covers_all_recipients",
+            "reason_texts": ["Requirement not met: the Built-In Protection rule excludes some recipients and no Safe Links "
+                             f"rule or preset covers them, so they get no Safe Links policy ({what})."],
+            "verdict": "not_met"},
+        "partial_tier_may_cover": {
+            "cited": [R003_SECTION, "safe_links_rules"], "reason_code": "data_unusable_partial_tier_may_cover",
+            "reason_texts": ["Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links "
+                             "rule exists that may cover the excluded recipients; the policy was not assessed."],
+            **_unusable("undecidable", "review_policy_against_baseline_text")},
+    }
+
+
+def review_catalogue(pin: dict) -> dict:
     """The pin with the documented deviation applied: sections, full-list citations, the not-a-list variant and the
-    added and retired cells of SS 7.1 to 7.3 come from the product catalogue; every other value stays the pin's."""
-    policies = product.get("policies", product)
+    added and retired cells of SS 7.1 to 7.3, all written out above; every other value stays the pin's."""
     out = deepcopy(pin)
     for pid in R003_POLICIES:
-        row, shipped = out[pid], policies[pid]
+        row = out[pid]
         old = list(row["sections"])
-        row["sections"] = list(shipped["sections"])
+        row["sections"] = list(R003_SECTIONS)
         for cell in R003_RETIRED:
             del row["cells"][cell]
-        for cell in R003_ADDED:
-            row["cells"][cell] = deepcopy(shipped["cells"][cell])
+        row["cells"].update(r003_added_cells(pid))
         for cell in row["cells"].values():
             if cell.get("cited") == old:
                 cell["cited"] = list(row["sections"])
