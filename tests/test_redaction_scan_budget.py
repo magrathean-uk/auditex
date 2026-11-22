@@ -147,6 +147,14 @@ def test_the_caps_cover_250000_users_with_non_latin_names_and_long_addresses(
     assert not redaction.context_for_run(root).incomplete
 
 
+def test_the_run_file_reader_accepts_every_normalised_file_the_redaction_scan_accepts() -> None:
+    # Review of repair round 2 (R090): diff, compare and the local report read normalised files through
+    # ``read_run_file``; a cap lower than the scan's drops or refuses a users section the shareable output accepts.
+    from azure_tenant_audit import run_files
+
+    assert run_files._limit_for("normalized/users.json") >= redaction._MAX_FILE_BYTES
+
+
 @pytest.fixture
 def low_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(redaction, "_MAX_FILE_BYTES", 100)

@@ -309,7 +309,7 @@ raise `FileNotFoundError`.
 Control files, including manifests, summaries, validation and AI context,
 have a 32 MiB limit (`MAX_RUN_FILE_BYTES`). The pseudonym key is read with an
 exact 32-byte bound instead: any other size is `damaged`. Evidence and other data
-files have a 256 MiB limit (`MAX_RUN_DATA_BYTES`). Hashing and copies use
+files have a 512 MiB limit (`MAX_RUN_DATA_BYTES`). Hashing and copies use
 guarded streams. Guarded reads during writer finalisation have no size cap.
 Bundle hash manifest generation and verification stream without a size cap;
 they still reject unsafe file types and links. Identity discovery has its own
