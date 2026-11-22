@@ -111,7 +111,8 @@ def test_r055_oauth_mailbox_read_skips_the_delegation_only_delegates_list() -> N
     result = GoogleGmailSettingsCollector().run({"client": client, "users": []})
     assert "delegates" not in settings.calls
     mailbox = next(row for row in result.coverage if row["name"] == "mailboxSettings:me")
-    assert mailbox["status"] == "ok"
+    # Not a failed read: a gap these credentials cannot close (repair round 2).
+    assert mailbox["status"] == "partial" and mailbox["error_class"] == "subject_scope"
     # Recorded as not read (never as no delegates), so the report names the gap.
     payload = result.payload["mailboxSettings"]["value"][0]
     assert payload["delegates_error"]["error_class"] == "subject_scope"

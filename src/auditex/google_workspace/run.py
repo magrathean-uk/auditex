@@ -212,7 +212,13 @@ def build_google_capability_rows(
         elif failures:
             # Only a read refused outright is a scope block; a read that partly succeeded proves the scopes work.
             classes = {str(item.get("error_class") or "") for item in failures if item.get("status") == "failed"}
-            if classes & {"insufficient_permissions", "unauthenticated"}:
+            # A read of this collector that returned data proves its token carries the collector's scopes (one
+            # token per collector), so another read refused beside it is a role limit, not a missing scope.
+            scopes_proven = any(
+                item.get("status") in {"ok", "partial"} and int(item.get("item_count") or 0) > 0
+                for item in seen_by_collector.get(name, [])
+            )
+            if classes & {"insufficient_permissions", "unauthenticated"} and not scopes_proven:
                 row_status = "blocked_by_scope"
                 row_reason = "runtime_permission_block"
                 # A refused token whose scopes were checked one by one names only the ones actually missing.
@@ -225,7 +231,11 @@ def build_google_capability_rows(
                 missing_permissions = list(dict.fromkeys(named)) or required
             else:
                 row_status = "partial"
-                row_reason = "runtime_endpoint_block"
+                row_reason = (
+                    "runtime_permission_block"
+                    if classes & {"insufficient_permissions", "unauthenticated"}
+                    else "runtime_endpoint_block"
+                )
         if auth_mode == "offline" and not failures:
             # A replay observed nothing on a tenant: it is an offline sample, not an exact-scope read.
             row_status = "offline_sample"

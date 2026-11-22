@@ -81,6 +81,10 @@ def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str
         if isinstance(error := payload.get(f"{name}_error"), dict) and error
     }
     if not failures:
+        if skipped:
+            # A setting these credentials cannot read (delegates under OAuth) is a gap, never a complete read.
+            names = ", ".join(sorted(skipped))
+            return "partial", "subject_scope", f"Gmail settings not read with these credentials: {names}."
         return "ok", None, None
     classes = Counter(str(error.get("error_class") or "client_error") for error in failures.values())
     error_class = classes.most_common(1)[0][0]

@@ -170,13 +170,15 @@ def test_r055_some_settings_reads_failing_make_the_mailbox_row_partial() -> None
     assert result.payload["mailboxSettings"]["value"][0]["userEmail"] == "me"
 
 
-def test_r055_clean_settings_reads_stay_ok() -> None:
+def test_r055_clean_settings_reads_leave_only_the_oauth_delegates_gap() -> None:
     from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
 
     client = _gmail_client(_GmailSettings({}))
     result = GoogleGmailSettingsCollector().run({"client": client, "users": []})
-    assert [(row["name"], row["status"]) for row in result.coverage] == [("mailboxSettings:me", "ok")]
-    assert result.status == "ok"
+    # No read failed; the one gap is delegates, which an OAuth sign-in cannot list (repair round 2).
+    assert [(row["name"], row["status"], row.get("error_class")) for row in result.coverage] == [
+        ("mailboxSettings:me", "partial", "subject_scope")
+    ]
 
 
 # ---- R115: users are read through a field mask, so recovery contacts never reach the bundle --------------------
