@@ -182,6 +182,7 @@ def finalize_bundle_contract(
     findings: list[dict[str, Any]],
     trust_coverage_rows: list[dict[str, Any]] | None = None,
     trust_selected_collectors: list[str] | None = None,
+    doh_endpoint: str | None = None,
 ) -> dict[str, Any]:
     """Write the stable post-run contract artifacts through one path.
 
@@ -231,6 +232,7 @@ def finalize_bundle_contract(
             events=metadata.get("data_handling_events") if isinstance(metadata.get("data_handling_events"), list) else [],
             response_execute=bool(metadata.get("response_execute")),
             response_allow_write=bool(metadata.get("response_allow_write")),
+            doh_endpoint=doh_endpoint,
             collection_notices=(
                 metadata.get("data_handling_notices") if isinstance(metadata.get("data_handling_notices"), list) else None
             ),

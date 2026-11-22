@@ -44,3 +44,61 @@ def test_the_chosen_resolver_is_used(endpoints, monkeypatch) -> None:
     monkeypatch.delenv(DOH_ENDPOINT_ENV)
     DnsPostureCollector().run({"public_lookups": False})
     assert endpoints == ["https://dns.example/dns-query", "https://env.example/dns-query", DEFAULT_DOH_ENDPOINT]
+
+
+# Bot wave 2 item 13: a transport failure's library text (which can repeat the configured resolver URL, whose path can
+# hold an account token) never reaches the DoH error, the raw posture's resolver_error or the coverage rows.
+
+_TOKEN = "acct-token-zz9"
+_ENDPOINT = f"https://dns.corp.example/{_TOKEN}"
+
+
+class _FailingSession:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    def get(self, url: str, **_kwargs):
+        raise self.exc
+
+
+class _Domains:
+    def get_all(self, _path: str, params=None):
+        return [{"id": "contoso.example", "isVerified": True}]
+
+
+def _http_error() -> Exception:
+    import requests
+
+    response = requests.Response()
+    response.status_code = 503
+    response.reason = "Service Unavailable"
+    response.url = f"{_ENDPOINT}?name=contoso.example&type=TXT"
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        return exc
+    raise AssertionError("raise_for_status did not raise")
+
+
+@pytest.mark.parametrize("make_exc, detail", [
+    (_http_error, "HTTP 503"),
+    (lambda: OSError(f"Max retries exceeded with url: /{_TOKEN}?name=contoso.example (Caused by {_ENDPOINT})"),
+     "request failed"),
+])
+def test_w2_13_doh_transport_diagnostics_keep_only_the_resolver_host(make_exc, detail) -> None:
+    import json
+
+    from azure_tenant_audit.dns_lookup import DohClient, DohError
+
+    client = DohClient(session=_FailingSession(make_exc()), endpoint=_ENDPOINT)
+    with pytest.raises(DohError) as caught:
+        client.query_detailed("contoso.example", "TXT")
+    message = str(caught.value)
+    assert _TOKEN not in message
+    assert "https://dns.corp.example" in message and detail in message
+
+    result = DnsPostureCollector().run({"client": _Domains(), "dns_resolver": client, "public_lookups": False})
+    dumped = json.dumps({"coverage": result.coverage, "payload": result.payload, "message": result.message}, default=str)
+    assert _TOKEN not in dumped
+    failed = [row for row in result.coverage if row.get("error_class") == "dns_resolver_error"]
+    assert failed and all("dns.corp.example" in str(row["error"]) for row in failed)

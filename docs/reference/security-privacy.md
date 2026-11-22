@@ -361,22 +361,33 @@ can pass `public_lookups: False` in the collector
 context to skip the HTTPS reads.
 
 The DNS-over-HTTPS resolver is `https://cloudflare-dns.com/dns-query` unless
-`--doh-endpoint URL` (on `auditex run`, `azure-tenant-audit` and
-`auditex guided-run`) or the environment variable `AUDITEX_DOH_ENDPOINT` names
+`--doh-endpoint URL` (on `auditex run`, `azure-tenant-audit`,
+`auditex guided-run` and `auditex google run`) or the environment variable `AUDITEX_DOH_ENDPOINT` names
 another; the option wins over the variable, and a blank variable means the
 default. Only a plain `https://host[:port]/path` is accepted: no credentials,
-query string or fragment, and a refused value is never repeated in messages
+query string or fragment, no character outside a URL's set (a backslash, a space,
+a non-ASCII letter) and a host that is a DNS name or an IP address, so the host
+shown is the host asked; a refused value is never repeated in messages
 because it may carry a token. The resolver must speak the DoH JSON API
 (`application/dns-json`, `name` and `type` parameters). The console notice,
-`data-handling.json` and the handoff name the resolver in use, and
-`data-handling.json` records its host as `dns_resolver`.
+`data-handling.json` and the handoff name the resolver in use, a configured
+one by its host alone (its path may carry a token), and `data-handling.json`
+records that host as `dns_resolver`. A failed lookup is described by the
+resolver's `https://host` (an IPv6 address in brackets, a port only when it is
+not 443), the record asked for and the HTTP status or error
+class only, never the transport library's text, and the DNS coverage gap of
+either provider names that host; a gap built from an older diagnostic keeps
+only the same display form, never a user name, path or query. While a DoH
+request runs, the `urllib3` and `requests` loggers record nothing, so a
+DEBUG log never holds the resolver's path or query.
 
 Google Workspace runs with the `google_dns_posture` collector (in the
 `core-security`, `mail` and `everything` presets) send each verified domain
 name to the same resolver: SPF, DMARC, MTA-STS, TLS-RPT and BIMI TXT lookups
 and up to six DKIM selector names. Only domain names are sent, and a Google run
-makes no HTTPS read of the domains. A Google run reads the resolver only from
-`AUDITEX_DOH_ENDPOINT`; it has no `--doh-endpoint` option. Deselect the
+makes no HTTPS read of the domains. A Google run takes the resolver from
+`--doh-endpoint URL`, else `AUDITEX_DOH_ENDPOINT`, and names only its host in
+the notice and `data-handling.json`. Deselect the
 collector with `--exclude google_dns_posture`; the `identity` and
 `collaboration` presets omit it. The run prints the notice on stderr before
 collection and writes it to `data-handling.json` and the report.

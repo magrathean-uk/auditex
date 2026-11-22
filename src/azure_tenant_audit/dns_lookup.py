@@ -5,6 +5,9 @@ Used by the dns_posture collector to evaluate SPF, DKIM, DMARC, MTA-STS, TLS-RPT
 """
 from __future__ import annotations
 
+import contextvars
+import ipaddress
+import logging
 import os
 import re
 from collections.abc import Iterable, Mapping
@@ -20,10 +23,80 @@ DEFAULT_TIMEOUT_SECONDS = 5.0
 DOH_ENDPOINT_ENV = "AUDITEX_DOH_ENDPOINT"
 
 
+# Every character an RFC 3986 URL may carry. Anything else (a backslash, a space, a control or non-ASCII character)
+# is read differently by Requests (urllib3) and urllib.parse, so the host shown could differ from the host asked.
+_URL_CHARACTERS = re.compile(r"[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
+_HOST_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+class ResolverAddress(NamedTuple):
+    """The parts of a resolver URL that may be shown: never its user info, path, query or fragment (review R164)."""
+
+    scheme: str
+    host: str          # a DNS name in lower case, an IPv4 address or a bracketed IPv6 address
+    port: int | None   # None for the scheme's default port
+
+    @property
+    def origin(self) -> str:
+        return f"{self.scheme}://{self.host}{f':{self.port}' if self.port is not None else ''}"
+
+    @property
+    def host_port(self) -> str:
+        return self.host if self.port is None else f"{self.host}:{self.port}"
+
+
+def _display_host(host: str) -> str | None:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return f"[{address.compressed}]" if address.version == 6 else address.compressed
+    name = host.lower().rstrip(".")
+    if not name or len(name) > 253 or not all(_HOST_LABEL.fullmatch(label) for label in name.split(".")):
+        return None
+    return name
+
+
+def doh_resolver_address(endpoint: object) -> ResolverAddress | None:
+    """The safe display parts of a resolver URL, or None when the value is not an http(s) URL with a plain host.
+
+    The one parser every place that shows or stores a resolver goes through: the run notices, data-handling.json,
+    DohClient errors, both providers' coverage rows and gap reasons built from older diagnostics.
+    """
+    text = str(endpoint or "").strip()
+    if not _URL_CHARACTERS.fullmatch(text):
+        return None
+    try:
+        parts = urlsplit(text)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    if scheme not in _DEFAULT_PORTS or not host:
+        return None
+    netloc_host = parts.netloc.rpartition("@")[2]
+    # An IPv6 address only between brackets: "https://2001:db8::53:8443" is not a host and port.
+    if ":" in host and not netloc_host.startswith("["):
+        return None
+    shown = _display_host(host)
+    if shown is None:
+        return None
+    return ResolverAddress(scheme, shown, None if port in (None, _DEFAULT_PORTS[scheme]) else port)
+
+
+def doh_resolver_display(endpoint: object) -> str | None:
+    """``scheme://host[:port]`` of a resolver URL (IPv6 bracketed, the default port left out), or None."""
+    address = doh_resolver_address(endpoint)
+    return address.origin if address else None
+
+
 def resolve_doh_endpoint(value: str | None = None, environ: Mapping[str, str] | None = None) -> str:
     """The DoH resolver for this run: an explicit option, else ``AUDITEX_DOH_ENDPOINT``, else Cloudflare.
 
-    Only a plain ``https://host/path`` URL is accepted: no other scheme, no user name or password and no fragment.
+    Only a plain ``https://host/path`` URL is accepted: no other scheme, no user name or password, no query and no
+    fragment, and nothing that Requests would read as a different host from the one Auditex shows.
     The error never repeats the value, which may carry a token.
     """
     chosen = value
@@ -32,25 +105,66 @@ def resolve_doh_endpoint(value: str | None = None, environ: Mapping[str, str] | 
         if chosen is None or not chosen.strip():
             return DEFAULT_DOH_ENDPOINT                      # an unset or blank variable means the default
     text = chosen.strip()
-    try:
-        parts = urlsplit(text)
-        host, _ = parts.hostname, parts.port                  # .port raises on a malformed port
-    except ValueError:
-        parts, host = None, None
+    address = doh_resolver_address(text)
+    netloc = urlsplit(text).netloc if address else ""
     # No query string either: the client adds its own parameters, and a token there would reach error messages.
-    if (parts is None or parts.scheme.lower() != "https" or not host or "@" in parts.netloc
-            or "?" in text or "#" in text):
+    if address is None or address.scheme != "https" or "@" in netloc or "?" in text or "#" in text:
         raise ValueError("The DNS-over-HTTPS endpoint must be a plain https:// URL with a host and path "
                          f"(option or {DOH_ENDPOINT_ENV}); no other scheme, credentials, query or fragment.")
     return text
 
 
+def doh_resolver_origin(endpoint: str) -> str | None:
+    """``https://host[:port]`` of a resolver URL: never its path, which can hold an account token, nor user info."""
+    return doh_resolver_display(endpoint)
+
+
 def doh_resolver_disclosure(endpoint: str) -> str:
-    """Notice wording for the resolver that receives the tenant's domain names; a query string is never shown."""
+    """Notice wording for the resolver that receives the tenant's domain names.
+
+    A configured resolver is named by its host (and a port that is not the default) alone: its path can hold an
+    account token (review R164).
+    """
     if endpoint == DEFAULT_DOH_ENDPOINT:
         return f"the public Cloudflare DNS-over-HTTPS resolver ({DEFAULT_DOH_ENDPOINT})"
-    parts = urlsplit(endpoint)
-    return f"the configured DNS-over-HTTPS resolver ({parts.scheme}://{parts.netloc}{parts.path})"
+    address = doh_resolver_address(endpoint)
+    return f"the configured DNS-over-HTTPS resolver at {address.host_port if address else 'a host that is not shown'}"
+
+
+# Requests and urllib3 log each request target (the resolver's path, which can hold a token, and the query) at DEBUG,
+# and urllib3 names the URL in its retry and redirect lines. While a DoH request runs, their records are dropped.
+_DOH_REQUEST_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar("auditex_doh_request", default=False)
+_TRANSPORT_LOGGER_PREFIXES = ("urllib3", "requests")
+
+
+class _DohTransportLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not _DOH_REQUEST_ACTIVE.get()
+
+
+_DOH_TRANSPORT_LOG_FILTER = _DohTransportLogFilter()
+
+
+def _guard_transport_loggers() -> None:
+    """Attach the filter to every transport logger, including any created since the last request."""
+    names = {"urllib3", "urllib3.connectionpool", "urllib3.connection", "urllib3.poolmanager", "urllib3.response",
+             "urllib3.util.retry", "requests"}
+    names.update(name for name in list(logging.root.manager.loggerDict)
+                 if name.split(".", 1)[0] in _TRANSPORT_LOGGER_PREFIXES)
+    for name in names:
+        logger = logging.getLogger(name)
+        if _DOH_TRANSPORT_LOG_FILTER not in logger.filters:
+            logger.addFilter(_DOH_TRANSPORT_LOG_FILTER)
+
+
+def _transport_detail(exc: BaseException) -> str:
+    """A bounded description of a failed DoH request: the HTTP status or the error class, never the library text,
+    which can repeat the resolver URL and so a token in its path."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int) and not isinstance(status, bool):
+        return f"HTTP {status}"
+    return f"request failed: {type(exc).__name__}"
 
 
 # DNS response codes. NOERROR with no answer and NXDOMAIN are definite statements that the record is absent; every
@@ -80,13 +194,19 @@ class DohClient:
     """Minimal DNS-over-HTTPS client returning record data strings."""
 
     session: Any = field(default_factory=requests.Session)
-    endpoint: str = field(default_factory=resolve_doh_endpoint)
+    endpoint: str = field(default_factory=resolve_doh_endpoint, repr=False)  # the path can hold a token
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
     def query(self, name: str, record_type: str) -> list[str]:
         return self.query_detailed(name, record_type).records
 
+    def _origin(self) -> str:
+        return doh_resolver_display(self.endpoint) or "the DNS-over-HTTPS resolver"
+
     def query_detailed(self, name: str, record_type: str) -> DnsAnswer:
+        # The full URL lives only in the request itself: no transport logger records it meanwhile.
+        _guard_transport_loggers()
+        quiet = _DOH_REQUEST_ACTIVE.set(True)
         try:
             response = self.session.get(
                 self.endpoint,
@@ -97,9 +217,14 @@ class DohClient:
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:  # noqa: BLE001
-            raise DohError(f"DoH query failed for {record_type} {name}: {exc}") from exc
+            # Bot review wave 2 item 13: the library text can carry the endpoint URL, so only the resolver's origin
+            # and a bounded detail are kept.
+            raise DohError(f"DoH query failed for {record_type} {name} at {self._origin()} "
+                           f"({_transport_detail(exc)})") from None
+        finally:
+            _DOH_REQUEST_ACTIVE.reset(quiet)
         if not isinstance(payload, dict):
-            raise DohError(f"DoH response was not an object for {record_type} {name}")
+            raise DohError(f"DoH response from {self._origin()} was not an object for {record_type} {name}")
         # A response with no ``Status`` (or one that is not a number) is not a statement about the record: only an
         # explicit NOERROR or NXDOMAIN says "absent".
         status = payload.get("Status")
@@ -108,14 +233,15 @@ class DohClient:
                 raise ValueError("no status")
             rcode = int(status)
         except (TypeError, ValueError) as exc:
-            raise DohError(f"DoH response carried no usable status for {record_type} {name}") from exc
+            raise DohError(f"DoH response from {self._origin()} carried no usable status for {record_type} {name}") from exc
         if payload.get("TC") is True:
             # The resolver cut the answer short: records may be missing from it, so nothing can be called absent.
-            raise DohError(f"DoH response was truncated (TC) for {record_type} {name}")
+            raise DohError(f"DoH response from {self._origin()} was truncated (TC) for {record_type} {name}")
         if rcode not in _ABSENT_RCODES:
             # SERVFAIL (2), REFUSED (5) and the other failure codes say the resolver could not answer; they
             # are not evidence that the record does not exist, so the domain reads unknown, never "missing".
-            raise DohError(f"DoH resolver could not answer {record_type} {name}: {_RCODE_NAMES.get(rcode, f'rcode {rcode}')}")
+            raise DohError(f"DoH resolver at {self._origin()} could not answer {record_type} {name}: "
+                           f"{_RCODE_NAMES.get(rcode, f'rcode {rcode}')}")
         answer = payload.get("Answer") or []
         records: list[str] = []
         record_types: list[int | None] = []

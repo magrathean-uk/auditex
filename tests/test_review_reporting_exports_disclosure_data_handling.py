@@ -81,7 +81,7 @@ def test_r088_sharepoint_selection_reports_content_capable_scope_risk() -> None:
 def test_x1_dns_notice_names_the_configured_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(DOH_ENDPOINT_ENV, "https://doh.example.net/dns-query")
     text = " ".join(collector_activity_notices(["dns_posture"], "live"))
-    assert "the configured DNS-over-HTTPS resolver (https://doh.example.net/dns-query)" in text
+    assert "the configured DNS-over-HTTPS resolver at doh.example.net" in text and "/dns-query" not in text
     assert "Cloudflare" not in text
     summary = build_data_handling_summary(platform="m365", mode="live", plane="audit", collectors=["dns_posture"])
     assert summary["dns_resolver"] == "doh.example.net"
