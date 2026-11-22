@@ -69,7 +69,7 @@ def google_dependency_status() -> dict[str, Any]:
     if missing:
         from ..bootstrap import extra_install_command
 
-        hint = (f"Install Google extras with `{extra_install_command('google')}` "
+        hint = (f"Install Google extras with `{extra_install_command('google', for_record=True)}` "
                 "(google-auth, google-auth-oauthlib, google-api-python-client).")
     return {"available": not missing, "missing": missing, "install_hint": hint}
 

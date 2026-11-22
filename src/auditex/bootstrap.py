@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -43,19 +44,53 @@ def _extra_installed(extra: str) -> bool:
         return False
 
 
-def extra_install_command(extra: str) -> str:
+def _installed_from_file() -> str | None:
+    """The local wheel or sdist this Auditex was installed from (PEP 610 direct_url.json), or None for an index install."""
+    try:
+        from importlib.metadata import PackageNotFoundError, distribution
+
+        text = distribution("auditex").read_text("direct_url.json")
+    except (PackageNotFoundError, OSError, ValueError):
+        return None
+    try:
+        data = json.loads(text or "{}")
+    except ValueError:
+        return None
+    url = str(data.get("url") or "") if isinstance(data, dict) else ""
+    if not url.startswith("file:") or "dir_info" in data:
+        return None
+    from urllib.parse import unquote, urlparse
+
+    return unquote(urlparse(url).path) or None
+
+
+def extra_install_command(extra: str, *, for_record: bool = False) -> str:
     """The command that adds an optional extra to this Auditex, for the route it was installed by.
 
     A source checkout takes an editable install in its folder. A pipx install is reinstalled with the extras it
     already has plus the new one (pipx keeps only the extras named on its last install). Any other environment
-    installs through the interpreter that runs Auditex, never a bare `python` that may be another one.
+    installs through the interpreter that runs Auditex, never a bare `python` that may be another one. An Auditex
+    installed from a downloaded wheel or sdist names that file again, not the package index.
+
+    ``for_record`` gives text that may be written into a run bundle: it never names a local path (the interpreter or
+    the wheel file), only a neutral description of the same step.
     """
     if is_source_checkout():
         return f"python -m pip install -e '.[{extra}]'"
-    if (Path(sys.prefix) / "pipx_metadata.json").is_file():
-        extras = sorted({name for name in _EXTRA_MODULES if _extra_installed(name)} | {extra})
-        return f'pipx install --force "auditex[{",".join(extras)}]"'
-    return f"{sys.executable} -m pip install 'auditex[{extra}]'"
+    pipx = (Path(sys.prefix) / "pipx_metadata.json").is_file()
+    extras = ",".join(sorted({name for name in _EXTRA_MODULES if _extra_installed(name)} | {extra})) if pipx else extra
+    local_file = _installed_from_file()
+    if local_file and for_record:
+        local_file = "<downloaded auditex wheel>"
+    if local_file:
+        spec = shlex.quote(f"{local_file}[{extras}]")
+    else:
+        spec = f'"auditex[{extras}]"' if pipx else f"'auditex[{extras}]'"
+    if pipx:
+        return f"pipx install --force {spec}"
+    if for_record:
+        return f"python -m pip install {spec} (with the Python that runs Auditex)"
+    return f"{shlex.quote(sys.executable)} -m pip install {spec}"
 
 
 def detect_package_manager() -> str | None:

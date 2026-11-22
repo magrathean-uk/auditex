@@ -9,6 +9,8 @@ import pytest
 
 from auditex import bootstrap
 
+_REAL_INSTALLED_FROM_FILE = getattr(bootstrap, "_installed_from_file", None)
+
 
 @pytest.fixture
 def installed_package(monkeypatch, tmp_path: Path) -> Path:
@@ -16,6 +18,7 @@ def installed_package(monkeypatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(bootstrap, "is_source_checkout", lambda: False)
     monkeypatch.setattr(sys, "prefix", str(tmp_path))
     monkeypatch.setattr(bootstrap, "_extra_installed", lambda extra: False, raising=False)
+    monkeypatch.setattr(bootstrap, "_installed_from_file", lambda: None, raising=False)
     return tmp_path
 
 
@@ -172,3 +175,62 @@ def test_the_install_guide_shows_the_website_commands_and_is_linked_and_shipped(
     assert "](guides/install-guide.md)" in (root / "docs/index.md").read_text(encoding="utf-8")
     patterns = [p for area in SHIPPED_CONTENT_AREAS for p in area.package_patterns]
     assert any(fnmatch("docs/guides/install-guide.md", p) for p in patterns)
+
+
+# -- Repair round 1 on PR #176.
+
+# Review blocker 1: with the Google libraries missing in a plain environment, the install hint carried the running
+# interpreter's path, and the blocked probe wrote it into toolchain-readiness.json and probe-result.json.
+def test_a_blocked_google_probe_writes_no_interpreter_path_into_the_bundle(installed_package: Path, monkeypatch,
+                                                                         capsys) -> None:
+    from auditex.google_workspace import auth
+    from auditex.google_workspace.run import GoogleRunConfig, run_google_probe
+
+    interpreter = installed_package / "my env" / "bin" / "python3"
+    monkeypatch.setattr(sys, "executable", str(interpreter))
+    monkeypatch.setattr(auth, "_module_available", lambda module: False)
+    out = installed_package / "out"
+    rc = run_google_probe(GoogleRunConfig(
+        tenant_name="Example", out=out, run_name="blocked", domain="example.com", customer_id="C123",
+        subject="admin@example.com", service_account_key=installed_package / "sa.json", collectors="google_directory",
+    ))
+    capsys.readouterr()
+    assert rc == 2
+    leaks = [path.name for path in (out / "Example-blocked").rglob("*")
+             if path.is_file() and "my env" in path.read_text(encoding="utf-8", errors="replace")]
+    assert leaks == []
+    hint = auth.google_dependency_status()["install_hint"]
+    assert "auditex[google]" in hint and "my env" not in hint
+
+
+# Review blocker 2: an Auditex installed from a downloaded wheel was sent to the package index for the MCP extra,
+# and an interpreter path with a space broke the pasted command.
+def test_the_mcp_hint_quotes_an_interpreter_path_with_a_space(installed_package: Path, monkeypatch, capsys) -> None:
+    import shlex
+
+    interpreter = "/opt/my tools/auditex env/bin/python3"
+    monkeypatch.setattr(sys, "executable", interpreter)
+    assert bootstrap.run_setup(with_mcp=True) == 0
+    line = next(row for row in capsys.readouterr().out.splitlines() if "MCP server:" in row)
+    assert shlex.split(line.split("MCP server:", 1)[1]) == [interpreter, "-m", "pip", "install", "auditex[mcp]"]
+
+
+def test_a_wheel_install_hint_names_the_wheel_not_the_package_index(installed_package: Path, monkeypatch) -> None:
+    import shlex
+
+    wheel = "/home/me/Down loads/auditex-1.0.0-py3-none-any.whl"
+    direct_url = '{"url": "file:///home/me/Down%20loads/auditex-1.0.0-py3-none-any.whl", "archive_info": {}}'
+
+    class _Dist:
+        def read_text(self, name: str) -> str | None:
+            return direct_url if name == "direct_url.json" else None
+
+    monkeypatch.setattr("importlib.metadata.distribution", lambda name: _Dist())
+    monkeypatch.setattr(bootstrap, "_installed_from_file", _REAL_INSTALLED_FROM_FILE, raising=False)
+    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+    assert shlex.split(bootstrap.extra_install_command("mcp")) == ["/usr/bin/python3", "-m", "pip", "install",
+                                                                   f"{wheel}[mcp]"]
+    (installed_package / "pipx_metadata.json").write_text("{}", encoding="utf-8")
+    assert shlex.split(bootstrap.extra_install_command("mcp")) == ["pipx", "install", "--force", f"{wheel}[mcp]"]
+    # What a run bundle may hold names no local path.
+    assert "/home/me" not in bootstrap.extra_install_command("mcp", for_record=True)

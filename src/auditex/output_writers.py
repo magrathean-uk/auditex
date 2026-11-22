@@ -106,7 +106,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("auditex.notify:_github_search_existing_issue", "private", "GET carrying the repository and the fingerprint digest only"),
     SinkEntry("auditex.google_workspace.auth:build_google_credentials", "private", "operator's Google credential file (0600)"),
     SinkEntry("auditex.bootstrap:print_doctor_report", "private", "operator terminal: toolchain status; diagnostics masked by the command-output boundary"),
-    SinkEntry("auditex.bootstrap:run_setup", "private", "operator terminal: the install command for an optional extra (fixed text plus the interpreter path)"),
+    SinkEntry("auditex.bootstrap:run_setup", "private", "operator terminal: the install command for an optional extra (fixed text plus the interpreter and wheel paths)"),
     SinkEntry("auditex.cli:_emit_assessment", "private", "operator-supplied assessment re-emitted to the operator; not run evidence"),
     SinkEntry("auditex.cli:_emit_gate_result", "private", "operator terminal and the operator's own CI log: gate verdict and ids (open item for product)"),
     SinkEntry("auditex.cli:_gate_run_refusal", "private", "operator terminal and CI: fixed blocked gate JSON, with no refused paths or values"),
