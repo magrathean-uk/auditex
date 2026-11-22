@@ -351,6 +351,18 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
         rows = []
         status = "failed"
         error_class, error = classify_google_error(exc)
+    page_error = getattr(rows, "page_error", None)
+    if status == "ok" and isinstance(page_error, Exception):
+        # A later page failed after its retries: what was read is real, but the list is cut short.
+        status = "partial"
+        error_class, error = classify_google_error(page_error)
+    permission_errors = [item for item in getattr(rows, "permission_errors", None) or [] if isinstance(item, dict)]
+    if status == "ok" and permission_errors:
+        # Drive files whose sharing could not be read: their exposure is unknown, so the read is not complete.
+        classes = [str(item.get("error_class") or "client_error") for item in permission_errors]
+        status = "partial"
+        error_class = max(set(classes), key=classes.count)
+        error = f"Sharing of {len(permission_errors)} Drive files could not be read ({', '.join(sorted(set(classes)))})."
     return {
         "collector": collector,
         "name": name,

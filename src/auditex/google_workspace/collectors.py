@@ -720,9 +720,10 @@ def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: l
         classes = [str(item.get("error_class") or "client_error") for item in errors]
         error_class = max(set(classes), key=classes.count)
         status = "failed" if not reads else "partial"
+        # Error classes only: a request error names the file's id and the request URL.
         error = (
             f"Sharing of {len(errors)} of {len(errors) + reads} Drive files (shared-drive items or files the subject "
-            f"cannot share) could not be read, so their exposure is unknown: {errors[0].get('error')}"
+            f"cannot share) could not be read, so their exposure is unknown ({', '.join(sorted(set(classes)))})."
         )
     coverage.append(
         _coverage(
