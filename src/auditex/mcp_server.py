@@ -565,66 +565,97 @@ def _record_omitted_field(capped: dict[str, Any], omitted: dict[str, Any], key: 
         entry["more_fields"] += 1
 
 
+class _Measure:
+    """The summary's JSON size, kept as a running estimate as fields are dropped and re-measured exactly only when
+    the estimate says it fits, so capping a wide section stays linear (R025)."""
+
+    def __init__(self, capped: dict[str, Any], budget: int) -> None:
+        self.capped, self.budget = capped, budget
+        self.estimate = _json_size(capped)
+
+    def fits(self) -> bool:
+        if self.estimate > self.budget:
+            return False
+        self.estimate = _json_size(self.capped)
+        return self.estimate <= self.budget
+
+    def dropped(self, size: int) -> None:
+        self.estimate -= size
+
+
+def _drop_fields(capped: dict[str, Any], omitted: dict[str, Any], measure: _Measure, rows: list[tuple[int, str, str | None]]) -> bool:
+    for size, key, name in sorted(rows, key=lambda row: row[0], reverse=True):
+        if measure.fits():
+            return True
+        if name is None:
+            omitted[key] = _omitted_entry(capped, key, capped.pop(key), size)
+        else:
+            section = dict(capped[key])
+            section.pop(name)
+            capped[key] = section
+            _record_omitted_field(capped, omitted, key, name, size)
+        measure.dropped(size)
+    return measure.fits()
+
+
+def _drop_sections(capped: dict[str, Any], measure: _Measure, *, keep_identity: bool) -> bool:
+    keys = [
+        key for key in capped
+        if key not in _SUMMARY_CORE_KEYS
+        and not (keep_identity and isinstance(capped[key], dict) and _SUMMARY_IDENTITY_FIELDS & set(capped[key]))
+    ]
+    for key in sorted(keys, key=lambda item: _json_size(capped[item]), reverse=True):
+        if measure.fits():
+            return True
+        value = capped.pop(key)
+        size = _json_size(value)
+        record = capped["omitted_sections"]
+        if set(record) == {"sections"}:
+            record["sections"] += 1
+        else:
+            record[key] = _omitted_entry(capped, key, value, size)
+        measure.dropped(size)
+    return measure.fits()
+
+
 def _cap_kept_sections(capped: dict[str, Any], omitted: dict[str, Any], budget: int) -> dict[str, Any]:
     """Second stage of ``_cap_summary`` (R025): the kept sections alone are over ``budget`` (hundreds of coverage gaps
     repeated in the manifest, the summary and the run metadata). Drop their nested lists and mappings, largest first,
-    then their other fields, keeping each section's identity (tenant, run id, status); then, if still over, whole
-    sections. The result never exceeds ``budget``: the record of what was left out shrinks last of all.
+    then their other fields, keeping each section's identity (tenant, run id, status); then whole sections that carry
+    no identity. Only if that is not enough are the omitted record and the citations trimmed and, last, the identity
+    sections dropped. The result never exceeds ``budget``.
     """
     capped["omitted_sections"] = omitted
     capped["summary_truncated"] = True
+    measure = _Measure(capped, budget)
     nested: list[tuple[int, str, str | None]] = []
     for key, value in capped.items():
         if key in _SUMMARY_CORE_KEYS:
             continue
         if isinstance(value, dict):
             nested.extend(
-                (_json_size(item), key, name) for name, item in value.items() if isinstance(item, (dict, list)) and item
+                # The pair's size, key included, so the running estimate does not over-count what is left.
+                (_json_size({name: item}), key, name) for name, item in value.items() if isinstance(item, (dict, list)) and item
             )
         elif isinstance(value, list) and value:
-            nested.append((_json_size(value), key, None))
-    for size, key, name in sorted(nested, key=lambda row: row[0], reverse=True):
-        if _json_size(capped) <= budget:
-            return capped
-        if name is None:
-            omitted[key] = _omitted_entry(capped, key, capped.pop(key), size)
-            continue
-        section = dict(capped[key])
-        section.pop(name)
-        capped[key] = section
-        _record_omitted_field(capped, omitted, key, name, size)
-    scalars = sorted(
-        (
-            (_json_size({name: item}), key, name)
-            for key, value in capped.items()
-            if key not in _SUMMARY_CORE_KEYS and isinstance(value, dict)
-            for name, item in value.items()
-            if name not in _SUMMARY_IDENTITY_FIELDS
-        ),
-        key=lambda row: row[0],
-        reverse=True,
-    )
-    for size, key, name in scalars:
-        if _json_size(capped) <= budget:
-            return capped
-        section = dict(capped[key])
-        section.pop(name)
-        capped[key] = section
-        _record_omitted_field(capped, omitted, key, name, size)
+            nested.append((_json_size({key: value}), key, None))
+    if _drop_fields(capped, omitted, measure, nested):
+        return capped
+    scalars = [
+        (_json_size({name: item}), key, name)
+        for key, value in capped.items()
+        if key not in _SUMMARY_CORE_KEYS and isinstance(value, dict)
+        for name, item in value.items()
+        if name not in _SUMMARY_IDENTITY_FIELDS
+    ]
+    if _drop_fields(capped, omitted, measure, scalars) or _drop_sections(capped, measure, keep_identity=True):
+        return capped
     # The run's identity outweighs the detail of the omitted record and the citations.
     _shrink_core(capped, budget)
-    for key in sorted(
-        (key for key in capped if key not in _SUMMARY_CORE_KEYS), key=lambda item: _json_size(capped[item]), reverse=True
-    ):
-        if _json_size(capped) <= budget:
-            break
-        value = capped.pop(key)
-        record = capped["omitted_sections"]
-        if set(record) == {"sections"}:
-            record["sections"] += 1
-        else:
-            record[key] = _omitted_entry(capped, key, value, _json_size(value))
-    return _shrink_core(capped, budget)
+    measure.estimate = _json_size(capped)
+    if not _drop_sections(capped, measure, keep_identity=False):
+        _shrink_core(capped, budget)
+    return capped
 
 
 def _shrink_core(capped: dict[str, Any], budget: int) -> dict[str, Any]:
@@ -642,8 +673,11 @@ def _shrink_core(capped: dict[str, Any], budget: int) -> dict[str, Any]:
         if _json_size(capped) <= budget:
             break
         value = capped.get(key)
-        if isinstance(value, (list, dict)) and value:
-            capped[key] = type(value)()
+        if isinstance(value, list) and value:
+            capped[key] = []
+            capped[f"{key}_omitted"] = len(value)
+        elif isinstance(value, dict) and value:
+            capped[key] = {}
             capped[f"{key}_omitted"] = len(value)
     return capped
 

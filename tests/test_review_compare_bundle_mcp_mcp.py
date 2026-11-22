@@ -164,6 +164,45 @@ def test_a_capped_summary_never_exceeds_the_budget_even_when_its_core_keys_do() 
     assert result["citations_omitted"] == 400
 
 
+def test_capping_a_wide_section_measures_the_summary_a_bounded_number_of_times(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Review of repair round 2 (R025): re-measuring the whole summary after every dropped field is quadratic.
+    from auditex import mcp_server
+
+    calls = {"count": 0}
+    real = mcp_server._json_size
+
+    def counted(value: object) -> int:
+        calls["count"] += 1
+        return real(value)
+
+    monkeypatch.setattr(mcp_server, "_json_size", counted)
+    manifest = {"tenant_name": "acme", "run_id": "r1"}
+    manifest |= {f"surface_{index}": {"status": "blocked_permission"} for index in range(3000)}
+    manifest |= {f"note_{index}": "x" * 20 for index in range(3000)}
+    result = mcp_server._cap_summary({"manifest": manifest}, budget=4_000)
+    whole_summary_measures = calls["count"] - 6000  # one measure per field when they are sorted
+
+    assert real(result) <= 4_000
+    assert result["manifest"]["run_id"] == "r1"
+    assert whole_summary_measures < 300, whole_summary_measures
+
+
+def test_a_section_dropped_whole_keeps_its_pointer_and_the_citations(tmp_path: Path) -> None:
+    # Review of repair round 2 (R025): the last-resort trimming of the omitted record and the citations runs only
+    # when dropping sections cannot make the summary fit.
+    from auditex.mcp_server import _cap_summary
+
+    citations = [{"artifact_path": "run-manifest.json", "reason": "Run identity."}]
+    result = _cap_summary(
+        {"manifest": {"tenant_name": "acme", "run_id": "r1"}, "run_dir": "x" * 6000, "citations": citations},
+        budget=4_000,
+    )
+
+    assert result["citations"] == citations
+    assert result["omitted_sections"]["run_dir"]["bytes"] > 6000
+    assert result["manifest"]["run_id"] == "r1"
+
+
 def test_mcp_summary_of_a_small_run_keeps_every_section(tmp_path: Path) -> None:
     from support import RunBundleBuilder
 
