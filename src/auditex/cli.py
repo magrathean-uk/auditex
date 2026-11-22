@@ -773,6 +773,7 @@ def _engine_run_places(engine_argv: list[str]) -> tuple[list[Path], Path | None]
     import contextlib
     import io
 
+    from azure_tenant_audit.cli import apply_run_defaults
     from azure_tenant_audit.cli import build_parser as build_engine_parser
 
     try:
@@ -781,7 +782,8 @@ def _engine_run_places(engine_argv: list[str]) -> tuple[list[Path], Path | None]
     except SystemExit:
         return None
     # The engine fills a missing --out from AUDIT_OUTPUT_DIR (an --env file is read only by the engine itself).
-    out = str(getattr(args, "out", None) or os.environ.get("AUDIT_OUTPUT_DIR", "").strip() or "audit-output")
+    apply_run_defaults(args)
+    out = str(getattr(args, "out", None) or "audit-output")
     resume = getattr(args, "resume_from", None)
     return [Path(out), Path(out).expanduser()], Path(resume).expanduser() if resume else None
 

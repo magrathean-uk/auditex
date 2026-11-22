@@ -416,3 +416,54 @@ def test_r124_auto_profile_reports_only_the_surface_it_really_skips() -> None:
                                       capability_rows=[])
 
     assert plan["missing_expected_collectors"] == ["sharepoint_access"]
+
+
+# R162: a stuck toolchain subprocess becomes a blocked row (probe) or a blocked status (doctor), never a crash or hang.
+
+def _timeout_run(seen: list[dict]):  # noqa: ANN202
+    import subprocess
+
+    def _run(command, **kwargs):  # noqa: ANN001
+        seen.append(kwargs)
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 0)
+
+    return _run
+
+
+def test_r162_probe_toolchain_timeout_is_a_blocked_row(monkeypatch) -> None:  # noqa: ANN001
+    from azure_tenant_audit import probe
+
+    seen: list[dict] = []
+    monkeypatch.setattr(probe.shutil, "which", lambda name: "/usr/bin/pwsh" if name == "pwsh" else None)
+    monkeypatch.setattr(probe.subprocess, "run", _timeout_run(seen))
+
+    rows = probe._probe_toolchain_statuses(include_response=True)
+
+    by_name = {row["name"]: row for row in rows}
+    for name in ("exchange_online_module", "response_message_trace_cmdlet"):
+        assert by_name[name]["status"] == "blocked"
+        assert by_name[name]["error_class"] == "command_timeout"
+    assert all(call.get("timeout") for call in seen)
+
+
+def test_r162_bootstrap_json_command_has_a_timeout_and_maps_it_to_blocked(monkeypatch) -> None:  # noqa: ANN001
+    from auditex import bootstrap
+
+    seen: list[dict] = []
+    monkeypatch.setattr(bootstrap.subprocess, "run", _timeout_run(seen))
+
+    result = bootstrap._run_json_command(["bash", "select-python.sh"])
+
+    assert seen and seen[0].get("timeout")
+    assert result["status"] == "blocked" and result["error"] == "command_timeout"
+
+
+def test_r094_run_explain_looks_for_the_run_under_audit_output_dir(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from auditex import cli as product_cli
+
+    _clear_run_env(monkeypatch)
+    monkeypatch.setenv("AUDIT_OUTPUT_DIR", str(tmp_path / "env-out"))
+
+    bases, _ = product_cli._engine_run_places(["--tenant-name", "acme"])
+
+    assert Path(tmp_path / "env-out") in bases

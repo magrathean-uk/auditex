@@ -165,25 +165,33 @@ def _certificate_selected(args: argparse.Namespace) -> bool:
     return any(getattr(args, name, None) for name in _CERTIFICATE_OPTIONS)
 
 
-DEFAULT_AUTHORITY = "https://login.microsoftonline.com/"
-DEFAULT_GRAPH_SCOPE = "https://graph.microsoft.com/.default"
-DEFAULT_OUT = "audit-output"
-DEFAULT_SAMPLE = "examples/sample_audit_bundle/sample_result.json"
+class _BuiltInDefault(str):
+    """A parser default the operator did not type: still a plain string for every reader of the parsed arguments,
+    but marked so an environment value (AZURE_* or AUDIT_*, an --env file included) can take its place."""
+
+
+DEFAULT_AUTHORITY = _BuiltInDefault("https://login.microsoftonline.com/")
+DEFAULT_GRAPH_SCOPE = _BuiltInDefault("https://graph.microsoft.com/.default")
+DEFAULT_OUT = _BuiltInDefault("audit-output")
+DEFAULT_SAMPLE = _BuiltInDefault("examples/sample_audit_bundle/sample_result.json")
 
 
 def apply_run_defaults(args: argparse.Namespace) -> argparse.Namespace:
-    """Fill options the command line left out from the environment (an --env file is loaded into it first), then
-    from the built-in defaults; a flag always wins. Idempotent."""
+    """Replace options the command line left out with the environment's value (an --env file is loaded into it
+    first); a typed flag always wins. Idempotent."""
     fallbacks = (
-        ("authority", "AZURE_AUTHORITY", DEFAULT_AUTHORITY),
-        ("graph_scope", "AZURE_GRAPH_SCOPE", DEFAULT_GRAPH_SCOPE),
-        ("out", "AUDIT_OUTPUT_DIR", DEFAULT_OUT),
-        ("sample", "AUDIT_SAMPLE_FILE", DEFAULT_SAMPLE),
-        ("collectors", "AUDIT_COLLECTORS", None),
+        ("authority", "AZURE_AUTHORITY"),
+        ("graph_scope", "AZURE_GRAPH_SCOPE"),
+        ("out", "AUDIT_OUTPUT_DIR"),
+        ("sample", "AUDIT_SAMPLE_FILE"),
+        ("collectors", "AUDIT_COLLECTORS"),
     )
-    for attribute, variable, default in fallbacks:
-        if getattr(args, attribute, None) in (None, ""):
-            setattr(args, attribute, (os.environ.get(variable) or "").strip() or default)
+    for attribute, variable in fallbacks:
+        current = getattr(args, attribute, None)
+        if current is None or isinstance(current, _BuiltInDefault):
+            value = (os.environ.get(variable) or "").strip()
+            if value:
+                setattr(args, attribute, value)
     return args
 
 
@@ -212,11 +220,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--certificate-password-file", default=None, metavar="FILE",
         help="File holding the key password, readable only by its owner. No option takes the password itself.",
     )
-    parser.add_argument("--authority", default=None,
+    parser.add_argument("--authority", default=DEFAULT_AUTHORITY,
                         help=f"Identity authority URL (else AZURE_AUTHORITY, else {DEFAULT_AUTHORITY}).")
-    parser.add_argument("--graph-scope", default=None,
+    parser.add_argument("--graph-scope", default=DEFAULT_GRAPH_SCOPE,
                         help=f"Graph scope (else AZURE_GRAPH_SCOPE, else {DEFAULT_GRAPH_SCOPE}).")
-    parser.add_argument("--out", default=None, help=f"Base output directory (else AUDIT_OUTPUT_DIR, else {DEFAULT_OUT}).")
+    parser.add_argument("--out", default=DEFAULT_OUT, help=f"Base output directory (else AUDIT_OUTPUT_DIR, else {DEFAULT_OUT}).")
     parser.add_argument("--config", default="configs/collector-definitions.json", help="Collector configuration file.")
     parser.add_argument(
         "--collector-preset",
@@ -294,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--as-of", type=parse_as_of, default=None, metavar="YYYY-MM-DD", help=AS_OF_HELP)
     parser.add_argument("--sensitive-users", metavar="FILE", help="Local sensitive-user list (else AUDITEX_SENSITIVE_USERS_FILE); never uploaded or logged.")
     parser.add_argument("--partner-domains", metavar="FILE", help="Local partner-domain list (else AUDITEX_PARTNER_DOMAINS_FILE); never uploaded or logged.")
-    parser.add_argument("--sample", default=None,
+    parser.add_argument("--sample", default=DEFAULT_SAMPLE,
                         help=f"Sample bundle path when offline (else AUDIT_SAMPLE_FILE, else {DEFAULT_SAMPLE}).")
     parser.add_argument(
         "--permission-hints",
