@@ -143,8 +143,8 @@ a method check and write no per-call audit events, so Google bundles say
 `observation_basis: "coverage_ledger_only"` and rely on read-only scopes and the
 collectors' use of list and get methods; the `dns_posture`, exposure, `power_platform`
 and `power_bi` lookups use their own GET-only sessions rather than `GraphClient`, and the
-`probe` toolchain checks that start `pwsh` or `az` directly are outside the
-adapters.
+`probe` toolchain checks that start `pwsh` directly are outside the adapters. No
+code path starts the Azure CLI (`az`).
 
 The optional Power BI / Power Platform collectors are extended scope, off by default
 and absent from `full` and all default presets. In the commercial cloud they
@@ -333,6 +333,25 @@ context to skip the HTTPS reads.
 The opt-in `identity_protection` collector stores only aggregate risky-user
 counts, never user names or UPNs. The `exchange_policy` mailbox audit bypass
 check stores only a count of bypassed accounts.
+
+## Outbound destinations
+
+Every host an Auditex process can contact, for an egress allowlist. Offline replay contacts none of them.
+
+| Destination | When | What |
+| --- | --- | --- |
+| `login.microsoftonline.com` | Every live Microsoft 365 run | Certificate token requests to the tenant's token endpoint; with `dns_posture`, the public OpenID discovery document per verified domain. |
+| `graph.microsoft.com` | Every live Microsoft 365 run | Read-only Graph GETs. Report downloads may be redirected once to a Microsoft download host (`*.office.com`, `*.office.net`, `*.office365.com`, `*.microsoft.com`, `*.microsoftonline.com`, `*.sharepoint.com`, `*.azureedge.net`, `*.windows.net`); any other redirect target is refused. |
+| `outlook.office365.com` | `exchange_policy` (default) | Exchange Online PowerShell session for read-only `Get-*` cmdlets. |
+| `ps.compliance.protection.outlook.com` | `exchange_policy` in an app-only certificate run | Security & Compliance PowerShell session for the alert and DLP policy reads. |
+| `api.interfaces.records.teams.microsoft.com` | `teams_policy`, commercial and GCC | Five allowlisted Teams admin GETs. |
+| `<tenant>-admin.sharepoint.com` | `sharepoint_admin` (opt-in) | SharePoint admin settings reads. |
+| `api.bap.microsoft.com`, `api.powerbi.com` | `power-platform` preset (opt-in) | Power Platform and Power BI admin reads. |
+| The DNS-over-HTTPS resolver: `cloudflare-dns.com` unless `--doh-endpoint` or `AUDITEX_DOH_ENDPOINT` names another | `dns_posture` (default) and `google_dns_posture` | TXT lookups; domain names only. |
+| `mta-sts.<domain>` | `dns_posture`, a verified domain that publishes `_mta-sts` | One GET of the MTA-STS policy file. |
+| `*.googleapis.com` (including `www.googleapis.com` and `oauth2.googleapis.com`), `accounts.google.com` for an OAuth sign-in | Google Workspace runs | Read-only Google API calls and token requests. |
+| `huggingface.co` and the download hosts it redirects to | `auditex explain` model download on first use (opt-in, [local answer](../guides/local-answer.md)) | One model file download; no tenant data is sent. |
+| The notification sink you configure (webhook URL, SMTP relay, Jira site, GitHub API) | `auditex notify send --sink <sink> --execute` only | The redacted notification described under [Notifications](#notifications). |
 
 ## Guarded run and pack reads
 

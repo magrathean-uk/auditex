@@ -274,3 +274,46 @@ def test_every_notification_sink_its_settings_and_calls_are_documented():
     for sink in sinks:
         assert f"`{sink}`" in manual, f"product-manual.md must name the {sink} sink"
     assert "security-privacy.md#notifications" in manual
+
+
+# R166 ------------------------------------------------------------------------------------------------------------
+
+
+def _host(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    return urlsplit(url).hostname or ""
+
+
+def test_security_reference_lists_the_real_processes_and_outbound_destinations():
+    from auditex.local_answer import HUB
+    from azure_tenant_audit.adapters.teams_admin_rest import TEAMS_ADMIN_BASE
+    from azure_tenant_audit.collectors.exchange_policy import EXCHANGE_ONLINE_SCOPE
+    from azure_tenant_audit.dns_lookup import DEFAULT_DOH_ENDPOINT
+    from azure_tenant_audit.graph import GRAPH_ROOT
+    from azure_tenant_audit.power_bi import POWERBI_ROOT
+    from azure_tenant_audit.power_platform import POWER_PLATFORM_ROOT
+
+    # No code path starts the Azure CLI, so the reference must not say the probe does.
+    sources = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "src").rglob("*.py"))
+    assert not re.search(r"""\[\s*["']az["']""", sources), "src starts az after all; revisit this test"
+    privacy = _flat(_doc("docs/reference/security-privacy.md"))
+    assert "start `pwsh` or `az`" not in privacy
+    section = privacy[privacy.index("## Outbound destinations") :]
+    section = section[: section.index(" ## ", 5)] if " ## " in section[5:] else section
+    hosts = {
+        _host(GRAPH_ROOT),
+        "login.microsoftonline.com",
+        _host(EXCHANGE_ONLINE_SCOPE),
+        "ps.compliance.protection.outlook.com",
+        *(_host(url) for url in TEAMS_ADMIN_BASE.values()),
+        _host(POWERBI_ROOT),
+        _host(POWER_PLATFORM_ROOT),
+        _host(DEFAULT_DOH_ENDPOINT),
+        "www.googleapis.com",
+        _host(HUB),
+    }
+    for host in sorted(hosts):
+        assert host in section, f"security-privacy.md outbound destinations must list {host}"
+    for marker in ("mta-sts.<domain>", "-admin.sharepoint.com", "--sink", "AUDITEX_DOH_ENDPOINT"):
+        assert marker in section, marker
