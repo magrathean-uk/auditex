@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -60,13 +61,18 @@ class RequestsHttpsFetcher:
             return None, "", "refused_non_https_url"
         start = self.clock()
         try:
-            response = self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True)
+            # identity encoding and a hook that drops any redirect body: requests otherwise reads a redirect body in
+            # full (resolve_redirects, even with allow_redirects=False) and urllib3 may loop raw reads inside one
+            # decoding read1, both outside the deadline below.
+            response = self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True,
+                                        headers={"Accept-Encoding": "identity"}, hooks={"response": _drop_redirect_body})
             raw = self._read_body(response, start)
             if raw is None:
                 close = getattr(response, "close", None)
                 if callable(close):
                     close()
                 return None, "", "fetch_deadline_exceeded"
+            raw = _decode_body(raw, (getattr(response, "headers", None) or {}).get("Content-Encoding"))
             body = raw[:MAX_POLICY_BYTES].decode("utf-8", errors="replace")
             return int(response.status_code), body, None
         except Exception as exc:  # noqa: BLE001
@@ -84,7 +90,7 @@ class RequestsHttpsFetcher:
         while size <= MAX_POLICY_BYTES:
             if self.clock() - start > self.deadline:
                 return None
-            chunk = read(min(_READ_CHUNK_BYTES, MAX_POLICY_BYTES + 1 - size), decode_content=True)
+            chunk = read(min(_READ_CHUNK_BYTES, MAX_POLICY_BYTES + 1 - size), decode_content=False)
             if isinstance(chunk, str):
                 chunk = chunk.encode("utf-8")
             if not chunk:
@@ -94,6 +100,32 @@ class RequestsHttpsFetcher:
         if self.clock() - start > self.deadline:
             return None
         return b"".join(chunks)
+
+
+def _drop_redirect_body(response: Any, *args: Any, **kwargs: Any) -> Any:
+    """Response hook: a redirect is never followed (RFC 8461 section 3.3), so its body is never read."""
+    if getattr(response, "is_redirect", False):
+        response._content = b""
+        response._content_consumed = True
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+    return response
+
+
+def _decode_body(raw: bytes, encoding: Any) -> bytes:
+    """Decode a gzip or deflate body after the bounded raw read, never past MAX_POLICY_BYTES + 1 bytes of output."""
+    name = str(encoding or "").strip().lower()
+    if name in {"gzip", "x-gzip"}:
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    elif name == "deflate":
+        decoder = zlib.decompressobj(zlib.MAX_WBITS if raw[:1] == b"\x78" else -zlib.MAX_WBITS)
+    else:
+        return raw
+    try:
+        return decoder.decompress(raw, MAX_POLICY_BYTES + 1)
+    except zlib.error:
+        return b""
 
 
 def is_safe_domain_name(domain: str) -> bool:
@@ -160,7 +192,7 @@ def mta_sts_policy_problems(parsed: dict[str, Any]) -> list[str]:
     max_age = parsed.get("max_age")
     if not isinstance(max_age, int) or not 0 <= max_age <= MAX_POLICY_AGE_SECONDS:
         reasons.append("max_age_invalid")
-    if parsed.get("mode") in {"enforce", "testing"} and not parsed.get("mx"):
+    if parsed.get("mode") in {"enforce", "testing"} and not any(str(mx).strip() for mx in parsed.get("mx") or []):
         reasons.append("mx_missing")
     return reasons
 

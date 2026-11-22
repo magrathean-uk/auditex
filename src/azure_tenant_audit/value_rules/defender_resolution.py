@@ -144,7 +144,8 @@ def _safelinks_core(policy_id, sp, sections, trace):
                         "partial_rule_noncompliant", None, div="D98")
     if builtin_scope and applied == BUILTIN:
         # A preset whose both parts are enabled but scoped to some recipients may also cover the excluded recipients.
-        preset_partial = any(({"q", "x"} & set(eop[t])) and ({"q", "x"} & set(atp[t])) for t in ("Strict", "Standard"))
+        preset_partial = any(({"q", "x", "u"} & set(eop[t]) or eop_u) and ({"q", "x", "u"} & set(atp[t]) or atp_u)
+                             for t in ("Strict", "Standard"))
         out = _builtin_exclusions(policy_id, sp, sections, partial or preset_partial)
         if out:
             return out

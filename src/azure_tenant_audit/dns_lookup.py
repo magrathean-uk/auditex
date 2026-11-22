@@ -26,19 +26,22 @@ def resolve_doh_endpoint(value: str | None = None, environ: Mapping[str, str] | 
     Only a plain ``https://host/path`` URL is accepted: no other scheme, no user name or password and no fragment.
     The error never repeats the value, which may carry a token.
     """
-    chosen = value if value is not None else (os.environ if environ is None else environ).get(DOH_ENDPOINT_ENV)
+    chosen = value
     if chosen is None:
-        return DEFAULT_DOH_ENDPOINT
+        chosen = (os.environ if environ is None else environ).get(DOH_ENDPOINT_ENV)
+        if chosen is None or not chosen.strip():
+            return DEFAULT_DOH_ENDPOINT                      # an unset or blank variable means the default
     text = chosen.strip()
     try:
         parts = urlsplit(text)
-        host = parts.hostname
+        host, _ = parts.hostname, parts.port                  # .port raises on a malformed port
     except ValueError:
         parts, host = None, None
-    if (parts is None or parts.scheme.lower() != "https" or not host or parts.username is not None
-            or parts.password is not None or parts.fragment or "@" in parts.netloc):
-        raise ValueError("The DNS-over-HTTPS endpoint must be a plain https:// URL with a host "
-                         f"(option or {DOH_ENDPOINT_ENV}); no other scheme, credentials or fragment.")
+    # No query string either: the client adds its own parameters, and a token there would reach error messages.
+    if (parts is None or parts.scheme.lower() != "https" or not host or "@" in parts.netloc
+            or "?" in text or "#" in text):
+        raise ValueError("The DNS-over-HTTPS endpoint must be a plain https:// URL with a host and path "
+                         f"(option or {DOH_ENDPOINT_ENV}); no other scheme, credentials, query or fragment.")
     return text
 
 
@@ -209,9 +212,9 @@ def spf_fails_unapproved_senders(record: str) -> bool:
     ``include:`` name holding "redirect" or "-all" passed (review R102). Names are case-insensitive (section 4.6.1).
     """
     for term in record.split()[1:]:
-        lowered = term.lower()
-        if lowered.lstrip("+-~?") == "all":
-            return lowered[0] in "-~"
+        qualifier = term[0] if term[0] in "+-~?" else ""
+        if term[len(qualifier):].lower() == "all":
+            return qualifier in ("-", "~")
     return any(term.lower().startswith("redirect=") for term in record.split()[1:])
 
 
@@ -531,15 +534,19 @@ def _summarize_spf(records: list[str]) -> dict[str, Any]:
     }
 
 
+_DMARC_RECORD_START = re.compile(r"^\s*v\s*=\s*DMARC1\s*(?:;|$)", re.IGNORECASE)
+
+
 def _summarize_dmarc(records: list[str]) -> dict[str, Any]:
     parsed_records = [parsed for rec in records if (parsed := parse_dmarc(rec)) is not None]
     if not parsed_records:
         return _absent("dmarc")
-    if len(parsed_records) > 1:
-        # RFC 7489 section 6.6.3: with more than one DMARC record a receiver applies no DMARC policy at all, so the
-        # domain has no effective record (dmarc_missing fires); the first record's p= must not read as protection (R109).
-        return {**_absent("dmarc"), "multiple_records": True, "record_count": len(parsed_records)}
-    parsed = parsed_records[0]
+    # RFC 7489 section 6.6.3: only strings that begin with v=DMARC1 are records; with more than one a receiver applies
+    # no DMARC policy at all, so the domain has no effective record (dmarc_missing fires) (review R109).
+    records_proper = [rec for rec in records if _DMARC_RECORD_START.match(rec)]
+    if len(records_proper) > 1:
+        return {**_absent("dmarc"), "multiple_records": True, "record_count": len(records_proper)}
+    parsed = parse_dmarc(records_proper[0]) if records_proper else parsed_records[0]
     pct = parsed.get("pct")
     pct_partial = isinstance(pct, int) and 0 <= pct < 100
     return {

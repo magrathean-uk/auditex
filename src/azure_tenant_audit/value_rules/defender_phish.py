@@ -248,11 +248,19 @@ def _phish_core(policy_id, sp, sections, cfg, cfg_bad, binding=None):
         for tier, rx in (("Strict", PRESET_RE[0]), ("Standard", PRESET_RE[1])):
             if any(rx.search(p["Identity"]) for p in pols):
                 continue
+            # A preset applies only when its enabled rules exist (both parts under D100); otherwise nothing changes.
+            if not any(rx.search(r["Identity"]) and _state(r) == "Enabled" for r in pres) or (
+                    ATP and not any(rx.search(r["Identity"]) and _state(r) == "Enabled" for r in atp)):
+                continue
+            saved = dict(flags)
             reach, err = preset_reach(tier)
             if err:
-                return err
-            if reach != "n":
-                info.append((tier, _UNEXPORTED, reach, "u"))
+                reach = "u"                    # rules that cannot be tied to one preset: its reach is unknown
+            if reach == "n":
+                flags.clear()
+                flags.update(saved)
+                continue
+            info.append((tier, _UNEXPORTED, reach, "u"))
     if sp["need"] == "safety_tips":
         # Rego (PresetRecipientsCovered): an enabled preset rule that covers all recipients is compliant, the preset policy is not inspected (or even required)
         for tier, rx, other in (("Strict", PRESET_RE[0], PRESET_RE[1]), ("Standard", PRESET_RE[1], PRESET_RE[0])):

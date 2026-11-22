@@ -155,7 +155,15 @@ def _inherited(entry, rd):
         return False
     if len([a for a in answers if _AUTHOR_DMARC.match(a)]) == 1:
         return False
-    return any(isinstance(step.get("query_answers"), list) and rd[0] in step["query_answers"] for step in log[1:])
+    author = domain.lower().rstrip(".")
+    for step in log[1:]:
+        name = str(step.get("query_name", "")).lower().rstrip(".")
+        parent = name[len("_dmarc."):] if name.startswith("_dmarc.") else ""
+        # Only a strict parent of the domain passes its record down; an answer for any other name proves nothing.
+        if (parent and author.endswith("." + parent) and isinstance(step.get("query_answers"), list)
+                and rd[0] in step["query_answers"]):
+            return True
+    return False
 
 
 def _all_nxdomain(log):

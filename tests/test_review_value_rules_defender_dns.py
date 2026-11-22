@@ -282,14 +282,17 @@ def test_r164_only_plain_https_endpoints_are_accepted(endpoint, monkeypatch):
         dns_lookup.resolve_doh_endpoint(endpoint)
     assert "pw" not in str(caught.value)
     monkeypatch.setenv(dns_lookup.DOH_ENDPOINT_ENV, endpoint)
-    with pytest.raises(ValueError):
-        dns_lookup.resolve_doh_endpoint()
+    if endpoint.strip():
+        with pytest.raises(ValueError):
+            dns_lookup.resolve_doh_endpoint()
+    else:
+        assert dns_lookup.resolve_doh_endpoint() == dns_lookup.DEFAULT_DOH_ENDPOINT
 
 
 def test_r164_disclosure_names_the_resolver_in_use():
     assert dns_lookup.doh_resolver_disclosure(dns_lookup.DEFAULT_DOH_ENDPOINT) == (
         "the public Cloudflare DNS-over-HTTPS resolver (https://cloudflare-dns.com/dns-query)")
-    assert dns_lookup.doh_resolver_disclosure("https://dns.example.net/dns-query?token=abc") == (
+    assert dns_lookup.doh_resolver_disclosure("https://dns.example.net/dns-query") == (
         "the configured DNS-over-HTTPS resolver (https://dns.example.net/dns-query)")
 
 
@@ -454,3 +457,108 @@ def test_r099_empty_rule_lists_follow_the_built_in_policy():
         assert (record["verdict"], record["cell"]) == ("not_assessed", "policy_not_in_export")
         record = _kind(_safelinks(rules, [{**SL_BUILTIN, "ScanUrls": False}], BI_ALL))
         assert (record["verdict"], record["cell"]) == ("not_met", "policy_flag_off")
+
+
+# ---- Repair round 1: independent review of 530ecb9..f96d653 ----
+
+def test_review_spf_double_qualifier_is_not_a_fail_all():
+    assert dns_lookup.spf_fails_unapproved_senders("v=spf1 --all +all") is False
+    assert dns_lookup.spf_fails_unapproved_senders("v=spf1 -all") is True
+
+
+def test_review_dmarc_answer_from_an_unrelated_name_is_not_inherited():
+    entry = {"domain": "a.example.com", "rdata": ["v=DMARC1; p=reject; sp=none"], "log": [
+        {"query_name": "_dmarc.a.example.com", "query_answers": [], "outcome": "empty"},
+        {"query_name": "_dmarc.other.com", "query_answers": ["v=DMARC1; p=reject; sp=none"], "outcome": "answers"}]}
+    record = assess("MS.EXO.4.2v1", {"dmarc_records": [entry]})
+    assert (record["verdict"], record["cell"]) == ("met", "all_compliant")
+
+
+def test_review_text_mentioning_dmarc_is_not_a_second_record():
+    summary = dns_lookup._summarize_dmarc(["note: use v=DMARC1", "v=DMARC1; p=reject"])
+    assert (summary["present"], summary["policy"], summary["multiple_records"]) == (True, "reject", False)
+
+
+def test_review_blank_mx_line_is_no_mx():
+    policy = exposure_lookup.fetch_mta_sts_policy(
+        "contoso.example", _PolicyFetcher("version: STSv1\nmode: testing\nmx:\nmax_age: 10\n"))
+    assert policy["fetch_status"] == "invalid_policy" and policy["invalid_reasons"] == ["mx_missing"]
+
+
+class _RecordingSession:
+    def __init__(self, response):
+        self.response, self.kwargs = response, {}
+
+    def get(self, url, **kwargs):
+        self.kwargs = kwargs
+        return self.response
+
+
+def test_review_redirect_body_is_never_consumed_by_requests():
+    session = _RecordingSession(type("R", (), {"status_code": 200, "raw": None})())
+    exposure_lookup.RequestsHttpsFetcher(session=session).get_text(MTA_STS_URL)
+    hook = session.kwargs["hooks"]["response"]
+    redirect = type("R", (), {"status_code": 302, "is_redirect": True, "closed": False})()
+    redirect.close = lambda: setattr(redirect, "closed", True)
+    redirect.raw = None
+    hook(redirect)
+    assert redirect._content == b"" and redirect._content_consumed is True and redirect.closed is True
+    assert session.kwargs["headers"]["Accept-Encoding"] == "identity"
+
+
+def test_review_compressed_policy_is_decoded_after_the_bounded_raw_read():
+    import gzip
+    body = b"version: STSv1\nmode: enforce\nmx: mail.contoso.example\nmax_age: 604800\n"
+    packed = gzip.compress(body)
+
+    class Raw:
+        def __init__(self):
+            self.left, self.decode = packed, []
+
+        def read1(self, amount=None, decode_content=None):
+            self.decode.append(decode_content)
+            chunk, self.left = self.left[:7], self.left[7:]
+            return chunk
+
+    response = type("R", (), {"status_code": 200, "headers": {"Content-Encoding": "gzip"}, "raw": Raw()})()
+    status, text, error = exposure_lookup.RequestsHttpsFetcher(session=_RecordingSession(response)).get_text(MTA_STS_URL)
+    assert (status, text, error) == (200, body.decode(), None)
+    assert set(response.raw.decode) == {False}
+
+
+@pytest.mark.parametrize("endpoint", ["https://resolver.example:bad/dns-query", "https://resolver.example/dns-query#",
+                                      "https://resolver.example/dns-query?token=secret"])
+def test_review_doh_endpoint_rejects_bad_port_fragment_and_query(endpoint):
+    with pytest.raises(ValueError) as caught:
+        dns_lookup.resolve_doh_endpoint(endpoint)
+    assert "secret" not in str(caught.value)
+
+
+def test_review_blank_environment_value_means_the_default(monkeypatch):
+    monkeypatch.setenv(dns_lookup.DOH_ENDPOINT_ENV, "  ")
+    assert dns_lookup.DohClient().endpoint == dns_lookup.DEFAULT_DOH_ENDPOINT
+
+
+def test_review_missing_preset_without_its_defender_rule_changes_nothing():
+    preset = "Standard Preset Security Policy1700000000000"
+    rule = {"Identity": preset, "State": "Enabled", **EVERYONE}
+    for presets in ([rule], [rule, {**rule, "Identity": preset + "b"}]):
+        record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT], [], presets=presets))
+        assert (record["verdict"], record["cell"], record["detail"]) == ("met", "default_qualifies", {})
+
+
+def test_review_ambiguous_rules_of_a_missing_preset_withhold_the_default():
+    preset = "Standard Preset Security Policy1700000000000"
+    rule = {"Identity": preset, "State": "Enabled", **EVERYONE}
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT], [], presets=[rule, {**rule, "Identity": preset + "b"}],
+                                                     atp=[rule]))
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "qualifier_shadowed")
+
+
+def test_review_preset_with_unreadable_defender_scope_may_cover_the_excluded():
+    name = "Standard Preset Security Policy1700000000000"
+    sections = _safelinks([], [SL_BUILTIN], BI_EXCLUDES)
+    sections["protection_policy_rules"] = [{"Identity": name, "State": "Enabled", **GROUP_ONLY}]
+    sections["atp_policy_rules"] = [{"Identity": name, "State": "Enabled"}]
+    record = _kind(sections)
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "partial_tier_may_cover")
