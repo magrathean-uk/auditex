@@ -151,6 +151,14 @@ auditex setup-guide google --auth oauth --collector-preset core-security
 
 Treat OAuth output as partial if domain-wide admin surfaces are blocked. OAuth cannot act as another user, so Gmail settings cover the signed-in mailbox only and the run says so.
 
+With an OAuth sign-in, Gmail delegates cannot be listed (Google allows that only under domain-wide delegation), so the Gmail surface is reported as partial and the report shows `delegates` as not read.
+
+Each run checks the cached sign-in with Google. If the run needs scopes the cache was not granted, or the sign-in was revoked or has expired (OAuth clients in Testing status expire refresh tokens after 7 days), the browser sign-in opens again; you never need to delete the token cache by hand. If Google's sign-in service is briefly unavailable, a sign-in that is still in date is used as it is; an expired one stops the run with "run again later" and does not open the browser.
+
+The service-account key must be an owner-only JSON file: `chmod 600 key.json`. Auditex refuses a key file that others can read, or a link, with `service_account_key_refused`.
+
+Each collector signs in with only its own scopes. If the domain-wide delegation entry leaves a scope out, only the collectors that need it fail, and the capability matrix names the missing scope under `missing_permissions`. A collector that read some data but was refused one list is shown as partial (a role limit), not as a missing scope.
+
 ## Microsoft 365
 
 Auditex audits Microsoft 365 one way: through the reader app, an app registration in the customer's own tenant that
@@ -178,6 +186,14 @@ auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --client-i
   --certificate-path ~/audit-keys/auditex-reader.pem --certificate-thumbprint <sha1-thumbprint> \
   --certificate-password-file ~/audit-keys/auditex-reader.pass --auditor-profile global-reader --collector-preset full
 ```
+
+Auditex reads Microsoft Graph at `graph.microsoft.com`, so it audits commercial and GCC tenants; GCC High, DoD and
+other sovereign clouds, whose Graph is elsewhere, are not supported. A certificate that Microsoft Entra refuses (the
+thumbprint is not on the reader app, or the tenant ID is wrong) stops the run before collection with exit status 2 and
+"A certificate app token could not be acquired. Check that the thumbprint is on the reader app registration and the
+tenant ID is right." An explicit `--permission-hints` file that does not exist stops `auditex run`,
+`azure-tenant-audit` and `auditex probe live` with exit status 2 (the probe before it writes any folder): "The
+--permission-hints file was not found: <path>".
 
 `auditex guided-run --flow app-audit` takes the same four options. `--mode app` on `auditex setup-guide m365` is accepted
 for old scripts and changes nothing. The Teams admin policies (`teams_policy`, selected by the `global-reader` profile and

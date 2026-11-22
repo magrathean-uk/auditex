@@ -420,3 +420,29 @@ def test_security_reference_carries_the_earlier_lanes_privacy_facts():
     credentials = privacy[privacy.index("## Credentials and local files") : privacy.index("## Suspected exposure")]
     assert "OAuth token cache" in credentials and "0600" in credentials and "0700" in credentials
     assert "`--verbose`" in privacy and "urllib3" in privacy and "msal" in privacy
+
+
+# Earlier lanes' wording for setup-guide.md -----------------------------------------------------------------------
+
+
+def test_setup_guide_carries_the_earlier_lanes_setup_facts():
+    from azure_tenant_audit.certificate_auth import CertificateAuthError
+    from azure_tenant_audit.graph import GRAPH_ROOT
+
+    auth_source = _doc("src/auditex/google_workspace/auth.py")
+    assert "service_account_key_refused" in auth_source and "run again later" in auth_source
+    assert '"delegates"' in _doc("src/auditex/google_workspace/client.py")
+    hint_source = _doc("src/azure_tenant_audit/diagnostics.py")
+    hint_message = re.search(r'"(The --permission-hints file was not found): ', hint_source).group(1)
+    cert_message = str(CertificateAuthError())
+    cert_hint = re.search(r'"%s (Check that the thumbprint[^"]+)"', _doc("src/azure_tenant_audit/cli.py")).group(1)
+    assert _host(GRAPH_ROOT) == "graph.microsoft.com"
+    guide = _flat(_doc("docs/guides/setup-guide.md"))
+    google = _flat(_section(_doc("docs/guides/setup-guide.md"), "## Google Workspace"))
+    for needle in ("chmod 600 key.json", "service_account_key_refused", "missing_permissions", "run again later",
+                   "delegates", "never need to delete the token cache"):
+        assert needle in google, needle
+    m365 = _flat(_section(_doc("docs/guides/setup-guide.md"), "## Microsoft 365"))
+    assert hint_message in guide
+    assert f"{cert_message} {cert_hint}" in m365
+    assert _host(GRAPH_ROOT) in m365 and "GCC High" in m365, "say which clouds the fixed Graph host serves"
