@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections import Counter, OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from azure_tenant_audit.data_minimisation import minimise_gmail_settings
@@ -215,6 +215,21 @@ class GoogleWorkspaceClient:
             self._services[key] = build(api, version, credentials=credentials, cache_discovery=False)
         return self._services[key]
 
+    def for_scopes(self, scopes: tuple[str, ...] | list[str] | None) -> GoogleWorkspaceClient:
+        """A client whose calls use a token narrowed to ``scopes`` (one collector's).
+
+        Under domain-wide delegation one scope the tenant has not authorised fails every call on the token that
+        asks for it, so each collector asks only for its own: a missing scope then fails only that collector.
+        Credentials that cannot be narrowed (an OAuth sign-in, which granted every scope at once) are shared as is.
+        """
+        wanted = tuple(scopes or ())
+        if not wanted or getattr(self.credentials, "with_scopes", None) is None:
+            return self
+        credentials = self._scoped_credentials(wanted)
+        if credentials is self.credentials:
+            return self
+        return replace(self, credentials=credentials, _services=None, _subject_services=None)
+
     def _scoped_credentials(self, scopes: tuple[str, ...]) -> Any:
         """Credentials narrowed to ``scopes``, so a scope the tenant has not authorised fails only its own calls."""
         with_scopes = getattr(self.credentials, "with_scopes", None)
@@ -254,7 +269,7 @@ class GoogleWorkspaceClient:
         first_page = True
         while True:
             try:
-                payload = _execute(lambda: request_factory(token).execute())
+                payload = _execute(lambda token=token: request_factory(token).execute())
             except Exception as exc:
                 if first_page:
                     raise

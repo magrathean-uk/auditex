@@ -287,6 +287,14 @@ def build_google_toolchain_readiness(dependency_status: dict[str, Any]) -> dict[
     }
 
 
+def _collector_client(client: Any, collector: str) -> Any:
+    """``client`` narrowed to the collector's own scopes, so a scope left out of the delegation fails only it."""
+    for_scopes = getattr(client, "for_scopes", None)
+    if for_scopes is None:
+        return client
+    return for_scopes(tuple(getattr(REGISTRY.get(collector), "required_scopes", ()) or ()))
+
+
 def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -331,48 +339,54 @@ def build_google_preflight_rows(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for collector in selected:
-        if collector == "google_directory":
-            rows.append(_preflight_call(collector, "users", lambda: client.list_directory("users", top=top)))
-        elif collector == "google_reports":
-            rows.append(_preflight_call(collector, "loginActivities", lambda: client.list_report_activities("login", top=top)))
-        elif collector == "google_alert_center":
-            rows.append(_preflight_call(collector, "alerts", lambda: client.list_alerts(top=top)))
-        elif collector == "google_policies":
-            rows.append(_preflight_call(collector, "twoStepVerificationPolicies", lambda: client.list_policies(top=top)))
-        elif collector == "google_gmail_settings":
-            def gmail_check() -> list[dict[str, Any]]:
-                # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
-                if not getattr(client, "per_user_delegation", True):
-                    gmail_check.payloads = [client.get_gmail_settings_for_user("me")]  # type: ignore[attr-defined]
-                    return gmail_check.payloads  # type: ignore[attr-defined]
-                users = client.list_directory("users", top=1)
-                if not users:
-                    return []
-                email = str(users[0].get("primaryEmail") or users[0].get("email") or "")
-                gmail_check.payloads = [client.get_gmail_settings_for_user(email)] if email else []  # type: ignore[attr-defined]
+        rows.extend(_collector_preflight_rows(_collector_client(client, collector), collector, domain=domain, top=top))
+    return rows
+
+
+def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None, top: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if collector == "google_directory":
+        rows.append(_preflight_call(collector, "users", lambda: client.list_directory("users", top=top)))
+    elif collector == "google_reports":
+        rows.append(_preflight_call(collector, "loginActivities", lambda: client.list_report_activities("login", top=top)))
+    elif collector == "google_alert_center":
+        rows.append(_preflight_call(collector, "alerts", lambda: client.list_alerts(top=top)))
+    elif collector == "google_policies":
+        rows.append(_preflight_call(collector, "twoStepVerificationPolicies", lambda: client.list_policies(top=top)))
+    elif collector == "google_gmail_settings":
+        def gmail_check() -> list[dict[str, Any]]:
+            # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
+            if not getattr(client, "per_user_delegation", True):
+                gmail_check.payloads = [client.get_gmail_settings_for_user("me")]  # type: ignore[attr-defined]
                 return gmail_check.payloads  # type: ignore[attr-defined]
+            users = client.list_directory("users", top=1)
+            if not users:
+                return []
+            email = str(users[0].get("primaryEmail") or users[0].get("email") or "")
+            gmail_check.payloads = [client.get_gmail_settings_for_user(email)] if email else []  # type: ignore[attr-defined]
+            return gmail_check.payloads  # type: ignore[attr-defined]
 
-            row = _preflight_call(collector, "mailboxSettings", gmail_check)
-            row.update(_gmail_preflight_status(row, gmail_check))
-            rows.append(row)
-        elif collector == "google_devices":
-            rows.append(_preflight_call(collector, "mobileDevices", lambda: client.list_devices("mobile", top=top)))
-        elif collector == "google_dns_posture":
-            rows.append({"collector": collector, "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None})
-        elif collector == "google_drive_posture":
-            rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
-            rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
-        elif collector == "google_groups_settings":
-            def group_settings_check() -> list[dict[str, Any]]:
-                groups = client.list_directory("groups", top=1)
-                if not groups:
-                    return []
-                email = str(groups[0].get("email") or groups[0].get("id") or "")
-                return [client.get_group_settings(email)] if email else []
+        row = _preflight_call(collector, "mailboxSettings", gmail_check)
+        row.update(_gmail_preflight_status(row, gmail_check))
+        rows.append(row)
+    elif collector == "google_devices":
+        rows.append(_preflight_call(collector, "mobileDevices", lambda: client.list_devices("mobile", top=top)))
+    elif collector == "google_dns_posture":
+        rows.append({"collector": collector, "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None})
+    elif collector == "google_drive_posture":
+        rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
+        rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
+    elif collector == "google_groups_settings":
+        def group_settings_check() -> list[dict[str, Any]]:
+            groups = client.list_directory("groups", top=1)
+            if not groups:
+                return []
+            email = str(groups[0].get("email") or groups[0].get("id") or "")
+            return [client.get_group_settings(email)] if email else []
 
-            rows.append(_preflight_call(collector, "groupSettings", group_settings_check))
-        elif collector == "google_calendar_posture":
-            rows.append(_preflight_call(collector, "calendarResources", lambda: client.list_calendar_resources(top=top)))
+        rows.append(_preflight_call(collector, "groupSettings", group_settings_check))
+    elif collector == "google_calendar_posture":
+        rows.append(_preflight_call(collector, "calendarResources", lambda: client.list_calendar_resources(top=top)))
     return rows
 
 
@@ -670,7 +684,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         output = runner.run(
             REGISTRY[name],
             CollectorRunContext(
-                client=client,
+                client=_collector_client(client, name),
                 top=config.top,
                 page_size=config.page_size,
                 plane="inventory",

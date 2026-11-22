@@ -139,7 +139,10 @@ def _gmail_client(settings: _GmailSettings) -> GoogleWorkspaceClient:
 
 def test_r055_every_settings_read_failing_fails_the_mailbox_row_and_the_probe() -> None:
     from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
-    from auditex.google_workspace.run import build_google_capability_rows, build_google_preflight_rows
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
 
     client = _gmail_client(_GmailSettings(_HttpError(403)))
     result = GoogleGmailSettingsCollector().run({"client": client, "users": [{"primaryEmail": "me@example.com"}]})

@@ -4,7 +4,11 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT, REASON_PAGINATION_FAILED, fanout_gap_row
+from azure_tenant_audit.collection_gaps import (
+    REASON_OPERATOR_LIMIT,
+    REASON_PAGINATION_FAILED,
+    fanout_gap_row,
+)
 from azure_tenant_audit.collectors.base import (
     CollectorResult,
     context_limit,
@@ -19,7 +23,11 @@ from azure_tenant_audit.dns_lookup import (
 )
 
 from .auth import POLICIES_SCOPE
-from .client import classify_google_error, gmail_settings_status, minimise_gmail_settings
+from .client import (
+    classify_google_error,
+    gmail_settings_status,
+    minimise_gmail_settings,
+)
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
