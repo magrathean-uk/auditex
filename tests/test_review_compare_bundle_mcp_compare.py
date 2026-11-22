@@ -255,3 +255,47 @@ def test_not_reassessed_heading_is_neutral_and_reasons_are_plain_language(tmp_pa
     assert "## Not reassessed findings (1)" in markdown
     assert "collector did not complete in the later run)" not in markdown.split("## Not reassessed findings")[0]
     assert "The finding's collector did not complete in the later run (blocked_permission)" in markdown
+
+
+# Repair round 1: the `auditex diff` CLI goes through the same gates as compare (R054)
+
+
+def _cli_diff(run_a: Path, run_b: Path, capsys: pytest.CaptureFixture[str]) -> tuple[int, dict[str, Any]]:
+    from auditex import cli
+
+    code = cli.main(["diff", str(run_a), str(run_b)])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_cli_diff_blocks_two_tenants_that_share_a_tenant_name(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run_a, run_b = _pair(tmp_path, later_identity="complete", tenant_id=TENANT_B)
+
+    code, result = _cli_diff(run_a, run_b, capsys)
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "tenant_id_mismatch"
+    assert "drift_summary" not in result
+    assert code == 1
+
+
+def test_cli_diff_blocks_a_bundle_whose_hash_check_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run_a, run_b = _pair(tmp_path, later_identity="complete")
+    _write(run_b / "bundle-hashes.json", build_bundle_hash_manifest(run_b))
+    _write(run_b / "reports" / "report-pack.json", {"findings": [], "edited": True})
+
+    code, result = _cli_diff(run_a, run_b, capsys)
+
+    assert result["status"] == "blocked"
+    assert result["reason"].startswith("run_unverified:current:bundle_integrity_")
+    assert "drift_summary" not in result
+    assert code == 1
+
+
+def test_cli_diff_of_a_verified_same_tenant_pair_resolves_and_exits_0(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run_a, run_b = _pair(tmp_path, later_identity="complete")
+
+    code, result = _cli_diff(run_a, run_b, capsys)
+
+    assert code == 0
+    assert result["status"] == "ok"
+    assert result["drift_summary"]["resolved_findings"] == [FINDING["id"]]
