@@ -2844,6 +2844,9 @@ def build_normalized_snapshot(
     # sections above are retired and stay only for old bundles.
     seen_case_ids = {str(item.get("id")) for item in ediscovery_cases}
     searched_case_ids: set[str] = set()
+    # One record per search key: a Graph search replaces the retired searchList row for the same id.
+    search_index = {record["key"]: index for index, record in enumerate(ediscovery_searches)}
+    graph_search_keys: set[str] = set()
     for item in _values(ediscovery_payload, "cases"):
         case_id = str(item.get("id") or "")
         if not case_id or case_id in searched_case_ids:
@@ -2869,16 +2872,22 @@ def build_normalized_snapshot(
         ) if isinstance(searches, dict) else []:
             if not search.get("id"):
                 continue
-            ediscovery_searches.append(
-                _record(
-                    "ediscovery_search",
-                    "ediscovery.caseSearches",
-                    str(search["id"]),
-                    display_name=search.get("displayName"),
-                    case_id=case_id,
-                    status=search.get("status"),
-                )
+            record = _record(
+                "ediscovery_search",
+                "ediscovery.caseSearches",
+                str(search["id"]),
+                display_name=search.get("displayName"),
+                case_id=case_id,
+                status=search.get("status"),
             )
+            if record["key"] in graph_search_keys:
+                continue
+            graph_search_keys.add(record["key"])
+            if record["key"] in search_index:
+                ediscovery_searches[search_index[record["key"]]] = record
+            else:
+                search_index[record["key"]] = len(ediscovery_searches)
+                ediscovery_searches.append(record)
     ediscovery_export_jobs = [
         _record(
             "ediscovery_export_job",

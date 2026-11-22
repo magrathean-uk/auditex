@@ -632,3 +632,20 @@ def test_each_case_streams_its_searches_to_its_own_chunk_files(tmp_path, first: 
     )
     searches = sorted((row["case_id"], row["id"]) for row in snapshot["ediscovery_searches"]["records"])
     assert searches == sorted([(first, "s1"), (second, "s2")])
+
+
+def test_a_search_in_both_the_retired_search_list_and_a_graph_case_is_one_record() -> None:
+    """Review of the fix above: a mixed bundle must not give one search two records with the same key."""
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payload = {
+        "caseOverview": {"value": [{"id": "c1", "name": "Board matter"}]},
+        "searchList": {"value": [{"id": "s1", "name": "Mailboxes"}]},
+        "cases": {"value": [{"id": "c1", "displayName": "Board matter"}]},
+        "case_c1": {"searches": {"value": [{"id": "s1", "displayName": "Mailboxes"}]}, "operations": {"value": []}},
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": payload})
+
+    records = snapshot["ediscovery_searches"]["records"]
+    assert [row["key"] for row in records] == ["ediscovery_search:s1"]
+    assert records[0]["case_id"] == "c1"  # the Graph read names the case the retired list left out
