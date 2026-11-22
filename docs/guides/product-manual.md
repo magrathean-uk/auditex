@@ -24,7 +24,7 @@ Auditex is an audit-only evidence collection and reporting toolkit for Microsoft
 
 ## Install
 
-Use Python 3.11 or newer.
+Use Python 3.11 or newer on Linux, macOS or Windows Subsystem for Linux 2 (WSL2). Native Windows is not supported yet: Auditex needs no-follow, descriptor-relative file opens to read its inputs safely, and on native Windows it refuses with "Auditex needs Linux, macOS or WSL2; native Windows is not supported yet." Install and run it inside a WSL2 distribution instead.
 
 ```bash
 python3 -m venv .venv
@@ -44,6 +44,13 @@ Install MCP dependencies only when serving Auditex through MCP.
 ```bash
 python -m pip install -e '.[mcp]'
 ```
+
+`auditex setup` prepares a source checkout. In an installed package it changes nothing and prints the manual steps
+for the optional packs instead, starting "auditex setup prepares a source checkout; this Auditex is an installed
+package, so its Python is ready." Shipped configs, profiles and schemas come from the package; the environment
+variable `AUDITEX_RESOURCE_ROOT` is the only way to point Auditex at another copy, and a checkout-like folder at or
+above the current folder never replaces them. A relative `--sample` path names a shipped example when one matches;
+otherwise it is read from the current folder.
 
 ## First Local Check
 
@@ -97,7 +104,13 @@ auditex run \
   --out outputs/live
 ```
 
-`auditex guided-run --flow app-audit` asks for the same values step by step.
+`auditex guided-run --flow app-audit` asks for the same values step by step. It checks the local tools the run
+needs (PowerShell 7 and `ExchangeOnlineManagement` only when `exchange_policy` or `targeted_users_coverage` is
+selected) and installs missing ones
+only on request: at its prompt, or without asking with `--install-tools`, which may use `sudo` with the system package
+manager and installs `ExchangeOnlineManagement` from PSGallery. In an installed package it installs nothing: it prints
+the manual steps and continues. `--non-interactive` never prompts; missing tools then stop the run with exit status 2
+unless `--install-tools` (install without asking) or `--skip-tool-check` is given. `--doh-endpoint URL` names the DNS-over-HTTPS resolver, as on `auditex run`.
 
 ## Google Workspace Audit Flow
 
@@ -221,6 +234,9 @@ A completed run directory contains the contract artifacts. Start with:
 8. `reports/report-pack.json`
 
 `validation.json` must be valid for customer handoff. Partial audits can still be useful, but the blocker reasons must be explicit.
+The auditor score grade in the report pack and `auditex report analyze` is `blocked` when no collector completed, or
+when coverage gaps bring the coverage component to 0 (six gaps on a partial run, seven on an ok run); such a run has
+no score to read.
 Accepted-risk findings with expired waiver dates are stale for handoff and should be treated like a review blocker until re-approved.
 
 ### Attack paths
@@ -264,12 +280,27 @@ raise `dns_posture.mta_sts_missing`, `dns_posture.mta_sts_testing_mode`,
 
 ```bash
 auditex report render <run-dir> --format md
-auditex report render <run-dir> --format html --output reports/client-report.html
-auditex report render <run-dir> --format json --output reports/client-report.json
+auditex report render <run-dir> --format html --output reports/operator-report.html
+auditex report render <run-dir> --format json --output reports/operator-report.json
 auditex report render <run-dir> --format csv --output reports/findings.csv
 auditex report render <run-dir> --format sarif --output reports/findings.sarif.json
 auditex report render <run-dir> --format oscal --output reports/oscal.json
 ```
+
+`auditex report render` is the operator's local view: it keeps the original, unredacted values, and its default
+sections include every normalised evidence section and the run manifest (user principal names, privileged users,
+guest lists, the command line and local paths). Keep it with the run folder. For anything that leaves the operator,
+use the shareable exporters, which apply the shareable redaction profile, or the [customer pack](#customer-pack):
+
+```bash
+auditex export list
+auditex export run html <run-dir> --output reports/client-report.html
+auditex export run json <run-dir> --output reports/client-report.json
+```
+
+`auditex export run` takes the same formats (`csv`, `html`, `json`, `md`, `oscal`, `sarif`) and the same
+`--include-section` and `--exclude-section` options. Both commands refuse an unknown section name with exit status 2:
+they print "Unknown report section(s): X. Valid sections: ..." and write nothing.
 
 The SARIF export is SARIF 2.1.0 and the OSCAL export is OSCAL 1.1.2 Assessment Results; both are validated against the official JSON Schemas in the test suite. The OSCAL collection time is the run's `created_utc`, not the time of the export. See the [output contract](../reference/output-contract.md#sarif-and-oscal-exports).
 
@@ -391,6 +422,19 @@ A status counts only with a waiver behind it, and only while the waiver stands. 
 - `owner`, `reason` (or `comment`) and `expires_on` (or `expires`, an ISO date) are expected. A waiver without them still applies but warns on stderr when the file loads and in the finding's `waiver.missing_fields`, the `accepted_risk_summary` and the gate output.
 - An expired waiver (`expires_on` before today) does not match; a waiver that expires today still does. The applied waiver is recorded on the finding with `waiver.matched_fields`.
 - A waiver file that is missing, unreadable, not valid JSON, the wrong shape, or has an invalid row or date stops the run before any tenant call. A configured file that cannot be trusted never means "no waivers".
+
+## Notifications
+
+```bash
+auditex notify send <run-dir> --sink teams
+auditex notify send <run-dir> --sink teams --execute
+```
+
+Without `--execute` the command only prints the redacted notification it would send. The sinks are `teams`, `slack`
+(webhooks), `smtp`, `jira` and `github` (tickets, de-duplicated per run). Each is configured through environment
+variables, and `--execute` sends the redacted run summary, coverage gaps and action plan out of the machine; a GitHub
+issue in a public repository is public. Review the settings, the calls and the payload in
+[Notifications](../reference/security-privacy.md#notifications) before the first `--execute`.
 
 ## MCP
 

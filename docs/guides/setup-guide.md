@@ -2,12 +2,18 @@
 
 Tenant administrators: every permission, role and setting the reader app needs is in [Reader app permissions](reader-app-permissions.md).
 
+The audit machine runs Linux, macOS or WSL2 (Windows Subsystem for Linux 2). On native Windows Auditex stops with "Auditex needs Linux, macOS or WSL2; native Windows is not supported yet." Run it inside a WSL2 distribution.
+
 ## Default Exchange and public DNS collection
 
 Runs with the `auto` or `global-reader` profile select `exchange_policy`
 and `dns_posture` by default, as does the `full` preset. `app-readonly-full` also
-includes both. Only an explicit `--collectors` list or the `config-only` and
-`power-platform` presets change that. Power Platform and Power BI remain opt-in.
+includes both and adds `intune_depth`, `purview` and `ediscovery`; `ediscovery` needs
+`eDiscovery.Read.All`, an [optional permission](reader-app-permissions.md#optional-collectors-not-part-of-the-grant)
+of the reader app, and without it the run is partial. Every other preset (`config-only`, `identity-only`, `security-only`
+and `power-platform`) replaces the profile defaults with its own list and omits
+both, as does an explicit `--collectors` list; `--exclude` drops either one after
+selection. Power Platform and Power BI remain opt-in.
 
 A default run opens an Exchange Online PowerShell session for read-only
 `Get-*` policy reads, with an Exchange token minted silently from the reader app's
@@ -32,9 +38,10 @@ collector and run **ok** when other reads succeed; the gate passes with a named
 limitation. The gap remains in coverage, collection gaps, the handoff, explorer and
 AI context.
 
-The run sends the tenant's domain names to the public **Cloudflare DNS-over-HTTPS
-resolver**, `https://cloudflare-dns.com/dns-query`. Only domain names, no user data,
-are sent to that resolver. SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange
+The run sends the tenant's domain names to the **DNS-over-HTTPS resolver**: the public
+Cloudflare resolver, `https://cloudflare-dns.com/dns-query`, unless `--doh-endpoint URL`
+or `AUDITEX_DOH_ENDPOINT` names another plain `https://` resolver. Only domain names,
+no user data, are sent to that resolver. SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange
 accepted domains (coexistence excluded) when the same run collected them, else
 Graph verified domains with the Email service. Posture checks and MTA-STS and
 public Entra OpenID discovery HTTPS reads stay on Graph-verified domains. No
@@ -68,8 +75,8 @@ Exchange session failures retain the tooling or app-consent remediation.
 The CLI writes a collector-only notice to stderr and records it as `partial_workload_notice` in the summary.
 
 `auditex probe live --surface all` includes Exchange policy and DNS posture.
-The standalone probe prints the Exchange session and Cloudflare resolver notices
-before its reads; use `--surface` to limit probe surfaces.
+The standalone probe prints the Exchange session and DNS resolver notices
+before its reads (it takes the resolver from `AUDITEX_DOH_ENDPOINT`); use `--surface` to limit probe surfaces.
 `--probe-first` defers these two collectors to the collection phase, so it does not
 repeat their PowerShell sessions or public lookups. A standalone probe performs
 the reads and a subsequent run repeats them. Added runtime depends on tenant size,
@@ -119,6 +126,12 @@ Admin flow:
 5. Add the OAuth app ID and paste the generated comma-separated scopes. The 2-step verification policy needs `cloud-identity.policies.readonly` and the Cloud Identity API.
 6. Run the generated doctor and probe commands.
 
+Google DNS posture (`google_dns_posture`, in the `core-security`, `mail` and `everything` presets) sends the
+customer's verified domain names, and nothing else, to the public Cloudflare DNS-over-HTTPS resolver
+(`https://cloudflare-dns.com/dns-query`), or to the resolver set in `AUDITEX_DOH_ENDPOINT`. The run prints this notice
+on stderr before collection and writes it to `data-handling.json` and the report. Turn it off with
+`--exclude google_dns_posture`, or use the `identity` or `collaboration` preset.
+
 `--domain` is a label. Users and groups are listed for the whole customer, and the internal domains (primary, secondary and alias) come from the Directory domains list.
 
 Accepted risks go in a waiver file, the same JSON format as the Microsoft 365 run. Each waiver names a `finding_id` or a `rule_id` (a `collector` or `category` only narrows it), and an expired waiver is ignored. An invalid file stops the run before any API call:
@@ -137,6 +150,14 @@ auditex setup-guide google --auth oauth --collector-preset core-security
 ```
 
 Treat OAuth output as partial if domain-wide admin surfaces are blocked. OAuth cannot act as another user, so Gmail settings cover the signed-in mailbox only and the run says so.
+
+With an OAuth sign-in, Gmail delegates cannot be listed (Google allows that only under domain-wide delegation), so the Gmail surface is reported as partial and the report shows `delegates` as not read.
+
+Each run checks the cached sign-in with Google. If the run needs scopes the cache was not granted, or the sign-in was revoked or has expired (OAuth clients in Testing status expire refresh tokens after 7 days), the browser sign-in opens again; you never need to delete the token cache by hand. If Google's sign-in service is briefly unavailable, a sign-in that is still in date is used as it is; an expired one stops the run with "run again later" and does not open the browser.
+
+The service-account key must be an owner-only JSON file: `chmod 600 key.json`. Auditex refuses a key file that others can read, or a link, with `service_account_key_refused`.
+
+Each collector signs in with only its own scopes. If the domain-wide delegation entry leaves a scope out, only the collectors that need it fail, and the capability matrix names the missing scope under `missing_permissions`. A collector that read some data but was refused one list is shown as partial (a role limit), not as a missing scope.
 
 ## Microsoft 365
 
@@ -165,6 +186,14 @@ auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --client-i
   --certificate-path ~/audit-keys/auditex-reader.pem --certificate-thumbprint <sha1-thumbprint> \
   --certificate-password-file ~/audit-keys/auditex-reader.pass --auditor-profile global-reader --collector-preset full
 ```
+
+Auditex reads Microsoft Graph at `graph.microsoft.com`, so it audits commercial and GCC tenants; GCC High, DoD and
+other sovereign clouds, whose Graph is elsewhere, are not supported. A certificate that Microsoft Entra refuses (the
+thumbprint is not on the reader app, or the tenant ID is wrong) stops the run before collection with exit status 2 and
+"A certificate app token could not be acquired. Check that the thumbprint is on the reader app registration and the
+tenant ID is right." An explicit `--permission-hints` file that does not exist stops `auditex run`,
+`azure-tenant-audit` and `auditex probe live` with exit status 2 (the probe before it writes any folder): "The
+--permission-hints file was not found: <path>".
 
 `auditex guided-run --flow app-audit` takes the same four options. `--mode app` on `auditex setup-guide m365` is accepted
 for old scripts and changes nothing. The Teams admin policies (`teams_policy`, selected by the `global-reader` profile and
