@@ -271,7 +271,7 @@ def test_defender_permissions_add_only_the_new_optional_commands():
     path = "configs/collector-permissions.json"
     shipped = json.loads((ROOT / path).read_text())["collector_permissions"]["exchange_policy"]
     assert shipped["graph_scopes"] == []
-    assert shipped["minimum_role_hints"] == ["Exchange Reader", "Exchange Administrator", "Global Reader"]
+    assert shipped["minimum_role_hints"] == ["Exchange Reader", "Global Reader"]
     assert shipped["command_tools"] == ["pwsh", "powershell_graph"]
     cmdlets = [command.removeprefix(",@(").split()[0] for _, command in defender.DEFENDER_COMMANDS]
     assert len(cmdlets) == 14
