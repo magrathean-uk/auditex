@@ -110,3 +110,46 @@ def test_r126_export_run_refuses_an_unknown_section_with_exit_2(tmp_path, capsys
     assert rc == 2
     assert "sumary" in err and "Valid sections:" in err
     assert not output.exists()
+
+
+# R083 (console half): a Google run shows its DNS notice on the console before collection, as the M365 run does.
+def test_r083_google_run_prints_its_dns_notice_before_collection(tmp_path, monkeypatch, capsys) -> None:  # noqa: ANN001
+    from test_review_google_workspace_dns import _fake_dns_run
+
+    from auditex.google_workspace.run import GoogleRunConfig, run_google_live
+    from azure_tenant_audit.dns_lookup import DEFAULT_DOH_ENDPOINT, DOH_ENDPOINT_ENV
+
+    monkeypatch.delenv(DOH_ENDPOINT_ENV, raising=False)
+    contexts = _fake_dns_run(monkeypatch)
+
+    run_google_live(GoogleRunConfig(tenant_name="Example", out=tmp_path, run_name="dns", collectors="google_dns_posture"))
+
+    captured = capsys.readouterr()
+    assert contexts, "the DNS collector ran"
+    notices = [line for line in captured.err.splitlines() if line.startswith("Collection notice: ")]
+    assert len(notices) == 1
+    assert DEFAULT_DOH_ENDPOINT in notices[0] and "--exclude google_dns_posture" in notices[0]
+    assert "Collection notice" not in captured.out
+
+
+def test_r083_google_run_without_dns_prints_no_dns_notice(tmp_path, monkeypatch, capsys) -> None:  # noqa: ANN001
+    from azure_tenant_audit.collectors.base import CollectorResult
+
+    from auditex.google_workspace import run as google_run
+
+    class _Collector:
+        name = "google_directory"
+        required_scopes = ("scope://directory",)
+
+        def run(self, context):  # noqa: ANN001
+            return CollectorResult(self.name, "ok", {}, 0, coverage=[{"collector": self.name, "name": "x", "status": "ok",
+                                                                       "item_count": 0}])
+
+    monkeypatch.setattr(google_run, "REGISTRY", {"google_directory": _Collector()})
+    monkeypatch.setattr(google_run, "google_dependency_status", lambda: {"available": True, "missing": [], "install_hint": ""})
+    monkeypatch.setattr(google_run, "build_google_credentials", lambda _config: object())
+
+    google_run.run_google_live(google_run.GoogleRunConfig(tenant_name="Example", out=tmp_path, run_name="dir",
+                                                          collectors="google_directory"))
+
+    assert "DNS" not in capsys.readouterr().err

@@ -811,6 +811,9 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     if doh_endpoint is not None:
         notice = google_dns_notice(doh_endpoint)
         LOG.info("%s", notice)
+        # The auditex CLI configures no log handler, so the operator sees the notice only through this line (stderr
+        # keeps stdout for the run's JSON).
+        print(f"Collection notice: {notice}", file=sys.stderr)
         writer.log_event("run.notice", notice, {"collector": "google_dns_posture", "resolver": _resolver_label(doh_endpoint)})
     start = time.time()
     writer_adapter = AuditWriterCollectorAdapter(writer)
