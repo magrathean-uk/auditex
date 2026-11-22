@@ -2,11 +2,15 @@
 service-account key file mode and the token cache write."""
 from __future__ import annotations
 
+import json
+import sys
+import types
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from auditex.google_workspace import auth as google_auth
 from auditex.google_workspace import run as google_run
 from auditex.google_workspace.client import GoogleWorkspaceClient
 from auditex.google_workspace.run import (
@@ -83,3 +87,128 @@ def test_r056_probe_reads_each_collector_with_its_own_scopes() -> None:
 def test_r056_credentials_without_scoping_are_shared_unchanged() -> None:
     client = GoogleWorkspaceClient(object())
     assert client.for_scopes(("scope://a",)) is client
+
+
+# ---- R059: the OAuth token cache is re-consented when scopes change or the refresh fails -------------------------
+
+
+class _GoogleAuthError(Exception):
+    pass
+
+
+class _RefreshError(_GoogleAuthError):
+    pass
+
+
+class _UserCredentials:
+    """google.oauth2.credentials.Credentials as the library builds it: explicit scopes win over the cached ones."""
+
+    def __init__(self, scopes: list[str], *, valid: bool = True, refresh_error: bool = False, tag: str = "cached") -> None:
+        self.scopes = list(scopes)
+        self.valid = valid
+        self.expired = not valid
+        self.refresh_token = "<REDACTED>"
+        self.refresh_error = refresh_error
+        self.tag = tag
+
+    @classmethod
+    def from_authorized_user_file(cls, path: str, scopes: list[str] | None = None) -> _UserCredentials:
+        info = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls(scopes if scopes is not None else info.get("scopes") or [], valid=info.get("valid", True),
+                   refresh_error=info.get("refresh_error", False))
+
+    def has_scopes(self, scopes: list[str]) -> bool:
+        return set(scopes).issubset(self.scopes)
+
+    def refresh(self, _request: Any) -> None:
+        if self.refresh_error:
+            raise _RefreshError("invalid_grant")
+        self.valid, self.expired = True, False
+
+    def to_json(self) -> str:
+        return json.dumps({"scopes": self.scopes, "tag": self.tag})
+
+
+@pytest.fixture
+def oauth_modules(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    state: dict[str, Any] = {"flows": 0, "flow_error": None}
+
+    class _Flow:
+        def __init__(self, scopes: list[str]) -> None:
+            self.scopes = scopes
+
+        @classmethod
+        def from_client_secrets_file(cls, _path: str, scopes: list[str]) -> _Flow:
+            return cls(scopes)
+
+        def run_local_server(self, port: int = 0) -> _UserCredentials:
+            state["flows"] += 1
+            if state["flow_error"] is not None:
+                raise state["flow_error"]
+            return _UserCredentials(self.scopes, tag="consented")
+
+    modules = {
+        "google": types.ModuleType("google"),
+        "google.auth": types.ModuleType("google.auth"),
+        "google.auth.exceptions": types.ModuleType("google.auth.exceptions"),
+        "google.auth.transport": types.ModuleType("google.auth.transport"),
+        "google.auth.transport.requests": types.ModuleType("google.auth.transport.requests"),
+        "google.oauth2": types.ModuleType("google.oauth2"),
+        "google.oauth2.credentials": types.ModuleType("google.oauth2.credentials"),
+        "google_auth_oauthlib": types.ModuleType("google_auth_oauthlib"),
+        "google_auth_oauthlib.flow": types.ModuleType("google_auth_oauthlib.flow"),
+    }
+    modules["google.auth.exceptions"].GoogleAuthError = _GoogleAuthError  # type: ignore[attr-defined]
+    modules["google.auth.exceptions"].RefreshError = _RefreshError  # type: ignore[attr-defined]
+    modules["google.auth.transport.requests"].Request = object  # type: ignore[attr-defined]
+    modules["google.oauth2.credentials"].Credentials = _UserCredentials  # type: ignore[attr-defined]
+    modules["google_auth_oauthlib.flow"].InstalledAppFlow = _Flow  # type: ignore[attr-defined]
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
+    return state
+
+
+def _oauth_config(tmp_path: Path, scopes: tuple[str, ...]) -> google_auth.GoogleAuthConfig:
+    return google_auth.GoogleAuthConfig(auth_mode="oauth", scopes=scopes, oauth_client=tmp_path / "client.json",
+                                        token_cache=tmp_path / "cache" / "token.json")
+
+
+def _write_cache(tmp_path: Path, **info: Any) -> None:
+    (tmp_path / "cache").mkdir(exist_ok=True)
+    (tmp_path / "cache" / "token.json").write_text(json.dumps(info), encoding="utf-8")
+
+
+def test_r059_cached_token_without_the_new_scopes_is_re_consented(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    _write_cache(tmp_path, scopes=["scope://a"])
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a", "scope://b")))
+    assert oauth_modules["flows"] == 1
+    assert credentials.tag == "consented" and credentials.scopes == ["scope://a", "scope://b"]
+    assert json.loads((tmp_path / "cache" / "token.json").read_text(encoding="utf-8"))["scopes"] == ["scope://a", "scope://b"]
+
+
+def test_r059_cached_token_with_every_scope_is_reused(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    _write_cache(tmp_path, scopes=["scope://a", "scope://b"])
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+    assert oauth_modules["flows"] == 0 and credentials.tag == "cached"
+
+
+def test_r059_refresh_error_falls_back_to_consent(tmp_path: Path, oauth_modules: dict[str, Any]) -> None:
+    _write_cache(tmp_path, scopes=["scope://a"], valid=False, refresh_error=True)
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+    assert oauth_modules["flows"] == 1 and credentials.tag == "consented"
+
+
+def test_r059_google_auth_error_ends_the_run_as_google_auth_failed(
+    tmp_path: Path, oauth_modules: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    oauth_modules["flow_error"] = _GoogleAuthError("access_denied")
+    with pytest.raises(RuntimeError, match="Google sign-in failed"):
+        google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a",)))
+
+    monkeypatch.setattr(google_run, "google_dependency_status", lambda: {"available": True, "missing": [], "install_hint": ""})
+    rc = run_google_live(GoogleRunConfig(tenant_name="Example", out=tmp_path / "out", auth="oauth",
+                                         oauth_client=tmp_path / "client.json", token_cache=tmp_path / "cache" / "t.json",
+                                         collectors="google_alert_center"))
+    assert rc == 2
+    assert json.loads(capsys.readouterr().err)["error"] == "google_auth_failed"

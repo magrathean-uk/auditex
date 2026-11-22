@@ -108,24 +108,49 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
             raise ValueError("--oauth-client is required for oauth auth")
         if config.token_cache is None:
             raise ValueError("--token-cache is required for oauth auth")
+        from google.auth.exceptions import GoogleAuthError, RefreshError
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
 
         token_cache = config.token_cache.expanduser()
         credentials = None
-        if token_cache.exists():
-            credentials = Credentials.from_authorized_user_file(str(token_cache), list(config.scopes))
-        if credentials and credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-        if not credentials or not credentials.valid:
-            flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
-            credentials = flow.run_local_server(port=0)
+        try:
+            if token_cache.exists():
+                # Loaded with the scopes it was granted (not this run's), so a run that needs more signs in again
+                # rather than reusing a token its new collectors cannot use.
+                credentials = Credentials.from_authorized_user_file(str(token_cache))
+                if not _has_scopes(credentials, config.scopes):
+                    credentials = None
+            if credentials and credentials.expired and credentials.refresh_token:
+                try:
+                    credentials.refresh(Request())
+                except RefreshError:
+                    # Revoked, expired (Testing-status clients expire refresh tokens after 7 days) or narrower than
+                    # asked: sign in again.
+                    credentials = None
+            if not credentials or not credentials.valid:
+                flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
+                credentials = flow.run_local_server(port=0)
+        except GoogleAuthError as exc:
+            # A fixed message: the library's text can carry token material.
+            raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
         token_cache.parent.mkdir(parents=True, exist_ok=True)
         secure_write_text(token_cache, credentials.to_json(), mode=0o600)
         return credentials
 
     raise ValueError(f"unsupported Google auth mode: {config.auth_mode}")
+
+
+def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:
+    """Whether cached OAuth credentials were granted every scope this run asks for."""
+    has_scopes = getattr(credentials, "has_scopes", None)
+    if has_scopes is None:
+        return False
+    try:
+        return bool(has_scopes(list(scopes)))
+    except Exception:  # noqa: BLE001 - an unreadable cache is signed in again, never trusted
+        return False
 
 
 def user_delegated_credentials(credentials: Any, subject: str, *, scopes: tuple[str, ...] | None = None) -> Any:
