@@ -43,3 +43,86 @@ def test_r011_deleted_alert_replayed_offline_is_not_active() -> None:
     )
     rule_ids = [str(item.get("rule_id")) for item in build_google_findings(snapshot)]
     assert "google.alert_active" not in rule_ids
+
+
+# ---- R055: probe counts, partial mailbox rows and the delegation-only delegates read ----------------------------
+
+
+class _Settings:
+    """Gmail users.settings fake: each call answers ``outcome`` unless its name is in ``ok``; calls are recorded."""
+
+    def __init__(self, outcome: Any, ok: tuple[str, ...] = ()) -> None:
+        self.outcome = outcome
+        self.ok = ok
+        self.calls: list[str] = []
+
+    def _answer(self, name: str) -> _Request:
+        self.calls.append(name)
+        return _Request({} if name in self.ok else self.outcome)
+
+    def __getattr__(self, name: str) -> Any:
+        if name in {"filters", "forwardingAddresses", "sendAs", "delegates"}:
+            sub = type("Sub", (), {"list": lambda _self, **_k: self._answer(name)})()
+            return lambda: sub
+        return lambda **_k: self._answer(name)
+
+
+def _gmail_client(settings: _Settings, *, delegated: bool = False) -> google_client.GoogleWorkspaceClient:
+    users = type("Users", (), {"settings": lambda _self: settings})()
+    client = google_client.GoogleWorkspaceClient(credentials=None, delegated=delegated)
+    assert client._services is not None
+    client._services[("gmail", "v1")] = type("Gmail", (), {"users": lambda _self: users})()
+    return client
+
+
+def test_r055_probe_counts_no_item_when_every_settings_read_fails() -> None:
+    from auditex.google_workspace.run import build_google_preflight_rows
+
+    client = _gmail_client(_Settings(_HttpError(403)))
+    row = build_google_preflight_rows(client, ["google_gmail_settings"], domain="example.com")[0]
+    assert row["status"] == "failed"
+    assert row["item_count"] == 0
+
+
+def test_r055_a_partial_mailbox_read_is_partial_not_blocked_by_scope() -> None:
+    from auditex.google_workspace.run import build_google_capability_rows
+
+    partial = {"collector": "google_gmail_settings", "name": "mailboxSettings", "status": "partial",
+               "item_count": 1, "error_class": "insufficient_permissions", "error": "1 of 8 Gmail settings reads failed"}
+    row = build_google_capability_rows(
+        ["google_gmail_settings"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=[partial],
+    )[0]
+    assert row["status"] == "partial"
+    assert row["missing_permissions"] == []
+
+
+def test_r055_oauth_mailbox_read_skips_the_delegation_only_delegates_list() -> None:
+    from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
+    from auditex.google_workspace.run import build_google_capability_rows, build_google_preflight_rows
+
+    # delegates.list answers 403 to anything but a delegated service account.
+    settings = _Settings(_HttpError(403), ok=("getAutoForwarding", "filters", "forwardingAddresses", "sendAs",
+                                              "getImap", "getPop", "getVacation"))
+    client = _gmail_client(settings)
+    result = GoogleGmailSettingsCollector().run({"client": client, "users": []})
+    assert "delegates" not in settings.calls
+    mailbox = next(row for row in result.coverage if row["name"] == "mailboxSettings:me")
+    assert mailbox["status"] == "ok"
+    assert "delegates_error" not in result.payload["mailboxSettings"]["value"][0]
+
+    preflight = build_google_preflight_rows(client, ["google_gmail_settings"], domain="example.com")
+    capability = build_google_capability_rows(
+        ["google_gmail_settings"], auth_mode="oauth", dependency_status={"available": True}, coverage_rows=preflight
+    )[0]
+    assert capability["status"] != "blocked_by_scope"
+
+
+def test_r055_delegated_mailbox_read_still_lists_delegates() -> None:
+    settings = _Settings({}, ok=())
+    client = _gmail_client(settings)
+    client.delegated = True
+    client.credentials = type("C", (), {"with_subject": lambda self, _s: self})()
+    client._subject_services["me@example.com", "gmail", "v1"] = client._services["gmail", "v1"]  # type: ignore[index]
+    client.get_gmail_settings_for_user("me@example.com")
+    assert "delegates" in settings.calls

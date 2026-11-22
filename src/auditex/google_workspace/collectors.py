@@ -488,8 +488,9 @@ class GoogleGmailSettingsCollector:
                         error_class="subject_scope",
                         error=(
                             f"Gmail settings were read for the signed-in mailbox only; the other {len(emails)} users were "
-                            "not read because these credentials cannot act as another user. Use domain-wide delegation "
-                            "for per-user evidence."
+                            "not read because these credentials cannot act as another user, and mailbox delegates "
+                            "can be listed only under domain-wide delegation. Use domain-wide delegation for per-user "
+                            "evidence."
                         ),
                         subject_scoped=SUBJECT_SCOPE_ADMIN,
                     )

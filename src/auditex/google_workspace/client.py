@@ -73,9 +73,11 @@ def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str
 
     Every settings read failing is ``failed``; some failing is ``partial``; none failing is ``ok``.
     """
+    skipped = set(payload.get("skippedSettings") or ())
+    attempted = [name for name in GMAIL_SETTING_NAMES if name not in skipped]
     failures = {
         name: error
-        for name in GMAIL_SETTING_NAMES
+        for name in attempted
         if isinstance(error := payload.get(f"{name}_error"), dict) and error
     }
     if not failures:
@@ -86,8 +88,8 @@ def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str
         (str(error.get("error") or "") for error in failures.values() if str(error.get("error_class") or "client_error") == error_class),
         "",
     )
-    status = "failed" if len(failures) == len(GMAIL_SETTING_NAMES) else "partial"
-    error = f"{len(failures)} of {len(GMAIL_SETTING_NAMES)} Gmail settings reads failed ({', '.join(sorted(failures))})"
+    status = "failed" if len(failures) == len(attempted) else "partial"
+    error = f"{len(failures)} of {len(attempted)} Gmail settings reads failed ({', '.join(sorted(failures))})"
     return status, error_class, f"{error}: {example}" if example else error
 
 
@@ -431,7 +433,12 @@ class GoogleWorkspaceClient:
         _capture("imap", lambda: settings.getImap(userId=user_email).execute(), default={})
         _capture("pop", lambda: settings.getPop(userId=user_email).execute(), default={})
         _capture("vacation", lambda: settings.getVacation(userId=user_email, fields=GMAIL_VACATION_FIELDS).execute(), default={})
-        _capture("delegates", lambda: settings.delegates().list(userId=user_email).execute(), list_key="delegates", default=[])
+        if self.per_user_delegation:
+            _capture("delegates", lambda: settings.delegates().list(userId=user_email).execute(), list_key="delegates", default=[])
+        else:
+            # delegates.list answers only a service account with domain-wide delegation; an OAuth sign-in is always
+            # refused, which is not a missing scope. It is recorded as not read, never as a failed read.
+            payload["skippedSettings"] = ["delegates"]
         return minimise_gmail_settings(payload)
 
     def list_drive_files(self, *, top: int | None = None) -> list[dict[str, Any]]:

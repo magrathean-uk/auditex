@@ -205,7 +205,8 @@ def build_google_capability_rows(
             row_status = "supported_exact_scope"
             row_reason = "runtime_preflight_ok"
         elif failures:
-            classes = {str(item.get("error_class") or "") for item in failures}
+            # Only a read refused outright is a scope block; a read that partly succeeded proves the scopes work.
+            classes = {str(item.get("error_class") or "") for item in failures if item.get("status") == "failed"}
             if classes & {"insufficient_permissions", "unauthenticated"}:
                 row_status = "blocked_by_scope"
                 row_reason = "runtime_permission_block"
@@ -333,7 +334,10 @@ def _gmail_preflight_status(row: dict[str, Any], check: Any) -> dict[str, Any]:
             continue
         status, error_class, error = gmail_settings_status(payload)
         if status != "ok":
-            return {"status": status, "error_class": error_class, "error": error}
+            update = {"status": status, "error_class": error_class, "error": error}
+            if status == "failed":
+                update["item_count"] = 0
+            return update
     return {}
 
 
