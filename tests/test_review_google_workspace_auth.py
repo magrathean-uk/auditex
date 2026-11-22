@@ -216,6 +216,8 @@ def oauth_modules(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
+    # As in real_oauth: the fallback tests assume a volume that enforces ownership (the test volume may be noowners).
+    monkeypatch.setattr(google_auth, "ownership_enforced", lambda _path: True)
     return state
 
 
@@ -594,6 +596,9 @@ def real_oauth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any
     monkeypatch.setattr(Credentials, "refresh", _refresh)
     monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file",
                         classmethod(lambda *_a, **_k: pytest.fail("consent must not start during an outage")))
+    # The test volume may ignore ownership (macOS noowners); the fallback tests below assume one that enforces it, and
+    # the noowners case has its own test.
+    monkeypatch.setattr(google_auth, "ownership_enforced", lambda _path: True)
     return state
 
 
@@ -708,5 +713,69 @@ def test_item26_fresh_consent_narrower_than_the_run_is_refused_naming_the_missin
         google_auth.build_google_credentials(_oauth_config(tmp_path, ("scope://a", "scope://b", "scope://c")))
     message = str(caught.value)
     assert "scope://b" in message and "scope://c" in message and "scope://a" not in message
+    assert "REDACTED" not in message and caught.value.__cause__ is None
+    assert not (tmp_path / "cache" / "token.json").exists()
+
+
+# ---- repair round 2 for group H (items 18, 26) ---------------------------------------------------------------------
+
+
+def _consented(refresh_token: str | None, scopes: list[str]) -> Any:
+    from google.oauth2.credentials import Credentials
+
+    return Credentials(token="<REDACTED-new>", refresh_token=refresh_token, client_id="constructed-client",
+                       client_secret="<REDACTED-secret>", token_uri="https://oauth2.googleapis.com/token",
+                       scopes=scopes, granted_scopes=scopes)
+
+
+def test_item18_a_cache_auditex_saved_without_a_refresh_token_leads_to_fresh_consent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Google may leave the refresh token out of a consent response; Auditex saves that cache (google-auth drops the
+    # empty field), and the next run must sign in again rather than stop on google-auth's ValueError.
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    consents = [_consented(None, [_SCOPE_A]), _consented("<REDACTED-refresh>", [_SCOPE_A])]
+    flow = types.SimpleNamespace(run_local_server=lambda port=0: consents.pop(0))
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", classmethod(lambda *_a, **_k: flow))
+    monkeypatch.setattr(Credentials, "refresh", lambda *_a: pytest.fail("a cache that cannot refresh is not sent"))
+    google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,)))
+    assert "refresh_token" not in json.loads((tmp_path / "cache" / "token.json").read_text(encoding="utf-8"))
+    credentials = google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,)))
+    assert credentials.refresh_token == "<REDACTED-refresh>" and consents == []
+
+
+def test_item26_outage_fallback_is_off_where_the_volume_ignores_ownership(
+    tmp_path: Path, real_oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On a macOS volume mounted with "Ignore ownership" every account passes the owner check, so the recorded grant
+    # could be another account's: the cached token is not used during an outage.
+    _real_cache(tmp_path, [_SCOPE_A], verified=[_SCOPE_A])
+    monkeypatch.setattr(google_auth, "ownership_enforced", lambda _path: False)
+    with pytest.raises(RuntimeError, match="run again later"):
+        google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A,)))
+
+
+def test_item26_default_oauthlib_partial_consent_names_the_missing_scopes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Without scope relaxation oauthlib raises its own Warning on a narrower grant, before any credentials exist.
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from oauthlib.oauth2.rfc6749.parameters import parse_token_response
+
+    monkeypatch.delenv("OAUTHLIB_RELAX_TOKEN_SCOPE", raising=False)
+    response = json.dumps({"access_token": "<REDACTED-access>", "token_type": "Bearer", "expires_in": 3600,
+                           "refresh_token": "<REDACTED-refresh>", "scope": _SCOPE_A})
+
+    def _consent(port: int = 0) -> Any:
+        return parse_token_response(response, scope=[_SCOPE_A, _SCOPE_B])
+
+    flow = types.SimpleNamespace(run_local_server=_consent)
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", classmethod(lambda *_a, **_k: flow))
+    with pytest.raises(RuntimeError) as caught:
+        google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_A, _SCOPE_B)))
+    message = str(caught.value)
+    assert "missing scopes: " + _SCOPE_B in message and _SCOPE_A not in message
     assert "REDACTED" not in message and caught.value.__cause__ is None
     assert not (tmp_path / "cache" / "token.json").exists()

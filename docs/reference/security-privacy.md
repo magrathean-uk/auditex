@@ -971,10 +971,13 @@ cache is refreshed every run and saved only after a successful refresh or a fres
 Google actually granted (`auditex_verified_scopes`). A fresh consent that grants fewer scopes than the run needs is
 neither used nor saved; the run stops and names the missing scopes. When Google's token endpoint is down, a cached
 token still in date is used without rewriting the cache, and only when its recorded grant covers the run; an older
-cache that records no grant, or one whose grant is narrower, stops the run with "run again later". Only the token
-endpoint's own grant errors (`invalid_grant`, `invalid_scope`, `invalid_client`, `unauthorized_client`) or a cache
-missing a field a refresh needs (checked on the cached credentials before any refresh, never from an error's text) start
-a new consent. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
+cache that records no grant, or one whose grant is narrower, stops the run with "run again later". This outage
+fallback is off where the owner check proves nothing: on a macOS volume with "Ignore ownership on this volume" set
+(mounted `noowners`, read from the volume's mount flags), when those flags cannot be read, and on Windows; there an
+outage always stops the run with "run again later". Only the token endpoint's own grant errors (`invalid_grant`,
+`invalid_scope`, `invalid_client`, `unauthorized_client`) or a cache missing a field a refresh needs (checked on the
+cached credentials before any refresh, never from an error's text, and including a cache saved from a consent that
+returned no refresh token) start a new consent. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
 others can read, or a link, is refused with `service_account_key_refused`.
 
 `--verbose` raises Auditex's own logging to DEBUG but keeps `urllib3` and `msal` at WARNING, because their request

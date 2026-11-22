@@ -244,6 +244,53 @@ def _acl_grants_access(descriptor: int) -> bool:
         libc.acl_free(acl)
 
 
+# sys/mount.h: a macOS volume with "Ignore ownership on this volume" set (mounted noowners) treats every account as the
+# owner of every file, so the owner and mode checks above pass for files another local account wrote.
+_MNT_IGNORE_OWNERSHIP = 0x00200000
+# struct statfs (64-bit inode layout, the only one on Apple silicon): f_flags follows four bytes of block size, four of
+# I/O size, five 64-bit counts, the 8-byte fsid, f_owner and f_type. The buffer is larger than the 2168-byte struct.
+_STATFS_FLAGS_OFFSET = 64
+_STATFS_BUFFER = 4096
+
+
+def _darwin_mount_flags(path: Path) -> int | None:
+    """The mount flags of the volume holding ``path`` (its nearest existing folder); ``None`` when they cannot be read."""
+    import ctypes
+
+    current = path
+    while not os.path.exists(current) and current != current.parent:
+        current = current.parent
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        try:
+            statfs = libc["statfs$INODE64"]  # Intel: the 64-bit inode layout under its own symbol
+        except AttributeError:
+            statfs = libc.statfs
+        statfs.restype = ctypes.c_int
+        statfs.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+        buffer = ctypes.create_string_buffer(_STATFS_BUFFER)
+        if statfs(os.fsencode(current), buffer) != 0:
+            return None
+        return int.from_bytes(buffer.raw[_STATFS_FLAGS_OFFSET:_STATFS_FLAGS_OFFSET + 4], sys.byteorder)
+    except (OSError, AttributeError, ValueError):
+        return None
+
+
+def ownership_enforced(path: str | Path) -> bool:
+    """Whether the owner checks of :func:`secure_read_text` prove that this account wrote the secret file at ``path``.
+
+    False on a macOS volume that ignores ownership (noowners), when its mount flags cannot be read, and off POSIX (no
+    owner check is made there). A secret read from such a place is still the caller's to use, but nothing it records
+    about itself (a token cache's granted scopes, say) can be trusted on its own word.
+    """
+    if os.name != "posix":
+        return False
+    if sys.platform != "darwin":
+        return True
+    flags = _darwin_mount_flags(Path(path).expanduser().parent)
+    return flags is not None and not flags & _MNT_IGNORE_OWNERSHIP
+
+
 def _trusted_folder(folder: int) -> bool:
     """Whether only the caller (or root) can create, rename or remove entries in this open folder.
 

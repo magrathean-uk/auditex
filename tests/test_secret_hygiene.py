@@ -361,3 +361,42 @@ def test_item26_secure_read_refuses_a_link_or_a_file_others_can_write(tmp_path) 
     os.chmod(writable, 0o666)
     with pytest.raises(PermissionError, match="secret_file_refused"):
         secret_hygiene.secure_read_text(writable)
+
+
+def _mount_options(path) -> set[str] | None:
+    """The options ``mount`` lists for the volume holding ``path`` (macOS), to check the detector independently."""
+    output = subprocess.run(["/sbin/mount"], capture_output=True, text=True, check=True).stdout
+    best: tuple[int, set[str]] | None = None
+    resolved = os.path.realpath(path)
+    for line in output.splitlines():
+        head, _, rest = line.partition(" on ")
+        point, _, options = rest.rpartition(" (")
+        if not point or not (resolved == point or resolved.startswith(point.rstrip("/") + "/")):
+            continue
+        if best is None or len(point) > best[0]:
+            best = (len(point), {option.strip() for option in options.rstrip(")").split(",")})
+    return best[1] if best else None
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS mount policy")
+def test_item26_ownership_enforced_matches_the_volume_mount_policy(tmp_path) -> None:
+    # The test volume decides the expected answer: on a volume mounted with "Ignore ownership" (noowners) every account
+    # is treated as the owner, so the owner and mode checks prove nothing there.
+    from azure_tenant_audit import secret_hygiene
+
+    options = _mount_options(tmp_path)
+    assert options is not None
+    assert secret_hygiene.ownership_enforced(tmp_path / "cache" / "token.json") is ("noowners" not in options)
+    assert secret_hygiene.ownership_enforced("/") is True  # the system volume always enforces ownership
+
+
+def test_item26_ownership_is_not_trusted_when_the_volume_flags_cannot_be_read(monkeypatch, tmp_path) -> None:
+    from azure_tenant_audit import secret_hygiene
+
+    monkeypatch.setattr(secret_hygiene.sys, "platform", "darwin")
+    monkeypatch.setattr(secret_hygiene, "_darwin_mount_flags", lambda _path: None)
+    assert secret_hygiene.ownership_enforced(tmp_path / "token.json") is False
+    monkeypatch.setattr(secret_hygiene, "_darwin_mount_flags", lambda _path: secret_hygiene._MNT_IGNORE_OWNERSHIP)
+    assert secret_hygiene.ownership_enforced(tmp_path / "token.json") is False
+    monkeypatch.setattr(secret_hygiene, "_darwin_mount_flags", lambda _path: 0)
+    assert secret_hygiene.ownership_enforced(tmp_path / "token.json") is True
