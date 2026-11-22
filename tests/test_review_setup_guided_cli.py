@@ -134,3 +134,127 @@ def test_r062_failed_run_renders_no_report(monkeypatch, tmp_path) -> None:  # no
 
     assert rc == 2
     assert rendered == []
+
+
+# R089: a certificate Entra refuses stops the live run with the certificate message, before collection starts.
+
+def test_r089_rejected_certificate_stops_the_live_run(monkeypatch, tmp_path, caplog) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.graph import GraphClient
+
+    use_fake_certificate(monkeypatch)
+    monkeypatch.setattr(GraphClient, "_certificate_exchange",
+                        lambda self, scope: (None, 0.0, "certificate_token_failed"))
+    ran: list[str] = []
+
+    class _Collector:
+        name = "identity"
+
+        def run(self, context):  # noqa: ANN001
+            ran.append("identity")
+            raise AssertionError("no collector may run without a token")
+
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": _Collector()})
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+        *FAKE_CERTIFICATE_ARGS, "--collectors", "identity", "--no-probe-first", "--out", str(tmp_path),
+    ])
+
+    with caplog.at_level("ERROR"):
+        rc = cli.run_live(args)
+
+    assert rc == 2
+    assert ran == []
+    assert "A certificate app token could not be acquired." in caplog.text
+    events = [
+        json.loads(line)["event"]
+        for log in tmp_path.glob("acme-*/audit-log.jsonl")
+        for line in log.read_text(encoding="utf-8").splitlines() if line
+    ]
+    assert "run.started" not in events
+
+
+# R094: the values the shipped example env file sets are honoured when the matching flag is not given.
+
+def _env_file(tmp_path: Path, out: Path) -> Path:
+    path = tmp_path / "tenant.env"
+    path.write_text(
+        "AZURE_AUTHORITY=https://login.microsoftonline.us/\n"
+        "AZURE_GRAPH_SCOPE=https://graph.microsoft.us/.default\n"
+        f"AUDIT_OUTPUT_DIR={out}\n"
+        "AUDIT_COLLECTORS=identity,security\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+    return path
+
+
+def _clear_run_env(monkeypatch) -> None:  # noqa: ANN001
+    # setenv first so monkeypatch restores the variable's absence after load_env_file writes os.environ directly.
+    for name in ("AZURE_AUTHORITY", "AZURE_GRAPH_SCOPE", "AUDIT_OUTPUT_DIR", "AUDIT_COLLECTORS", "AUDIT_SAMPLE_FILE"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+
+
+def test_r094_env_file_values_reach_the_live_run(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS
+
+    from azure_tenant_audit import cli
+
+    _clear_run_env(monkeypatch)
+    out = tmp_path / "env-out"
+    seen: dict = {}
+    monkeypatch.setattr(cli, "run_live", lambda args, **_: seen.update(vars(args)) or 0)
+
+    rc = cli.main([
+        "--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+        *FAKE_CERTIFICATE_ARGS, "--env", str(_env_file(tmp_path, out)),
+    ])
+
+    assert rc == 0
+    assert seen["authority"] == "https://login.microsoftonline.us/"
+    assert seen["graph_scope"] == "https://graph.microsoft.us/.default"
+    assert seen["out"] == str(out)
+    assert seen["collectors"] == "identity,security"
+
+
+def test_r094_flags_win_over_env_file_values(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS
+
+    from azure_tenant_audit import cli
+
+    _clear_run_env(monkeypatch)
+    seen: dict = {}
+    monkeypatch.setattr(cli, "run_live", lambda args, **_: seen.update(vars(args)) or 0)
+
+    rc = cli.main([
+        "--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+        *FAKE_CERTIFICATE_ARGS, "--env", str(_env_file(tmp_path, tmp_path / "env-out")),
+        "--authority", "https://login.microsoftonline.com/", "--out", str(tmp_path / "flag-out"),
+        "--collectors", "teams",
+    ])
+
+    assert rc == 0
+    assert seen["authority"] == "https://login.microsoftonline.com/"
+    assert seen["graph_scope"] == "https://graph.microsoft.us/.default"
+    assert seen["out"] == str(tmp_path / "flag-out")
+    assert seen["collectors"] == "teams"
+
+
+def test_r094_defaults_without_env(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS
+
+    from azure_tenant_audit import cli
+
+    _clear_run_env(monkeypatch)
+    seen: dict = {}
+    monkeypatch.setattr(cli, "run_live", lambda args, **_: seen.update(vars(args)) or 0)
+
+    assert cli.main(["--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+                     *FAKE_CERTIFICATE_ARGS]) == 0
+    assert seen["authority"] == "https://login.microsoftonline.com/"
+    assert seen["graph_scope"] == "https://graph.microsoft.com/.default"
+    assert seen["out"] == "audit-output"
+    assert seen["collectors"] is None

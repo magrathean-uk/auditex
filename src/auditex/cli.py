@@ -777,7 +777,8 @@ def _engine_run_places(engine_argv: list[str]) -> tuple[list[Path], Path | None]
             args, _ = build_engine_parser().parse_known_args(engine_argv)
     except SystemExit:
         return None
-    out = str(getattr(args, "out", None) or "audit-output")
+    # The engine fills a missing --out from AUDIT_OUTPUT_DIR (an --env file is read only by the engine itself).
+    out = str(getattr(args, "out", None) or os.environ.get("AUDIT_OUTPUT_DIR", "").strip() or "audit-output")
     resume = getattr(args, "resume_from", None)
     return [Path(out), Path(out).expanduser()], Path(resume).expanduser() if resume else None
 

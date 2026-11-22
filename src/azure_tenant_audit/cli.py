@@ -52,7 +52,7 @@ from .diagnostics import build_diagnostics as _build_diagnostics
 from .diagnostics import load_permission_hints as _load_permission_hints
 from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
-from .graph import GraphClient
+from .graph import GraphClient, GraphError
 from .guarded_io import current_context
 from .normalize import (
     build_ai_safe_summary,
@@ -165,6 +165,28 @@ def _certificate_selected(args: argparse.Namespace) -> bool:
     return any(getattr(args, name, None) for name in _CERTIFICATE_OPTIONS)
 
 
+DEFAULT_AUTHORITY = "https://login.microsoftonline.com/"
+DEFAULT_GRAPH_SCOPE = "https://graph.microsoft.com/.default"
+DEFAULT_OUT = "audit-output"
+DEFAULT_SAMPLE = "examples/sample_audit_bundle/sample_result.json"
+
+
+def apply_run_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    """Fill options the command line left out from the environment (an --env file is loaded into it first), then
+    from the built-in defaults; a flag always wins. Idempotent."""
+    fallbacks = (
+        ("authority", "AZURE_AUTHORITY", DEFAULT_AUTHORITY),
+        ("graph_scope", "AZURE_GRAPH_SCOPE", DEFAULT_GRAPH_SCOPE),
+        ("out", "AUDIT_OUTPUT_DIR", DEFAULT_OUT),
+        ("sample", "AUDIT_SAMPLE_FILE", DEFAULT_SAMPLE),
+        ("collectors", "AUDIT_COLLECTORS", None),
+    )
+    for attribute, variable, default in fallbacks:
+        if getattr(args, attribute, None) in (None, ""):
+            setattr(args, attribute, (os.environ.get(variable) or "").strip() or default)
+    return args
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
     parser.add_argument("--version", action="version", version=package_version_line("azure-tenant-audit"))
@@ -190,9 +212,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--certificate-password-file", default=None, metavar="FILE",
         help="File holding the key password, readable only by its owner. No option takes the password itself.",
     )
-    parser.add_argument("--authority", default="https://login.microsoftonline.com/", help="Identity authority URL.")
-    parser.add_argument("--graph-scope", default="https://graph.microsoft.com/.default", help="Graph scope.")
-    parser.add_argument("--out", default="audit-output", help="Base output directory.")
+    parser.add_argument("--authority", default=None,
+                        help=f"Identity authority URL (else AZURE_AUTHORITY, else {DEFAULT_AUTHORITY}).")
+    parser.add_argument("--graph-scope", default=None,
+                        help=f"Graph scope (else AZURE_GRAPH_SCOPE, else {DEFAULT_GRAPH_SCOPE}).")
+    parser.add_argument("--out", default=None, help=f"Base output directory (else AUDIT_OUTPUT_DIR, else {DEFAULT_OUT}).")
     parser.add_argument("--config", default="configs/collector-definitions.json", help="Collector configuration file.")
     parser.add_argument(
         "--collector-preset",
@@ -223,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Essentials window for installing updates. Also read from AUDITEX_STALE_SYNC_DAYS."
         ),
     )
-    parser.add_argument("--collectors", default=None, help="Comma-separated collectors to run.")
+    parser.add_argument("--collectors", default=None, help="Comma-separated collectors to run (else AUDIT_COLLECTORS).")
     parser.add_argument("--exclude", default=None, help="Comma-separated collectors to skip.")
     parser.add_argument("--include-exchange", action="store_true", help="Enable optional exchange collectors.")
     parser.add_argument(
@@ -270,7 +294,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--as-of", type=parse_as_of, default=None, metavar="YYYY-MM-DD", help=AS_OF_HELP)
     parser.add_argument("--sensitive-users", metavar="FILE", help="Local sensitive-user list (else AUDITEX_SENSITIVE_USERS_FILE); never uploaded or logged.")
     parser.add_argument("--partner-domains", metavar="FILE", help="Local partner-domain list (else AUDITEX_PARTNER_DOMAINS_FILE); never uploaded or logged.")
-    parser.add_argument("--sample", default="examples/sample_audit_bundle/sample_result.json", help="Sample bundle path when offline.")
+    parser.add_argument("--sample", default=None,
+                        help=f"Sample bundle path when offline (else AUDIT_SAMPLE_FILE, else {DEFAULT_SAMPLE}).")
     parser.add_argument(
         "--permission-hints",
         default="configs/collector-permissions.json",
@@ -640,6 +665,7 @@ def run_live(
     args: argparse.Namespace, event_listener: Callable[[dict[str, Any]], None] | None = None,
     *, sensitive_users: SensitiveUsers | None = None, partner_domains: PartnerDomains | None = None,
 ) -> int:
+    apply_run_defaults(args)
     try:
         sensitive_users = sensitive_users if sensitive_users is not None else load_sensitive_users(getattr(args, "sensitive_users", None))
         partner_domains = partner_domains if partner_domains is not None else load_partner_domains(getattr(args, "partner_domains", None))
@@ -785,6 +811,18 @@ def run_live(
         LOG.error("%s", MIXED_CREDENTIALS_MESSAGE)
         return 2
     client = GraphClient(auth, audit_event=writer.log_event)
+    if hasattr(client, "ensure_token"):
+        # A certificate Entra refuses (thumbprint not on the app, wrong tenant) is one credential fault, not every
+        # Graph permission missing: stop before collection with the fixed certificate message.
+        try:
+            client.ensure_token()
+        except GraphError as exc:
+            if not str(exc.error_code or "").startswith("certificate_"):
+                raise
+            LOG.error("%s Check that the thumbprint is on the reader app registration and the tenant ID is right.", exc)
+            writer.log_event("run.aborted", "The certificate app token could not be acquired.",
+                             {"error_code": exc.error_code})
+            return 2
     # An app-only run has no signed-in user: the session context is empty (older bundles may carry one).
     session_context: dict[str, Any] = {}
     token_claims: dict[str, Any] = client.token_claims() if hasattr(client, "token_claims") else {}
@@ -1198,10 +1236,7 @@ def main(
     for ignored in ("AZURE_CLIENT_SECRET", "AZURE_ACCESS_TOKEN"):
         if os.environ.get(ignored) is not None:
             LOG.warning("Ignoring %s: Microsoft 365 audits authenticate only with the reader app's certificate.", ignored)
-    if args.authority is None:
-        args.authority = os.environ.get("AZURE_AUTHORITY", args.authority)
-    if args.graph_scope is None:
-        args.graph_scope = os.environ.get("AZURE_GRAPH_SCOPE", args.graph_scope)
+    apply_run_defaults(args)
     if args.offline:
         try:
             offline_break_glass = load_break_glass_accounts(args.break_glass_accounts)
