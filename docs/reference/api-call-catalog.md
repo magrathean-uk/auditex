@@ -230,6 +230,22 @@ settings-catalog templates (not listed by `deviceCompliancePolicies`), the editi
 `osVersion`) and enrolment in the Windows 10 Extended Security Updates programme. Each is reported as unknown or
 not assessed, never as a pass.
 
+## Inbox Rule Folder Reads (optional permission)
+
+An inbox rule that moves mail names its target folder by ID. To tell whether that folder hides mail from the user,
+`mailbox_forwarding` reads folder metadata for users who have such a rule, and only when the reader app holds the
+optional `Mail.ReadBasic.All` permission. It is never part of the default reader-app plan.
+
+| Collector | Call | Fields read | Permission |
+| --- | --- | --- | --- |
+| `mailbox_forwarding` | `GET /users/{id}/mailFolders` (`$select=id,displayName`, `$top=100`) and `GET /users/{id}/mailFolders/junkemail`, `/mailFolders/deleteditems`, `/mailFolders/archive`, `/mailFolders/conversationhistory` (`$select=id`), sent together in one Graph `$batch` of GET requests | Folder IDs and display names; never a message, header or body | `Mail.ReadBasic.All` (optional) |
+
+Blast radius: by the permission's nature the app could read basic message properties (subject, sender, recipients,
+dates) of every mailbox, never a body, preview or attachment; Auditex calls only these folder routes. Without the
+permission the folder lookup is refused, the rule's hide-from-user state is recorded as unknown (never false) and the
+collector is partial with one `mailFolders` gap row. RSS Feeds has no well-known name, so it is matched by its English
+display name only; in a mailbox in another language a move to RSS Feeds is not recognised.
+
 ## Teams Policy Reads
 
 A certificate-authenticated Teams admin API token and Global Reader on the service principal enable the five GET paths below, in commercial and GCC only. No new Graph scope is required. The token comes from the run's certificate credential (`--certificate-path` with `--certificate-thumbprint`), minted through `msal.ConfidentialClientApplication` as a client-credentials grant against the tenant's Entra token endpoint; a client secret never mints it. In supported environments, without a usable certificate token, all eight operations are recorded as `skipped` with reason `teams_token_unavailable`; no `Get-Cs*` command or Teams admin API read is attempted. The collector completes `ok`, so Teams alone does not make the run partial or return exit code 1. Coverage gaps, the report pack and handoff say "not collected: certificate token for the Teams admin API not available"; the policies remain not assessed. GCC High and DoD retain `unsupported_environment` failures for the five REST operations and make no Teams admin API call; their two command operations skip without a token, and the unified app-settings read records `unsupported_environment`. With a usable token, messaging and app setup are still skipped with reason `teams_powershell_not_supported` because no Teams PowerShell session path exists. The org-wide unified app settings (`tenantAppSettings`, the source of `Get-M365UnifiedTenantSettings`) are served only to a user sign-in, so an app-only run records the same named skip and sends no request and no token for them; the `tenant_app_settings` rule input is then ScubaGear's certificate-authentication marker (`CertificateBasedAuth: true`), and MS.TEAMS 5.1-5.3 are decided from the app permission policies, as ScubaGear decides them with certificate authentication. A tenant that manages apps only through the newer org-wide app settings in the Teams admin center can read differently there. These REST reads are not verified live. Policy settings only, no messages, chats, channel posts or files.

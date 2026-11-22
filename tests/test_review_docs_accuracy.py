@@ -370,3 +370,29 @@ def test_setup_guide_and_manual_say_native_windows_is_unsupported():
     for relative in ("docs/guides/setup-guide.md", "docs/guides/product-manual.md"):
         text = _flat(_doc(relative))
         assert UNSUPPORTED_PLATFORM_MESSAGE in text, f"{relative} must quote the native Windows refusal"
+
+
+# R006 ------------------------------------------------------------------------------------------------------------
+
+
+def test_optional_inbox_rule_folder_permission_is_documented_everywhere_and_never_default():
+    from azure_tenant_audit.collectors.mailbox_forwarding import _HIDE_FROM_USER_WELL_KNOWN, MailboxForwardingCollector
+    from azure_tenant_audit.profiles import PROFILES
+
+    (scope,) = MailboxForwardingCollector.optional_permissions
+    for name, profile in PROFILES.items():
+        assert scope not in profile.app_escalation_permissions, f"{scope} must never be in the {name} plan"
+    for relative in (
+        "docs/guides/reader-app-permissions.md",
+        "docs/guides/admin-permission-guide.md",
+        "docs/reference/security-privacy.md",
+    ):
+        text = _flat(_doc(relative))
+        assert f"`{scope}`" in text and "never" in text, relative
+    catalogue = _flat(_doc("docs/reference/api-call-catalog.md"))
+    section = catalogue[catalogue.index("## Inbox Rule Folder Reads") :]
+    section = section[: section.index(" ## ", 5)]
+    assert f"`{scope}`" in section and "GET /users/{id}/mailFolders" in section
+    for name in _HIDE_FROM_USER_WELL_KNOWN:
+        assert f"/mailFolders/{name}" in section, name
+    assert "unknown" in section
