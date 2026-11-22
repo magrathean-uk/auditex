@@ -467,3 +467,98 @@ def test_r094_run_explain_looks_for_the_run_under_audit_output_dir(monkeypatch, 
     bases, _ = product_cli._engine_run_places(["--tenant-name", "acme"])
 
     assert Path(tmp_path / "env-out") in bases
+
+
+# X1 (R164 wiring): --doh-endpoint reaches the dns_posture context, is checked before any read, is never abbreviated
+# and is redacted from the recorded command line.
+
+def test_x1_doh_endpoint_reaches_the_dns_posture_context(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.collectors.base import CollectorResult
+
+    use_fake_certificate(monkeypatch)
+    monkeypatch.delenv("AUDITEX_DOH_ENDPOINT", raising=False)
+    seen: dict = {}
+
+    class _Dns:
+        name = "dns_posture"
+
+        def run(self, context):  # noqa: ANN001
+            seen["doh_endpoint"] = context.get("doh_endpoint")
+            return CollectorResult(name=self.name, status="ok", item_count=0, message="ok", payload={})
+
+    class _Client:
+        def __init__(self, auth, **_):  # noqa: ANN001
+            self.auth = auth
+
+        def token_claims(self) -> dict:
+            return {}
+
+    monkeypatch.setattr(cli, "GraphClient", _Client)
+    monkeypatch.setattr(cli, "REGISTRY", {"dns_posture": _Dns()})
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+        *FAKE_CERTIFICATE_ARGS, "--collectors", "dns_posture", "--no-probe-first", "--out", str(tmp_path),
+        "--doh-endpoint", "https://dns.corp.example/dns-query",
+    ])
+
+    cli.run_live(args)
+
+    assert seen["doh_endpoint"] == "https://dns.corp.example/dns-query"
+
+
+def test_x1_malformed_doh_endpoint_stops_the_run_before_the_folder_exists(monkeypatch, tmp_path, caplog) -> None:  # noqa: ANN001
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    from azure_tenant_audit import cli
+
+    use_fake_certificate(monkeypatch)
+    monkeypatch.setattr(cli, "GraphClient", lambda *_a, **_k: pytest.fail("no client"))
+    canary = "constructed-doh-token-zz9"
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "contoso.onmicrosoft.com", "--client-id", "app-id",
+        *FAKE_CERTIFICATE_ARGS, "--out", str(tmp_path), "--doh-endpoint", f"http://dns.corp.example/{canary}",
+    ])
+
+    with caplog.at_level("ERROR"):
+        assert cli.run_live(args) == 2
+    assert "DNS-over-HTTPS" in caplog.text and canary not in caplog.text
+    assert not list(tmp_path.glob("acme-*"))
+
+
+@pytest.mark.parametrize("builder_name", ["engine", "guided"])
+@pytest.mark.parametrize("inline", [False, True])
+def test_x1_doh_endpoint_refuses_abbreviations_without_echo(builder_name, inline, capsys) -> None:  # noqa: ANN001
+    from azure_tenant_audit import cli
+
+    builder = cli.build_parser if builder_name == "engine" else build_guided_parser
+    assert builder().parse_args(["--doh-endpoint", "https://dns.corp.example/q"]).doh_endpoint == "https://dns.corp.example/q"
+    canary = "constructed-canary-argv-zz9"
+    for length in range(3, len("--doh-endpoint")):
+        option = "--doh-endpoint"[:length]
+        with pytest.raises(SystemExit) as exc:
+            builder().parse_args([f"{option}={canary}"] if inline else [option, canary])
+        assert exc.value.code == 2
+        assert canary not in capsys.readouterr().err
+
+
+def test_x1_doh_endpoint_is_redacted_from_the_recorded_command_line() -> None:
+    from azure_tenant_audit.auth_runtime import SENSITIVE_CLI_ARGS, scrub_command_line
+
+    assert "--doh-endpoint" in SENSITIVE_CLI_ARGS
+    scrubbed = scrub_command_line(["azure-tenant-audit", "--doh-endpoint", "https://dns.corp.example/tok-zz9"])
+    assert "https://dns.corp.example/tok-zz9" not in scrubbed
+
+
+def test_x1_guided_run_passes_the_doh_endpoint_to_the_engine(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    monkeypatch.setattr(guided, "build_doctor_report", lambda: _doctor())
+    seen = _engine_spy(monkeypatch)
+
+    rc = guided.run_guided(build_guided_parser().parse_args(
+        [*_guided_args(tmp_path, "--doh-endpoint", "https://dns.corp.example/q"), "--non-interactive"]
+    ))
+
+    assert rc == 0
+    assert seen["argv"][seen["argv"].index("--doh-endpoint") + 1] == "https://dns.corp.example/q"

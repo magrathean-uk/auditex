@@ -201,6 +201,8 @@ def build_guided_parser() -> argparse.ArgumentParser:
     ))
     parser.add_argument("--page-size", type=int, default=50)
     parser.add_argument("--collectors", default=None)
+    parser.add_argument("--doh-endpoint", default=None, metavar="URL",
+                        help="DNS-over-HTTPS resolver for dns_posture (else AUDITEX_DOH_ENDPOINT, else Cloudflare).")
     parser.add_argument("--throttle-mode", choices=("fast", "safe", "ultra-safe"), default="safe")
     parser.add_argument("--include-blocked", action="store_true")
     parser.add_argument("--with-mcp", action="store_true")
@@ -290,6 +292,8 @@ def run_guided(args: argparse.Namespace) -> int:
         argv.extend(["--run-name", args.run_name])
     if args.collectors:
         argv.extend(["--collectors", args.collectors])
+    if args.doh_endpoint:
+        argv.extend(["--doh-endpoint", args.doh_endpoint])
     argv.append("--probe-first" if args.probe_first else "--no-probe-first")
     if args.include_blocked:
         argv.append("--include-blocked")

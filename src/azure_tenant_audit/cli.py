@@ -50,6 +50,7 @@ from .data_handling import collector_activity_notices
 from .data_minimisation import minimise_user_text
 from .diagnostics import build_diagnostics as _build_diagnostics
 from .diagnostics import load_permission_hints as _load_permission_hints
+from .dns_lookup import DEFAULT_DOH_ENDPOINT, DOH_ENDPOINT_ENV, resolve_doh_endpoint
 from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
 from .graph import GraphClient, GraphError
@@ -256,6 +257,10 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--collectors", default=None, help="Comma-separated collectors to run (else AUDIT_COLLECTORS).")
+    parser.add_argument("--doh-endpoint", default=None, metavar="URL", help=(
+        "DNS-over-HTTPS resolver that dns_posture asks for the tenant's domain names: a plain https:// URL "
+        f"(else {DOH_ENDPOINT_ENV}, else {DEFAULT_DOH_ENDPOINT})."
+    ))
     parser.add_argument("--exclude", default=None, help="Comma-separated collectors to skip.")
     parser.add_argument("--include-exchange", action="store_true", help="Enable optional exchange collectors.")
     parser.add_argument(
@@ -644,11 +649,15 @@ def _publish_staged_rerun(output: CollectorRunOutput, retained: dict[str, Any]) 
 
 def _collector_extra(
     name: str, collector_payloads: dict[str, dict[str, Any]], sensitive_users: SensitiveUsers, binding: Any,
+    *, doh_endpoint: str | None = None,
 ) -> dict[str, Any]:
-    """Run-scoped private context: accepted domains for ``dns_posture``; SensitiveUsers and its opaque writer binding
-    for ``exchange_policy`` only (never the key, a session, an event or a checkpoint)."""
+    """Run-scoped private context: accepted domains and the DoH resolver for ``dns_posture``; SensitiveUsers and its
+    opaque writer binding for ``exchange_policy`` only (never the key, a session, an event or a checkpoint)."""
     if name == "dns_posture":
-        return {"exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains")}
+        return {
+            "exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains"),
+            "doh_endpoint": doh_endpoint or resolve_doh_endpoint(),
+        }
     if name == "exchange_policy":
         from .collectors.targeted_users_coverage import CONTEXT_BINDING, CONTEXT_USERS
         return {CONTEXT_USERS: sensitive_users, CONTEXT_BINDING: binding}
@@ -674,6 +683,12 @@ def run_live(
     *, sensitive_users: SensitiveUsers | None = None, partner_domains: PartnerDomains | None = None,
 ) -> int:
     apply_run_defaults(args)
+    try:
+        # The option, else AUDITEX_DOH_ENDPOINT, else Cloudflare; a malformed value stops the run before any read.
+        doh_endpoint = resolve_doh_endpoint(getattr(args, "doh_endpoint", None))
+    except ValueError as exc:
+        LOG.error("%s", exc)
+        return 2
     try:
         sensitive_users = sensitive_users if sensitive_users is not None else load_sensitive_users(getattr(args, "sensitive_users", None))
         partner_domains = partner_domains if partner_domains is not None else load_partner_domains(getattr(args, "partner_domains", None))
@@ -1001,7 +1016,8 @@ def run_live(
                 hooks=writer_adapter.hooks(),
                 # Only completed evidence from this run (including a validated resume),
                 # never another tenant read or an arbitrary raw artefact from disk.
-                extra=_collector_extra(name, collector_payloads, sensitive_users, sensitive_binding),
+                extra=_collector_extra(name, collector_payloads, sensitive_users, sensitive_binding,
+                                       doh_endpoint=doh_endpoint),
             ),
             name=name,
             # A staged re-run writes no raw file or checkpoint of its own: its raw evidence is published below once
