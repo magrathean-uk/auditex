@@ -118,11 +118,38 @@ def _collect_changed_paths(before: Any, after: Any, *, prefix: str = "") -> list
     return []
 
 
+def _collector_coverage(run_dir: Path) -> dict[str, bool]:
+    """Whether each collector the run recorded completed: the coverage ledger, else the ``summary.json`` statuses."""
+    ledger = _load_json(run_dir, "normalized/coverage_ledger.json")
+    coverage: dict[str, bool] = {}
+    for row in ledger.get("records") if isinstance(ledger.get("records"), list) else []:
+        if isinstance(row, dict) and row.get("collector"):
+            coverage[str(row["collector"])] = str(row.get("coverage_status") or "unknown").startswith("complete")
+    if coverage:
+        return coverage
+    summary = _load_json(run_dir, "summary.json")
+    for row in summary.get("collectors") if isinstance(summary.get("collectors"), list) else []:
+        if isinstance(row, dict) and row.get("name"):
+            coverage[str(row["name"])] = str(row.get("status") or "unknown") == "ok"
+    return coverage
+
+
 def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
     before = _finding_index(_load_findings(left))
     after = _finding_index(_load_findings(right))
     new_keys = sorted(set(after) - set(before))
     resolved_keys = sorted(set(before) - set(after))
+    # R054: a finding is resolved only when the later run's collector for it completed. When the later run records
+    # its collector coverage and the finding's collector did not complete there (or did not run), the finding was not
+    # reassessed. ``auditex compare`` refines this with the rule inputs and the bundle and tenant checks.
+    later_coverage = _collector_coverage(right)
+    not_reassessed_keys: list[str] = []
+    if later_coverage:
+        for key in list(resolved_keys):
+            collector = str(before[key].get("collector") or "")
+            if collector and not later_coverage.get(collector, False):
+                not_reassessed_keys.append(key)
+        resolved_keys = [key for key in resolved_keys if key not in set(not_reassessed_keys)]
     worsened: list[str] = []
     improved: list[str] = []
     state_transitions: list[dict[str, Any]] = []
@@ -164,6 +191,7 @@ def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
     return {
         "new_findings": new_keys,
         "resolved_findings": resolved_keys,
+        "not_reassessed_findings": not_reassessed_keys,
         "worsened_findings": worsened,
         "improved_findings": improved,
         "state_transitions": state_transitions,
@@ -172,6 +200,7 @@ def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
         "stale_accepted_risks": [dict(row) for row in accepted_summary.get("stale") or [] if isinstance(row, dict)],
         "new_count": len(new_keys),
         "resolved_count": len(resolved_keys),
+        "not_reassessed_count": len(not_reassessed_keys),
         "worsened_count": len(worsened),
         "improved_count": len(improved),
         "state_transition_count": len(state_transitions),

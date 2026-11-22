@@ -83,6 +83,26 @@ def test_raw_diff_is_not_same_tenant_when_known_tenant_ids_differ(tmp_path: Path
     assert result["compare_context"]["same_tenant"] is False
 
 
+def test_raw_diff_does_not_call_a_finding_resolved_when_its_collector_was_blocked(tmp_path: Path) -> None:
+    # The engine diff behind `auditex diff` has no compare gates; it still checks the later run's collector coverage.
+    run_a, run_b = _pair(tmp_path)
+
+    drift = diff_run_directories(run_a, run_b)["drift_summary"]
+
+    assert drift["resolved_findings"] == []
+    assert drift["resolved_count"] == 0
+    assert drift["not_reassessed_findings"] == [FINDING["id"]]
+
+
+def test_raw_diff_resolves_a_finding_its_completed_collector_no_longer_raises(tmp_path: Path) -> None:
+    run_a, run_b = _pair(tmp_path, later_identity="complete")
+
+    drift = diff_run_directories(run_a, run_b)["drift_summary"]
+
+    assert drift["resolved_findings"] == [FINDING["id"]]
+    assert drift["not_reassessed_findings"] == []
+
+
 def test_mcp_diff_runs_does_not_call_a_finding_resolved_when_its_collector_was_blocked(tmp_path: Path) -> None:
     run_a, run_b = _pair(tmp_path)
 
