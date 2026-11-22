@@ -5,11 +5,13 @@ import argparse
 import json
 import subprocess
 import sys
+import uuid
 from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
 
 GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+PLACEHOLDER_TENANT_ID = "00000000-0000-0000-0000-000000000000"
 
 
 def utc_now() -> str:
@@ -46,14 +48,55 @@ def graph_permission_map(*, dry_run: bool) -> dict[tuple[str, str], dict[str, st
     return mapping
 
 
+def named_tenant_id(raw: str) -> str | None:
+    """Return the lab tenant GUID, or None for a malformed or all-zero placeholder value."""
+    try:
+        tenant_id = str(uuid.UUID(raw.strip()))
+    except ValueError:
+        return None
+    if tenant_id != raw.strip().lower() or tenant_id == PLACEHOLDER_TENANT_ID:
+        return None
+    return tenant_id
+
+
+def signed_in_tenant_id() -> str:
+    proc = subprocess.run(
+        ["az", "account", "show", "--query", "tenantId", "--output", "tsv"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return proc.stdout.strip().lower() if proc.returncode == 0 else ""
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Create or update the lab-only Microsoft Graph tenant populator app.")
     parser.add_argument("--config", type=Path, default=Path("configs/lab-populator-permissions.json"))
-    parser.add_argument("--tenant-id", default=None)
+    parser.add_argument(
+        "--tenant-id",
+        required=True,
+        help="Lab tenant GUID. Every az call runs only when the signed-in Azure CLI tenant equals it.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--admin-consent", action="store_true", help="Run az ad app permission admin-consent after adding permissions.")
     parser.add_argument("--create-secret", action="store_true", help="Create a client secret and store it under .secrets for lab automation.")
     args = parser.parse_args(argv)
+
+    tenant_id = named_tenant_id(args.tenant_id)
+    if tenant_id is None:
+        print("tenant_id_required: --tenant-id must be the lab tenant GUID (the all-zero placeholder is refused).", file=sys.stderr)
+        return 2
+    args.tenant_id = tenant_id
+    # az ad commands act in the signed-in tenant and take no --tenant, so refuse any other tenant
+    # before the first directory call.
+    if not args.dry_run and signed_in_tenant_id() != tenant_id:
+        print(
+            f"tenant_mismatch: the Azure CLI is not signed in to tenant {tenant_id}. "
+            f"Run 'az login --tenant {tenant_id}' and retry. Nothing was changed.",
+            file=sys.stderr,
+        )
+        return 3
 
     cfg = json.loads(args.config.read_text(encoding="utf-8"))
     app_name = cfg["appDisplayName"]
@@ -194,6 +237,7 @@ def main(argv: list[str]) -> int:
                     app_id,
                     "--display-name",
                     "codex-lab-populator",
+                    "--append",
                     "--years",
                     "1",
                     "--output",
