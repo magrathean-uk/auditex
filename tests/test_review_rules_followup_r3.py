@@ -169,3 +169,14 @@ def test_r106_output_contract_names_the_written_schema_version():
     paragraph = text[text.index("Its schema is `schemas/model_assessment.schema.json`"):]
     paragraph = paragraph[:paragraph.index("\n\n")]
     assert "`2026-11-05`" in paragraph and "rule_view" in paragraph
+
+
+@pytest.mark.xfail(strict=True, reason="needs ruleview in output_redaction._D5_FIELD_NAMES (integrator-owned list); "
+                                       "remove this marker when it is added")
+def test_r106_rule_view_key_is_kept_when_a_person_is_named_rule_view():
+    from test_redaction_person_names import _people
+
+    from azure_tenant_audit.output_redaction import redact_output
+    value = {"projection": {"sections": {"safe_links_rules": {"status": "not_collected", "rule_view": "adapter"}}}}
+    out = redact_output(value, context=_people("Rule View"))
+    assert out["projection"]["sections"]["safe_links_rules"] == {"status": "not_collected", "rule_view": "adapter"}
