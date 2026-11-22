@@ -292,8 +292,8 @@ def service_account_module(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     class _Factory:
         @staticmethod
-        def from_service_account_file(path: str, *, scopes: list[str]) -> _ScopedCredentials:
-            loaded.append(path)
+        def from_service_account_info(info: dict[str, Any], *, scopes: list[str]) -> _ScopedCredentials:
+            loaded.append(str(info.get("client_email")))
             return _ScopedCredentials(tuple(scopes))
 
     service_account = types.ModuleType("google.oauth2.service_account")
@@ -340,7 +340,7 @@ def test_r092_key_behind_a_link_is_refused(tmp_path: Path, service_account_modul
 def test_r092_owner_only_key_is_loaded(tmp_path: Path, service_account_module: list[str]) -> None:
     key = _key(tmp_path, 0o600)
     credentials = google_auth.build_google_credentials(_delegation_config(key))
-    assert service_account_module == [str(key)] and credentials.scopes == ("scope://a",)
+    assert service_account_module == ["sa@example.iam.gserviceaccount.com"] and credentials.scopes == ("scope://a",)
 
 
 # ---- in-session review follow-ups ---------------------------------------------------------------------------------
@@ -349,10 +349,10 @@ def test_r092_owner_only_key_is_loaded(tmp_path: Path, service_account_module: l
 def test_r059_malformed_service_account_key_is_a_sign_in_failure_not_a_traceback(
     tmp_path: Path, service_account_module: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def malformed(path: str, *, scopes: list[str]) -> Any:
+    def malformed(info: dict[str, Any], *, scopes: list[str]) -> Any:
         raise _GoogleAuthError("Service account info was not in the expected format, missing fields token_uri.")
 
-    monkeypatch.setattr(sys.modules["google.oauth2.service_account"].Credentials, "from_service_account_file", staticmethod(malformed))
+    monkeypatch.setattr(sys.modules["google.oauth2.service_account"].Credentials, "from_service_account_info", staticmethod(malformed))
     with pytest.raises(RuntimeError, match="Google sign-in failed"):
         google_auth.build_google_credentials(_delegation_config(_key(tmp_path, 0o600)))
 
@@ -388,3 +388,53 @@ def test_r059_refresh_granting_fewer_scopes_is_re_consented(tmp_path: Path, oaut
     assert oauth_modules["flows"] == 1
     assert credentials.tag == "consented"
     assert json.loads((tmp_path / "cache" / "token.json").read_text(encoding="utf-8"))["tag"] == "consented"
+
+
+def test_r092_credentials_come_from_the_bytes_that_passed_the_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A key swapped between the owner-only check and the load is never what the credentials are built from."""
+    loaded: list[dict[str, Any]] = []
+
+    class _Factory:
+        @staticmethod
+        def from_service_account_file(path: str, *, scopes: list[str]) -> _ScopedCredentials:
+            loaded.append(json.loads(Path(path).read_text(encoding="utf-8")))
+            return _ScopedCredentials(tuple(scopes))
+
+        @staticmethod
+        def from_service_account_info(info: dict[str, Any], *, scopes: list[str]) -> _ScopedCredentials:
+            loaded.append(dict(info))
+            return _ScopedCredentials(tuple(scopes))
+
+    service_account = types.ModuleType("google.oauth2.service_account")
+    service_account.Credentials = _Factory  # type: ignore[attr-defined]
+    exceptions = types.ModuleType("google.auth.exceptions")
+    exceptions.GoogleAuthError = _GoogleAuthError  # type: ignore[attr-defined]
+    for name, module in {"google": types.ModuleType("google"), "google.oauth2": types.ModuleType("google.oauth2"),
+                         "google.oauth2.service_account": service_account, "google.auth": types.ModuleType("google.auth"),
+                         "google.auth.exceptions": exceptions}.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(google_auth, "_module_available", lambda _module: True)
+
+    from azure_tenant_audit import certificate_auth
+
+    key = _key(tmp_path, 0o600)
+    checked = certificate_auth._read_private_file
+
+    def check_then_swap(path: Any, limit: int, code: str) -> bytes:
+        raw = checked(path, limit, code)
+        key.write_text(json.dumps({"type": "service_account", "client_email": "swapped@example.net"}), encoding="utf-8")
+        os.chmod(key, 0o644)
+        return raw
+
+    monkeypatch.setattr(certificate_auth, "_read_private_file", check_then_swap)
+    google_auth.build_google_credentials(_delegation_config(key))
+    assert [item["client_email"] for item in loaded] == ["sa@example.iam.gserviceaccount.com"]
+
+
+def test_r092_a_key_that_is_not_json_is_refused_with_a_fixed_message(tmp_path: Path, service_account_module: list[str]) -> None:
+    key = tmp_path / "key.json"
+    key.write_text("not json PRIVATE", encoding="utf-8")
+    os.chmod(key, 0o600)
+    with pytest.raises(ValueError, match="service_account_key_invalid") as raised:
+        google_auth.build_google_credentials(_delegation_config(key))
+    assert "PRIVATE" not in str(raised.value)

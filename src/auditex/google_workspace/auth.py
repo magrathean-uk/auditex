@@ -100,10 +100,11 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
 
         shared_scopes = [scope for scope in config.scopes if scope not in config.isolated_scopes]
         key_path = config.service_account_key.expanduser()
-        _check_private_key_file(key_path)
+        # Built from the bytes the owner-only check read through one descriptor: the path is never opened again.
+        key_info = _parse_service_account_key(_check_private_key_file(key_path))
         try:
-            credentials = service_account.Credentials.from_service_account_file(
-                str(key_path),
+            credentials = service_account.Credentials.from_service_account_info(
+                key_info,
                 scopes=shared_scopes,
             )
         except GoogleAuthError as exc:  # a key file missing fields (MalformedError)
@@ -160,7 +161,7 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
 _SERVICE_ACCOUNT_KEY_LIMIT = 64 * 1024
 
 
-def _check_private_key_file(path: Path) -> None:
+def _check_private_key_file(path: Path) -> bytes:
     """Refuse a domain-wide delegation key that is not a small, owner-only regular file (no link).
 
     The key can act as any user in the domain, so it gets the same check as the Microsoft 365 certificate. The
@@ -174,12 +175,23 @@ def _check_private_key_file(path: Path) -> None:
     )
 
     try:
-        _read_private_file(path, _SERVICE_ACCOUNT_KEY_LIMIT, "service_account_key_refused")
+        return _read_private_file(path, _SERVICE_ACCOUNT_KEY_LIMIT, "service_account_key_refused")
     except CertificateAuthError:
         raise ValueError(
             "service_account_key_refused: the service-account key must be an owner-only regular file "
             "(chmod 600, not a link) of at most 64 KB."
         ) from None
+
+
+def _parse_service_account_key(raw: bytes) -> dict[str, Any]:
+    """The key file's JSON object; a fixed message otherwise, never the content."""
+    try:
+        info = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        info = None
+    if not isinstance(info, dict):
+        raise ValueError("service_account_key_invalid: the service-account key file is not a JSON key.")
+    return info
 
 
 def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:

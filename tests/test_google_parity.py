@@ -948,8 +948,8 @@ def test_the_policy_scope_is_requested_on_its_own_token_so_a_missing_grant_fails
 
     class _Factory:
         @staticmethod
-        def from_service_account_file(path: str, *, scopes: list[str]) -> _Credentials:
-            captured["path"], captured["scopes"] = path, scopes
+        def from_service_account_info(info: dict[str, Any], *, scopes: list[str]) -> _Credentials:
+            captured["info"], captured["scopes"] = info, scopes
             return _Credentials(None, tuple(scopes))
 
     service_account = types.ModuleType("google.oauth2.service_account")

@@ -177,7 +177,7 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "the one $batch POST; it sends only the GET-only inner requests get_batch builds after refusing "
             "non-GET specs, and _request re-checks them through the read guard",
             target_contains="/$batch"),
-    Allowed(_GOOGLE_AUTH, "build_google_credentials", "service_account.Credentials.from_service_account_file",
+    Allowed(_GOOGLE_AUTH, "build_google_credentials", "service_account.Credentials.from_service_account_info",
             TOKEN_POST, 1, 2, "A22",
             "service-account credentials; google-auth exchanges a JWT bearer grant lazily inside execute()"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "credentials.with_subject", TOKEN_POST, 1, 2, "A22",
