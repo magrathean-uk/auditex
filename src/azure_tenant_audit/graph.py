@@ -244,6 +244,13 @@ class _WaitBudget:
         self.spent += seconds
 
 
+def _off_graph_reason(response: Any) -> str:
+    """An error from the download host after a redirect: its body can echo the signed URL (a credential), so only the
+    host and status are kept (R158)."""
+    host = urlparse(str(getattr(response, "url", "") or "")).hostname or "unknown"
+    return f"HTTP {response.status_code} from download host {host}"
+
+
 class GraphError(RuntimeError):
     def __init__(
         self,
@@ -697,6 +704,8 @@ class GraphClient:
                 elif isinstance(error, str):
                     reason = error
             error_url = response.url if graph_host_url(response.url) else redacted_url(response.url)
+            if not graph_host_url(response.url):
+                reason = _off_graph_reason(response)
             self._emit(
                 "graph.response.error",
                 "Graph endpoint returned error response",
@@ -715,8 +724,9 @@ class GraphClient:
             self._require_graph_url(url)
         response = self._request("GET", url, params=params)
         if response.status_code >= 400:
-            error_url = response.url if graph_host_url(response.url) else redacted_url(response.url)
-            raise GraphError(response.text, status=response.status_code, request=error_url)
+            if graph_host_url(response.url):
+                raise GraphError(response.text, status=response.status_code, request=response.url)
+            raise GraphError(_off_graph_reason(response), status=response.status_code, request=redacted_url(response.url))
         return response.text
 
     def _require_graph_url(self, url: Any) -> None:
