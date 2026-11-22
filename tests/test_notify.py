@@ -231,4 +231,26 @@ def test_send_notification_webhook_error_body_echoing_url_is_scrubbed(tmp_path: 
     dumped = json.dumps(result)
     assert result["status"] == "failed" and result["http_status"] == 404
     assert "SECRETPART" not in dumped and "SIGSECRET" not in dumped
-    assert "no_service" in result["response_text"]
+    assert result["response_text"] == "HTTP 404"
+
+
+def test_send_notification_webhook_error_reply_keeps_only_a_short_code(tmp_path: Path, monkeypatch) -> None:
+    """R065 (review round 2): a failing reply is kept only when it is a short service code; anything else (a
+    JSON-escaped echo of the path) becomes a fixed diagnostic."""
+    run_dir = tmp_path / "run"
+    _write_run_bundle(run_dir)
+    monkeypatch.setenv("AUDITEX_SLACK_WEBHOOK_URL", "https://hooks.slack.example.test/services/T000/B000/SECRETPART")
+    replies = iter(['{"path": "\\/services\\/T000\\/B000\\/SECRETPART"}', "invalid_token"])
+
+    class _Response:
+        status_code = 403
+
+        @property
+        def text(self) -> str:
+            return next(replies)
+
+    monkeypatch.setattr("auditex.notify.requests.post", lambda *_a, **_k: _Response())
+    first = send_notification(run_dir=str(run_dir), sink="slack", dry_run=False)
+    assert "SECRETPART" not in json.dumps(first) and first["response_text"] == "HTTP 403"
+    second = send_notification(run_dir=str(run_dir), sink="slack", dry_run=False)
+    assert second["response_text"] == "invalid_token"

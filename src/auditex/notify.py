@@ -316,8 +316,17 @@ def _send_webhook(sink: str, payload: dict[str, Any]) -> dict[str, Any]:
         "sink": sink,
         "payload": payload,
         "http_status": response.status_code,
-        "response_text": _without_webhook_url(str(response.text or ""), url),
+        "response_text": _webhook_reply(response, url),
     }
+
+
+def _webhook_reply(response: Any, url: str) -> str:
+    """The service's reply, safe to print: a failure keeps only a short service code (``invalid_token``), because any
+    longer reply can echo the webhook URL in some spelling; a success reply has the URL removed."""
+    text = str(response.text or "")
+    if response.status_code >= 400:
+        return text.strip() if re.fullmatch(r"[a-z_]{1,64}", text.strip()) else f"HTTP {response.status_code}"
+    return _without_webhook_url(text, url)
 
 
 def _without_webhook_url(text: str, url: str) -> str:
