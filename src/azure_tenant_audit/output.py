@@ -175,10 +175,13 @@ class AuditLogger:
                 LOG.exception("Failed to dispatch audit event listener.")
 
 
-# Manifest keys that describe one session (a replay source, the waiver file, sampling limits, a probe): a resumed run
-# does not inherit them from the earlier session's manifest (R051).
+# Manifest keys that describe one session (a replay source, the waiver file, sampling limits, a probe, the operator's
+# preset, preflight and throttle choices): a resumed run does not inherit them from the earlier session's manifest (R051).
 SESSION_SCOPED_MANIFEST_KEYS = frozenset(
     {
+        "collector_preset",
+        "preflight_path",
+        "throttle_mode",
         "replay_source",
         "fixture_provenance",
         "waiver_path",

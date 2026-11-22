@@ -78,6 +78,22 @@ def test_resume_drops_the_earlier_sessions_waiver_and_sampling_keys(tmp_path: Pa
         assert key not in manifest, key
 
 
+def test_resume_drops_the_earlier_sessions_preset_preflight_and_throttle_choices(tmp_path: Path) -> None:
+    # Repair round 1 (R051): the engine CLI passes None for a choice the resumed session did not make.
+    from azure_tenant_audit.output import AuditWriter
+
+    run_dir = _first_session(tmp_path, collector_preset="full", preflight_path="preflight.json", throttle_mode="safe")
+    assert _manifest(run_dir)["collector_preset"] == "full"
+
+    AuditWriter(tmp_path, "lab", run_dir=run_dir).write_bundle(
+        {"collectors": [], "mode": "app", "collector_preset": None, "preflight_path": None, "throttle_mode": None}
+    )
+
+    manifest = _manifest(run_dir)
+    for key in ("collector_preset", "preflight_path", "throttle_mode"):
+        assert key not in manifest, key
+
+
 def test_resume_removes_the_earlier_sessions_post_finalisation_answers(tmp_path: Path) -> None:
     from azure_tenant_audit.output import AuditWriter
 
