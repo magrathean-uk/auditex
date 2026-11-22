@@ -192,7 +192,7 @@
     },
     "rows": 1722,
     "selection": "constructed and training-pack train/validation (licensed twins included); held-out test split and pilot rows (sealed AAD v2.1 freeze included) excluded",
-    "sha256": "873cd5c0bffb717dff0388ca70ec0dc6d6dfad91f12a2d1109498b9b48545b05",
+    "sha256": "468661a5fa5500b2a7f20b17ae999b7551a4a47ce3938cc422cfa026b9959383",
     "source_sha256": "dedd71d897ea26219db8bea2ce4730325e90ed7551d9137e916309ef83876d5c",
     "spec_version": "v3.9.1"
   }

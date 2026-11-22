@@ -68,8 +68,9 @@ def _safelinks_core(policy_id, sp, sections, trace):
     builtin_scope = BI in sp.get("sections", ())
     # Review R003 (repair): the Built-In rule is a late section. A covering rule decides without it; the Built-In fallback
     # answers section_not_collected when it is missing or marked (assess lets it through when it alone is missing).
+    # Repair round 2: so is its shape; a covering rule decides even when the section is not a list.
     builtin_missing = _not_collected(policy_id, sections, [BI]) if builtin_scope else None
-    for name in ("protection_policy_rules", "safe_links_policies", "safe_links_rules", "atp_policy_rules", *((BI,) if builtin_scope and not builtin_missing else ())):
+    for name in ("protection_policy_rules", "safe_links_policies", "safe_links_rules", "atp_policy_rules"):
         if not isinstance(sections[name], list):
             return _A(policy_id, BAD_SECTION_LIST, f"Data unusable: {name} is not a list of objects; the policy was not assessed.", "section_not_a_list", [name])
     lic = _licence_cell(policy_id, sections, "defender_license")      # v3.7 (lens B DEF-F3, D101): Safe Links need Defender for Office 365; a false read can be a failed command
@@ -165,10 +166,12 @@ def _safelinks_core(policy_id, sp, sections, trace):
     if builtin_scope and applied == BUILTIN:
         if builtin_missing:
             return builtin_missing
+        if not isinstance(sections[BI], list):
+            return _A(policy_id, BAD_SECTION_LIST, f"Data unusable: {BI} is not a list of objects; the policy was not assessed.", "section_not_a_list", [BI])
         # A preset whose both parts are enabled but scoped to some recipients may also cover the excluded recipients.
         preset_partial = any(({"q", "x", "u"} & set(eop[t]) or eop_u) and ({"q", "x", "u"} & set(atp[t]) or atp_u)
                              for t in ("Strict", "Standard"))
-        out = _builtin_exclusions(policy_id, sp, sections, partial or preset_partial)
+        out = _builtin_exclusions(policy_id, sp, sections, partial, preset_partial)
         if out:
             return out
     pols = by_identity.get(applied, [])
@@ -272,9 +275,31 @@ class _Shadows:
         return False
 
 
-def _builtin_exclusions(policy_id, sp, sections, partial):
+def _excluded_recipients(rules):
+    """The recipients the Built-In rules name in ExceptIfSentTo, casefolded, when that is their only exclusion kind;
+    None when a group or domain exclusion (or an unreadable one) leaves the excluded recipients unknown."""
+    out = set()
+    for rule in rules:
+        sc = _scope(rule) if isinstance(rule, dict) else None
+        if sc is None or any(k != "ExceptIfSentTo" for k, _ in sc[1]):
+            return None
+        out.update(v.casefold() for k, values in sc[1] for v in values)
+    return out
+
+
+def _may_cover(rule, excluded):
+    """False only when a partly scoped rule provably names none of the excluded recipients: it is scoped by SentTo
+    alone (under AND or OR joins) and none of its values is one of them."""
+    sc = _scope(rule) if excluded is not None else None
+    if sc is None or [k for k, _ in sc[0]] != ["SentTo"]:
+        return True
+    return any(v.casefold() in excluded for v in sc[0][0][1])
+
+
+def _builtin_exclusions(policy_id, sp, sections, partial, preset_partial=False):
     """As SS 1.3 reads the Built-In Protection rule (defender_cascade, attachment variant): None when it covers everyone,
-    else the record for recipients it excludes. The rule list exports no Priority; Built-In applies last."""
+    else the record for recipients it excludes. The rule list exports no Priority; Built-In applies last. A partly
+    scoped rule that provably names none of the excluded recipients cannot cover them (repair round 2)."""
     states = []
     for rule in sections[BI]:
         ex = [_empty3(rule, key) if isinstance(rule, dict) else None for key in EXCEPT_KEYS]
@@ -284,7 +309,8 @@ def _builtin_exclusions(policy_id, sp, sections, partial):
     if not states or "u" in states:
         return _A(policy_id, "data_unusable_builtin_rule", f"Data unusable: {BI} holds no rule with readable exclusions; the policy was not assessed.",
                   "builtin_rule_unusable", [BI])
-    if partial:
+    excluded = _excluded_recipients(sections[BI])
+    if preset_partial or any(_may_cover(r, excluded) for r in partial):
         return _A(policy_id, "data_unusable_partial_tier_may_cover", "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule "
                   "exists that may cover the excluded recipients; the policy was not assessed.", "partial_tier_may_cover", [BI, "safe_links_rules"])
     return _rec(policy_id, "not_met", "no_policy_covers_all_recipients",

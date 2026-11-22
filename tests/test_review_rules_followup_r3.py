@@ -118,3 +118,36 @@ def test_r100_orphan_not_jointly_shadowed_still_unjudged(policy_id):
     for rules in cases:
         assert _answer(policy_id, _safelinks([*rules, cover], policies, BI_ALL)) == ("not_assessed", "policy_not_in_export")
 
+
+# ---- R003: a partial rule that provably names none of the excluded recipients; malformed Built-In data ----
+
+BI_EXCLUDES_BOB = [{"Identity": "ATP Built-In Protection Rule", "ExceptIfSentTo": ["bob"], "ExceptIfSentToMemberOf": None,
+                    "ExceptIfRecipientDomainIs": None}]
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_r003_partial_rule_for_other_recipients_cannot_cover_the_built_in_exclusion(policy_id):
+    rules = [_sl_rule("alice", _to("alice", "Carol"), priority=0)]
+    policies = [SL_BUILTIN, {"Identity": "alice", **SL_FLAGS}]
+    assert _answer(policy_id, _safelinks(rules, policies, BI_EXCLUDES_BOB)) == ("not_met", "no_policy_covers_all")
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_r003_partial_rule_that_may_name_an_excluded_recipient_still_may_cover(policy_id):
+    policies = [SL_BUILTIN, {"Identity": "p", **SL_FLAGS}]
+    for scope in (_to("alice", "BOB"), {**SCOPE_ALL, "SentToMemberOf": ["team"]}, {**SCOPE_ALL, "RecipientDomainIs": ["example.com"]},
+                  {**_to("alice"), "RecipientDomainIs": ["example.com"]}):
+        sections = _safelinks([_sl_rule("p", scope, priority=0)], policies, BI_EXCLUDES_BOB)
+        assert _answer(policy_id, sections) == ("not_assessed", "partial_tier_may_cover"), scope
+    group_excluded = [{**BI_EXCLUDES_BOB[0], "ExceptIfSentToMemberOf": ["team"]}]
+    sections = _safelinks([_sl_rule("p", _to("alice"), priority=0)], policies, group_excluded)
+    assert _answer(policy_id, sections) == ("not_assessed", "partial_tier_may_cover")     # a group's members are unknown
+
+
+@pytest.mark.parametrize("built_in", [{"Identity": "ATP Built-In Protection Rule"}, "unreadable", 7])
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_r003_malformed_built_in_section_does_not_block_a_covering_rule(policy_id, built_in):
+    rules = [_sl_rule("cover", SCOPE_ALL)]
+    assert _answer(policy_id, _safelinks(rules, [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}], built_in)) == ("met", "policy_flags_ok")
+    record = assess(policy_id, _safelinks([], [SL_BUILTIN], built_in))
+    assert (record["cell"], record["cited_sections"]) == ("section_not_a_list", ["built_in_protection_rules"])
