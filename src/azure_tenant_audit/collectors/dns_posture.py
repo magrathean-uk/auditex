@@ -99,7 +99,7 @@ class DnsPostureCollector(Collector):
                 endpoint = resolve_doh_endpoint(context.get("doh_endpoint"))
             except ValueError as exc:
                 return self._config_error(str(exc))
-        resolver = CachingResolver(injected or DohClient(endpoint=endpoint))
+        resolver = CachingResolver(injected if injected is not None else DohClient(endpoint=endpoint))
         dkim_selectors: Iterable[str] = context.get("dkim_selectors", DEFAULT_DKIM_SELECTORS)
         dkim_fallback_selectors: Iterable[str] = context.get(
             "dkim_fallback_selectors", FALLBACK_DKIM_SELECTORS
