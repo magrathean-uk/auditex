@@ -12,31 +12,47 @@ Usage: run-bootstrap-azurecli.sh [options]
 
   --config PATH        Path to config JSON (default: config.example.json)
   --tenant-name NAME   Override tenant display name from config
+  --tenant-id ID       Lab tenant ID; must equal the config tenantId (checked before any write)
   --run-name NAME      Base run name prefix (defaults to az-bootstrap-<timestamp>)
   --steps STEP_LIST    workload steps: licenses,windows365,teams,intune,security,devices,exchange,sample (default: licenses,windows365,teams,intune,security,devices,exchange,sample)
   --days DAYS          sample data days window (default: full config count)
   --interactive-workload  Use delegated interactive Graph auth for workload seeding
   --client-id ID          Public client app ID for delegated interactive Graph auth
   --audit-collectors LIST     audit collectors (default: identity,security,intune,teams,exchange)
+  --audit-client-id ID        Reader app client ID for the audit step (default: $AZURE_CLIENT_ID)
+  --audit-certificate-path FILE  Reader app certificate private key for the audit step
+  --audit-certificate-thumbprint SHA1  Thumbprint of the reader app certificate
+  --audit-certificate-password-env NAME  Environment variable holding the key password (optional)
+  --audit-certificate-password-file FILE File holding the key password (optional)
   --audit-top TOP             audit collector top item count (default: 500)
   --include-audit-exchange    enable command-based exchange collector
   --skip-identity      Skip identity/group seeding
   --skip-workload      Skip Graph workload seeding
   --skip-verify        Skip post-seed population verification
   --skip-audit         Skip audit evidence collection
-  --token-env PATH     Path to token env file (default: .secrets/lab-populator-token.env if present).
+  --token-env PATH     Seeding token env file (default: .secrets/lab-populator-token.env if present).
   --browser-command CMD Browser command for az login (default: firefox)
   --skip-login         Skip automatic az login and require existing session
   --verbose-shell-log  Backward compatible alias; command logging is always captured.
   --dry-run            Dry-run only, no tenant writes
   --help               Show this help
 
-If not already signed in, this script will run `az login` in the specified browser.
+Live runs write to the lab tenant named by the config tenantId only. The placeholder all-zero ID is
+refused, and the run stops before any write unless the Azure CLI (or AZURE_ACCESS_TOKEN) holds a
+token for that tenant. If no such sign-in exists, this script runs `az login --tenant <tenantId>`
+in the specified browser. The audit step uses the reader app certificate (DEC-107); pass the
+--audit-* options or --skip-audit.
 USAGE
 }
 
 CONFIG="$DEFAULT_CONFIG"
 TENANT_NAME=""
+TENANT_ID_ARG=""
+AUDIT_CLIENT_ID="${AZURE_CLIENT_ID:-}"
+AUDIT_CERTIFICATE_PATH=""
+AUDIT_CERTIFICATE_THUMBPRINT=""
+AUDIT_CERTIFICATE_PASSWORD_ENV=""
+AUDIT_CERTIFICATE_PASSWORD_FILE=""
 RUN_NAME="az-bootstrap-$(date +%Y%m%d_%H%M%S)"
 STEPS="licenses,windows365,teams,intune,security,devices,exchange,sample"
 DAYS=""
@@ -69,6 +85,30 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tenant-name)
       TENANT_NAME="$2"
+      shift 2
+      ;;
+    --tenant-id)
+      TENANT_ID_ARG="$2"
+      shift 2
+      ;;
+    --audit-client-id)
+      AUDIT_CLIENT_ID="$2"
+      shift 2
+      ;;
+    --audit-certificate-path)
+      AUDIT_CERTIFICATE_PATH="$2"
+      shift 2
+      ;;
+    --audit-certificate-thumbprint)
+      AUDIT_CERTIFICATE_THUMBPRINT="$2"
+      shift 2
+      ;;
+    --audit-certificate-password-env)
+      AUDIT_CERTIFICATE_PASSWORD_ENV="$2"
+      shift 2
+      ;;
+    --audit-certificate-password-file)
+      AUDIT_CERTIFICATE_PASSWORD_FILE="$2"
       shift 2
       ;;
     --run-name)
@@ -206,36 +246,78 @@ print(cfg.get("tenant", {}).get("tenantDomain", ""))
 PY
 )"
 
-ensure_azure_cli_session() {
-  local tenant_hint="$1"
+lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
 
+# A --tenant-id must name the same tenant as the config: the seeders pin to the config tenantId.
+if [[ -n "$TENANT_ID_ARG" && "$(lower "$TENANT_ID_ARG")" != "$(lower "$TENANT_ID")" ]]; then
+  echo "tenant_mismatch: --tenant-id ${TENANT_ID_ARG} does not match the config tenantId ${TENANT_ID}. Edit the config to name the lab tenant." >&2
+  exit 6
+fi
+
+require_named_tenant_id() {
+  if ! python3 - "$TENANT_ID" <<'PY'
+import sys
+import uuid
+
+raw = sys.argv[1].strip()
+try:
+    value = str(uuid.UUID(raw))
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if value == raw.lower() and value != "00000000-0000-0000-0000-000000000000" else 1)
+PY
+  then
+    echo "tenant_id_required: set tenant.tenantId in ${CONFIG} to the lab tenant GUID (the all-zero placeholder is refused)." >&2
+    exit 6
+  fi
+}
+
+# Prints the tid claim of AZURE_ACCESS_TOKEN; the token is read from the environment, never argv.
+access_token_tenant() {
+  python3 - <<'PY'
+import base64
+import json
+import os
+
+try:
+    payload = os.environ["AZURE_ACCESS_TOKEN"].split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    print(str(json.loads(base64.urlsafe_b64decode(payload.encode("ascii"))).get("tid") or ""))
+except Exception:
+    print("")
+PY
+}
+
+cli_token_tenant() {
+  az account get-access-token --tenant "$TENANT_ID" --resource https://graph.microsoft.com \
+    --query tenant --output tsv 2>/dev/null || true
+}
+
+ensure_azure_cli_session() {
   if ! command -v az >/dev/null 2>&1; then
     echo "Azure CLI not found. Install the Azure CLI package first."
     exit 3
   fi
 
-  if az account show --output none >/dev/null 2>&1; then
-    echo "Azure CLI session already active."
+  if [[ "$(lower "$(cli_token_tenant)")" == "$(lower "$TENANT_ID")" ]]; then
+    echo "Azure CLI session holds a token for the named lab tenant."
     return 0
   fi
 
   if [[ "$SKIP_LOGIN" -eq 1 ]]; then
-    echo "No active Azure CLI session and --skip-login was set."
-    echo "Run 'az login' manually and re-run this command."
+    echo "tenant_mismatch: the Azure CLI has no sign-in for tenant ${TENANT_ID} and --skip-login was set." >&2
+    echo "Run 'az login --tenant ${TENANT_ID}' and re-run this command." >&2
     exit 4
   fi
 
-  local login_cmd=(az login --output none)
-  if [[ -n "$tenant_hint" ]]; then
-    login_cmd+=(--tenant "$tenant_hint")
-  fi
-
-  echo "No active Azure CLI session found. Launching browser authentication..."
+  echo "No Azure CLI sign-in for tenant ${TENANT_ID}. Launching browser authentication..."
   echo "Using browser command: $BROWSER_CMD"
-  BROWSER="$BROWSER_CMD" "${login_cmd[@]}"
+  BROWSER="$BROWSER_CMD" az login --tenant "$TENANT_ID" --output none || true
 
-  if ! az account show --output none >/dev/null 2>&1; then
-    echo "Azure CLI sign-in did not complete. Run 'az login' manually and retry."
+  if [[ "$(lower "$(cli_token_tenant)")" != "$(lower "$TENANT_ID")" ]]; then
+    echo "tenant_mismatch: Azure CLI sign-in did not produce a token for tenant ${TENANT_ID}." >&2
     exit 5
   fi
 }
@@ -290,9 +372,20 @@ log_shell_event() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "${BOOTSTRAP_SHELL_LOG}"
 }
 
+# Certificate location, thumbprint and password source are sensitive; logs show them as <redacted>.
 shell_command_repr() {
-  local token cmd=()
+  local token cmd=() redact_next=0
   for token in "$@"; do
+    if [[ "$redact_next" -eq 1 ]]; then
+      cmd+=("<redacted>")
+      redact_next=0
+      continue
+    fi
+    case "$token" in
+      --certificate-path|--certificate-thumbprint|--certificate-password-env|--certificate-password-file)
+        redact_next=1
+        ;;
+    esac
     cmd+=("$(printf '%q' "$token")")
   done
   printf '%s' "${cmd[*]}"
@@ -371,14 +464,24 @@ cleanup() {
 
 trap 'cleanup $?' EXIT
 
+AUDIT_READY=0
+if [[ -n "$AUDIT_CLIENT_ID" && -n "$AUDIT_CERTIFICATE_PATH" && -n "$AUDIT_CERTIFICATE_THUMBPRINT" ]]; then
+  AUDIT_READY=1
+fi
+if [[ "$SKIP_AUDIT" -eq 0 && "$AUDIT_READY" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
+  echo "The audit step needs the reader app certificate (DEC-107): pass --audit-client-id, --audit-certificate-path and --audit-certificate-thumbprint, or --skip-audit. Nothing was written." >&2
+  exit 2
+fi
+
 if [[ "$DRY_RUN" -eq 0 ]]; then
+  require_named_tenant_id
   if ! resolve_azure_access_token; then
-    ensure_azure_cli_session "${TENANT_ID:-$TENANT_DOMAIN}"
+    ensure_azure_cli_session
     AUTH_SOURCE="AZURE_CLI"
   fi
-  if [[ -z "${AZURE_ACCESS_TOKEN:-}" ]] && ! az account show --output json --query "{tenantId:tenantId, user:user.name}" >/dev/null 2>&1; then
-    echo "Unable to verify Azure CLI context."
-    exit 5
+  if [[ -n "${AZURE_ACCESS_TOKEN:-}" && "$(lower "$(access_token_tenant)")" != "$(lower "$TENANT_ID")" ]]; then
+    echo "tenant_mismatch: AZURE_ACCESS_TOKEN was not issued by tenant ${TENANT_ID}. Nothing was written." >&2
+    exit 6
   fi
   log_shell_debug "Auth source: ${AUTH_SOURCE}"
   if [[ -n "${AZURE_ACCESS_TOKEN:-}" ]]; then
@@ -450,7 +553,10 @@ if [[ "$SKIP_VERIFY" -eq 0 ]]; then
   fi
 fi
 
-if [[ "$SKIP_AUDIT" -eq 0 ]]; then
+if [[ "$SKIP_AUDIT" -eq 0 && "$AUDIT_READY" -eq 0 ]]; then
+  echo "Audit step skipped in dry-run: pass --audit-client-id, --audit-certificate-path and --audit-certificate-thumbprint to preview it."
+  AUDIT_STATUS="skipped"
+elif [[ "$SKIP_AUDIT" -eq 0 ]]; then
   AUDIT_OUT="${ROOT_DIR}/audit-output/${RUN_NAME}-evidence"
   mkdir -p "$AUDIT_OUT"
   AUDIT_ARGS=(
@@ -460,12 +566,18 @@ if [[ "$SKIP_AUDIT" -eq 0 ]]; then
     --top "$AUDIT_TOP"
     --out "$AUDIT_OUT"
     --run-name "${RUN_NAME}-evidence"
+    --client-id "$AUDIT_CLIENT_ID"
+    --certificate-path "$AUDIT_CERTIFICATE_PATH"
+    --certificate-thumbprint "$AUDIT_CERTIFICATE_THUMBPRINT"
   )
+  if [[ -n "$AUDIT_CERTIFICATE_PASSWORD_ENV" ]]; then
+    AUDIT_ARGS+=(--certificate-password-env "$AUDIT_CERTIFICATE_PASSWORD_ENV")
+  fi
+  if [[ -n "$AUDIT_CERTIFICATE_PASSWORD_FILE" ]]; then
+    AUDIT_ARGS+=(--certificate-password-file "$AUDIT_CERTIFICATE_PASSWORD_FILE")
+  fi
   if [[ "$AUDIT_INCLUDE_EXCHANGE" -eq 1 || "$AUDIT_COLLECTORS" == *"exchange"* ]]; then
     AUDIT_ARGS+=(--include-exchange)
-  fi
-  if [[ "${AUTH_SOURCE}" == "AZURE_ACCESS_TOKEN" && -n "${TOKEN_ENV_PATH:-}" && -f "$TOKEN_ENV_PATH" ]]; then
-    AUDIT_ARGS+=(--token-env "$TOKEN_ENV_PATH")
   fi
   if [[ "$DRY_RUN" -eq 1 ]]; then
     AUDIT_ARGS+=(--dry-run)
