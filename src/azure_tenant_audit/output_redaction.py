@@ -278,12 +278,18 @@ _SECRET_LAST_PAIRS = frozenset({"privatekey", "sharedkey", "keymaterial"})
 _KEY_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 
 
-def _secret_key(key: Any) -> bool:
+# Under these a list or mapping is masked whole too (an Authorization header list, a client_assertion object); a
+# ``...Credential`` key can hold metadata records the audit reads, so only its scalars are masked.
+_SECRET_STRUCTURED_WORDS = _SECRET_LAST_WORDS - {"credential"}
+
+
+def _secret_key(key: Any, *, structured: bool = False) -> bool:
     words = [word.lower() for word in _KEY_WORD_RE.findall(str(key))]
     # A numbered copy (``clientSecret2``, ``password1``) or a value qualifier (``secretValue``) names the same thing.
     while words and (words[-1].isdigit() or (len(words) > 1 and words[-1] in {"value", "text"})):
         words.pop()
-    return bool(words) and (words[-1] in _SECRET_LAST_WORDS or "".join(words[-2:]) in _SECRET_LAST_PAIRS)
+    last_words = _SECRET_STRUCTURED_WORDS if structured else _SECRET_LAST_WORDS
+    return bool(words) and (words[-1] in last_words or "".join(words[-2:]) in _SECRET_LAST_PAIRS)
 
 
 @dataclass(frozen=True)
@@ -2099,7 +2105,9 @@ class _Redactor:
             norm = _norm(key)
             if norm in _SECRET_NORMS and _non_empty(item):
                 item = SECRET_PLACEHOLDER
-            elif isinstance(item, (str, bytes, int, float)) and _non_empty(item) and _secret_key(key):
+            elif _non_empty(item) and _secret_key(key) and (
+                isinstance(item, (str, bytes, int, float)) or (_secret_key(key, structured=True) and not isinstance(item, bool))
+            ):
                 item = SECRET_PLACEHOLDER
             elif isinstance(item, str):
                 if not item:

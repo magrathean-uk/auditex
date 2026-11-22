@@ -527,3 +527,19 @@ def test_r150_markup_pass_does_not_truncate_document_at_lone_pem_marker(profile:
     assert _PARITY_CANARY not in json.dumps(
         redact_output({"error": f"-----BEGIN {_PEM_LABEL}-----\n{_PARITY_CANARY}"}, profile=profile)
     )
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack", "explainer"])
+def test_r150_structured_values_under_credential_keys_are_replaced(profile: str) -> None:
+    """A list or mapping under a credential key (an Authorization header list, a client_assertion object) is masked."""
+    from azure_tenant_audit.output_redaction import redact_output
+
+    value = {
+        "Authorization": [f"Basic {_PARITY_CANARY}"],
+        "client_assertion": {"value": _PARITY_CANARY},
+        "sharedSecret": [12345678],
+        "AllowSimplePassword": True,
+    }
+    out = redact_output({"record": value}, profile=profile)["record"]
+    assert _PARITY_CANARY not in json.dumps(out) and "12345678" not in json.dumps(out)
+    assert out["AllowSimplePassword"] is True
