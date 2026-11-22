@@ -67,6 +67,55 @@ def test_scan_accepts_large_synthetic_file_sizes(
         assert redaction.redact_output({"owner": "private"}, profile=profile, context=context)["owner"] == "<redacted-text>"
 
 
+def _full_user_section_bytes(users: int) -> int:
+    """Bytes of ``normalized/users.json`` for ``users`` users, in the writer's layout (indent 2), built by the real
+    normaliser from Graph users with every field it keeps filled (sign-in activity included)."""
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    rows = [
+        {
+            "id": f"0d3e1a7f-0000-4000-8000-{index:012d}",
+            "displayName": "Alexandra Konstantinopoulou-Smythe",
+            "userPrincipalName": "alexandra.konstantinopoulou-smythe@halcyonfreight-logistics.example",
+            "mail": "alexandra.konstantinopoulou-smythe@halcyonfreight-logistics.example",
+            "department": "Customer Service and Operations",
+            "userType": "Member",
+            "accountEnabled": True,
+            "createdDateTime": "2021-03-04T10:11:12Z",
+            "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z",
+        }
+        for index in range(users)
+    ]
+    activity = {"lastSuccessfulSignInDateTime": "2026-11-01T08:00:00Z", "lastSignInDateTime": "2026-11-01T08:00:00Z"}
+    snapshot = build_normalized_snapshot(
+        tenant_name="lab",
+        run_id="r1",
+        collector_payloads={
+            "identity": {
+                "users": {"value": rows},
+                "userSignInActivity": {"value": [{"id": row["id"], "signInActivity": activity} for row in rows]},
+            }
+        },
+    )
+    return len(json.dumps(snapshot["users"], indent=2).encode("utf-8"))
+
+
+def test_the_per_file_cap_covers_a_full_users_section_at_the_250000_user_collection_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Repair round 1 (R090): the normal user record shape and layout, at the identity collector's 250,000-user cap.
+    per_user = _full_user_section_bytes(2) - _full_user_section_bytes(1)
+    users_file = _full_user_section_bytes(1) + per_user * (250_000 - 1)
+    assert users_file > 180 * 1024 * 1024  # the shape the review measured (about 189 MiB), not a smaller one
+    other_files = _PROJECTED_250K[1]  # the next largest file of the 90k-user run, scaled to 250,000 users
+    root = tmp_path / "run"
+    _sparse_run(root, (users_file, other_files))
+    monkeypatch.setattr(redaction._Scan, "collect", lambda self, parts, data: None)
+
+    assert len(redaction.snapshot_run(root)) == 2
+    assert not redaction.context_for_run(root).incomplete
+
+
 @pytest.fixture
 def low_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(redaction, "_MAX_FILE_BYTES", 100)
