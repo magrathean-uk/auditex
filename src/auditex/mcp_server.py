@@ -495,6 +495,9 @@ _SUMMARY_DROPPABLE_SECTIONS = {
 }
 
 
+_MANIFEST_ARTIFACTS = "manifest.artifacts"
+
+
 def _json_size(value: Any) -> int:
     return len(json.dumps(value, default=str))
 
@@ -512,14 +515,24 @@ def _cap_summary(result: dict[str, Any], budget: int = SUMMARY_RESPONSE_BUDGET_B
     sizes = sorted(
         ((_json_size(capped[key]), key) for key in _SUMMARY_DROPPABLE_SECTIONS if key in capped), reverse=True
     )
+    manifest = capped.get("manifest")
+    if isinstance(manifest, dict) and isinstance(manifest.get("artifacts"), list):
+        # The manifest stays, but its artifact list grows with every raw page and chunk of a large run.
+        sizes = sorted([*sizes, (_json_size(manifest["artifacts"]), _MANIFEST_ARTIFACTS)], reverse=True)
     for size, key in sizes:
-        value = capped.pop(key)
-        entry: dict[str, Any] = {"bytes": size, "read_with": _SUMMARY_DROPPABLE_SECTIONS[key]}
+        if key == _MANIFEST_ARTIFACTS:
+            capped["manifest"] = {name: item for name, item in capped["manifest"].items() if name != "artifacts"}
+            value: Any = manifest["artifacts"]
+            entry: dict[str, Any] = {"bytes": size}
+            path = capped.get("manifest_path")
+        else:
+            value = capped.pop(key)
+            entry = {"bytes": size, "read_with": _SUMMARY_DROPPABLE_SECTIONS[key]}
+            path = capped.get(f"{key}_path")
         if isinstance(value, list):
             entry["items"] = len(value)
         elif isinstance(value, dict) and isinstance(value.get("findings"), list):
             entry["findings"] = len(value["findings"])
-        path = capped.get(f"{key}_path")
         if isinstance(path, str) and path:
             entry["path"] = path
         omitted[key] = entry

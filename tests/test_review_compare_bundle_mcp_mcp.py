@@ -57,6 +57,29 @@ def test_mcp_summary_of_a_large_run_fits_a_client_output_cap_and_points_at_the_o
     assert summary["summary_truncated"] is True
 
 
+def test_mcp_summary_of_a_run_with_many_artifacts_still_fits_the_cap(tmp_path: Path) -> None:
+    # A 250,000-user run lists hundreds of raw pages and chunks (each with a .meta.json) in its manifest.
+    from support import RunBundleBuilder
+
+    from auditex.mcp_server import summarize_run
+
+    artifacts = [f"chunks/identity/users-page-{index:05d}.json" for index in range(1500)]
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .manifest(artifacts=artifacts)
+        .report_pack(summary={"overall_status": "partial"}, findings=[], evidence_paths=[])
+        .build()
+    )
+
+    summary = summarize_run(str(run_dir))
+
+    assert len(json.dumps(summary, default=str)) <= 48_000
+    assert summary["manifest"]["tenant_name"]
+    omitted = summary["omitted_sections"]["manifest.artifacts"]
+    assert omitted["items"] == 1500
+    assert omitted["path"] == "run-manifest.json"
+
+
 def test_mcp_summary_of_a_small_run_keeps_every_section(tmp_path: Path) -> None:
     from support import RunBundleBuilder
 
