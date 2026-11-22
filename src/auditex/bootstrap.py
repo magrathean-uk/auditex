@@ -20,15 +20,6 @@ BOOTSTRAP_SCRIPT = REPO_ROOT / "scripts" / "bootstrap-local-tools.sh"
 SELECT_PYTHON_SCRIPT = REPO_ROOT / "scripts" / "select-python.sh"
 DEFAULT_VENV_DIR = REPO_ROOT / ".venv"
 
-INSTALLED_SETUP_MESSAGE = (
-    "auditex setup prepares a source checkout; this Auditex is an installed package, so its Python is ready.\n"
-    "Optional packs are installed by hand:\n"
-    "  MCP server:      python -m pip install 'auditex[mcp]'\n"
-    "  Exchange checks: install PowerShell 7, then run\n"
-    "                   pwsh -Command \"Install-Module ExchangeOnlineManagement -Scope CurrentUser\"\n"
-    "Run auditex doctor to check."
-)
-
 
 def is_source_checkout() -> bool:
     """Whether this package runs from its own source checkout (with the bootstrap scripts) or an installed wheel/sdist."""
@@ -203,7 +194,14 @@ def run_setup(*, with_exchange: bool = False, with_pwsh: bool = False, with_mcp:
     if not is_source_checkout():
         # Nothing to bootstrap in an installed package; print the manual steps instead of failing, so guided-run
         # carries on and doctor still reports any missing optional pack.
-        print(INSTALLED_SETUP_MESSAGE)
+        print(
+            "auditex setup prepares a source checkout; this Auditex is an installed package, so its Python is ready.\n"
+            "Optional packs are installed by hand:\n"
+            "  MCP server:      python -m pip install 'auditex[mcp]'\n"
+            "  Exchange checks: install PowerShell 7, then run\n"
+            "                   pwsh -Command \"Install-Module ExchangeOnlineManagement -Scope CurrentUser\"\n"
+            "Run auditex doctor to check."
+        )
         return 0
     command = ["bash", str(BOOTSTRAP_SCRIPT)]
     if with_exchange:
