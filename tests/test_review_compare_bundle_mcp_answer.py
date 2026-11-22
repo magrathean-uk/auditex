@@ -123,3 +123,33 @@ def test_every_pinned_model_names_its_licence_and_the_download_notice_states_it(
     la.fetch_model(spec, tmp_path / spec.file, progress=lines.append)
 
     assert f"licensed by its publisher under {spec.licence}; one time only, then Auditex answers offline." in lines[0]
+
+
+def _model_answer() -> tuple[dict[str, Any], dict[str, Any]]:
+    from auditex import local_answer as la
+    from auditex.answer_digest import digest_from_assessment
+
+    digest = digest_from_assessment({"run_id": "synthetic", "policies": [_assessment_row("MS.AAD.8.1v1", True)]})
+    answer = la.assemble_answer(digest, {}, None, model=la.MODELS["mistral"], runtime=la.RUNTIME_VERSION, reason=None)
+    return digest, answer
+
+
+def test_a_saved_model_answer_records_the_models_licence_and_passes_its_schema() -> None:
+    # Repair round 1 (L5): the licence is written into the answer record, not only the download notice.
+    from auditex import local_answer as la
+
+    digest, answer = _model_answer()
+
+    assert answer["model"]["licence"] == la.MODELS["mistral"].licence
+    la.validate_answer(answer)
+    assert la.verify_answer(answer, digest)["model"]["licence"] == la.MODELS["mistral"].licence
+
+
+def test_a_saved_model_answer_without_a_licence_asks_for_a_new_answer() -> None:
+    from auditex import local_answer as la
+
+    digest, answer = _model_answer()
+    stored = {**answer, "model": {key: value for key, value in answer["model"].items() if key != "licence"}}
+
+    with pytest.raises(la.LocalAnswerError, match="another Auditex version"):
+        la.verify_answer(stored, digest)

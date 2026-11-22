@@ -98,7 +98,7 @@ class ModelSpec:
 
     def record(self) -> dict[str, Any]:
         return {"choice": self.choice, "family": self.family, "repo": self.repo, "revision": self.revision,
-                "file": self.file, "size": self.size, "sha256": self.sha256}
+                "file": self.file, "size": self.size, "sha256": self.sha256, "licence": self.licence}
 
 
 # Chosen and pinned by measurement (M10-T01); M10-T04 keeps only the models that pass acceptance.
@@ -959,6 +959,9 @@ def verify_answer(payload: Mapping[str, Any], digest: Mapping[str, Any]) -> dict
     if payload["run_id"] != digest.get("run_id"):
         raise LocalAnswerError("the local answer belongs to another run")
     if payload["digest_version"] != DIGEST_VERSION or payload["frames_version"] != frames()["version"]:
+        raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
+    if payload["model"] and "licence" not in payload["model"]:
+        # L5: an answer saved before the licence was recorded with its model.
         raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
     model = MODELS.get(payload["model"]["choice"]) if payload["model"] else None
     if payload["model"] and (model is None or model.record() != payload["model"]):
