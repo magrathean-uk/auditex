@@ -299,3 +299,30 @@ def test_r164_gap_reason_without_a_known_resolver_stays_generic() -> None:
     reason = collector_gap_reason("dns_posture", "dns_resolver_error", "DoH resolver could not answer TXT x: SERVFAIL")
     assert reason is not None and "--doh-endpoint" in reason
     assert collector_gap_reason("google_dns_posture", "dns_resolver_error", None) is not None
+
+
+def test_output_contract_matches_the_code_on_compare_time_omissions_and_timeouts() -> None:
+    import inspect
+
+    from auditex import command_runner, mcp_server
+    from auditex.run_bundle import RunBundle
+
+    text = _flat_doc("docs/reference/output-contract.md")
+    # Compare: the creation time falls back from the evidence index to the manifest to summary.json.
+    source = inspect.getsource(RunBundle.metadata)
+    assert 'indexed.get("created_utc") or manifest.get("created_utc") or summary.get("created_utc")' in source
+    assert "else `run-manifest.json`, else `summary.json`" in text
+    assert "orders runs by the run manifest's `created_utc`" not in text
+    # MCP summary cap: the manifest artifact list is dropped without a read_with.
+    assert mcp_server._MANIFEST_ARTIFACTS not in mcp_server._SUMMARY_DROPPABLE_SECTIONS
+    assert "(entry `manifest.artifacts`) has no `read_with`" in text
+    # Command timeout: every tool that launches a command is named, and partial_run_dir is conditional.
+    handlers = mcp_server.tool_handlers()
+    launching = sorted(name for name, handler in handlers.items()
+                       if "run_cli_command(" in inspect.getsource(inspect.unwrap(handler)))
+    assert launching, "no command-launching tools found"
+    for name in launching:
+        assert f"`{name}`" in text[text.index("The MCP tools that launch an Auditex command"):], name
+    runner = inspect.getsource(command_runner.run_cli_command)
+    assert "len(new_folders) == 1" in runner and "if partial is not None:" in runner
+    assert "`partial_run_dir` is absent" in text
