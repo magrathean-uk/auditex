@@ -101,8 +101,8 @@ INLINE_SECRET_WORDS = (
     r"|certificate[_-]?(?:path|thumbprint|password(?:[_-]?(?:env|file))?)"
 )
 # A quoted value runs to its closing quote, or to the end of the text when it was cut off before one. A value that is
-# already a redaction marker (``***redacted-jwt***``) is left as it is.
-INLINE_SECRET_VALUE = r"(?!\*\*\*redacted)(?:\"(?:[^\"\\]|\\.)*(?:\"|\Z)|'(?:[^'\\]|\\.)*(?:'|\Z)|[^\s,;]+)"
+# exactly a redaction marker (``***redacted-jwt***``), ending at a value boundary, is left as it is.
+INLINE_SECRET_VALUE = r"(?!\*\*\*redacted(?:-[a-z-]+)?\*\*\*(?![^\s,;]))(?:\"(?:[^\"\\]|\\.)*(?:\"|\\?\Z)|'(?:[^'\\]|\\.)*(?:'|\\?\Z)|[^\s,;]+)"
 INLINE_SECRET_RE = re.compile(
     rf"(?P<prefix>[\"']?(?:{INLINE_SECRET_WORDS})[\"']?\s*[=:]\s*)(?P<value>{INLINE_SECRET_VALUE})",
     re.IGNORECASE,

@@ -160,3 +160,13 @@ def test_redact_text_masks_unterminated_quoted_secret_to_the_end() -> None:
 
     out = redact_text('error: {"password": "Pa\\"ss word Secret99')
     assert out == 'error: {"password": ***redacted***'
+
+
+def test_redact_text_round2_cut_off_after_backslash_and_marker_prefix() -> None:
+    """R093 (review round 2): a quoted value cut off after a backslash is masked to the end; only an exact redaction
+    marker is left as it is, not a credential that merely starts with one."""
+    from azure_tenant_audit.secret_hygiene import redact_text
+
+    assert redact_text('password="abc def\\') == "password=***redacted***"
+    assert "TAILSECRET" not in redact_text("password=***redacted***TAILSECRET")
+    assert redact_text("token: ***redacted-jwt***") == "token: ***redacted-jwt***"
