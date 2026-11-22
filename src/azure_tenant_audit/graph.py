@@ -567,28 +567,7 @@ class GraphClient:
                     "Graph request raised exception",
                     {"method": method, "url": url, "error": str(exc), "attempt": attempt},
                 )
-                # A read timeout or dropped connection is retried like a 5xx (R033): one network blip must not fail
-                # an endpoint or cut a long paged list. Other request errors (a bad URL, a refused redirect) are not.
-                if not isinstance(exc, (Timeout, RequestsConnectionError)):
-                    raise
-                if attempt > self._throttle_policy().server_error_retries:
-                    raise
-                backoff_seconds = self._retry_delay(attempt)
-                if wait_budget is not None and not wait_budget.allows(backoff_seconds):
-                    raise
-                self._emit(
-                    "graph.request.retry",
-                    "Transport error, retrying request",
-                    {
-                        "method": method,
-                        "url": url,
-                        "error": type(exc).__name__,
-                        "attempt": attempt,
-                        "backoff_seconds": backoff_seconds,
-                        "reason": "transport_error",
-                    },
-                )
-                self._take_wait(wait_budget, backoff_seconds)
+                self._retry_transport_error(exc, method=method, url=url, attempt=attempt, wait_budget=wait_budget)
                 continue
             duration_ms = round((time.time() - request_start) * 1000, 2)
             self._emit(
@@ -604,7 +583,13 @@ class GraphClient:
                 },
             )
             if response.status_code in _REDIRECT_STATUSES:
-                response = self._follow_redirects(response, method, url, headers)
+                try:
+                    response = self._follow_redirects(response, method, url, headers)
+                except (Timeout, RequestsConnectionError) as exc:
+                    # A blip on an allowed download hop is retried from the Graph URL, which mints a fresh signed
+                    # link, within the same bound as a blip on Graph itself (R033). The error is already redacted.
+                    self._retry_transport_error(exc, method=method, url=url, attempt=attempt, wait_budget=wait_budget)
+                    continue
             if response.status_code == 403 and permission_stop_after:
                 # A licence answer is not a permission refusal: sibling reads of the family may still be licensed or
                 # take another path (R004), so only genuine authorisation refusals count toward the stop.
@@ -660,6 +645,35 @@ class GraphClient:
                 continue
             self._arm_next_request_delay()
             return response
+
+    def _retry_transport_error(
+        self, exc: RequestException, *, method: str, url: str, attempt: int, wait_budget: _WaitBudget | None
+    ) -> None:
+        """Wait before retrying a read timeout or dropped connection, or re-raise ``exc`` when it may not be retried.
+
+        A transport blip is retried like a 5xx (R033): one network blip must not fail an endpoint or cut a long paged
+        list. Other request errors (a bad URL, a refused redirect) are not retried.
+        """
+        if not isinstance(exc, (Timeout, RequestsConnectionError)):
+            raise exc
+        if attempt > self._throttle_policy().server_error_retries:
+            raise exc
+        backoff_seconds = self._retry_delay(attempt)
+        if wait_budget is not None and not wait_budget.allows(backoff_seconds):
+            raise exc
+        self._emit(
+            "graph.request.retry",
+            "Transport error, retrying request",
+            {
+                "method": method,
+                "url": url,
+                "error": type(exc).__name__,
+                "attempt": attempt,
+                "backoff_seconds": backoff_seconds,
+                "reason": "transport_error",
+            },
+        )
+        self._take_wait(wait_budget, backoff_seconds)
 
     def _over_wait_budget(
         self, wait_budget: _WaitBudget | None, seconds: float, *, method: str, url: str, attempt: int

@@ -137,13 +137,18 @@ def test_an_error_after_a_redirect_does_not_carry_the_download_query() -> None:
 def test_a_failed_redirect_hop_is_logged_without_the_signed_url() -> None:
     from requests.exceptions import ConnectionError as RequestsConnectionError
 
-    session = _Session(_redirect(SIGNED), RequestsConnectionError(f"could not reach {SIGNED}"))
+    # The hop is retried from Graph within the transport bound (R033), so every attempt fails the same way.
+    attempts = [(_redirect(SIGNED), RequestsConnectionError(f"could not reach {SIGNED}")) for _ in range(10)]
+    session = _Session(*[answer for pair in attempts for answer in pair])
     events: list[tuple[str, dict[str, Any]]] = []
+    client = _client(session, events)
+    client.sleep = lambda _seconds: None
 
     with pytest.raises(RequestsConnectionError):
-        _client(session, events).get_content("/reports/getMailboxUsageDetail(period='D30')")
+        client.get_content("/reports/getMailboxUsageDetail(period='D30')")
 
     assert "TOPSECRETSIGNATURE" not in repr(events)
+    assert any(event == "graph.request.retry" for event, _details in events)
 
 
 def test_the_observed_ledger_lists_redirect_hops_without_a_query() -> None:
