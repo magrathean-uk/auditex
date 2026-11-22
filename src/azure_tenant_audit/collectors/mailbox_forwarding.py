@@ -27,6 +27,9 @@ _HIDE_FROM_USER_FOLDERS = {
     "archive",
     "conversation history",
 }
+# Well-known folder names Graph resolves in any mailbox language (R006). RSS Feeds has none, so it is matched by its
+# display name in the top-level folder list.
+_HIDE_FROM_USER_WELL_KNOWN = ("junkemail", "deleteditems", "archive", "conversationhistory")
 
 
 class MailboxForwardingCollector(Collector):
@@ -59,10 +62,16 @@ class MailboxForwardingCollector(Collector):
             user_rules, rules_status = self._fetch_inbox_rules(
                 client, user_id, log_event=log_event
             )
-            for rule in user_rules:
-                classified = _classify_message_rule(rule, user, accepted_domains)
-                all_rules.append(classified)
             coverage.append(rules_status)
+            # Graph returns moveToFolder as a folder ID, so the user's hide-from-user folders are resolved to IDs,
+            # but only when a rule moves mail somewhere a display name does not already settle.
+            hide_folder_ids: set[str] | None = set()
+            if any(_needs_folder_resolution(rule) for rule in user_rules):
+                hide_folder_ids, folders_status = self._resolve_hide_folders(client, user_id)
+                coverage.append(folders_status)
+            for rule in user_rules:
+                classified = _classify_message_rule(rule, user, accepted_domains, hide_folder_ids)
+                all_rules.append(classified)
 
             user_settings, settings_status = self._fetch_mailbox_settings(client, user_id)
             if user_settings is not None:
@@ -242,6 +251,53 @@ class MailboxForwardingCollector(Collector):
             )
         return rules, coverage_row
 
+    def _resolve_hide_folders(self, client: GraphClient | None, user_id: str) -> tuple[set[str] | None, dict[str, Any]]:
+        """IDs of the user's hide-from-user folders, or None when they could not be read.
+
+        Folder metadata only (``$select=id,displayName`` on the top-level list and ``$select=id`` on the well-known
+        folders); no message is read.
+        """
+        start = time.perf_counter()
+        path = f"/users/{user_id}/mailFolders"
+        ids: set[str] | None = set()
+        error_class: str | None = None
+        error: str | None = None
+        try:
+            if client is None or not hasattr(client, "get_all") or not hasattr(client, "get_batch"):
+                raise GraphError("graph client unavailable", request=path)
+            for folder in client.get_all(path, params={"$select": "id,displayName", "$top": "100"}) or []:
+                if isinstance(folder, dict) and str(folder.get("displayName") or "").strip().lower() in _HIDE_FROM_USER_FOLDERS:
+                    ids.add(str(folder.get("id") or ""))
+            answers = client.get_batch(
+                [{"path": f"{path}/{name}", "params": {"$select": "id"}} for name in _HIDE_FROM_USER_WELL_KNOWN]
+            )
+            for answer in answers:
+                status = answer.get("status") if isinstance(answer, dict) else None
+                body = answer.get("body") if isinstance(answer, dict) else None
+                if status == 200 and isinstance(body, dict) and body.get("id"):
+                    ids.add(str(body["id"]))
+                elif status != 404:  # 404: the mailbox has no such folder (an archive is optional)
+                    raise GraphError(
+                        str((answer or {}).get("error") or "well-known folder not read"),
+                        status=status if isinstance(status, int) else None,
+                        request=path,
+                    )
+            ids.discard("")
+        except Exception as exc:  # noqa: BLE001
+            ids = None
+            error_class, error = _classify_graph_error(exc)
+        return ids, {
+            "collector": self.name,
+            "type": "graph",
+            "name": f"mailFolders:{user_id}",
+            "endpoint": path,
+            "status": "ok" if ids is not None else "failed",
+            "item_count": len(ids or ()),
+            "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+            "error_class": error_class,
+            "error": error,
+        }
+
     def _fetch_mailbox_settings(
         self,
         client: GraphClient | None,
@@ -283,10 +339,19 @@ class MailboxForwardingCollector(Collector):
         }
 
 
+def _needs_folder_resolution(rule: dict[str, Any]) -> bool:
+    actions = rule.get("actions") if isinstance(rule, dict) else None
+    if not isinstance(actions, dict):
+        return False
+    target = str(actions.get("moveToFolder") or "").strip().lower()
+    return bool(target) and target not in _HIDE_FROM_USER_FOLDERS and not target.endswith(":\\rss feeds")
+
+
 def _classify_message_rule(
     rule: dict[str, Any],
     user: dict[str, Any],
     accepted_domains: Iterable[str],
+    hide_folder_ids: set[str] | None = frozenset(),
 ) -> dict[str, Any]:
     accepted_set = {item.lower() for item in accepted_domains}
     actions = rule.get("actions") or {}
@@ -322,6 +387,13 @@ def _classify_message_rule(
         broad_filter = _is_broad_filter(conditions)
         if not broad_filter and move_target not in _HIDE_FROM_USER_FOLDERS and not delete_action:
             hide_from_user = False
+    hide_state = "resolved"
+    if not hide_from_user and _needs_folder_resolution(rule):
+        if hide_folder_ids is None:
+            # The folder ID could not be resolved: the rule is not reported as clean (R006).
+            hide_from_user, hide_state = None, "unknown"
+        elif str(actions.get("moveToFolder")).strip() in hide_folder_ids:
+            hide_from_user = True
 
     return {
         "rule_id": str(rule.get("id") or ""),
@@ -341,6 +413,7 @@ def _classify_message_rule(
         "move_to_folder": actions.get("moveToFolder"),
         "delete_action": delete_action,
         "hide_from_user": hide_from_user,
+        "hide_from_user_state": hide_state,
     }
 
 
