@@ -91,3 +91,71 @@ def test_a_complete_lab_exchange_session_on_the_default_adapter_still_runs(tmp_p
     _lab_response(monkeypatch, adapter)
     assert run_response(_response_config(tmp_path)) == 0
     assert adapter.calls
+
+
+# Least-privileged application permission Microsoft documents for each folder route (Graph API reference pages
+# user-list-mailfolders and mailfolder-get, v1.0; mailbox-list-folders, beta). An independent source, not the config.
+_DOCUMENTED_FOLDER_GRANTS = (
+    ("/users/{id}/mailFolders", "Mail.ReadBasic.All"),
+    ("/admin/exchange/mailboxes/{id}/folders", "MailboxFolder.Read.All"),
+)
+
+
+def _documented_grant(path: str) -> str:
+    import re
+
+    for route, grant in _DOCUMENTED_FOLDER_GRANTS:
+        pattern = "^" + re.escape(route).replace(r"\{id\}", "[^/]+") + "(/|$)"
+        if re.search(pattern, path):
+            return grant
+    raise AssertionError(f"undocumented folder route {path}")
+
+
+def test_the_declared_folder_scope_is_the_grant_documented_for_the_routes_the_collector_calls(monkeypatch) -> None:
+    """R006 (round 2): the shipped consent instructions must name the grant Microsoft documents for the actual calls."""
+    import json
+    from pathlib import Path
+    from urllib.parse import urlparse
+
+    from azure_tenant_audit.collectors.mailbox_forwarding import MailboxForwardingCollector
+
+    client = fake_graph_client(throttle_mode="safe")
+    client.sleep = lambda _seconds: None
+    folder_paths: list[str] = []
+
+    def _request(method, url, headers=None, timeout=None, params=None, json=None, **kwargs):  # noqa: ARG001
+        path = urlparse(url).path.removeprefix("/v1.0").removeprefix("/beta")
+        if path == "/$batch":
+            folder_paths.extend(urlparse(item["url"]).path for item in json["requests"])
+            return graph_response(200, {"responses": [
+                {"id": item["id"], "status": 200, "body": {"id": "AAMkFOLDER", "value": []}} for item in json["requests"]
+            ]})
+        if path == "/users":
+            return graph_response(200, {"value": [{"id": "u1", "mail": "u1@contoso.com", "userType": "Member"}]})
+        if path == "/domains":
+            return graph_response(200, {"value": [{"id": "contoso.com", "isVerified": True}]})
+        if path.endswith("/messageRules"):
+            return graph_response(200, {"value": [{"id": "r1", "isEnabled": True, "conditions": {},
+                                                   "actions": {"moveToFolder": "AAMkFOLDER"}}]})
+        if path.endswith("/mailboxSettings"):
+            return graph_response(200, {})
+        if "/mailFolders" in path or "/folders" in path:
+            folder_paths.append(path)
+            return graph_response(200, {"id": "AAMkFOLDER", "value": []})
+        raise AssertionError(path)
+
+    monkeypatch.setattr(client.session, "request", _request)
+    MailboxForwardingCollector().run({"client": client})
+    assert folder_paths, "the folder lookup was not exercised"
+    documented = {_documented_grant(path) for path in folder_paths}
+
+    configs = Path(__file__).resolve().parents[1] / "configs"
+    entry = json.loads((configs / "collector-permissions.json").read_text(encoding="utf-8"))[
+        "collector_permissions"]["mailbox_forwarding"]
+    assert documented <= set(entry["optional_graph_scopes"])
+    assert documented <= set(MailboxForwardingCollector.optional_permissions)
+    # The consent guides name the same grant, so a reader following them can make the calls.
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for guide in ("guides/admin-permission-guide.md", "guides/reader-app-permissions.md"):
+        text = (docs / guide).read_text(encoding="utf-8")
+        assert all(f"`{grant}`" in text for grant in documented), guide

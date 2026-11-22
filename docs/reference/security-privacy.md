@@ -25,8 +25,10 @@ SharePoint, or OneDrive file content. Metadata and settings can still contain
 personal data, including user names, email addresses, group membership, device
 metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
 Treat every bundle as confidential.
-With the optional `MailboxFolder.Read.All` permission, `mailbox_forwarding` reads mailbox folder metadata
-(folder IDs and display names) for users whose inbox rules move mail, never a message or header.
+With the optional `Mail.ReadBasic.All` permission, `mailbox_forwarding` reads mailbox folder metadata
+(folder IDs and display names) for users whose inbox rules move mail, never a message or header. The
+permission itself also allows basic message properties (subject, sender, recipients, dates), which
+Auditex never requests.
 Value-rule records carry policy, cell, code, section names and controlled reason
 text, not tenant evidence values. Serving rules read a separate in-memory view
 on both the run-bundle and internal ScubaGear export paths after source, ledger,

@@ -5,7 +5,8 @@ hide messages from the user (move to RSS Feeds, Junk, or Deleted Items with a
 broad subject filter). Reads via Microsoft Graph so a Global Reader / Global
 Admin with `MailboxSettings.Read` can audit a tenant without Exchange Online
 PowerShell. Message content is never read, so `Mail.Read` is not requested. Rule move targets are folder IDs,
-resolved from folder metadata with the optional `MailboxFolder.Read.All`. Auto-reply message
+resolved from folder metadata (mailFolders routes only) with the optional `Mail.ReadBasic.All`, the grant Microsoft
+documents for those routes. Auto-reply message
 bodies come back with mailboxSettings and are dropped before they reach raw or normalized output.
 """
 from __future__ import annotations
@@ -41,7 +42,7 @@ class MailboxForwardingCollector(Collector):
         "MailboxSettings.Read",
     ]
     # Folder metadata for inbox-rule move targets (R006); without it those rules read unknown, never clean.
-    optional_permissions = ["MailboxFolder.Read.All"]
+    optional_permissions = ["Mail.ReadBasic.All"]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient | None = context.get("client")

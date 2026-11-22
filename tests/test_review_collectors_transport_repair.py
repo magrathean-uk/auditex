@@ -149,8 +149,8 @@ def test_the_folder_lookup_scope_and_read_are_declared() -> None:
     permissions = json.loads((configs / "collector-permissions.json").read_text(encoding="utf-8"))
     definitions = json.loads((configs / "collector-definitions.json").read_text(encoding="utf-8"))
     entry = permissions["collector_permissions"]["mailbox_forwarding"]
-    assert entry["optional_graph_scopes"] == MailboxForwardingCollector.optional_permissions == ["MailboxFolder.Read.All"]
-    assert "MailboxFolder.Read.All" not in entry["graph_scopes"]
+    assert entry["optional_graph_scopes"] == MailboxForwardingCollector.optional_permissions == ["Mail.ReadBasic.All"]
+    assert "Mail.ReadBasic.All" not in entry["graph_scopes"]
     # The query plan names payload sections (offline replay marks a missing one absent); the folder lookup is a
     # per-user coverage row with no payload section, so it is declared by its scope, not as a planned section.
     assert "mailFolders" not in definitions["collectors"]["mailbox_forwarding"]["query_plan"]
