@@ -1843,7 +1843,7 @@ def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> d
     return _relabel_path_fields(safe)
 
 
-_PATH_FIELD = re.compile(r"(?:path|dir|directory|file)$", re.IGNORECASE)
+_PATH_FIELD = re.compile(r"(?:path|dir|directory|file)s?$", re.IGNORECASE)
 
 
 def _relabel_path_fields(value: Any, key: str = "") -> Any:
@@ -1919,7 +1919,9 @@ def _copy_source_artifact(
             manifest_copy = {**manifest_copy, "pseudonym_notice": TEMPORARY_KEY_NOTICE}
         write_private_text(destination, json.dumps(manifest_copy, indent=2, ensure_ascii=False) + "\n")
     elif isinstance(payload, (Mapping, list)):
-        local_free = _pack_payload(payload, run_path) if isinstance(payload, Mapping) else _pack_safe(payload, run_path)
+        local_free = _relabel_path_fields(
+            _pack_payload(payload, run_path) if isinstance(payload, Mapping) else _pack_safe(payload, run_path)
+        )
         derived = settle_citations(redact_output(local_free, profile=PROFILE_CUSTOMER_PACK, context=context))
         if relative in _VERBATIM_IF_UNCHANGED:
             if derived != payload:
