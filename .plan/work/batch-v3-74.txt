@@ -1,1 +1,0 @@
---task PASS-verify --role codex --model gpt-6.1-sol --brief .plan/work/PASS-verify/request-2.md --readonly --sha main --tags debug

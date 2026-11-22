@@ -1,2 +1,0 @@
---task REV-M08-T02-codex --role codex --model gpt-6.1-sol --account codex --readonly --tags review,risk:high --timeout 2400 --brief .plan/work/REV-M08-T02/brief-src-3.md
---task REV-M08-T02-opus --role sol --account claude-5 --readonly --tags review,risk:high --timeout 2400 --brief .plan/work/REV-M08-T02/brief-src-3.md

@@ -1,8 +1,0 @@
-# M03 closing findings (15 Nov 2026, DEC-113)
-- Base comparison (M03-T01): Ministral 3 8B and 14B, Gemma 4 31B, Qwen3.8-27B, bf16 LoRA, three seeds each: every base tied with the fixed-text template on validation (preference 0.49-0.52 against the 0.729 bar); pick Gemma 4 31B on the EU-first rule; 235.67 GPU-hours.
-- Ceiling probe (M03-T02 round 1): the teacher's own targets score 0.476 against the template, so training on them cannot reach the bar; 2.78 GPU-hours.
-- Data-round pilots on the 190 headroom validation rows (both-order wins needed: about 139): attempt 1 6 wins (0.511), attempt 2 18 (0.534), attempt 3 with lab exemplars 11 (0.521), attempt 4 with the Qwen3.8-Flash-Next writer, four candidates, 38 (0.571; 264 of 267 pass the frozen checks).
-- Question-answering job (M03-T14, M03-T15): 1,037-question set with fail-closed hard checks; one pilot: hard-check rate 0.90 (bar 0.95), preference 0.528; 275.78 GPU-hours.
-- Cause, consistent across both jobs: the fixed text is already a strong answer for per-check explanation and run questions, and the judge counts most model text as a tie. Independent view (ASTRA-trackB): more pre-training, data, preference training or a bigger base would not change that; the bar measures judge preference, not user benefit.
-- Total Track B use: about 1,040 of 20,000 GPU-hours (allocation ends 31 Jan 2027).
-- Reusable outcomes: the AIRR kit and verifier, the fail-closed answer checks (kit checks/qa.py), question set v1, and the pilot-4 writer setup. M10 (a local off-the-shelf model that words the run's answer under the same fail-closed checks, no training) replaces further training.

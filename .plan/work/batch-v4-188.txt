@@ -1,1 +1,0 @@
---task EXP-m07-pred-gaps --role sol --account claude-1 --readonly --tags hard --timeout 3600 --max-turns 120 --budget 15 --brief .plan/work/EXP-m07-pred-gaps/brief-src.md

@@ -1,2 +1,0 @@
---task REV-M04-T01 --role codex --model gpt-6.1-sol --account codex2 --readonly --tags hard --brief .plan/work/REV-M04-T01/brief-src-3.md
---task REV-M04-T01-sol --role sol --account claude-5 --readonly --tags hard --brief .plan/work/REV-M04-T01-sol/brief-src-3.md

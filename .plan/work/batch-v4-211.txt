@@ -1,2 +1,0 @@
---task M08-T03 --role sol --account claude-3 --readonly --tags risk:high --timeout 3600 --brief .plan/work/M08-T03/fix-3.md
---task M08-T01 --role sol --account claude-4 --branch --slug certauth-teams --tags risk:high --timeout 3600 --rounds-ok "rebase" --brief .plan/work/M08-T01/fix-3.md
