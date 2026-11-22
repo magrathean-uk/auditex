@@ -2875,15 +2875,16 @@ _MARKDOWN_INLINE_SPECIAL = re.compile(r"\\(?=[!-/:-@\[-`{-~])|[\[\]|]")
 def markdown_inline(value: Any) -> str:
     """Untrusted text as one line of Markdown that renders literally (R064, R134).
 
-    Line breaks become spaces, ``<`` and ``>`` become entities (no raw HTML or autolink), link brackets and the table
-    cell separator are backslash-escaped. Identifiers (``MS.AAD.1.1v1``, ``identity:global_admin``) stay readable.
+    Line breaks become spaces, ``<`` becomes an entity (no raw HTML or autolink can open; a lone ``>`` cannot start
+    either, so ``a -> b`` stays readable), link brackets and the table cell separator are backslash-escaped.
+    Identifiers (``MS.AAD.1.1v1``, ``identity:global_admin``) stay readable.
     Shared by the report, customer-pack and compare Markdown renderers.
     """
     text = _MARKDOWN_BREAKS.sub(" ", "" if value is None else str(value)).strip()
     parts = _MARKDOWN_PLACEHOLDER.split(text)
     return "".join(
         part if index % 2 else
-        _MARKDOWN_INLINE_SPECIAL.sub(lambda match: "\\" + match[0], part).replace("<", "&lt;").replace(">", "&gt;")
+        _MARKDOWN_INLINE_SPECIAL.sub(lambda match: "\\" + match[0], part).replace("<", "&lt;")
         for index, part in enumerate(parts)
     )
 
