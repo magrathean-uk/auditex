@@ -165,6 +165,9 @@ These reads feed `report_pack["detection_coverage"]` and `report_pack["public_fo
 | `dns_posture` | DoH `TXT default._bimi.<domain>` | BIMI record: logo and authority locations and whether each is HTTPS; neither is fetched | <https://datatracker.ietf.org/doc/draft-brand-indicators-for-message-identification/> |
 | `dns_posture` | `GET https://mta-sts.<domain>/.well-known/mta-sts.txt` | MTA-STS policy mode, only when `_mta-sts` TXT exists; no redirects, 64 KiB cap | <https://learn.microsoft.com/en-us/exchange/security-and-compliance/enhance-mail-flow-using-strict-transport-security> |
 | `dns_posture` | `GET https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration` | Public tenant ID, region scope, cloud instance | <https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc> |
+| `google_dns_posture` | DoH `TXT <domain>`, `TXT _dmarc.<domain>`, `TXT _mta-sts.<domain>`, `TXT _smtp._tls.<domain>`, `TXT default._bimi.<domain>` and DKIM `TXT google._domainkey.<domain>` (then `s1`, `s2`, `default`, `k1` and `mail` when `google` has no key) for each verified Google Workspace domain | SPF, DMARC, MTA-STS, TLS-RPT, BIMI and DKIM answers; domain names only, no HTTPS read of the domain | Public DNS |
+
+Every DoH query above goes to the configured resolver: `https://cloudflare-dns.com/dns-query` unless `--doh-endpoint URL` (Microsoft 365 runs) or `AUDITEX_DOH_ENDPOINT` (Microsoft 365 and Google Workspace runs) names another plain `https://` resolver that speaks the DoH JSON API. Only domain names are sent. `data-handling.json` records the resolver host as `dns_resolver`.
 
 The four Security & Compliance reads run only in an app-only certificate run: each PowerShell process first connects with
 `Connect-IPPSSession -AccessToken` (a certificate token for `https://ps.compliance.protection.outlook.com/.default`, the

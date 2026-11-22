@@ -317,3 +317,27 @@ def test_security_reference_lists_the_real_processes_and_outbound_destinations()
         assert host in section, f"security-privacy.md outbound destinations must list {host}"
     for marker in ("mta-sts.<domain>", "-admin.sharepoint.com", "--sink", "AUDITEX_DOH_ENDPOINT"):
         assert marker in section, marker
+
+
+# R083 / R164 -----------------------------------------------------------------------------------------------------
+
+
+def test_doh_resolver_choice_is_disclosed_for_m365_and_google():
+    from auditex.google_workspace.run import PRESETS
+    from azure_tenant_audit.cli import build_parser
+    from azure_tenant_audit.dns_lookup import DEFAULT_DOH_ENDPOINT, DOH_ENDPOINT_ENV
+
+    assert any("--doh-endpoint" in action.option_strings for action in build_parser()._actions)
+    google_presets = [name for name, selected in PRESETS.items() if "google_dns_posture" in selected]
+    assert google_presets
+    privacy = _flat(_doc("docs/reference/security-privacy.md"))
+    lookups = privacy[privacy.index("## External lookups") :]
+    lookups = lookups[: lookups.index(" ## ", 5)]
+    catalogue = _flat(_doc("docs/reference/api-call-catalog.md"))
+    for name, text in (("security-privacy.md External lookups", lookups), ("api-call-catalog.md", catalogue)):
+        for needle in (DOH_ENDPOINT_ENV, "--doh-endpoint", DEFAULT_DOH_ENDPOINT, "google_dns_posture"):
+            assert needle in text, f"{name} must disclose {needle}"
+    for preset in google_presets:
+        assert f"`{preset}`" in lookups, f"External lookups must name the Google `{preset}` preset"
+    assert "--exclude google_dns_posture" in lookups and "`dns_resolver`" in lookups
+    assert re.search(r"\| `google_dns_posture` \| DoH ", catalogue), "api-call-catalog.md needs a google_dns_posture row"
