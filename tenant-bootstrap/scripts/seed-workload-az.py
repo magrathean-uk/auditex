@@ -24,6 +24,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+import identity_seed_az as tenant_guard  # noqa: E402
 import windows365_workload as windows365_workload  # noqa: E402
 
 
@@ -388,9 +389,11 @@ class GraphClient:
         client_id: str | None = None,
         browser_command: str | None = None,
         interactive_scopes: list[str] | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         self.logger = logger
         self.dry_run = dry_run
+        self.tenant_id = tenant_id
         self.debug_logger = debug_logger
         self.auth_mode = auth_mode
         self.client_id = client_id
@@ -427,18 +430,21 @@ class GraphClient:
         if self.debug_logger:
             self.debug_logger.event("auth.token.source", source="azure_cli", mode=self.auth_mode)
         self.logger.event("auth.token.source", "success", source="azure_cli", mode=self.auth_mode)
+        command = [
+            "az",
+            "account",
+            "get-access-token",
+            "--resource",
+            GRAPH_RESOURCE,
+            "--query",
+            "accessToken",
+            "--output",
+            "tsv",
+        ]
+        if self.tenant_id:
+            command[3:3] = ["--tenant", self.tenant_id]
         proc = subprocess.run(
-            [
-                "az",
-                "account",
-                "get-access-token",
-                "--resource",
-                GRAPH_RESOURCE,
-                "--query",
-                "accessToken",
-                "--output",
-                "tsv",
-            ],
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -465,7 +471,7 @@ class GraphClient:
             os.environ["BROWSER"] = self.browser_command
         app = msal.PublicClientApplication(
             client_id=self.client_id,
-            authority="https://login.microsoftonline.com/organizations",
+            authority=f"https://login.microsoftonline.com/{self.tenant_id or 'organizations'}",
             token_cache=None,
         )
         result = app.acquire_token_interactive(scopes=scopes)
@@ -478,6 +484,19 @@ class GraphClient:
 
     def access_token(self) -> str:
         return self.session.headers.get("Authorization", "").removeprefix("Bearer ").strip() if not self.dry_run else ""
+
+    def verify_tenant(self) -> None:
+        """Prove the token and the Graph organisation belong to the named tenant before any write."""
+        if self.dry_run:
+            return
+        if not self.tenant_id:
+            raise tenant_guard.TenantGuardError("tenant_id_required")
+        tenant_guard.verify_named_tenant(
+            self.tenant_id,
+            self.access_token(),
+            lambda: self.request("GET", "/organization?$select=id"),
+        )
+        self.logger.event("tenant.verified", "success", tenantId=self.tenant_id)
 
     def request(
         self,
@@ -3180,15 +3199,39 @@ def main(argv: list[str]) -> int:
         token_source = "interactive"
     elif os.environ.get("AZURE_ACCESS_TOKEN"):
         token_source = "AZURE_ACCESS_TOKEN"
-    client = GraphClient(
-        logger,
-        args.dry_run,
-        debug_logger=debug_logger,
-        auth_mode="interactive" if args.interactive else "azure_cli",
-        client_id=args.client_id,
-        browser_command=args.browser_command,
-        interactive_scopes=interactive_scopes,
-    )
+    try:
+        tenant_id = None
+        try:
+            tenant_id = tenant_guard.configured_tenant_id(cfg)
+        except tenant_guard.TenantGuardError:
+            if not args.dry_run:
+                raise
+            logger.event("tenant.unverified", "warn", reason="tenant_id_required", note="dry-run makes no tenant writes")
+        client = GraphClient(
+            logger,
+            args.dry_run,
+            debug_logger=debug_logger,
+            auth_mode="interactive" if args.interactive else "azure_cli",
+            client_id=args.client_id,
+            browser_command=args.browser_command,
+            interactive_scopes=interactive_scopes,
+            tenant_id=tenant_id,
+        )
+        client.verify_tenant()
+    except tenant_guard.TenantGuardError as exc:
+        refused = {
+            "runName": args.run_name,
+            "tenantId": cfg["tenant"].get("tenantId"),
+            "dryRun": args.dry_run,
+            "steps": selected_steps,
+            "status": "failed",
+            "error": exc.reason,
+            "completedAt": utc_now(),
+        }
+        manifest_path.write_text(json.dumps(refused, indent=2, sort_keys=True), encoding="utf-8")
+        logger.event("workload_seed.refused", "error", reason=exc.reason, tenantId=cfg["tenant"].get("tenantId"))
+        print(f"seed-workload-az: refused before any write: {exc.reason}", file=sys.stderr)
+        return 1
     token_claims = graph_token_claims(
         logger,
         debug_logger,

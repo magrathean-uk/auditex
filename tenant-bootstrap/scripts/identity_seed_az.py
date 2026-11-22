@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import secrets
@@ -9,6 +10,7 @@ import string
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +19,53 @@ from urllib.parse import quote
 import requests
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
+PLACEHOLDER_TENANT_ID = "00000000-0000-0000-0000-000000000000"
+
+
+class TenantGuardError(RuntimeError):
+    """Raised with a stable reason code when the named lab tenant cannot be proven before a write."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def configured_tenant_id(cfg: dict) -> str:
+    """Return the config tenant GUID, refusing a missing, malformed or placeholder value."""
+    raw = str((cfg.get("tenant") or {}).get("tenantId") or "").strip()
+    try:
+        tenant_id = str(uuid.UUID(raw))
+    except ValueError:
+        raise TenantGuardError("tenant_id_required") from None
+    if tenant_id != raw.lower() or tenant_id == PLACEHOLDER_TENANT_ID:
+        raise TenantGuardError("tenant_id_required")
+    return tenant_id
+
+
+def token_tenant_id(token: str) -> str | None:
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    tid = claims.get("tid") if isinstance(claims, dict) else None
+    return str(tid).lower() if isinstance(tid, str) else None
+
+
+def verify_named_tenant(expected_tenant_id: str, token: str, get_organization) -> None:
+    """Require the token tid and the Graph /organization id to both equal the named tenant.
+
+    get_organization performs a read-only GET of /organization and returns the response body.
+    """
+    if token_tenant_id(token) != expected_tenant_id:
+        raise TenantGuardError("tenant_mismatch")
+    body = get_organization()
+    organizations = body.get("value") if isinstance(body, dict) else None
+    if not isinstance(organizations, list) or len(organizations) != 1 or not isinstance(organizations[0], dict):
+        raise TenantGuardError("tenant_mismatch")
+    if str(organizations[0].get("id") or "").lower() != expected_tenant_id:
+        raise TenantGuardError("tenant_mismatch")
 
 
 @dataclass(frozen=True)
@@ -57,9 +106,10 @@ class JsonlLogger:
 
 
 class GraphClient:
-    def __init__(self, logger: JsonlLogger, dry_run: bool) -> None:
+    def __init__(self, logger: JsonlLogger, dry_run: bool, tenant_id: str | None = None) -> None:
         self.logger = logger
         self.dry_run = dry_run
+        self.tenant_id = tenant_id
         self.session = requests.Session()
         if self.dry_run:
             return
@@ -75,18 +125,21 @@ class GraphClient:
         if env_token:
             self.logger.event("auth.token.source", "success", source="AZURE_ACCESS_TOKEN", hint="env")
             return env_token
+        command = [
+            "az",
+            "account",
+            "get-access-token",
+            "--resource",
+            "https://graph.microsoft.com",
+            "--query",
+            "accessToken",
+            "--output",
+            "tsv",
+        ]
+        if self.tenant_id:
+            command[3:3] = ["--tenant", self.tenant_id]
         proc = subprocess.run(
-            [
-                "az",
-                "account",
-                "get-access-token",
-                "--resource",
-                "https://graph.microsoft.com",
-                "--query",
-                "accessToken",
-                "--output",
-                "tsv",
-            ],
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -97,6 +150,18 @@ class GraphClient:
             raise RuntimeError("Azure CLI did not return a Graph access token.")
         self.logger.event("auth.token.source", "success", source="azure_cli", command="az account get-access-token")
         return token
+
+    def access_token(self) -> str:
+        return str(self.session.headers.get("Authorization", "")).removeprefix("Bearer ").strip()
+
+    def verify_tenant(self) -> None:
+        """Prove the token and the Graph organisation belong to the named tenant before any write."""
+        if self.dry_run:
+            return
+        if not self.tenant_id:
+            raise TenantGuardError("tenant_id_required")
+        verify_named_tenant(self.tenant_id, self.access_token(), lambda: self.request("GET", "/organization?$select=id"))
+        self.logger.event("tenant.verified", "success", tenantId=self.tenant_id)
 
     def request(self, method: str, path: str, *, payload: dict | None = None) -> dict:
         if self.dry_run:
@@ -640,7 +705,22 @@ def main(argv: list[str]) -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     logger.event("identity_seed.started", "started", **manifest)
 
-    client = GraphClient(logger, args.dry_run)
+    try:
+        tenant_id = None
+        try:
+            tenant_id = configured_tenant_id(cfg)
+        except TenantGuardError:
+            if not args.dry_run:
+                raise
+            logger.event("tenant.unverified", "warn", reason="tenant_id_required", note="dry-run makes no tenant calls")
+        client = GraphClient(logger, args.dry_run, tenant_id=tenant_id)
+        client.verify_tenant()
+    except TenantGuardError as exc:
+        manifest.update({"status": "failed", "error": exc.reason, "completedAt": utc_now()})
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        logger.event("identity_seed.refused", "error", reason=exc.reason, tenantId=cfg["tenant"].get("tenantId"))
+        print(f"identity_seed_az: refused before any write: {exc.reason}", file=sys.stderr)
+        return 1
     resolved_users = []
     users_by_alias: dict[str, dict] = {}
     for user in users:
