@@ -2735,6 +2735,8 @@ def build_normalized_snapshot(
             spf_mechanisms=(item.get("spf") or {}).get("mechanisms"),
             spf_multiple_records=bool((item.get("spf") or {}).get("multiple_records")),
             dmarc_present=_dns_presence(item, "dmarc"),
+            dmarc_multiple_records=bool((item.get("dmarc") or {}).get("multiple_records")) or None,
+            dmarc_record_count=(item.get("dmarc") or {}).get("record_count"),
             dmarc_policy=(item.get("dmarc") or {}).get("policy"),
             dmarc_subdomain_policy=(item.get("dmarc") or {}).get("subdomain_policy"),
             dmarc_pct=(item.get("dmarc") or {}).get("pct"),

@@ -3807,7 +3807,28 @@ def _normalized_findings(
                     }
                 )
             )
-        if not item.get("dmarc_present"):
+        if item.get("dmarc_multiple_records"):
+            # RFC 7489 6.6.3: more than one DMARC record means no policy applies. The fix is to remove the
+            # duplicates, not to publish a record, so this is its own rule rather than dmarc_missing.
+            findings.append(
+                _finalize_finding(
+                    {
+                        "id": f"dns_posture:{domain}:dmarc_multiple_records",
+                        "rule_id": "dns_posture.dmarc_multiple_records",
+                        "severity": "high",
+                        "category": "mail_flow",
+                        "title": "Multiple DMARC records published",
+                        "status": "open",
+                        "collector": "dns_posture",
+                        "affected_objects": [domain],
+                        "evidence": item,
+                        "evidence_refs": evidence_refs,
+                        "returned_value": item.get("dmarc_record_count"),
+                        **_metadata_for("dns_posture.dmarc_multiple_records"),
+                    }
+                )
+            )
+        elif not item.get("dmarc_present"):
             findings.append(
                 _finalize_finding(
                     {

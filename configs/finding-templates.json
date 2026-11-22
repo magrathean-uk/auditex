@@ -566,6 +566,19 @@
     ],
     "expected_value": "At least one DKIM selector resolves with a valid public key."
   },
+  "dns_posture.dmarc_multiple_records": {
+    "risk_rating": "high",
+    "description": "More than one DMARC (v=DMARC1) TXT record is published at _dmarc.<domain>.",
+    "impact": "RFC 7489 \u00a76.6.3 says a receiver that finds more than one DMARC record applies no DMARC policy, so the domain is treated as having none and spoofed mail is not quarantined or rejected.",
+    "remediation": "Keep one DMARC record with the intended policy (p=quarantine or p=reject) and remove the other v=DMARC1 TXT records at _dmarc.<domain>.",
+    "references": [
+      "RFC 7489 \u00a76.6.3"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-DMARC-MULTIPLE"
+    ],
+    "expected_value": "Exactly one v=DMARC1 record at _dmarc.<domain>."
+  },
   "dns_posture.spf_multiple_records": {
     "risk_rating": "high",
     "description": "More than one SPF (v=spf1) TXT record is published at the domain apex.",

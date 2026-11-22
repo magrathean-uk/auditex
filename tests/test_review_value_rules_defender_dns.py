@@ -140,7 +140,9 @@ def test_r109_several_dmarc_records_are_not_a_published_policy():
                                      "dkim": {"selectors_present": ["selector1"], "selectors_missing": []},
                                      "mta_sts": {"dns_present": True}, "bimi": {"present": False}}]}}})
     ids = {finding["id"] for finding in build_findings([], normalized_snapshot=snapshot)}
-    assert "dns_posture:contoso.example:dmarc_missing" in ids
+    # Duplicates are their own finding (remove the extra records), not dmarc_missing (publish a record).
+    assert "dns_posture:contoso.example:dmarc_multiple_records" in ids
+    assert "dns_posture:contoso.example:dmarc_missing" not in ids
 
 
 def test_r109_one_dmarc_record_beside_other_txt_is_still_read():

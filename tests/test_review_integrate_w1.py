@@ -128,3 +128,46 @@ def test_i3_case_searches_with_different_counts_keep_normalisation_complete() ->
     assert sources["ediscovery.case_c2.searches"]["record_count"] == 2
     searches = {(row["case_id"], row["id"]) for row in snapshot["ediscovery_searches"]["records"]}
     assert searches == {("c1", "s1"), ("c2", "s2"), ("c2", "s3")}
+
+
+def _dns_findings(dmarc_records: list[str]) -> tuple[dict, dict]:
+    from azure_tenant_audit import dns_lookup
+    from azure_tenant_audit.findings import build_findings
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    posture = {
+        "domain": "contoso.example",
+        "dmarc": dns_lookup._summarize_dmarc(dmarc_records),
+        "spf": {"present": True, "all_qualifier": "-"},
+        "dkim": {"selectors_present": ["s"]},
+        "mta_sts": {"dns_present": True},
+    }
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="r",
+        collector_payloads={"dns_posture": {"domains": {"value": []}, "domainPosture": {"value": [posture]}}},
+    )
+    record = snapshot["dns_posture_objects"]["records"][0]
+    return record, {item["rule_id"]: item for item in build_findings([], normalized_snapshot=snapshot)}
+
+
+def test_i9_duplicate_dmarc_records_raise_their_own_finding_not_dmarc_missing() -> None:
+    """R109: two DMARC records are not "no record"; remediation is to remove the duplicates."""
+    record, rules = _dns_findings(["v=DMARC1; p=reject", "v=DMARC1; p=none"])
+
+    assert record["dmarc_present"] is False
+    assert record["dmarc_multiple_records"] is True
+    assert record["dmarc_record_count"] == 2
+    finding = rules["dns_posture.dmarc_multiple_records"]
+    assert finding["severity"] == "high"
+    assert finding["id"] == "dns_posture:contoso.example:dmarc_multiple_records"
+    assert finding["returned_value"] == 2
+    assert "dns_posture.dmarc_missing" not in rules
+
+
+def test_i9_a_single_or_absent_dmarc_record_raises_no_duplicate_finding() -> None:
+    record, rules = _dns_findings(["v=DMARC1; p=reject"])
+    assert not record.get("dmarc_multiple_records")
+    assert "dns_posture.dmarc_multiple_records" not in rules
+    _, rules = _dns_findings([])
+    assert "dns_posture.dmarc_missing" in rules and "dns_posture.dmarc_multiple_records" not in rules
