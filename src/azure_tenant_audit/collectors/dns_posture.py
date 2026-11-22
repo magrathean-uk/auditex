@@ -14,12 +14,12 @@ from typing import Any
 
 from ..collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
 from ..dns_lookup import (
-    DEFAULT_DOH_ENDPOINT,
     CachingResolver,
     DnsResolver,
     DohClient,
     DohError,
     collect_domain_posture,
+    resolve_doh_endpoint,
     scuba_dkim_record,
     scuba_dmarc_record,
     scuba_spf_record,
@@ -65,14 +65,41 @@ class DnsPostureCollector(Collector):
     )
     required_permissions = ["Directory.Read.All"]
 
+    def _config_error(self, error: str) -> CollectorResult:
+        """No lookup runs: the resolver choice was refused before any domain name was sent anywhere."""
+        return CollectorResult(
+            name=self.name,
+            status="failed",
+            payload={},
+            item_count=0,
+            message="DNS posture not collected: the DNS-over-HTTPS endpoint setting was refused.",
+            coverage=[{
+                "collector": self.name,
+                "type": "config",
+                "name": "dohEndpoint",
+                "endpoint": "doh_endpoint",
+                "status": "failed",
+                "item_count": 0,
+                "duration_ms": 0.0,
+                # client_error, as a refusal raised before any request classifies; the reason names it.
+                "error_class": "client_error",
+                "reason": "doh_endpoint_refused",
+                "error": error,
+            }],
+        )
+
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient | None = context.get("client")
         log_event: Callable[[str, str, dict[str, Any] | None], None] | None = context.get("audit_logger")
-        resolver = CachingResolver(
-            context.get("dns_resolver") or DohClient(
-                endpoint=context.get("doh_endpoint", DEFAULT_DOH_ENDPOINT)
-            )
-        )
+        injected = context.get("dns_resolver")
+        if injected is None:
+            # The run's resolver choice: the option, else AUDITEX_DOH_ENDPOINT, else Cloudflare (R164). A refused
+            # choice is a configuration error of the run, recorded without the value (it may carry a token).
+            try:
+                endpoint = resolve_doh_endpoint(context.get("doh_endpoint"))
+            except ValueError as exc:
+                return self._config_error(str(exc))
+        resolver = CachingResolver(injected or DohClient(endpoint=endpoint))
         dkim_selectors: Iterable[str] = context.get("dkim_selectors", DEFAULT_DKIM_SELECTORS)
         dkim_fallback_selectors: Iterable[str] = context.get(
             "dkim_fallback_selectors", FALLBACK_DKIM_SELECTORS
