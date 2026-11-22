@@ -143,14 +143,16 @@ def _safelinks_core(policy_id, sp, sections, trace):
         pr = r.get("Priority")
         name = r.get("SafeLinksPolicy")
         pp = by_identity.get(name, []) if type(name) is str else []
-        readable = len(pp) == 1 and all(type(pp[0].get(f)) is bool for f in sp["flags"])
+        # Repair round 2: a known false flag decides even when another flag is unreadable.
+        off = len(pp) == 1 and any(pp[0].get(f) is False for f in sp["flags"])
+        readable = off or (len(pp) == 1 and all(type(pp[0].get(f)) is bool for f in sp["flags"]))
         if cand and not (_is_num(pr) and pr < low_cov):
             # After the covering rule this rule never applies. One of unknown Priority may apply first: a readable policy
             # decides nothing there (v3.6), but an unreadable one leaves its recipients unjudged (R100 repair).
             if _is_num(pr) or readable or partial_unread is not None:
                 continue
         elif readable:
-            if any(not pp[0][f] for f in sp["flags"]) and not shadow(r):
+            if off and not shadow(r):
                 return _rec(policy_id, "not_met", "partial_scope_policy_flag_off",
                             f"Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable {sp['what']}, so those recipients get a non-compliant policy.",
                             "partial_rule_noncompliant", None, div="D98")
@@ -222,18 +224,20 @@ def _scope(rule):
 
 
 class _Shadows:
-    """Review R100 (repair): ``shadows(rule)`` is True when an enabled partial rule with a lower numeric Priority applies
+    """Review R100 (repair): ``shadows(rule)`` is True when enabled partial rules with a lower numeric Priority apply
     to every recipient ``rule`` names, so ``rule`` never applies. Sound whether Exchange joins different conditions with
-    AND or OR: both rules set the same condition kinds, the earlier one's values include the later one's, and its
-    exceptions are none or the same. Built on first use and indexed by value, so a call scans only the rules that share
-    the later rule's rarest value."""
+    AND or OR: one earlier rule sets the same condition kinds, its values include the later one's, and its exceptions
+    are none or the same. When the later rule sets one condition kind, several earlier rules that set only that kind
+    (exceptions none or the same) may share its values between them (repair round 2). Built on first use and indexed by
+    value, so a call scans only the rules that share the later rule's rarest value."""
 
     def __init__(self, partial):
         self._partial = partial
         self._postings = None
+        self._first = None
 
     def _build(self):
-        self._postings = {}
+        self._postings, self._first = {}, {}
         for rule in self._partial:
             pr, sc = rule.get("Priority"), _scope(rule)
             if not _is_num(pr) or sc is None or not sc[0]:
@@ -243,6 +247,9 @@ class _Shadows:
             for k, values in inc:
                 for value in values:
                     self._postings.setdefault((shape, k, value), []).append((pr, dict(inc)))
+                    if len(inc) == 1:
+                        key = (k, exc, value)
+                        self._first[key] = min(pr, self._first.get(key, pr))
 
     def __call__(self, rule):
         pr, sc = rule.get("Priority"), _scope(rule)
@@ -251,6 +258,10 @@ class _Shadows:
         if self._postings is None:
             self._build()
         inc, exc = sc
+        if len(inc) == 1:
+            (k, values), never = inc[0], float("inf")
+            if all(min(self._first.get((k, (), v), never), self._first.get((k, exc, v), never)) < pr for v in values):
+                return True
         keys = tuple(k for k, _ in inc)
         mine = dict(inc)
         for shape in {(keys, ()), (keys, exc)}:
