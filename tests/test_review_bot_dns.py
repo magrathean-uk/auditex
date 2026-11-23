@@ -63,3 +63,46 @@ def test_text_without_a_dmarc_version_tag_is_still_not_a_record():
     assert dns_lookup.parse_dmarc("v=spf1 -all") is None
     assert dns_lookup.parse_dmarc("note=v=dmarc1x") is None
 
+
+# ---- MTA-STS: every mx value must be a host pattern; max_age is 1-10 ASCII digits (RFC 8461 3.2) ----
+
+class _BodyFetcher:
+    def __init__(self, body):
+        self.body = body
+
+    def get_text(self, url):
+        return 200, self.body, None
+
+
+def _policy(mode="enforce", mx=("mail.contoso.example",), max_age="86400"):
+    lines = ["version: STSv1", f"mode: {mode}", *(f"mx: {m}" for m in mx), f"max_age: {max_age}"]
+    return exposure_lookup.fetch_mta_sts_policy("contoso.example", _BodyFetcher("\n".join(lines) + "\n"))
+
+
+@pytest.mark.parametrize("mode", ["enforce", "testing"])
+def test_mta_sts_mx_value_that_is_not_a_host_is_invalid(mode):
+    policy = _policy(mode=mode, mx=("mail.contoso.example", "not a host!"))
+    assert policy["fetch_status"] == "invalid_policy"
+    assert policy["invalid_reasons"] == ["mx_invalid"]
+
+
+def test_mta_sts_wildcard_mx_and_plain_hosts_stay_valid():
+    policy = _policy(mx=("*.mail.protection.outlook.example", "mx1.contoso.example"))
+    assert policy["fetch_status"] == "ok" and "invalid_reasons" not in policy
+
+
+def test_mta_sts_mode_none_does_not_judge_mx_values():
+    assert _policy(mode="none", mx=("not a host!",))["fetch_status"] == "ok"
+
+
+@pytest.mark.parametrize("raw", ["+86400", "86_400", "٨٦٤٠٠", "12345678901", "-0"])
+def test_mta_sts_max_age_must_be_ascii_digits(raw):
+    assert exposure_lookup.parse_mta_sts_policy(f"version: STSv1\nmode: enforce\nmx: a.example\nmax_age: {raw}\n")[
+        "max_age"] is None
+    policy = _policy(max_age=raw)
+    assert policy["fetch_status"] == "invalid_policy" and "max_age_invalid" in policy["invalid_reasons"]
+
+
+def test_mta_sts_max_age_of_plain_digits_is_read():
+    assert exposure_lookup.parse_mta_sts_policy("version: STSv1\nmode: none\nmax_age: 0604800\n")["max_age"] == 604800
+
