@@ -270,3 +270,13 @@ def test_disabled_rule_with_unreadable_policy_link_changes_nothing():
     rule = {"Identity": "Unknown rule", "State": "Disabled", "AntiPhishPolicy": None, **SCOPE_ALL}
     record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT], [rule]))
     assert (record["verdict"], record["cell"]) == ("met", "default_qualifies")
+
+
+# ---- Repair round 1 (review of 346e97fc) ----
+
+def test_dmarc_version_tag_must_be_the_first_tag():
+    """RFC 7489 6.4: a record starts with v=DMARC1; a version tag later in the string does not make it a record."""
+    assert dns_lookup.parse_dmarc("p=reject; v = DMARC1") is None
+    assert dns_lookup.parse_dmarc("p=reject; v=DMARC1") is None
+    summary = dns_lookup._summarize_dmarc(["p=reject; v = DMARC1"])
+    assert summary["present"] is False
