@@ -49,6 +49,7 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
     ),
     'azure_tenant_audit.output:*': (
         'azure_tenant_audit.output:AuditLogger.log',
+        'azure_tenant_audit.output:AuditWriter._write_json_atomic',
         'azure_tenant_audit.output:AuditWriter._write_operator_pair',
         'azure_tenant_audit.output:AuditWriter._write_text_atomic',
         'azure_tenant_audit.output:AuditWriter.write_chunk_records',
