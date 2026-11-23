@@ -27,9 +27,9 @@ Commons Attribution 4.0 International licence
 (https://creativecommons.org/licenses/by/4.0/). Auditex extracted and reformatted
 the text; the changes are listed in docs/provenance/explainer-baselines.md.
 
-configs/framework-catalog.json cites headings of the NCSC Cyber Essentials:
-Requirements for IT Infrastructure v3.3. Contains public sector information licensed
-under the Open Government Licence v3.0
+configs/framework-catalog.json and configs/ce-plus-practice.json cite headings of the
+NCSC Cyber Essentials: Requirements for IT Infrastructure v3.3. Contains public sector
+information licensed under the Open Government Licence v3.0
 (https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).
 
 Auditex contains no language model. The optional local answer downloads a model file
