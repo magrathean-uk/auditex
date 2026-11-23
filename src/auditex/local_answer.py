@@ -953,19 +953,27 @@ def write_answer(run_dir: str | Path, answer: Mapping[str, Any]) -> Path:
                                                                  allow_nan=False) + "\n")
 
 
+def _validate_stored_answer(payload: Mapping[str, Any]) -> bool:
+    """``validate_answer`` for a stored answer. L5: an answer saved before the licence was recorded with its model
+    fails the schema on the licence alone, so the rest of it is checked with a stand-in licence. True when only the
+    licence is missing, so the reader can ask for a rerun; schema errors raise as ``validate_answer`` raises."""
+    model_record = payload.get("model") if isinstance(payload, Mapping) else None
+    if isinstance(model_record, Mapping) and "licence" not in model_record:
+        validate_answer(dict(payload, model=dict(model_record, licence="unrecorded")))
+        return True
+    validate_answer(payload)
+    return False
+
+
 def verify_answer(payload: Mapping[str, Any], digest: Mapping[str, Any]) -> dict[str, Any]:
     """The stored answer re-checked against the run's digest: every stored selection checked and rendered again,
     every fixed text recomputed, the counts and the printed text rebuilt, and DEC-120 completeness. Returns the
     recomputed answer; LocalAnswerError when anything differs."""
-    model_record = payload.get("model") if isinstance(payload, Mapping) else None
-    if isinstance(model_record, Mapping) and "licence" not in model_record:
-        # L5: an answer saved before the licence was recorded with its model. The schema requires the licence, so
-        # check the rest of the record with a stand-in licence and ask for a rerun when only the licence is missing.
-        validate_answer(dict(payload, model=dict(model_record, licence="unrecorded")))
-        raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
-    validate_answer(payload)
+    unlicensed = _validate_stored_answer(payload)
     if payload["run_id"] != digest.get("run_id"):
         raise LocalAnswerError("the local answer belongs to another run")
+    if unlicensed:
+        raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
     if payload["digest_version"] != DIGEST_VERSION or payload["frames_version"] != frames()["version"]:
         raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
     model = MODELS.get(payload["model"]["choice"]) if payload["model"] else None
@@ -1013,7 +1021,7 @@ def load_answer(run_dir: str | Path) -> dict[str, Any]:
     except (ValueError, RecursionError, UnicodeError):
         raise LocalAnswerError("the local answer is damaged") from None
     try:
-        validate_answer(payload)
+        _validate_stored_answer(payload)
     except (ValueError, KeyError, TypeError):
         raise LocalAnswerError("the local answer is damaged or of an unknown version") from None
     try:
