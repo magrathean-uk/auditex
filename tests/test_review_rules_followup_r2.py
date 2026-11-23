@@ -234,3 +234,37 @@ def test_r106_frozen_2026_11_05_schema_has_no_rule_view():
     frozen = json.loads((root / ASSESSMENT_SCHEMAS["2026-11-05"]).read_text(encoding="utf-8"))
     assert frozen["properties"]["schema_version"]["const"] == "2026-11-05"
     assert "rule_view" not in frozen["$defs"]["projection_section"]["properties"]
+
+
+# ---- Bot review wave 2: Safe Links policy resolution and evidence (group N) ----
+
+BI_ROW = {"Identity": "ATP Built-In Protection Rule", "ExceptIfSentTo": None, "ExceptIfSentToMemberOf": None,
+          "ExceptIfRecipientDomainIs": None}
+BI_SEVERAL = "Data unusable: built_in_protection_rules holds more than one rule; the policy was not assessed."
+BI_UNREADABLE = "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."
+
+
+def _reason(policy_id, sections):
+    record = assess(policy_id, sections)
+    return record["verdict"], record["cell"], record["reason_text"], record["cited_sections"]
+
+
+@pytest.mark.parametrize("built_in, text", [
+    pytest.param([BI_ROW, {"Identity": "ATP Built-In Protection Rule"}], BI_SEVERAL, id="unrestricted-beside-unreadable"),
+    pytest.param([BI_ROW, BI_ROW], BI_SEVERAL, id="two-unrestricted"),
+    pytest.param([{**BI_ROW, "ExceptIfSentTo": [None]}], BI_UNREADABLE, id="null-exclusion"),
+    pytest.param([{**BI_ROW, "ExceptIfSentToMemberOf": ["g", 7]}], BI_UNREADABLE, id="non-string-exclusion"),
+    pytest.param([{**BI_ROW, "ExceptIfSentTo": [""]}], BI_UNREADABLE, id="empty-string-exclusion"),
+])
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item66_built_in_fallback_needs_exactly_one_readable_rule(policy_id, built_in, text):
+    assert _reason(policy_id, _safelinks([], [SL_BUILTIN], built_in)) == (
+        "not_assessed", "builtin_rule_unusable", text, [BI])
+    # A covering rule decides without the Built-In rule, however it is shaped.
+    rules, policies = [_sl_rule("cover", SCOPE_ALL)], [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}]
+    assert _answer(policy_id, _safelinks(rules, policies, built_in)) == ("met", "policy_flags_ok")
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item66_one_unrestricted_built_in_rule_still_passes(policy_id):
+    assert _answer(policy_id, _safelinks([], [SL_BUILTIN], [BI_ROW])) == ("met", "policy_flags_ok")

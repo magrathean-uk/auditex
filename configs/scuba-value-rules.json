@@ -16702,6 +16702,7 @@
           ],
           "reason_code": "data_unusable_builtin_rule",
           "reason_texts": [
+            "Data unusable: built_in_protection_rules holds more than one rule; the policy was not assessed.",
             "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."
           ],
           "recommendations": [
@@ -17116,6 +17117,7 @@
           ],
           "reason_code": "data_unusable_builtin_rule",
           "reason_texts": [
+            "Data unusable: built_in_protection_rules holds more than one rule; the policy was not assessed.",
             "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."
           ],
           "recommendations": [
@@ -17528,6 +17530,7 @@
           ],
           "reason_code": "data_unusable_builtin_rule",
           "reason_texts": [
+            "Data unusable: built_in_protection_rules holds more than one rule; the policy was not assessed.",
             "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."
           ],
           "recommendations": [

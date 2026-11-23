@@ -33,7 +33,9 @@ def r003_added_cells(policy_id: str) -> dict:
     return {
         "builtin_rule_unusable": {
             "cited": [R003_SECTION], "reason_code": "data_unusable_builtin_rule",
-            "reason_texts": ["Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy "
+            "reason_texts": ["Data unusable: built_in_protection_rules holds more than one rule; the policy was not "
+                             "assessed.",
+                             "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy "
                              "was not assessed."],
             **_unusable("unusable", "recollect_unusable_evidence")},
         "no_policy_covers_all": {

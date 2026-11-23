@@ -296,17 +296,32 @@ def _may_cover(rule, excluded):
     return any(v.casefold() in excluded for v in sc[0][0][1])
 
 
+def _builtin_state(rule):
+    """'q' the Built-In rule excludes no one, 'x' it excludes someone, 'u' an exclusion list is absent or malformed."""
+    if not isinstance(rule, dict):
+        return "u"
+    empty = []
+    for key in EXCEPT_KEYS:
+        value = _empty3(rule, key)
+        if value is None or (value is False and any(type(v) is not str or not v.strip() for v in rule[key])):
+            return "u"
+        empty.append(value)
+    return "q" if all(empty) else "x"
+
+
 def _builtin_exclusions(policy_id, sp, sections, partial, preset_partial=False):
     """As SS 1.3 reads the Built-In Protection rule (defender_cascade, attachment variant): None when it covers everyone,
     else the record for recipients it excludes. The rule list exports no Priority; Built-In applies last. A partly
     scoped rule that provably names none of the excluded recipients cannot cover them (repair round 2)."""
-    states = []
-    for rule in sections[BI]:
-        ex = [_empty3(rule, key) if isinstance(rule, dict) else None for key in EXCEPT_KEYS]
-        states.append("q" if all(x is True for x in ex) else ("x" if any(x is False for x in ex) else "u"))
-    if "q" in states:
+    # Bot review wave 2 (item 66): an organisation has one Built-In Protection rule. Several rows, or an exclusion
+    # list with an element that is not a recipient name, leave its exclusions unknown.
+    if len(sections[BI]) > 1:
+        return _A(policy_id, "data_unusable_builtin_rule", f"Data unusable: {BI} holds more than one rule; the policy was not assessed.",
+                  "builtin_rule_unusable", [BI])
+    state = _builtin_state(sections[BI][0]) if sections[BI] else "u"
+    if state == "q":
         return None
-    if not states or "u" in states:
+    if state == "u":
         return _A(policy_id, "data_unusable_builtin_rule", f"Data unusable: {BI} holds no rule with readable exclusions; the policy was not assessed.",
                   "builtin_rule_unusable", [BI])
     excluded = _excluded_recipients(sections[BI])
