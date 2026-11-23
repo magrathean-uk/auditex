@@ -124,3 +124,121 @@ def test_raw_deflate_body_still_decodes():
     raw = compressor.compress(BODY) + compressor.flush()
     assert exposure_lookup._decode_body(raw, "deflate") == BODY
 
+
+# ---- The fetch deadline holds while one read (trailers) or the request itself (100 Continue lines) blocks ----
+
+class _Socket:
+    def __init__(self, release):
+        self.release, self.shut = release, False
+
+    def shutdown(self, how):
+        self.shut = True
+        self.release.set()
+
+
+class _BlockingRaw:
+    """One read1 that stays inside http.client (an endless chunked trailer) until its socket is shut down."""
+
+    def __init__(self, release):
+        self.release = release
+        self.connection = type("Connection", (), {"sock": _Socket(release)})()
+
+    def read1(self, amount=None, decode_content=None):
+        self.release.wait(5.0)
+        raise OSError("connection closed")
+
+
+class _Response:
+    status_code = 200
+    headers: dict = {}
+
+    def __init__(self, release):
+        self.raw = _BlockingRaw(release)
+        self.closed = False
+        self._release = release
+
+    def close(self):
+        self.closed = True
+        self._release.set()
+
+
+def _wait_closed(response):
+    deadline = time.monotonic() + 5.0
+    while not response.closed and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return response.closed
+
+
+def _timed_fetch(session):
+    fetcher = exposure_lookup.RequestsHttpsFetcher(session=session, deadline=0.3)
+    started = time.monotonic()
+    result = fetcher.get_text(MTA_STS_URL)
+    return result, time.monotonic() - started
+
+
+def test_deadline_holds_while_one_body_read_blocks():
+    release = threading.Event()
+    response = _Response(release)
+    session = type("S", (), {"get": lambda self, url, **kw: response})()
+    try:
+        (status, body, error), elapsed = _timed_fetch(session)
+    finally:
+        release.set()
+    assert (status, body, error) == (None, "", "fetch_deadline_exceeded")
+    assert elapsed < 2.0
+    assert response.raw.connection.sock.shut is True
+    assert _wait_closed(response), "the fetch thread closes the response once its read is interrupted"
+
+
+def test_deadline_holds_while_the_request_blocks_before_headers():
+    release = threading.Event()
+    late = _Response(release)
+
+    def get(self, url, **kw):
+        release.wait(5.0)
+        return late
+
+    session = type("S", (), {"get": get})()
+    try:
+        (status, body, error), elapsed = _timed_fetch(session)
+    finally:
+        release.set()
+    assert (status, body, error) == (None, "", "fetch_deadline_exceeded")
+    assert elapsed < 2.0
+    assert _wait_closed(late), "a response that arrives after the deadline is closed by the fetch thread"
+
+
+
+def test_deadline_ends_a_real_endless_chunked_trailer():
+    """A real socket and the real requests/urllib3 stack: the trailer never ends, so one read1 never returns."""
+    import socket as socket_module
+
+    server = socket_module.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    disconnected = threading.Event()
+
+    def serve():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nbody\r\n0\r\n")
+            try:
+                for _ in range(200):
+                    conn.sendall(b"X-Trailer: more\r\n")
+                    time.sleep(0.05)
+            except OSError:
+                disconnected.set()
+
+    threading.Thread(target=serve, daemon=True).start()
+    url = f"http://127.0.0.1:{server.getsockname()[1]}/.well-known/mta-sts.txt"
+    fetcher = exposure_lookup.RequestsHttpsFetcher(deadline=0.5, timeout=5.0)
+    started = time.monotonic()
+    try:
+        result = fetcher._fetch_within_deadline(lambda: fetcher.session.get(url, stream=True, timeout=5.0), started)
+        elapsed = time.monotonic() - started
+        assert result == (None, "", "fetch_deadline_exceeded")
+        assert elapsed < 2.0
+        assert disconnected.wait(5.0), "the abandoned fetch drops the connection instead of reading trailers forever"
+    finally:
+        server.close()

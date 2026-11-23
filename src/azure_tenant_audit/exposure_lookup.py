@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import re
+import socket
+import threading
 import time
 import zlib
 from collections.abc import Callable
@@ -63,27 +65,54 @@ class RequestsHttpsFetcher:
         if not url.lower().startswith("https://"):
             return None, "", "refused_non_https_url"
         start = self.clock()
+        # identity encoding and a hook that drops any redirect body: requests otherwise reads a redirect body in full
+        # (resolve_redirects, even with allow_redirects=False) and urllib3 may loop raw reads inside one decoding read1.
+        return self._fetch_within_deadline(
+            lambda: self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True,
+                                     headers={"Accept-Encoding": "identity"}, hooks={"response": _drop_redirect_body}),
+            start,
+        )
+
+    def _fetch_within_deadline(self, request: Callable[[], Any], start: float) -> tuple[int | None, str, str | None]:
+        """Run the request and the body read on one daemon thread and wait at most ``deadline`` seconds for them. One
+        read can block inside http.client for as long as the host keeps sending (chunked trailer lines, repeated 100
+        Continue status lines), so the deadline is held by the wait, not by checks between reads. On expiry the
+        response socket is shut down to end a blocked read; the thread then closes the response, and closes a response
+        that arrives only after the deadline as soon as it arrives."""
+        attempt = _FetchAttempt()
+        worker = threading.Thread(target=self._attempt, args=(request, start, attempt), name="auditex-https-fetch",
+                                  daemon=True)
+        worker.start()
+        if attempt.done.wait(max(0.0, self.deadline)) and attempt.result is not None:
+            return attempt.result
+        attempt.abandon()
+        return None, "", "fetch_deadline_exceeded"
+
+    def _attempt(self, request: Callable[[], Any], start: float, attempt: _FetchAttempt) -> None:
+        response = None
+        close = False
         try:
-            # identity encoding and a hook that drops any redirect body: requests otherwise reads a redirect body in
-            # full (resolve_redirects, even with allow_redirects=False) and urllib3 may loop raw reads inside one
-            # decoding read1, both outside the deadline below.
-            response = self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True,
-                                        headers={"Accept-Encoding": "identity"}, hooks={"response": _drop_redirect_body})
-            raw = self._read_body(response, start)
-            if raw is None:
-                close = getattr(response, "close", None)
-                if callable(close):
-                    close()
-                return None, "", "fetch_deadline_exceeded"
+            response = request()
+            if not attempt.adopt(response):
+                close = True
+                return
+            raw = self._read_body(response, start, attempt.abandoned)
+            if raw is None or attempt.abandoned.is_set():
+                _close_quietly(response)  # before finish, so the caller never sees an open response after the deadline
+                attempt.finish((None, "", "fetch_deadline_exceeded"))
+                return
             raw = _decode_body(raw, (getattr(response, "headers", None) or {}).get("Content-Encoding"))
             body = raw[:MAX_POLICY_BYTES].decode("utf-8", errors="replace")
-            return int(response.status_code), body, None
+            attempt.finish((int(response.status_code), body, None))
         except Exception as exc:  # noqa: BLE001
-            return None, "", f"{type(exc).__name__}: {exc}"[:300]
+            close = attempt.abandoned.is_set()
+            attempt.finish((None, "", f"{type(exc).__name__}: {exc}"[:300]))
+        finally:
+            if close and response is not None:
+                _close_quietly(response)
 
-    def _read_body(self, response: Any, start: float) -> bytes | None:
-        """At most MAX_POLICY_BYTES + 1 bytes, or None once the deadline passes. ``read1`` returns what one socket read
-        delivers, so the deadline is overrun by at most one per-read timeout."""
+    def _read_body(self, response: Any, start: float, stop: threading.Event | None = None) -> bytes | None:
+        """At most MAX_POLICY_BYTES + 1 bytes, or None once the deadline passes or the fetch is abandoned."""
         stream = response.raw
         if stream is None:
             return b""
@@ -91,7 +120,7 @@ class RequestsHttpsFetcher:
         chunks: list[bytes] = []
         size = 0
         while size <= MAX_POLICY_BYTES:
-            if self.clock() - start > self.deadline:
+            if self.clock() - start > self.deadline or (stop is not None and stop.is_set()):
                 return None
             chunk = read(min(_READ_CHUNK_BYTES, MAX_POLICY_BYTES + 1 - size), decode_content=False)
             if isinstance(chunk, str):
@@ -103,6 +132,62 @@ class RequestsHttpsFetcher:
         if self.clock() - start > self.deadline:
             return None
         return b"".join(chunks)
+
+
+@dataclass
+class _FetchAttempt:
+    """What the fetch thread and the waiting caller share: the response once it exists, and whether the caller gave up."""
+
+    done: threading.Event = field(default_factory=threading.Event)
+    abandoned: threading.Event = field(default_factory=threading.Event)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    response: Any = None
+    result: tuple[int | None, str, str | None] | None = None
+
+    def adopt(self, response: Any) -> bool:
+        """Record the response; False when the caller has already given up, so the thread closes it at once."""
+        with self.lock:
+            self.response = response
+            return not self.abandoned.is_set()
+
+    def finish(self, result: tuple[int | None, str, str | None]) -> None:
+        self.result = result
+        self.done.set()
+
+    def abandon(self) -> None:
+        with self.lock:
+            self.abandoned.set()
+            response = self.response
+        if response is not None:
+            _interrupt_read(response)
+
+
+def _response_socket(response: Any) -> Any:
+    raw = getattr(response, "raw", None)
+    sock = getattr(getattr(raw, "connection", None), "sock", None)
+    if sock is None:  # urllib3 already released the connection: reach the socket under http.client's reader
+        sock = getattr(getattr(getattr(getattr(raw, "_fp", None), "fp", None), "raw", None), "_sock", None)
+    return sock
+
+
+def _interrupt_read(response: Any) -> None:
+    """End a read that blocks on the response socket; the fetch thread sees an error and closes the response."""
+    sock = _response_socket(response)
+    shutdown = getattr(sock, "shutdown", None)
+    if callable(shutdown):
+        try:
+            shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
+def _close_quietly(response: Any) -> None:
+    close = getattr(response, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _drop_redirect_body(response: Any, *args: Any, **kwargs: Any) -> Any:
