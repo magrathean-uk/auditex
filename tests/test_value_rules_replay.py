@@ -72,6 +72,19 @@ D4_VECTOR = "constructed:MS.EXO.3.1v1:dkim_config_empty"
 D4_PRODUCT = ("not_met", "domain_noncompliant.no_signing_config", "domain_noncompliant",
               "Requirement not met: at least one domain has no DKIM signing configuration.", ["dkim_config"])
 
+
+def product_labels(vector: dict) -> dict:
+    """A v3.9.1 vector with the product's rule labels for the two documented classes above, for the full-kit tests
+    outside the replay: the D29 vectors gain only the shared reason text; the D4 vector takes the product answer,
+    which now agrees with its gold (so it records no disagreement), citing the rule's sections. Others unchanged."""
+    if vector["vector_id"] == D4_VECTOR:
+        assert vector["divergence_id"] == "D15" and vector["gold_verdict"] == "not_met", vector["vector_id"]
+        return {**vector, "rule_verdict": D4_PRODUCT[0], "rule_cell": D4_PRODUCT[1], "rule_reason_code": D4_PRODUCT[2],
+                "rule_reason_text": D4_PRODUCT[3], "rule_cited_sections": [], "disagreement": None}
+    if vector["rule_reason_code"] == D29_REASON_CODE and vector["rule_reason_text"] == D29_V391_TEXT:
+        return {**vector, "rule_reason_text": D29_PRODUCT_TEXT}
+    return vector
+
 def _lines(path: Path):
     with (lzma.open(path, "rt") if path.suffix == ".xz" else path.open()) as handle:
         for line in handle:

@@ -435,6 +435,7 @@ def test_optional_full_source_vectors():
         MANIFEST,
         _overrides,
         override_gold,
+        product_labels,
         review_relabel,
         review_vectors,
     )
@@ -461,7 +462,8 @@ def test_optional_full_source_vectors():
     def source_rows():
         for row in _rows(Path(path)):
             source_policies.add(row["policy"])
-            yield review_relabel(row)[0]
+            # M08-T10's documented D29 and D4 classes, mapped as the replay maps them (product_labels).
+            yield product_labels(review_relabel(row)[0])
 
     def added_review_vectors():
         yield from (row for row in review_vectors() if row["policy"] in source_policies)

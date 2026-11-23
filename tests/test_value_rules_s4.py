@@ -226,11 +226,12 @@ def external_vectors():
     path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not path:
         pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
-    from test_value_rules_replay import review_relabel
+    from test_value_rules_replay import product_labels, review_relabel
     grouped = defaultdict(list)
     for row in _rows(Path(path)):
         if row["policy"] in POLICIES:
-            grouped[row["policy"]].append(review_relabel(row)[0])
+            # M08-T10's documented D29 and D4 classes, mapped as the replay maps them (product_labels).
+            grouped[row["policy"]].append(product_labels(review_relabel(row)[0]))
     # Review R003: the kit predates the SS 7.x Built-In cells; the shipped constructed vectors reach them.
     for row in _rows(FIXTURE):
         if ":review_r003_" in row["vector_id"]:
