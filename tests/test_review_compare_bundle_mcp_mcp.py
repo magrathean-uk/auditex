@@ -488,35 +488,85 @@ elif mode == "slow_worker_launch":
         time.sleep(0.05)
     os.kill(os.getpid(), signal.SIGTERM)
 elif mode == "nested_signal":
-    # A SIGHUP lands while the SIGTERM stop is inside the stop flag's own lock.
-    class SignalInsideSet(threading.Event):
-        def set(self):
-            with self._cond:
-                os.kill(os.getpid(), signal.SIGHUP)
-                time.sleep(0.3)
-                self._flag = True
-                self._cond.notify_all()
+    # A SIGHUP lands while the SIGTERM stop is killing the registered process groups.
+    real_kill_group = command_runner._kill_process_group
 
-    command_runner._STOPPING = SignalInsideSet()
+    def kill_group_after_a_second_signal(process):
+        os.kill(os.getpid(), signal.SIGHUP)
+        time.sleep(0.3)
+        real_kill_group(process)
+
+    command_runner._kill_process_group = kill_group_after_a_second_signal
     threading.Thread(target=command_runner.run_cli_command, args=(command,), daemon=True).start()
     deadline = time.monotonic() + 10
     while not pid_file.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     os.kill(os.getpid(), signal.SIGTERM)
-time.sleep(5)
+elif mode == "late_signal":
+    # A SIGHUP lands after the commands are stopped but before the stop re-sends the SIGTERM that ends the server.
+    real_kill = os.kill
+
+    def kill_after_a_late_signal(pid, signum):
+        if threading.current_thread().name == "auditex-signal-stop" and signum == signal.SIGTERM:
+            real_kill(pid, signal.SIGHUP)
+            time.sleep(0.3)
+        real_kill(pid, signum)
+
+    os.kill = kill_after_a_late_signal
+    threading.Thread(target=command_runner.run_cli_command, args=(command,), daemon=True).start()
+    deadline = time.monotonic() + 10
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    os.kill(os.getpid(), signal.SIGTERM)
+elif mode == "finished_during_stop":
+    # Command A is running when SIGTERM lands; its own process exits during the stop (while a second launch is still
+    # in flight) and leaves a descendant with its output redirected, so A's run returns before the stop is done.
+    go_file = pid_file.with_name("go")
+    command = [
+        "sh", "-c",
+        f"sleep 60 </dev/null >/dev/null 2>&1 & echo $! > '{pid_file}.tmp' && mv '{pid_file}.tmp' '{pid_file}'; "
+        f"while [ ! -e '{go_file}' ]; do sleep 0.05; done; exit 0",
+    ]
+    threading.Thread(target=command_runner.run_cli_command, args=(command,), daemon=True).start()
+    deadline = time.monotonic() + 10
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    real_popen = command_runner.subprocess.Popen
+    in_launch = threading.Event()
+
+    def popen_until_a_finished(*args, **kwargs):
+        in_launch.set()
+        deadline = time.monotonic() + 10
+        while not go_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        time.sleep(1)  # A's own process exits and its run returns meanwhile
+        return real_popen(*args, **kwargs)
+
+    command_runner.subprocess.Popen = popen_until_a_finished
+    threading.Thread(target=command_runner.run_cli_command, args=(["sleep", "30"],), daemon=True).start()
+    in_launch.wait(10)
+    os.kill(os.getpid(), signal.SIGTERM)
+    go_file.touch()
+# Idle until the signal ends the process; exiting by itself would race the stop that ends it by the signal.
+time.sleep(20)
 sys.exit(0)
 """
 
 
 @pytest.mark.parametrize(
-    "mode", ["registered", "leader_exited", "lock_held", "launch_gap", "slow_worker_launch", "nested_signal"]
+    "mode",
+    [
+        "registered", "leader_exited", "lock_held", "launch_gap", "slow_worker_launch", "nested_signal", "late_signal",
+        "finished_during_stop",
+    ],
 )
 def test_a_terminated_mcp_server_stops_its_command_at_every_point_of_launch(mode: str, tmp_path: Path) -> None:
     # R063: the command runs in its own session, so the server must stop it on SIGTERM; the check waits for the
     # command's readiness marker and follows the PID of the process it started. Bot review (coderabbit, PR 172): a
     # signal while the main thread held the registry lock hung the server, and a signal between the launch and its
     # registration left the command running. Review of PR 187: a worker launch that outlasted the stop's wait left its
-    # command running, and a second signal during the stop deadlocked the server.
+    # command running, and a second signal during the stop deadlocked the server. Second review of PR 187: a command
+    # whose own process exited during the stop left its descendant running, and a later SIGHUP changed the exit signal.
     import os
     import signal
     import subprocess
@@ -528,7 +578,7 @@ def test_a_terminated_mcp_server_stops_its_command_at_every_point_of_launch(mode
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
 
     try:
-        server = subprocess.run([sys.executable, str(script), str(pid_file), mode], env=env, timeout=25, check=False)
+        server = subprocess.run([sys.executable, str(script), str(pid_file), mode], env=env, timeout=30, check=False)
     finally:
         descendant = int(pid_file.read_text(encoding="utf-8")) if pid_file.exists() else None
         survived = descendant is not None and not _wait_for(lambda: not _alive(descendant), 5)
@@ -551,7 +601,7 @@ def test_a_command_launched_while_a_stop_is_waiting_is_stopped_and_later_launche
     from auditex import command_runner
 
     monkeypatch.setattr(command_runner, "_RUNNING", set())
-    monkeypatch.setattr(command_runner, "_STOPPING", threading.Event(), raising=False)
+    monkeypatch.setattr(command_runner, "_STOP_REQUESTED", False)
     pid_file = tmp_path / "descendant.pid"
     launched, release = threading.Event(), threading.Event()
     real_popen = command_runner.subprocess.Popen

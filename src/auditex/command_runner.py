@@ -126,16 +126,16 @@ def _kill_process_group(process: Any) -> None:
             process.kill()
 
 
-# Commands running now. Each starts in its own session, so a signal to the server's process group no longer reaches
-# it: the server stops them itself when it exits (atexit) or is terminated (``install_signal_stop``).
+# Commands started by this server whose process groups may still be live. Each starts in its own session, so a signal
+# to the server's process group no longer reaches it: the server stops them itself when it exits (atexit) or is
+# terminated (``install_signal_stop``). A command leaves the set only once its own process has been reaped, and never
+# after a stop is requested, so every group live when the stop begins is in the snapshot the stop kills.
 _RUNNING: set[Any] = set()
-# Threads between starting a command and registering it in ``_RUNNING``.
-_LAUNCHING: set[int] = set()
-# Reentrant, so a thread that already holds it (a synchronous MCP tool launching a command) can take it again.
+# Reentrant, so a thread that already holds it (a synchronous MCP tool launching a command) can take it again. A launch
+# holds it from the stop check until its command is registered, so a stop's snapshot never falls inside a launch.
 _RUNNING_LOCK = threading.RLock()
-_LAUNCHES_SETTLED = threading.Condition(_RUNNING_LOCK)
-# Set once a stop begins; no command starts after it.
-_STOPPING = threading.Event()
+# True once a stop is requested; no command starts after it. A plain flag, so a signal handler can set it without a lock.
+_STOP_REQUESTED = False
 
 
 class ShuttingDown(RuntimeError):
@@ -143,17 +143,16 @@ class ShuttingDown(RuntimeError):
 
 
 def stop_running_commands() -> None:
-    """Kill the process group of every command still running; the server is going away and nothing will collect
-    their results (R063).
+    """Kill the process group of every command started and not yet finished; the server is going away and nothing
+    will collect their results (R063).
 
-    No command starts once this has begun. A command another thread is launching is waited for until it is
-    registered, however long its start takes, and stopped with the rest; a launch on the calling thread itself stops
-    its own command when it registers it. Never call this from a signal handler (``install_signal_stop``).
+    No command starts once this has begun, and none leaves the registry, so the snapshot taken under the lock holds
+    every command running when the stop was requested, including one another thread was launching. Never call this
+    from a signal handler (``install_signal_stop``).
     """
-    _STOPPING.set()
-    me = threading.get_ident()
-    with _LAUNCHES_SETTLED:
-        _LAUNCHES_SETTLED.wait_for(lambda: not (_LAUNCHING - {me}))
+    global _STOP_REQUESTED
+    _STOP_REQUESTED = True
+    with _RUNNING_LOCK:
         running = list(_RUNNING)
     for process in running:
         # Kill the group even when its first process has exited: a process it started can still be running and
@@ -163,23 +162,20 @@ def stop_running_commands() -> None:
 
 def _start_process(command: list[str], **kwargs: Any) -> Any:
     """Start ``command`` and register it, so a stop at any moment either refuses it or stops it."""
-    me = threading.get_ident()
     with _RUNNING_LOCK:
-        if _STOPPING.is_set():
+        if _STOP_REQUESTED:
             raise ShuttingDown("the MCP server is shutting down; the command was not started")
-        _LAUNCHING.add(me)
-    process = None
-    try:
         process = subprocess.Popen(command, **kwargs)
-    finally:
-        with _LAUNCHES_SETTLED:
-            if process is not None:
-                _RUNNING.add(process)  # before leaving _LAUNCHING, so a stop always sees one or the other
-            _LAUNCHING.discard(me)
-            _LAUNCHES_SETTLED.notify_all()
-        if process is not None and _STOPPING.is_set():
-            _kill_process_group(process)
+        _RUNNING.add(process)
     return process
+
+
+def _forget_process(process: Any) -> None:
+    """Drop a command whose own process has been reaped, unless a stop is requested: the stop must still kill its
+    group, where a process it started may be running."""
+    with _RUNNING_LOCK:
+        if not _STOP_REQUESTED:
+            _RUNNING.discard(process)
 
 
 # How long the stop thread gives the main thread to end the process by the signal before it exits directly.
@@ -187,21 +183,24 @@ _SIGNAL_EXIT_GRACE_SECONDS = 5
 
 
 def install_signal_stop(signal_names: tuple[str, ...] = ("SIGTERM", "SIGHUP")) -> None:
-    """On any of ``signal_names``, stop every running command, then end the process as the first signal would (R063).
+    """On any of ``signal_names``, stop every running command, then end the process by the first signal (R063).
 
-    The handler takes no lock: it only writes the signal number to a pipe (a second signal during the stop just adds
-    another byte). A stop thread reads it and does the work outside the handler, so a launch the signal interrupted on
-    the main thread carries on and registers its command, and the stop waits for it. Once the commands are stopped,
-    the stop thread sends the signal again; the handler then restores the default action and re-raises it.
+    The handler takes no lock: it sets the stop flag and writes the signal number to a pipe. A stop thread reads the
+    first number, kills the registered process groups outside the handler, and sends that signal again; the handler
+    then restores the default action for it and re-raises it. Any other signal after the first changes nothing.
     """
     read_fd, write_fd = os.pipe()
     os.set_blocking(write_fd, False)
+    first: list[int] = []  # the signal the process ends by, recorded before ``stopped`` is set
     stopped = threading.Event()
 
     def handle(signum: int, _frame: Any) -> None:
+        global _STOP_REQUESTED
+        _STOP_REQUESTED = True  # a plain assignment; takes no lock
         if stopped.is_set():  # reads a flag; takes no lock
-            signal.signal(signum, signal.SIG_DFL)
-            signal.raise_signal(signum)
+            if signum == first[0]:
+                signal.signal(signum, signal.SIG_DFL)
+                signal.raise_signal(signum)
             return
         try:
             os.write(write_fd, bytes([signum]))
@@ -210,6 +209,7 @@ def install_signal_stop(signal_names: tuple[str, ...] = ("SIGTERM", "SIGHUP")) -
 
     def stop_on_signal() -> None:
         signum = os.read(read_fd, 1)[0]
+        first.append(signum)
         stop_running_commands()
         stopped.set()
         os.kill(os.getpid(), signum)
@@ -244,8 +244,7 @@ def _run_process(
     try:
         return _collect(command, process, timeout)
     finally:
-        with _RUNNING_LOCK:
-            _RUNNING.discard(process)
+        _forget_process(process)  # _collect has reaped it on every path
 
 
 def _collect(command: list[str], process: Any, timeout: int | None) -> subprocess.CompletedProcess[str]:
