@@ -473,13 +473,14 @@ class PowerShellGraphAdapter(Adapter):
                 )
             return {"error": f"command_failed:{exc.returncode}", "error_class": "command_error", "command": safe_command}
         except Exception as exc:  # noqa: BLE001
+            error = redact_output(_without_executable_path(str(exc), exe))
             if log_event:
                 log_event(
                     "command.failed",
                     "PowerShell command exception",
-                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": redact_output(str(exc))},
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": error},
                 )
-            return {"error": redact_output(str(exc)), "error_class": "command_exception", "command": safe_command}
+            return {"error": error, "error_class": "command_exception", "command": safe_command}
 
     def _run_sensitive(
         self,
@@ -621,6 +622,15 @@ class PowerShellGraphAdapter(Adapter):
 
 # A read that enumerates every mailbox in the tenant before answering outlasts the default timeout on a large tenant.
 UNBOUNDED_READ_TIMEOUT_SECONDS = 600
+
+
+def _without_executable_path(text: str, exe: str) -> str:
+    """``text`` naming the PowerShell executable by name only: a launch error (``PermissionError``) quotes its full
+    path, in ``repr`` form on Windows (doubled backslashes), and the bundle keeps no absolute local path."""
+    name = Path(exe).name
+    for written in sorted({exe, repr(exe)[1:-1]}, key=len, reverse=True):
+        text = text.replace(written, name)
+    return text
 
 
 def _json_success(returncode: int | None, stdout: str | None) -> bool:

@@ -421,6 +421,36 @@ def test_an_offline_google_run_keeps_tenant_organisational_unit_paths(
         assert "index/evidence.sqlite" in holding, (needle, holding)
 
 
+def test_a_powershell_launch_error_names_the_executable_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
+
+    def refuse(cmd, **_kw):
+        raise PermissionError(13, "Permission denied", cmd[0])
+
+    events: list[dict] = []
+    monkeypatch.setattr("shutil.which", lambda name: SYSTEM_PWSH if name == "pwsh" else None)
+    monkeypatch.setattr("subprocess.run", refuse)
+    result = PowerShellGraphAdapter().run(
+        "Get-Mailbox", log_event=lambda _event, _message, details: events.append(details or {}))
+    assert result["error_class"] == "command_exception"
+    written = json.dumps([result, events])
+    assert "/usr/local/microsoft" not in written
+    assert "Permission denied" in written and "pwsh" in written
+
+
+def test_a_powershell_module_lookup_error_keeps_no_absolute_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from azure_tenant_audit import probe
+
+    module = "/opt/company-powershell/modules/ExchangeOnlineManagement/ExchangeOnlineManagement.psd1"
+    monkeypatch.setattr(probe.shutil, "which", lambda name: SYSTEM_PWSH if name == "pwsh" else None)
+    monkeypatch.setattr(probe, "_subprocess_probe",
+                        lambda command, **_kw: (1, "", f"Import-Module: The module '{module}' could not be loaded."))
+    rows = probe._probe_toolchain_statuses(include_response=True, log_event=None)
+    errors = [row["error"] for row in rows if row.get("error")]
+    assert errors == ["Import-Module: The module 'ExchangeOnlineManagement.psd1' could not be loaded."] * 2
+    assert "/opt/company-powershell" not in json.dumps(rows)
+
+
 def test_the_normaliser_reads_escaped_windows_paths_in_error_text() -> None:
     from azure_tenant_audit.local_paths import LocalPathScrubber
 

@@ -39,6 +39,7 @@ from .diagnostics import build_diagnostics as _build_diagnostics
 from .diagnostics import load_permission_hints as _load_permission_hints
 from .findings import build_findings
 from .graph import GraphClient
+from .local_paths import path_names_in_text
 from .output import AuditWriter
 from .profiles import get_profile
 from .secret_hygiene import redact_output
@@ -240,7 +241,7 @@ def _probe_toolchain_statuses(
                     message="ExchangeOnlineManagement module is not available.",
                     command=" ".join([Path(pwsh_exe).name, *module_command[1:]]),
                     error_class="command_timeout" if code is None else "module_not_found",
-                    error=(stderr or stdout).strip() or f"return_code:{code}",
+                    error=path_names_in_text((stderr or stdout).strip()) or f"return_code:{code}",
                 )
             )
     else:
@@ -274,7 +275,7 @@ def _probe_toolchain_statuses(
                     else "Message trace cmdlet is not available through the local PowerShell module path.",
                     command=" ".join([Path(pwsh_exe).name, *response_command[1:]]),
                     error_class=None if code == 0 else "command_timeout" if code is None else "command_not_available",
-                    error=None if code == 0 else (stderr or stdout).strip() or f"return_code:{code}",
+                    error=None if code == 0 else path_names_in_text((stderr or stdout).strip()) or f"return_code:{code}",
                 )
             )
         else:
