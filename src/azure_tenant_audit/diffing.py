@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -143,6 +144,71 @@ def _collector_coverage(run_dir: Path) -> dict[str, bool]:
     return coverage
 
 
+def finding_status(finding: Mapping[str, Any]) -> str:
+    """A finding's status as the drift summary compares it: lower case, ``open`` when it records none."""
+    return str(finding.get("status") or "open").lower()
+
+
+def _engine_severity(finding: Mapping[str, Any]) -> str:
+    return str(finding.get("severity") or "")
+
+
+def shared_finding_drift(
+    before: Mapping[str, Mapping[str, Any]],
+    after: Mapping[str, Mapping[str, Any]],
+    *,
+    severity_of: Callable[[Mapping[str, Any]], str] = _engine_severity,
+) -> dict[str, Any]:
+    """The drift of findings both runs raised (worsened, improved, status transitions, reactivated accepted risks)
+    and the later run's accepted-risk summary.
+
+    ``before`` and ``after`` index findings by key. ``auditex compare`` passes the rows and severity reading its finding
+    delta uses, so the delta's changed findings and this summary come from one classification.
+    """
+    worsened: list[str] = []
+    improved: list[str] = []
+    state_transitions: list[dict[str, Any]] = []
+    reactivated_accepted_risks: list[dict[str, Any]] = []
+    for key in sorted(set(before) & set(after)):
+        left, right = before[key], after[key]
+        before_rank = _SEVERITY_RANK.get(severity_of(left), -1)
+        after_rank = _SEVERITY_RANK.get(severity_of(right), -1)
+        if after_rank > before_rank:
+            worsened.append(key)
+        elif after_rank < before_rank:
+            improved.append(key)
+        from_status, to_status = finding_status(left), finding_status(right)
+        if from_status == to_status:
+            continue
+        row = {
+            "id": right.get("id") or left.get("id") or key,
+            "rule_id": right.get("rule_id") or left.get("rule_id"),
+            "severity": str(right.get("severity") or left.get("severity") or "medium").lower(),
+            "title": right.get("title") or left.get("title"),
+            "collector": right.get("collector") or left.get("collector"),
+            "from_status": from_status,
+            "to_status": to_status,
+        }
+        state_transitions.append(row)
+        if is_accepted_status(from_status) and not is_accepted_status(to_status):
+            reactivated_accepted_risks.append(dict(row))
+    accepted_summary = accepted_risk_summary([dict(row) for row in after.values()])
+    stale_count = int(accepted_summary.get("stale_count") or 0)
+    return {
+        "worsened_findings": worsened,
+        "improved_findings": improved,
+        "state_transitions": state_transitions,
+        "reactivated_accepted_risks": reactivated_accepted_risks,
+        "accepted_risk_summary": accepted_summary,
+        "stale_accepted_risks": [dict(row) for row in accepted_summary.get("stale") or [] if isinstance(row, dict)],
+        "worsened_count": len(worsened),
+        "improved_count": len(improved),
+        "state_transition_count": len(state_transitions),
+        "reactivated_accepted_risk_count": len(reactivated_accepted_risks),
+        "stale_accepted_risk_count": stale_count,
+    }
+
+
 def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
     before = _finding_index(_load_findings(left))
     after = _finding_index(_load_findings(right))
@@ -160,67 +226,20 @@ def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
         collector = str(before[key].get("collector") or "")
         (not_reassessed_keys if collector and not later_coverage.get(collector, False) else still_resolved).append(key)
     resolved_keys = still_resolved
-    worsened: list[str] = []
-    improved: list[str] = []
-    state_transitions: list[dict[str, Any]] = []
-    reactivated_accepted_risks: list[dict[str, Any]] = []
-    for key in sorted(set(before) & set(after)):
-        before_rank = _SEVERITY_RANK.get(str(before[key].get("severity") or ""), -1)
-        after_rank = _SEVERITY_RANK.get(str(after[key].get("severity") or ""), -1)
-        if after_rank > before_rank:
-            worsened.append(key)
-        elif after_rank < before_rank:
-            improved.append(key)
-        from_status = str(before[key].get("status") or "open").lower()
-        to_status = str(after[key].get("status") or "open").lower()
-        if from_status != to_status:
-            state_transitions.append(
-                {
-                    "id": after[key].get("id") or before[key].get("id") or key,
-                    "rule_id": after[key].get("rule_id") or before[key].get("rule_id"),
-                    "severity": str(after[key].get("severity") or before[key].get("severity") or "medium").lower(),
-                    "title": after[key].get("title") or before[key].get("title"),
-                    "collector": after[key].get("collector") or before[key].get("collector"),
-                    "from_status": from_status,
-                    "to_status": to_status,
-                }
-            )
-        if is_accepted_status(from_status) and not is_accepted_status(to_status):
-            reactivated_accepted_risks.append(
-                {
-                    "id": after[key].get("id") or before[key].get("id") or key,
-                    "rule_id": after[key].get("rule_id") or before[key].get("rule_id"),
-                    "severity": str(after[key].get("severity") or before[key].get("severity") or "medium").lower(),
-                    "title": after[key].get("title") or before[key].get("title"),
-                    "collector": after[key].get("collector") or before[key].get("collector"),
-                    "from_status": from_status,
-                    "to_status": to_status,
-                }
-            )
-    accepted_summary = accepted_risk_summary(list(after.values()))
+    shared = shared_finding_drift(before, after)
     return {
         "new_findings": new_keys,
         "resolved_findings": resolved_keys,
         "not_reassessed_findings": not_reassessed_keys,
-        "worsened_findings": worsened,
-        "improved_findings": improved,
-        "state_transitions": state_transitions,
-        "reactivated_accepted_risks": reactivated_accepted_risks,
-        "accepted_risk_summary": accepted_summary,
-        "stale_accepted_risks": [dict(row) for row in accepted_summary.get("stale") or [] if isinstance(row, dict)],
+        **shared,
         "new_count": len(new_keys),
         "resolved_count": len(resolved_keys),
         "not_reassessed_count": len(not_reassessed_keys),
-        "worsened_count": len(worsened),
-        "improved_count": len(improved),
-        "state_transition_count": len(state_transitions),
-        "reactivated_accepted_risk_count": len(reactivated_accepted_risks),
-        "stale_accepted_risk_count": int(accepted_summary.get("stale_count") or 0),
         "notification_recommended": bool(
             new_keys
-            or worsened
-            or reactivated_accepted_risks
-            or int(accepted_summary.get("stale_count") or 0) > 0
+            or shared["worsened_findings"]
+            or shared["reactivated_accepted_risks"]
+            or shared["stale_accepted_risk_count"] > 0
         ),
     }
 

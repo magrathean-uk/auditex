@@ -18,7 +18,12 @@ from azure_tenant_audit.bundle_integrity import (
     normalize_digest,
 )
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
-from azure_tenant_audit.diffing import MalformedRunEvidence, diff_run_directories
+from azure_tenant_audit.diffing import (
+    MalformedRunEvidence,
+    diff_run_directories,
+    finding_status,
+    shared_finding_drift,
+)
 from azure_tenant_audit.rule_parameters import (
     recorded_rule_parameters,
     rule_parameter_gap,
@@ -215,8 +220,8 @@ def _compare_pair(
         # sealed bundle is, rather than the comparison failing.
         side = "baseline" if os.path.realpath(exc.run_dir) == os.path.realpath(left_run["path"]) else "current"
         return _blocked_diff(left_run, right_run, f"run_evidence_malformed:{side}")
-    delta = build_finding_delta(left_run, right_run)
-    diff["drift_summary"] = _reassessed_drift_summary(diff.get("drift_summary") or {}, delta)
+    delta, shared = _finding_delta_and_drift(left_run, right_run)
+    diff["drift_summary"] = _reassessed_drift_summary({**(diff.get("drift_summary") or {}), **shared}, delta)
     # The markdown renders this snapshot, so it gives the same answer as the JSON even if the evidence changes later.
     diff["finding_delta"] = delta
     diff["left_run"] = _public_run(left_run)
@@ -598,6 +603,14 @@ def run_verification(bundle: RunBundle, expected_digest: str | None = None) -> d
 def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
     """Summarise findings that are new, resolved, not reassessed, or changed between two runs.
 
+    See ``_finding_delta_and_drift``.
+    """
+    return _finding_delta_and_drift(left_run, right_run)[0]
+
+
+def _finding_delta_and_drift(left_run: dict[str, Any], right_run: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The finding delta, and the drift of the findings both runs raised, from one reading of the findings.
+
     A finding that is absent from the later run is ``resolved`` only if its collector
     completed there, its rule's inputs were known and it was judged with the same or a stricter
     window; otherwise it is ``not_reassessed`` with a ``reason``. A finding only the later run has is
@@ -662,10 +675,13 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
             resolved.append(_summary(left[key]))
         else:
             not_reassessed.append({**_summary(left[key]), "reason": gap})
+    # The changed findings and the drift summary's worsened, improved and status transitions are one classification
+    # of the same rows, so the JSON, MCP and markdown agree whichever artifact (report pack or legacy findings) held them.
+    shared = shared_finding_drift(left, right, severity_of=_severity)
     changed: list[dict[str, Any]] = []
     for key in sorted(set(left) & set(right)):
         before, after = left[key], right[key]
-        if _severity(before) != _severity(after) or str(before.get("status") or "") != str(after.get("status") or ""):
+        if _severity(before) != _severity(after) or finding_status(before) != finding_status(after):
             changed.append(
                 {
                     **_summary(after),
@@ -673,7 +689,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
                     "status_before": before.get("status"),
                 }
             )
-    return {
+    delta = {
         "new": new,
         "newly_assessed": newly_assessed,
         "resolved": resolved,
@@ -683,6 +699,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
         "risk_before": _risk_snapshot(left_run, left_rows),
         "risk_after": _risk_snapshot(right_run, right_rows),
     }
+    return delta, shared
 
 
 def _md(value: Any) -> str:

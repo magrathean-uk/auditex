@@ -613,3 +613,26 @@ def test_diff_pairs_reordered_duplicate_rows_that_differ_only_in_volatile_fields
 
     assert things["changed"] == []
     assert sorted((row["before"]["v"], row["after"]["v"]) for row in things["suppressed"]) == [(1, 1), (2, 2)]
+
+
+# Repair round 2: one finding classification, unique changed-row keys, malformed legacy evidence (items 37, 46, 48)
+
+
+def _legacy_run(root: Path, name: str, created_utc: str, finding: dict[str, Any]) -> Path:
+    run_dir = _run(root, name, created_utc=created_utc, findings=[], coverage={"identity": "complete"})
+    _write(run_dir / "findings" / "findings.json", [finding])
+    return run_dir
+
+
+def test_compare_drift_summary_classifies_legacy_findings_as_the_finding_delta_does(tmp_path: Path) -> None:
+    run_a = _legacy_run(tmp_path, "run-a", "2026-10-01T00:00:00Z", {**FINDING, "severity": "low", "status": "accepted"})
+    run_b = _legacy_run(tmp_path, "run-b", "2026-10-02T00:00:00Z", {**FINDING, "severity": "high", "status": "open"})
+
+    result = compare_runs([run_a, run_b])["baseline_diff"]
+
+    assert [row["key"] for row in result["finding_delta"]["changed"]] == [FINDING["id"]]
+    drift = result["drift_summary"]
+    assert drift["worsened_findings"] == [FINDING["id"]]
+    assert drift["state_transition_count"] == 1
+    assert drift["reactivated_accepted_risk_count"] == 1
+    assert drift["notification_recommended"] is True
