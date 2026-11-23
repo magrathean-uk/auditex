@@ -244,6 +244,10 @@ def _phish_core(policy_id, sp, sections, cfg, cfg_bad, binding=None):
     for key in rules_by_policy:
         if type(key) is str and key not in known:
             info.append(("Custom", _UNEXPORTED, custom_reach({key}), "u"))
+    # An enabled rule with no readable policy link (null, absent, not a string) applies a policy nobody can name ahead
+    # of the Default, whether or not a Custom policy is exported: its unknown content shadows a lower qualifier.
+    if unreadable_link:
+        info.append(("Custom", _UNEXPORTED, "u", "u"))
     if sp["need"] != "safety_tips":
         for tier, rx in (("Strict", PRESET_RE[0]), ("Standard", PRESET_RE[1])):
             if any(rx.search(p["Identity"]) for p in pols):

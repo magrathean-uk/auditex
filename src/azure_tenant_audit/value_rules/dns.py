@@ -127,7 +127,11 @@ def _need_contacts(tags):
 def _need_reject_inherited(tags):
     """An accepted subdomain that publishes no record of its own gets the parent's sp= (RFC 7489 6.3; p= only when sp is
     absent). An sp that is not none, quarantine or reject acts as none (RFC 7489 6.6.3). Divergence from ScubaGear,
-    which reads p= of the inherited record (review R029)."""
+    which reads p= of the inherited record (review R029). The inherited record still needs one valid p= first: a record
+    without one is not applied as reject (RFC 7489 6.6.3), so sp=reject alone never meets the rule."""
+    published = _need_published(tags)
+    if published[0] != "ok":
+        return published
     s, v = _one(tags, "sp")
     if s == "dup":
         return "unusable", "tag_duplicated"

@@ -531,7 +531,9 @@ def parse_spf(record: str) -> dict[str, Any] | None:
 
 def parse_dmarc(record: str) -> dict[str, Any] | None:
     text = record.strip()
-    if "v=dmarc1" not in text.lower():
+    # RFC 7489 section 6.4: a record begins with the version tag, which may have whitespace around its "=" ("v = DMARC1");
+    # a v=DMARC1 later in the string does not make it a record.
+    if not _DMARC_RECORD_START.match(text):
         return None
     tags = _split_semicolon_tags(text)
     pct_raw = tags.get("pct")
