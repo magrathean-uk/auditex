@@ -227,9 +227,26 @@ def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[s
     return gate
 
 
+def evidence_sections(policy_id: str, sections: list[str]) -> list[str]:
+    """The sections a value-rule answer's evidence ids name, in id order (``e1`` is the first).
+
+    Bot review wave 2 (item 56): the case carries the policy's catalogued sections; a value rule may also read a
+    section added after the case was fixed (SS 7.x: built_in_protection_rules, review R003). From assessment schema
+    2026-11-22 those follow the case's own sections, so ``e1`` onwards keep their meaning. 2026-11-05 answers and
+    offline pack responses use the case's sections alone.
+    """
+    from .value_rules import _late_sections
+    from .value_rules.catalogue import row_for
+
+    row = row_for(policy_id)
+    late = _late_sections().get(row["kind"], frozenset()) if row is not None else frozenset()
+    return [*sections, *(name for name in (row["sections"] if row is not None else ())
+                         if name in late and name not in sections)]
+
+
 def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], sections: list[str], *,
                       named_limitations: bool = True, legacy: bool | None = None,
-                      verdict: str | None = None) -> dict[str, Any]:
+                      verdict: str | None = None, late_evidence: bool = False) -> dict[str, Any]:
     """Render the pack verdict; serving also names each unavailable input.
 
     An empty required list is the oracle's not-met shape: confirmed false citing
@@ -268,7 +285,8 @@ def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], secti
                   "cited_sections": detail["section"] if verdict == "not_assessed" else None}
         # The unnamed form is offline pack scoring; retain its original vocabulary.
         legacy = not named_limitations if legacy is None else legacy
-        response = as_pack_response(record, policy_item["criticality"], sections, legacy=legacy)
+        order = evidence_sections(policy_item["policy_id"], sections) if late_evidence else sections
+        response = as_pack_response(record, policy_item["criticality"], order, legacy=legacy)
         if verdict == "not_assessed" and named_limitations and not shared:
             kind = None if legacy else evidence_kind(detail["reason_code"])
             response["limitations"] += [(f"evidence_unusable:{name}:{kind}" if kind else

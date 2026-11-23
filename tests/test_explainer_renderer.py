@@ -455,5 +455,6 @@ def test_all_source_self_test_planted_controls_on_every_applicable_case():
     # 28,964 over the fixture-built template (1,771 catalogue texts); the product catalogue's closed text sets also hold
     # every reachable subset text (2,209 texts), which adds 6,036 applicable mutants. Review R003 adds 1,806: SS 7.1 to
     # 7.3 read built_in_protection_rules (32 more missing-section texts and one not-a-list text and variant each) and
-    # trade no_rules_configured for the three Built-In cells.
-    assert sum(applied.values()) == 36806
+    # trade no_rules_configured for the three Built-In cells. Bot review wave 2 adds 420: the unknown-order Safe Links
+    # rule text (item 59) and the preset and combined partial_tier_may_cover texts and citations (item 50).
+    assert sum(applied.values()) == 37226

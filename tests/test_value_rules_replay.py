@@ -80,7 +80,7 @@ def _lines(path: Path):
 
 
 # ---- Review lane rules-followup: product answers that depart from the frozen v3.9.1 kit ----
-# The shipped fixtures (s4, s7 and this sample) carry these rows relabelled; the full kit keeps the spec's labels, so
+# The shipped fixtures (s4, s7 and this sample) carry these rows relabelled (bot review wave 2 adds W59 in s4); the full kit keeps the spec's labels, so
 # every full-kit replay maps them through ``review_relabel`` (a documented class, like D29 and A2 above).
 REVIEW_BI_POLICIES = frozenset(f"MS.SECURITYSUITE.7.{n}v1" for n in (1, 2, 3))
 REVIEW_R027_POLICIES = frozenset({"MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2",
@@ -89,6 +89,8 @@ REVIEW_BI_ROW = {"ExceptIfRecipientDomainIs": None, "ExceptIfSentTo": None, "Exc
                  "Identity": "ATP Built-In Protection Rule", "RecipientDomainIs": None, "SentTo": None, "SentToMemberOf": None}
 REVIEW_R099_CELLS = frozenset({"policy_flags_ok", "policy_flag_off", "policy_flag_unusable", "policy_not_in_export",
                                "policy_duplicated"})
+REVIEW_W59_TEXT = ("Data unusable: a partly scoped Safe Links rule whose policy turns off a flag the policy reads has no "
+                   "numeric Priority, so it may apply before the covering rule; the policy was not assessed.")
 REVIEW_D24 = ("expected: D24 Safe Links resolution cannot be established from the export (domain-scoped or excepted "
               "rule, tie, unexported or duplicated policy, null flag)")
 
@@ -100,8 +102,10 @@ def review_relabel(vector: dict) -> tuple[dict, str | None, int]:
     R003: SS 7.x rows read built_in_protection_rules; a row without it gains a Built-In rule that excludes no one (what
     every v3.9.1 vector assumed), and its pack gold, which predates the section, is not compared (as licensed twins).
     R099: a no_rules_configured label follows the Built-In policy. R100: a met label where a partly scoped rule with an
-    unreadable policy applies first is not assessed. R027: union_possible where every policy excludes the same role is
-    no_policy_meets. Any other difference is left for the caller's own assertion to name."""
+    unreadable policy applies first is not assessed. W59 (bot review wave 2, item 59): a met label where a partly scoped
+    rule of unknown Priority has a policy flag off is not assessed, since that rule may apply first. R027:
+    union_possible where every policy excludes the same role is no_policy_meets. Any other difference is left for the
+    caller's own assertion to name."""
     policy = vector["policy"]
     if policy not in REVIEW_BI_POLICIES and not (policy in REVIEW_R027_POLICIES
                                                  and vector.get("rule_cell") == "union_possible"):
@@ -120,6 +124,9 @@ def review_relabel(vector: dict) -> tuple[dict, str | None, int]:
     elif (policy in REVIEW_BI_POLICIES and v["rule_cell"] == "policy_flags_ok" and record["verdict"] == "not_assessed"
           and record["detail"].get("partial_scope")):
         label = "R100"
+    elif (policy in REVIEW_BI_POLICIES and v["rule_cell"] == "policy_flags_ok" and record["cell"] == "rule_unusable"
+          and record["reason_text"] == REVIEW_W59_TEXT):
+        label = "W59"
     elif policy in REVIEW_R027_POLICIES and v["rule_cell"] == "union_possible" and record["cell"] == "no_policy_meets":
         label = "R027"
     else:

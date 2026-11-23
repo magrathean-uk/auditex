@@ -20,8 +20,7 @@ RAW = json.loads(RESOURCE.read_text(encoding="utf-8"))
 # The spec's byte-exact v3.9.1 cell catalogue is the independent pin (stored compressed, shared with the renderer tests).
 # Review lane rules-followup adds its documented SS 7.x Built-In deviation (explainer_checks/review_overlay.py).
 CATALOGUE = review_catalogue(
-    json.loads(gzip.decompress((ROOT / "tests/fixtures/explainer/renderer/catalogue-v391-fixture.json.gz").read_bytes())),
-    json.loads((ROOT / "configs/scuba-value-rules.json").read_text()))
+    json.loads(gzip.decompress((ROOT / "tests/fixtures/explainer/renderer/catalogue-v391-fixture.json.gz").read_bytes())))
 RECONCILIATION = json.loads(gzip.decompress((FIXTURES / "reconciliation.json.gz").read_bytes()))
 
 

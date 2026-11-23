@@ -16702,6 +16702,7 @@
           ],
           "reason_code": "data_unusable_builtin_rule",
           "reason_texts": [
+            "Data unusable: built_in_protection_rules holds more than one rule; the policy was not assessed.",
             "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."
           ],
           "recommendations": [
@@ -16780,6 +16781,23 @@
             "built_in_protection_rules",
             "safe_links_rules"
           ],
+          "cited_variants": [
+            [
+              "atp_policy_rules",
+              "built_in_protection_rules",
+              "protection_policy_rules"
+            ],
+            [
+              "atp_policy_rules",
+              "built_in_protection_rules",
+              "protection_policy_rules",
+              "safe_links_rules"
+            ],
+            [
+              "built_in_protection_rules",
+              "safe_links_rules"
+            ]
+          ],
           "evidence_kind": "undecidable",
           "limitations": [
             "evidence_unusable",
@@ -16787,7 +16805,9 @@
           ],
           "reason_code": "data_unusable_partial_tier_may_cover",
           "reason_texts": [
-            "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule exists that may cover the excluded recipients; the policy was not assessed."
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule exists that may cover the excluded recipients; the policy was not assessed.",
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped Standard or Strict preset security policy exists that may cover the excluded recipients; the policy was not assessed.",
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped preset security policy and Safe Links rule exist that may cover the excluded recipients; the policy was not assessed."
           ],
           "recommendations": [
             "review_policy_against_baseline_text"
@@ -16948,6 +16968,7 @@
           "reason_code": "data_unusable_safe_links_rule",
           "reason_texts": [
             "Data unusable: a covering Safe Links rule has no numeric Priority or no policy name; the policy was not assessed.",
+            "Data unusable: a partly scoped Safe Links rule whose policy turns off a flag the policy reads has no numeric Priority, so it may apply before the covering rule; the policy was not assessed.",
             "Data unusable: an enabled Safe Links rule has an unreadable recipient scope; the policy was not assessed."
           ],
           "recommendations": [
@@ -17116,6 +17137,7 @@
           ],
           "reason_code": "data_unusable_builtin_rule",
           "reason_texts": [
+            "Data unusable: built_in_protection_rules holds more than one rule; the policy was not assessed.",
             "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."
           ],
           "recommendations": [
@@ -17194,6 +17216,23 @@
             "built_in_protection_rules",
             "safe_links_rules"
           ],
+          "cited_variants": [
+            [
+              "atp_policy_rules",
+              "built_in_protection_rules",
+              "protection_policy_rules"
+            ],
+            [
+              "atp_policy_rules",
+              "built_in_protection_rules",
+              "protection_policy_rules",
+              "safe_links_rules"
+            ],
+            [
+              "built_in_protection_rules",
+              "safe_links_rules"
+            ]
+          ],
           "evidence_kind": "undecidable",
           "limitations": [
             "evidence_unusable",
@@ -17201,7 +17240,9 @@
           ],
           "reason_code": "data_unusable_partial_tier_may_cover",
           "reason_texts": [
-            "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule exists that may cover the excluded recipients; the policy was not assessed."
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule exists that may cover the excluded recipients; the policy was not assessed.",
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped Standard or Strict preset security policy exists that may cover the excluded recipients; the policy was not assessed.",
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped preset security policy and Safe Links rule exist that may cover the excluded recipients; the policy was not assessed."
           ],
           "recommendations": [
             "review_policy_against_baseline_text"
@@ -17362,6 +17403,7 @@
           "reason_code": "data_unusable_safe_links_rule",
           "reason_texts": [
             "Data unusable: a covering Safe Links rule has no numeric Priority or no policy name; the policy was not assessed.",
+            "Data unusable: a partly scoped Safe Links rule whose policy turns off a flag the policy reads has no numeric Priority, so it may apply before the covering rule; the policy was not assessed.",
             "Data unusable: an enabled Safe Links rule has an unreadable recipient scope; the policy was not assessed."
           ],
           "recommendations": [
@@ -17528,6 +17570,7 @@
           ],
           "reason_code": "data_unusable_builtin_rule",
           "reason_texts": [
+            "Data unusable: built_in_protection_rules holds more than one rule; the policy was not assessed.",
             "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."
           ],
           "recommendations": [
@@ -17606,6 +17649,23 @@
             "built_in_protection_rules",
             "safe_links_rules"
           ],
+          "cited_variants": [
+            [
+              "atp_policy_rules",
+              "built_in_protection_rules",
+              "protection_policy_rules"
+            ],
+            [
+              "atp_policy_rules",
+              "built_in_protection_rules",
+              "protection_policy_rules",
+              "safe_links_rules"
+            ],
+            [
+              "built_in_protection_rules",
+              "safe_links_rules"
+            ]
+          ],
           "evidence_kind": "undecidable",
           "limitations": [
             "evidence_unusable",
@@ -17613,7 +17673,9 @@
           ],
           "reason_code": "data_unusable_partial_tier_may_cover",
           "reason_texts": [
-            "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule exists that may cover the excluded recipients; the policy was not assessed."
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule exists that may cover the excluded recipients; the policy was not assessed.",
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped Standard or Strict preset security policy exists that may cover the excluded recipients; the policy was not assessed.",
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped preset security policy and Safe Links rule exist that may cover the excluded recipients; the policy was not assessed."
           ],
           "recommendations": [
             "review_policy_against_baseline_text"
@@ -17774,6 +17836,7 @@
           "reason_code": "data_unusable_safe_links_rule",
           "reason_texts": [
             "Data unusable: a covering Safe Links rule has no numeric Priority or no policy name; the policy was not assessed.",
+            "Data unusable: a partly scoped Safe Links rule whose policy turns off a flag the policy reads has no numeric Priority, so it may apply before the covering rule; the policy was not assessed.",
             "Data unusable: an enabled Safe Links rule has an unreadable recipient scope; the policy was not assessed."
           ],
           "recommendations": [

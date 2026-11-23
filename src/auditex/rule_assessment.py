@@ -171,8 +171,9 @@ def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
                                  empty_lists=empty_lists, value_rules=False)
     if detail is None:
         return None
+    # Item 56: the assessment answer names a late rule section by its own evidence id; the pack form keeps the case's.
     record = {**precheck_response(detail, case["evidence"][0]["observed"], sections,
-                                  named_limitations=named_limitations),
+                                  named_limitations=named_limitations, late_evidence=named_limitations),
               "policy_id": case["policy_id"], "rule_precheck": detail,
               "validation_status": "valid", "reason": "rule_precheck", "latency_ms": 0,
               "attempts": 0, "prompt_sha256": None, "response_sha256": None,
