@@ -208,7 +208,6 @@ def test_deadline_holds_while_the_request_blocks_before_headers():
     assert _wait_closed(late), "a response that arrives after the deadline is closed by the fetch thread"
 
 
-
 def test_deadline_ends_a_real_endless_chunked_trailer():
     """A real socket and the real requests/urllib3 stack: the trailer never ends, so one read1 never returns."""
     import socket as socket_module
@@ -242,3 +241,32 @@ def test_deadline_ends_a_real_endless_chunked_trailer():
         assert disconnected.wait(5.0), "the abandoned fetch drops the connection instead of reading trailers forever"
     finally:
         server.close()
+
+
+# ---- Anti-phish: an enabled rule with no readable policy link shadows the Default ----
+
+ACCEPTED = [{"DomainName": "contoso.example"}]
+SCOPE_ALL = {key: None for key in ("SentTo", "SentToMemberOf", "RecipientDomainIs")} | {
+    "ExceptIfSentTo": [], "ExceptIfSentToMemberOf": [], "ExceptIfRecipientDomainIs": []}
+PHISH_DEFAULT = {"Identity": "Office365 AntiPhish Default", "Name": "Office365 AntiPhish Default", "IsDefault": True,
+                 "Enabled": True, "EnableOrganizationDomainsProtection": True, "TargetedDomainProtectionAction": "Quarantine"}
+
+
+def _phish(policies, rules):
+    return {"accepted_domains": ACCEPTED, "anti_phish_policies": list(policies), "anti_phish_rules": list(rules),
+            "atp_policy_rules": [], "defender_license": True, "protection_policy_rules": []}
+
+
+@pytest.mark.parametrize("link", [None, "absent", 7])
+def test_enabled_rule_with_unreadable_policy_link_withholds_the_default(link):
+    rule = {"Identity": "Unknown rule", "State": "Enabled", **SCOPE_ALL}
+    if link != "absent":
+        rule["AntiPhishPolicy"] = link
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT], [rule]))
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "qualifier_shadowed")
+
+
+def test_disabled_rule_with_unreadable_policy_link_changes_nothing():
+    rule = {"Identity": "Unknown rule", "State": "Disabled", "AntiPhishPolicy": None, **SCOPE_ALL}
+    record = assess("MS.SECURITYSUITE.2.2v1", _phish([PHISH_DEFAULT], [rule]))
+    assert (record["verdict"], record["cell"]) == ("met", "default_qualifies")
