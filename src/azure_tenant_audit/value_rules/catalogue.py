@@ -12,10 +12,11 @@ from azure_tenant_audit.resources import open_text_resource
 _ID = r"[a-z][a-z0-9_.]{0,63}"
 
 # A1.3 and A2: the exact variable-citation contract, 64 cells with two or more variants plus the three SS 7.x reference
-# orders (67 cells, 196 lists; review R003 adds built_in_protection_rules to the SS 7.x not-a-list variants). The
-# digest covers every cited_variants list of the catalogue, keyed "policy:cell", so a dropped, added or reordered
-# variant is refused, not just an unsound one.
-_VARIANT_CONTRACT_SHA256 = "23364537a797676bf43fbc60113b76919ae157c92793ff86964f515917b54009"
+# orders, plus the three SS 7.x partial_tier_may_cover cells (70 cells, 205 lists; review R003 adds
+# built_in_protection_rules to the SS 7.x not-a-list variants; bot review wave 2, item 50, cites the preset sections
+# when a preset may cover the Built-In exclusions). The digest covers every cited_variants list of the catalogue, keyed
+# "policy:cell", so a dropped, added or reordered variant is refused, not just an unsound one.
+_VARIANT_CONTRACT_SHA256 = "84c360979d357843ad8ff7e67a9c57334f27ef4ce432815f259164d1a4a5a7a3"
 
 # A1 preserves these three reference citation lists in their specified order.
 _ORDER_EXCEPTIONS = {(f"MS.SECURITYSUITE.7.{n}v1", "preset_rule_unusable") for n in (1, 2, 3)}

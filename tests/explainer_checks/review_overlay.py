@@ -6,6 +6,9 @@ compare it with ``review_catalogue(pin)``.
 
 Every value the overlay adds is written out here, never read from the shipped catalogue, so a changed shipped cell
 disagrees with the reviewed pin instead of being copied into it (bot review wave 2, item 62).
+
+Bot review wave 2 also adds the preset and combined partial_tier_may_cover answers (item 50) and the unknown-order
+rule_unusable text (item 59) to SS 7.1 to 7.3.
 """
 from __future__ import annotations
 
@@ -44,11 +47,26 @@ def r003_added_cells(policy_id: str) -> dict:
                              f"rule or preset covers them, so they get no Safe Links policy ({what})."],
             "verdict": "not_met"},
         "partial_tier_may_cover": {
-            "cited": [R003_SECTION, "safe_links_rules"], "reason_code": "data_unusable_partial_tier_may_cover",
+            "cited": [R003_SECTION, "safe_links_rules"],
+            "cited_variants": [["atp_policy_rules", R003_SECTION, "protection_policy_rules"],
+                               ["atp_policy_rules", R003_SECTION, "protection_policy_rules", "safe_links_rules"],
+                               [R003_SECTION, "safe_links_rules"]],
+            "reason_code": "data_unusable_partial_tier_may_cover",
             "reason_texts": ["Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links "
-                             "rule exists that may cover the excluded recipients; the policy was not assessed."],
+                             "rule exists that may cover the excluded recipients; the policy was not assessed.",
+                             "Data unusable: the built-in protection rule has exclusions and a partly scoped Standard or "
+                             "Strict preset security policy exists that may cover the excluded recipients; the policy was "
+                             "not assessed.",
+                             "Data unusable: the built-in protection rule has exclusions and a partly scoped preset "
+                             "security policy and Safe Links rule exist that may cover the excluded recipients; the policy "
+                             "was not assessed."],
             **_unusable("undecidable", "review_policy_against_baseline_text")},
     }
+
+
+# Bot review wave 2 (item 59): a non-compliant partial rule of unknown Priority leaves the rule order undecided.
+UNKNOWN_ORDER_TEXT = ("Data unusable: a partly scoped Safe Links rule whose policy turns off a flag the policy reads has "
+                      "no numeric Priority, so it may apply before the covering rule; the policy was not assessed.")
 
 
 def review_catalogue(pin: dict) -> dict:
@@ -62,6 +80,8 @@ def review_catalogue(pin: dict) -> dict:
         for cell in R003_RETIRED:
             del row["cells"][cell]
         row["cells"].update(r003_added_cells(pid))
+        rule_unusable = row["cells"]["rule_unusable"]
+        rule_unusable["reason_texts"] = sorted([*rule_unusable["reason_texts"], UNKNOWN_ORDER_TEXT])
         for cell in row["cells"].values():
             if cell.get("cited") == old:
                 cell["cited"] = list(row["sections"])

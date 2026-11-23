@@ -268,3 +268,149 @@ def test_item66_built_in_fallback_needs_exactly_one_readable_rule(policy_id, bui
 @pytest.mark.parametrize("policy_id", SL_POLICIES)
 def test_item66_one_unrestricted_built_in_rule_still_passes(policy_id):
     assert _answer(policy_id, _safelinks([], [SL_BUILTIN], [BI_ROW])) == ("met", "policy_flags_ok")
+
+
+STANDARD = "Standard Preset Security Policy1700000000000"
+OFF = {flag: False for flag in SL_FLAGS}
+
+
+def _to(*names):
+    return {**SCOPE_ALL, "SentTo": list(names)}
+
+
+def _with_preset(sections, eop_scope, atp_scope, state="Enabled"):
+    """A Standard preset whose EOP part (protection_policy_rules) and Defender part (atp_policy_rules) have the scopes
+    given; None leaves that part out."""
+    if eop_scope is not None:
+        sections["protection_policy_rules"] = [{"Identity": STANDARD, "State": state, **eop_scope}]
+    if atp_scope is not None:
+        sections["atp_policy_rules"] = [{"Identity": STANDARD, "State": state, **atp_scope}]
+    return sections
+
+
+# Item 58: presets apply before every custom rule, so a custom rule both enabled parts of one preset tier cover never applies.
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item58_orphan_rule_inside_an_enabled_preset_scope_never_applies(policy_id):
+    rules = [_sl_rule("orphan", GROUP_ONLY, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    policies = [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}]
+    sections = _with_preset(_safelinks(rules, policies, BI_ALL), GROUP_ONLY, GROUP_ONLY)
+    assert _answer(policy_id, sections) == ("met", "policy_flags_ok")
+    # A flag-off rule inside the preset scope is superseded the same way.
+    rules = [_sl_rule("off", GROUP_ONLY, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    sections = _with_preset(_safelinks(rules, [*policies, {"Identity": "off", **OFF}], BI_ALL), GROUP_ONLY, GROUP_ONLY)
+    assert _answer(policy_id, sections) == ("met", "policy_flags_ok")
+
+
+@pytest.mark.parametrize("eop, atp, state", [
+    pytest.param(GROUP_ONLY, None, "Enabled", id="eop-part-only"),
+    pytest.param(None, GROUP_ONLY, "Enabled", id="atp-part-only"),
+    pytest.param(GROUP_ONLY, GROUP_ONLY, "Disabled", id="disabled"),
+    pytest.param(GROUP_ONLY, OTHER_GROUP, "Enabled", id="parts-for-other-recipients"),
+    pytest.param(_to("alice"), _to("alice"), "Enabled", id="preset-for-other-recipients"),
+])
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item58_orphan_rule_outside_a_complete_preset_scope_stays_unjudged(policy_id, eop, atp, state):
+    rules = [_sl_rule("orphan", GROUP_ONLY, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    policies = [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}]
+    sections = _with_preset(_safelinks(rules, policies, BI_ALL), eop, atp, state)
+    assert _answer(policy_id, sections) == ("not_assessed", "policy_not_in_export")
+
+
+# Item 59: a non-compliant partial rule of unknown Priority may apply before the covering rule.
+
+UNKNOWN_ORDER = ("Data unusable: a partly scoped Safe Links rule whose policy turns off a flag the policy reads has no "
+                 "numeric Priority, so it may apply before the covering rule; the policy was not assessed.")
+
+
+@pytest.mark.parametrize("priority", [None, "1", True])
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item59_flag_off_partial_rule_of_unknown_priority_leaves_the_order_unknown(policy_id, priority):
+    rules = [_sl_rule("cover", SCOPE_ALL, priority=5), _sl_rule("off", GROUP_ONLY, priority=priority)]
+    policies = [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}, {"Identity": "off", **OFF}]
+    assert _reason(policy_id, _safelinks(rules, policies, BI_ALL)) == (
+        "not_assessed", "rule_unusable", UNKNOWN_ORDER, ["safe_links_rules"])
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item59_known_priority_and_compliant_policies_keep_their_verdicts(policy_id):
+    base = [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}, {"Identity": "off", **OFF}]
+    for priority, answer in ((0, ("not_met", "partial_rule_noncompliant")), (6, ("met", "policy_flags_ok"))):
+        rules = [_sl_rule("cover", SCOPE_ALL, priority=5), _sl_rule("off", GROUP_ONLY, priority=priority)]
+        assert _answer(policy_id, _safelinks(rules, base, BI_ALL)) == answer
+    # The covering policy decides not_met whatever the order.
+    rules = [_sl_rule("cover", SCOPE_ALL, priority=5), _sl_rule("off", GROUP_ONLY, priority=None)]
+    policies = [SL_BUILTIN, {"Identity": "cover", **OFF}, {"Identity": "off", **OFF}]
+    assert _answer(policy_id, _safelinks(rules, policies, BI_ALL)) == ("not_met", "policy_flag_off")
+    # Inside an enabled preset scope the rule never applies (item 58).
+    rules = [_sl_rule("cover", SCOPE_ALL, priority=5), _sl_rule("off", GROUP_ONLY, priority=None)]
+    sections = _with_preset(_safelinks(rules, base, BI_ALL), GROUP_ONLY, GROUP_ONLY)
+    assert _answer(policy_id, sections) == ("met", "policy_flags_ok")
+
+
+# Item 60: many partial rules with the same two scope conditions, listed latest first, stay linear.
+
+def test_item60_identical_two_condition_scopes_in_descending_order_stay_fast():
+    import time
+    n = 30000
+    scope = {**SCOPE_ALL, "SentTo": ["alice"], "SentToMemberOf": ["team"]}
+    rules = [_sl_rule("cover", SCOPE_ALL, priority=n + 1)]
+    rules += [_sl_rule(f"p{i}", scope, priority=i) for i in range(n, 0, -1)]
+    policies = [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}, {"Identity": "p1", **SL_FLAGS}]
+    start = time.perf_counter()
+    answer = _answer("MS.SECURITYSUITE.7.2v1", _safelinks(rules, policies, BI_ALL))
+    assert time.perf_counter() - start < 3.0          # each lookup walked every later rule: about 9 s before the fix
+    assert answer == ("met", "policy_flags_ok")
+
+
+# Item 61: each Built-In exclusion is judged on its own; one no earlier rule may cover is definitely uncovered.
+
+BI_EXCLUDES_BOB_CAROL = [{**BI_ROW, "ExceptIfSentTo": ["bob", "Carol"]}]
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item61_an_exclusion_no_rule_may_cover_is_not_met(policy_id):
+    rules = [_sl_rule("bob", _to("BOB"), priority=0)]
+    policies = [SL_BUILTIN, {"Identity": "bob", **SL_FLAGS}]
+    assert _answer(policy_id, _safelinks(rules, policies, BI_EXCLUDES_BOB_CAROL)) == ("not_met", "no_policy_covers_all")
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item61_every_exclusion_possibly_covered_stays_undecided(policy_id):
+    rules = [_sl_rule("bob", _to("bob"), priority=0), _sl_rule("carol", _to("carol"), priority=1)]
+    policies = [SL_BUILTIN, {"Identity": "bob", **SL_FLAGS}, {"Identity": "carol", **SL_FLAGS}]
+    assert _answer(policy_id, _safelinks(rules, policies, BI_EXCLUDES_BOB_CAROL)) == ("not_assessed", "partial_tier_may_cover")
+    group = [_sl_rule("team", GROUP_ONLY, priority=0)]                    # a group may hold either recipient
+    policies = [SL_BUILTIN, {"Identity": "team", **SL_FLAGS}]
+    assert _answer(policy_id, _safelinks(group, policies, BI_EXCLUDES_BOB_CAROL)) == ("not_assessed", "partial_tier_may_cover")
+
+
+# Item 50: the undecidable Built-In answer names what may cover the excluded recipients and cites its sections.
+
+MAY_CUSTOM = ("Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule exists that "
+              "may cover the excluded recipients; the policy was not assessed.")
+MAY_PRESET = ("Data unusable: the built-in protection rule has exclusions and a partly scoped Standard or Strict preset "
+              "security policy exists that may cover the excluded recipients; the policy was not assessed.")
+MAY_BOTH = ("Data unusable: the built-in protection rule has exclusions and a partly scoped preset security policy and "
+            "Safe Links rule exist that may cover the excluded recipients; the policy was not assessed.")
+BI_EXCLUDES_GROUP_MEMBER = [{**BI_ROW, "ExceptIfSentTo": ["member"]}]
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item50_preset_driven_uncertainty_names_and_cites_the_preset(policy_id):
+    preset_only = _with_preset(_safelinks([], [SL_BUILTIN], BI_EXCLUDES_GROUP_MEMBER), GROUP_ONLY, GROUP_ONLY)
+    assert _reason(policy_id, preset_only) == (
+        "not_assessed", "partial_tier_may_cover", MAY_PRESET,
+        ["atp_policy_rules", BI, "protection_policy_rules"])
+    policies = [SL_BUILTIN, {"Identity": "team", **SL_FLAGS}]
+    both = _with_preset(_safelinks([_sl_rule("team", GROUP_ONLY)], policies, BI_EXCLUDES_GROUP_MEMBER), GROUP_ONLY, GROUP_ONLY)
+    assert _reason(policy_id, both) == (
+        "not_assessed", "partial_tier_may_cover", MAY_BOTH,
+        ["atp_policy_rules", BI, "protection_policy_rules", "safe_links_rules"])
+    custom_only = _safelinks([_sl_rule("team", GROUP_ONLY)], policies, BI_EXCLUDES_GROUP_MEMBER)
+    assert _reason(policy_id, custom_only) == (
+        "not_assessed", "partial_tier_may_cover", MAY_CUSTOM, [BI, "safe_links_rules"])
+    # A custom rule that provably names none of the excluded recipients does not drive the uncertainty.
+    policies = [SL_BUILTIN, {"Identity": "alice", **SL_FLAGS}]
+    other = _with_preset(_safelinks([_sl_rule("alice", _to("alice"))], policies, BI_EXCLUDES_GROUP_MEMBER), GROUP_ONLY, GROUP_ONLY)
+    assert _reason(policy_id, other)[2:] == (MAY_PRESET, ["atp_policy_rules", BI, "protection_policy_rules"])

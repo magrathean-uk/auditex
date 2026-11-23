@@ -139,7 +139,15 @@ def _safelinks_core(policy_id, sp, sections, trace):
         if isinstance(e, dict) and type(e.get("Identity")) is str:
             by_identity.setdefault(e["Identity"], []).append(e)
     partial_unread = None
-    shadow = _Shadows(partial)
+    # Bot review wave 2 (item 59): a non-compliant partial rule of unknown Priority may apply before the covering rule.
+    order_unknown = False
+    shadow, preset = _Shadows(partial), _preset_scopes(sections)
+
+    def covered(rule):
+        # Item 58: preset policies apply before every custom rule, so a rule both enabled parts of one preset tier
+        # cover never applies.
+        return preset(rule) or shadow(rule)
+
     for r in partial:
         pr = r.get("Priority")
         name = r.get("SafeLinksPolicy")
@@ -148,17 +156,23 @@ def _safelinks_core(policy_id, sp, sections, trace):
         off = len(pp) == 1 and any(pp[0].get(f) is False for f in sp["flags"])
         readable = off or (len(pp) == 1 and all(type(pp[0].get(f)) is bool for f in sp["flags"]))
         if cand and not (_is_num(pr) and pr < low_cov):
-            # After the covering rule this rule never applies. One of unknown Priority may apply first: a readable policy
-            # decides nothing there (v3.6), but an unreadable one leaves its recipients unjudged (R100 repair).
-            if _is_num(pr) or readable or partial_unread is not None:
+            # After the covering rule this rule never applies. One of unknown Priority may apply first: a compliant
+            # policy decides nothing there (v3.6), a non-compliant one leaves the order deciding (item 59) and an
+            # unreadable one leaves its recipients unjudged (R100 repair).
+            if _is_num(pr) or covered(r):
+                continue
+            if off:
+                order_unknown = True
+                continue
+            if readable or partial_unread is not None:
                 continue
         elif readable:
-            if off and not shadow(r):
+            if off and not covered(r):
                 return _rec(policy_id, "not_met", "partial_scope_policy_flag_off",
                             f"Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable {sp['what']}, so those recipients get a non-compliant policy.",
                             "partial_rule_noncompliant", None, div="D98")
             continue
-        elif partial_unread is not None or shadow(r):
+        elif partial_unread is not None or covered(r):
             continue
         # Review R100: a partial rule that may apply first gives its recipients its policy; when that policy is missing,
         # duplicated or lacks a boolean flag, those recipients are unjudged (as data_unusable_partial_tier in SS 1.x).
@@ -200,6 +214,10 @@ def _safelinks_core(policy_id, sp, sections, trace):
     if partial_unread == "flag":
         return _A(policy_id, ITEM_VALUE, "Data unusable: the applied Safe Links policy lacks a boolean value for a flag the policy reads; the policy was not assessed.",
                   "policy_flag_unusable", ["safe_links_policies"], partial_scope=True)
+    if order_unknown:
+        return _A(policy_id, "data_unusable_safe_links_rule",
+                  "Data unusable: a partly scoped Safe Links rule whose policy turns off a flag the policy reads has no numeric "
+                  "Priority, so it may apply before the covering rule; the policy was not assessed.", "rule_unusable", ["safe_links_rules"])
     return _rec(policy_id, "met", "applied_policy_flags_on", f"Requirement met: the applied Safe Links policy enables {sp['what']}.", "policy_flags_ok", None,
                 applied="built_in" if applied == BUILTIN else "custom")
 
@@ -232,7 +250,9 @@ class _Shadows:
     AND or OR: one earlier rule sets the same condition kinds, its values include the later one's, and its exceptions
     are none or the same. When the later rule sets one condition kind, several earlier rules that set only that kind
     (exceptions none or the same) may share its values between them (repair round 2). Built on first use and indexed by
-    value, so a call scans only the rules that share the later rule's rarest value."""
+    value, so a call scans only the rules that share the later rule's rarest value. Each posting is kept in Priority order and
+    a scan stops at the first rule that is not earlier, so rules with the same scope cost one step each, in whatever
+    order they are listed (bot review wave 2, item 60)."""
 
     def __init__(self, partial):
         self._partial = partial
@@ -253,6 +273,8 @@ class _Shadows:
                     if len(inc) == 1:
                         key = (k, exc, value)
                         self._first[key] = min(pr, self._first.get(key, pr))
+        for posting in self._postings.values():
+            posting.sort(key=lambda entry: entry[0])
 
     def __call__(self, rule):
         pr, sc = rule.get("Priority"), _scope(rule)
@@ -270,9 +292,52 @@ class _Shadows:
         for shape in {(keys, ()), (keys, exc)}:
             lists = [self._postings.get((shape, k, value), ()) for k, values in inc for value in values]
             for earlier_pr, theirs in min(lists, key=len):
-                if earlier_pr < pr and all(mine[k] <= theirs[k] for k in keys):
+                if earlier_pr >= pr:
+                    break
+                if all(mine[k] <= theirs[k] for k in keys):
                     return True
         return False
+
+
+def _covers_scope(earlier, later):
+    """True when a rule scoped ``earlier`` applies to every recipient a rule scoped ``later`` names (both from
+    ``_scope``), under AND or OR joins: no include condition, or the same condition kinds with values that include the
+    later rule's; and exceptions none or the same."""
+    (inc, exc), (their_inc, their_exc) = later, earlier
+    if their_exc and their_exc != exc:
+        return False
+    if not their_inc:
+        return True
+    theirs = dict(their_inc)
+    return set(theirs) == {k for k, _ in inc} and all(values <= theirs[k] for k, values in inc)
+
+
+def _preset_scopes(sections):
+    """Bot review wave 2 (item 58): ``covered(rule)`` is True when, for one preset tier, an enabled EOP rule
+    (protection_policy_rules) and an enabled Defender rule (atp_policy_rules) both apply to every recipient ``rule``
+    names. Presets apply before every custom policy, so those recipients never get ``rule``'s policy."""
+    tiers = {}
+    for name, part in (("protection_policy_rules", 0), ("atp_policy_rules", 1)):
+        for r in sections[name]:
+            if not isinstance(r, dict) or type(r.get("Identity")) is not str or r.get("State") != "Enabled":
+                continue
+            sc = _scope(r)
+            if sc is None:
+                continue
+            for tier, rx in zip(("Strict", "Standard"), PRESET_RE, strict=False):
+                if rx.search(r["Identity"]):
+                    tiers.setdefault(tier, ([], []))[part].append(sc)
+
+    def covered(rule):
+        if not tiers:
+            return False
+        sc = _scope(rule)
+        if sc is None or not sc[0]:
+            return False
+        return any(all(any(_covers_scope(earlier, sc) for earlier in scopes) for scopes in parts)
+                   for parts in tiers.values())
+
+    return covered
 
 
 def _excluded_recipients(rules):
@@ -288,12 +353,12 @@ def _excluded_recipients(rules):
 
 
 def _may_cover(rule, excluded):
-    """False only when a partly scoped rule provably names none of the excluded recipients: it is scoped by SentTo
-    alone (under AND or OR joins) and none of its values is one of them."""
+    """The excluded recipients a partly scoped rule may cover: all of them unless it is scoped by SentTo alone (under
+    AND or OR joins), then those among its values. None when the excluded recipients are unknown (they all may be)."""
     sc = _scope(rule) if excluded is not None else None
     if sc is None or [k for k, _ in sc[0]] != ["SentTo"]:
-        return True
-    return any(v.casefold() in excluded for v in sc[0][0][1])
+        return excluded
+    return excluded & {v.casefold() for v in sc[0][0][1]}
 
 
 def _builtin_state(rule):
@@ -325,9 +390,29 @@ def _builtin_exclusions(policy_id, sp, sections, partial, preset_partial=False):
         return _A(policy_id, "data_unusable_builtin_rule", f"Data unusable: {BI} holds no rule with readable exclusions; the policy was not assessed.",
                   "builtin_rule_unusable", [BI])
     excluded = _excluded_recipients(sections[BI])
-    if preset_partial or any(_may_cover(r, excluded) for r in partial):
-        return _A(policy_id, "data_unusable_partial_tier_may_cover", "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule "
-                  "exists that may cover the excluded recipients; the policy was not assessed.", "partial_tier_may_cover", [BI, "safe_links_rules"])
+    # Bot review wave 2 (item 61): each known exclusion is judged on its own; one that no earlier rule (or preset) may
+    # cover gets no Safe Links policy.
+    custom, reached = False, set()
+    for r in partial:
+        may = _may_cover(r, excluded)
+        if may is None or may:
+            custom = True
+            if may is None:
+                break
+            reached |= may
+    uncovered = excluded is not None and not preset_partial and reached != excluded
+    if not uncovered and (preset_partial or custom):
+        # Item 50: name and cite what may cover the excluded recipients.
+        if preset_partial and custom:
+            what, cited = "a partly scoped preset security policy and Safe Links rule exist", [
+                "atp_policy_rules", BI, "protection_policy_rules", "safe_links_rules"]
+        elif preset_partial:
+            what, cited = ("a partly scoped Standard or Strict preset security policy exists",
+                           ["atp_policy_rules", BI, "protection_policy_rules"])
+        else:
+            what, cited = "a partly scoped Safe Links rule exists", [BI, "safe_links_rules"]
+        return _A(policy_id, "data_unusable_partial_tier_may_cover", f"Data unusable: the built-in protection rule has exclusions and {what} "
+                  "that may cover the excluded recipients; the policy was not assessed.", "partial_tier_may_cover", cited)
     return _rec(policy_id, "not_met", "no_policy_covers_all_recipients",
                 f"Requirement not met: the Built-In Protection rule excludes some recipients and no Safe Links rule or preset covers them, so they get no Safe Links "
                 f"policy ({sp['what']}).", "no_policy_covers_all", None)
