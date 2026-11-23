@@ -957,13 +957,16 @@ def verify_answer(payload: Mapping[str, Any], digest: Mapping[str, Any]) -> dict
     """The stored answer re-checked against the run's digest: every stored selection checked and rendered again,
     every fixed text recomputed, the counts and the printed text rebuilt, and DEC-120 completeness. Returns the
     recomputed answer; LocalAnswerError when anything differs."""
+    model_record = payload.get("model") if isinstance(payload, Mapping) else None
+    if isinstance(model_record, Mapping) and "licence" not in model_record:
+        # L5: an answer saved before the licence was recorded with its model. The schema requires the licence, so
+        # check the rest of the record with a stand-in licence and ask for a rerun when only the licence is missing.
+        validate_answer(dict(payload, model=dict(model_record, licence="unrecorded")))
+        raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
     validate_answer(payload)
     if payload["run_id"] != digest.get("run_id"):
         raise LocalAnswerError("the local answer belongs to another run")
     if payload["digest_version"] != DIGEST_VERSION or payload["frames_version"] != frames()["version"]:
-        raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
-    if payload["model"] and "licence" not in payload["model"]:
-        # L5: an answer saved before the licence was recorded with its model.
         raise LocalAnswerError("the local answer was made by another Auditex version; run auditex explain again")
     model = MODELS.get(payload["model"]["choice"]) if payload["model"] else None
     if payload["model"] and (model is None or model.record() != payload["model"]):

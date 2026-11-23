@@ -286,6 +286,20 @@ def test_completeness_check_catches_a_dropped_moved_or_hidden_not_met_item(pinne
         assert la.completeness_problems(bad, d)
 
 
+def test_a_model_answer_without_its_licence_fails_the_schema_but_verify_still_asks_for_a_rerun(pinned):
+    d = digest()
+    answer = la.explain_digest(d, "qwen", backend_factory=lambda path: FakeBackend())
+    assert la.verify_answer(answer, d)["status"] == "model"
+    historical = dict(answer, model={k: v for k, v in answer["model"].items() if k != "licence"})
+    with pytest.raises(ValueError):                                     # the contract requires the licence (L5)
+        la.validate_answer(historical)
+    with pytest.raises(la.LocalAnswerError, match="run auditex explain again"):
+        la.verify_answer(historical, d)                                 # an answer saved before L5: rerun
+    damaged = dict(historical, model=dict(historical["model"], size=0))
+    with pytest.raises(ValueError) as caught:                           # not only the licence missing: schema error
+        la.verify_answer(damaged, d)
+    assert "run auditex explain again" not in str(caught.value)
+
 # -- runtime, download, verification -----------------------------------------------------------------------------------
 
 def test_without_the_runtime_every_item_shows_the_fixed_text_and_the_answer_says_what_to_install(monkeypatch):
