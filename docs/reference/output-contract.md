@@ -342,8 +342,11 @@ re-worded: `fail` to `gap_found`, `pass` to `no_gap_found`, `not_assessed` to `n
 kept; anything else, or a verdict on a rule not marked evaluated, is `not_evaluated` (`status_unreadable`). Rule
 reasons are mapped to a closed set of the codes the engine writes: a `code:detail` reason keeps its detail only for
 `registration_report_incomplete:<count>` and for `collector_not_complete:<collectors>` naming the rule's own
-collectors, otherwise the code alone; any other reason reads `reason_unrecognised`. Ids that are not id-shaped
-(ASCII letters, digits, `.`, `_`, `-`) are dropped.
+collectors, otherwise the code alone. The engine's counted reasons keep their count when the prefix and suffix are
+the engine's own (`os_lifecycle_unknown_for_<n>_devices` and the other device and Defender `*_for_<n>_devices`
+reasons, `<n>` one to nine ASCII digits), as do the Exchange `<source>_not_read_in_full` reasons for the Exchange
+sources; any other reason reads `reason_unrecognised`. Ids that are not id-shaped (ASCII letters, digits, `.`,
+`_`, `-`) are dropped.
 
 **Flags**, independent of the state and rolled up in `evidence_quality`: `missing` (a deciding rule not evaluated, or
 the state is `evidence_unknown`), `truncated` (a truncated list or section gap from the coverage rows or the
@@ -353,7 +356,9 @@ unavailable`), `stale` (evidence age over the catalogue's `stale_after_days`, 14
 as-of date is before the evidence date) and `conflicting` (a catalogue conflict holds: every policy rule
 `no_gap_found` and at least one state rule `gap_found`; a not-evaluated rule asserts no conflict). At run level
 `requirements_version_mismatch` is added when the section's `version` differs from the catalogue's, and bundle rows the
-catalogue lacks, and the section's own `uncatalogued_requirement_ids`, are listed in `unmapped_requirement_ids`. A
+catalogue lacks, and the section's own `uncatalogued_requirement_ids`, are listed in `unmapped_requirement_ids` when
+they have the requirement id shape (`ce.<theme>.<name>`, lower-case ASCII, at most 64 characters); any other entry
+or row id is dropped and counted in `dropped_requirement_id_count`, and a report adds a line for a non-zero count. A
 bundle without the section renders its requirements version and finding counts as "not established". `run` carries
 the run id, platform, evidence date, as-of date and age; it carries no tenant name.
 
@@ -366,8 +371,10 @@ Order: score descending, effort weight ascending, action id ascending. The weigh
 defaults, not scheme rules. `requirements` always has the 30 catalogue rows in catalogue order and `assessor_tests`
 the five CE+ tests, each `witness_status: assessor_witness_required`. A customer pack adds `ce-plus-practice.md` and
 `ce-plus-practice.json` (customer-pack profile, no as-of date) when the run's report pack carries the section; a pack
-directory reused for a run without the section loses an earlier run's copies of both files. `CONTRACT_VERSION` is unchanged: nothing in
-the bundle changes.
+directory reused for a run without the section loses an earlier run's copies of both files when the previous
+`pack-manifest.json` lists them as generated; a file of that name the previous manifest never listed is left in
+place, and `verify-pack` reports it as `unexpected_file`. `CONTRACT_VERSION` is unchanged: nothing in the bundle
+changes.
 
 ## Contract history
 

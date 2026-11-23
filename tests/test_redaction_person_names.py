@@ -796,6 +796,14 @@ def test_product_field_keys_are_kept_when_a_person_has_that_name() -> None:
     assert redaction._NameMatcher({"break glass": "Break Glass"}, KEY).whole("break_glass") == "break_glass"
 
 
+def test_a_ce_plus_reason_code_is_not_a_product_field_exemption() -> None:
+    # The CE+ practice run's closed reason codes (``reported_by``) are values, not field names: a person called
+    # "Reported By" is still pseudonymised where that spelling is a mapping key.
+    out = redact_output({"by_reviewer": {"ReportedBy": 1}}, context=_people("Reported By"))
+    assert out == {"by_reviewer": {"User 6bc1e770fa498160": 1}}
+    assert "reportedby" not in redaction._D5_FIELD_NAMES
+
+
 @pytest.mark.parametrize(("recorded", "other"), [(JOHN, "John A. Smith"), (JANE, "Dr. Jane Doe")])
 def test_a_derived_form_never_takes_another_persons_recorded_spelling(recorded: str, other: str) -> None:
     text = f"{recorded} met {other}."

@@ -12,12 +12,24 @@ names, finding titles) is never copied. Rule reasons are mapped to a closed set 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime
 from typing import Any
 
-from azure_tenant_audit.baselines import rule_evidence_collectors
+from azure_tenant_audit.baselines import (
+    _DEFENDER_RULE_FIELDS,
+    _DEVICE_UNKNOWN_FIELDS,
+    rule_evidence_collectors,
+)
 from azure_tenant_audit.collection_gaps import list_truncations, section_gap_records
+from azure_tenant_audit.exchange_protection import (
+    SOURCE_CAS_SMTP,
+    SOURCE_DKIM,
+    SOURCE_DOMAINS,
+    SOURCE_MALWARE,
+    SOURCE_TRANSPORT,
+)
 
 SCHEMA_VERSION = "ce-plus-practice-v1"
 PAYLOAD_KIND = "ce_plus_practice_run"
@@ -61,31 +73,58 @@ _FINDING_ID_LIMIT = 20
 _ID_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
 _ID_MAX_LENGTH = 128
 
-# The rule reasons the engine writes (baselines._rule_evaluation and its input checks), kept as they are.
-_KNOWN_RULE_REASONS = frozenset({
-    "admin_set_not_collected", "break_glass_accounts_not_identified", "break_glass_accounts_unresolved",
-    "break_glass_exclusion_unverified", "compliance_policies_not_collected", "default_malware_policy_not_identified",
-    "defender_state_not_collected", "device_configurations_not_collected", "device_configurations_not_read_in_full",
-    "device_posture_not_collected", "dkim_state_not_returned_for_domain", "federation_allow_list_not_read",
-    "federation_configuration_not_collected", "federation_setting_not_read", "inputs_not_available",
-    "mailbox_smtp_auth_count_not_returned", "malware_filter_settings_not_returned", "mta_sts_policy_not_fetched",
-    "no_assigned_update_ring", "no_collector_mapping", "no_custom_domains", "no_device_configurations",
-    "no_devices_in_os_lifecycle_scope", "no_domain_records", "no_managed_devices", "no_windows_devices",
-    "policy_assignments_not_read_for_every_policy", "policy_assignments_not_read_in_full", "resolver_error",
-    "ring_assignments_not_read_for_every_ring", "ring_settings_not_returned", "risk_detail_hidden",
-    "sharepoint_settings_not_collected", "signal_not_collected", "signin_activity_unavailable",
-    "site_permissions_not_read", "smtp_auth_setting_not_returned", "status_unreadable", "tenant_domains_unknown",
-    "tls_rpt_not_collected", "transport_config_not_returned", "update_managed_by_other_means",
-    "update_management_not_collected",
-})
+# The rule reasons the engine writes (baselines._rule_evaluation and its input checks), kept as they are. They are
+# values, never mapping keys, so they are held as one string and stay out of the redaction field-name exemption
+# (``output_redaction._D5_FIELD_NAMES``): a person with one of these names is still masked wherever it is a key.
+_KNOWN_RULE_REASONS = frozenset(
+    """
+    admin_set_not_collected break_glass_accounts_not_identified break_glass_accounts_unresolved
+    break_glass_exclusion_unverified compliance_policies_not_collected default_malware_policy_not_identified
+    defender_state_not_collected device_configurations_not_collected device_configurations_not_read_in_full
+    device_posture_not_collected dkim_state_not_returned_for_domain federation_allow_list_not_read
+    federation_configuration_not_collected federation_setting_not_read inputs_not_available
+    mailbox_smtp_auth_count_not_returned malware_filter_settings_not_returned mta_sts_policy_not_fetched
+    no_assigned_update_ring no_collector_mapping no_custom_domains no_device_configurations
+    no_devices_in_os_lifecycle_scope no_domain_records no_managed_devices no_windows_devices
+    policy_assignments_not_read_for_every_policy policy_assignments_not_read_in_full resolver_error
+    ring_assignments_not_read_for_every_ring ring_settings_not_returned risk_detail_hidden
+    sharepoint_settings_not_collected signal_not_collected signin_activity_unavailable site_permissions_not_read
+    smtp_auth_setting_not_returned status_unreadable tenant_domains_unknown tls_rpt_not_collected
+    transport_config_not_returned update_managed_by_other_means update_management_not_collected
+    """.split()
+)
 # Engine reasons of the form ``code:detail``. Only two details are kept, and only when they hold what the engine
 # writes there: a count for ``registration_report_incomplete`` and the rule's own collectors for
 # ``collector_not_complete``. Every other detail is dropped and the code alone is kept.
-_PREFIXED_RULE_REASONS = frozenset({
-    "admin_set_unknown", "collector_not_complete", "evidence_not_returned", "licence_data_unavailable",
-    "registration_report_incomplete", "reported_by", "sharing_setting_not_read", "verdict_not_collected",
-    "verdict_unknown",
-})
+_PREFIXED_RULE_REASONS = frozenset(
+    """
+    admin_set_unknown collector_not_complete evidence_not_returned licence_data_unavailable
+    registration_report_incomplete reported_by sharing_setting_not_read verdict_not_collected verdict_unknown
+    """.split()
+)
+# Engine reasons that carry a device count (baselines._device_inputs_gap and _defender_inputs_gap): a fixed prefix
+# from the engine's own field tables, ASCII digits for the count and the fixed suffix. Nothing else is kept.
+_COUNTED_RULE_REASON = re.compile(
+    "(?:"
+    + "|".join(
+        re.escape(prefix)
+        for prefix in sorted({
+            *(f"{field}_for_" for field in _DEVICE_UNKNOWN_FIELDS.values()),
+            *(f"defender_{field}_unknown_for_" for field in _DEFENDER_RULE_FIELDS.values()),
+            "os_edition_dependent_for_",
+            "defender_state_unavailable_for_",
+        })
+    )
+    + ")[0-9]{1,9}_devices"
+)
+# Exchange protection reasons for a source read that did not finish (exchange_protection._inputs_gap).
+_SOURCE_RULE_REASONS = frozenset(
+    f"{source}_not_read_in_full" for source in (SOURCE_MALWARE, SOURCE_TRANSPORT, SOURCE_DKIM, SOURCE_DOMAINS, SOURCE_CAS_SMTP)
+)
+# A Cyber Essentials requirement id as the framework catalogue writes it (``ce.<theme>.<name>``, lower-case ASCII).
+# Requirement ids read from the bundle are shared only in this shape; anything else is counted and dropped.
+_REQUIREMENT_ID = re.compile(r"ce\.[a-z]{2,16}\.[a-z0-9]+(?:_[a-z0-9]+)*")
+_REQUIREMENT_ID_MAX_LENGTH = 64
 
 DISCLAIMER = (
     "This practice run lists the evidence observed in one read-only audit and the proof still needed. It is not a "
@@ -126,9 +165,16 @@ def _id(value: Any) -> str | None:
     return text
 
 
+def _requirement_id(value: Any) -> str | None:
+    """A Cyber Essentials requirement id (``_REQUIREMENT_ID``, at most 64 characters), else ``None``."""
+    if not isinstance(value, str) or len(value) > _REQUIREMENT_ID_MAX_LENGTH or not _REQUIREMENT_ID.fullmatch(value):
+        return None
+    return value
+
+
 def _reason_code(rule_id: str, reason: str) -> str:
     """A rule reason as a closed-set code; never the bundle's text unless it is a code the engine writes."""
-    if reason in _KNOWN_RULE_REASONS:
+    if reason in _KNOWN_RULE_REASONS or reason in _SOURCE_RULE_REASONS or _COUNTED_RULE_REASON.fullmatch(reason):
         return reason
     code, separator, detail = reason.partition(":")
     if not separator or code not in _PREFIXED_RULE_REASONS:
@@ -291,19 +337,31 @@ def _ranking_formula(catalogue: Mapping[str, Any]) -> str:
     )
 
 
-def _section_rows(section: Any) -> tuple[dict[str, Any] | None, str | None, list[str]]:
-    """(rows by requirement id, section version, ids in order) or (None, None, []) for a missing section."""
+def _section_rows(
+    section: Any, catalogue_ids: Iterable[str]
+) -> tuple[dict[str, Any] | None, str | None, list[str], int]:
+    """(rows by requirement id, section version, ids in order, rows dropped for an id that is not a requirement id)
+    or (None, None, [], 0) for a missing section. An id the shipped catalogue lists is taken as it is."""
+    known = frozenset(catalogue_ids)
     if not isinstance(section, Mapping) or not isinstance(section.get("controls"), list):
-        return None, None, []
+        return None, None, [], 0
     rows: dict[str, Any] = {}
     order: list[str] = []
+    dropped = 0
     for row in section["controls"]:
-        requirement_id = _id(row.get("control_id")) if isinstance(row, Mapping) else None
-        if requirement_id is None or requirement_id in rows:
+        if not isinstance(row, Mapping):
+            continue
+        control_id = row.get("control_id")
+        listed = isinstance(control_id, str) and control_id in known
+        requirement_id = control_id if listed else _requirement_id(control_id)
+        if requirement_id is None:
+            dropped += 1
+            continue
+        if requirement_id in rows:
             continue
         rows[requirement_id] = row
         order.append(requirement_id)
-    return rows, _text(section.get("version")), order
+    return rows, _text(section.get("version")), order, dropped
 
 
 def build_practice_run(
@@ -325,7 +383,8 @@ def build_practice_run(
     effort_weights = {row["id"]: int(row["weight"]) for row in catalogue["effort_bands"]}
     conflict_weight = int(catalogue["conflict_weight"])
 
-    rows_by_id, section_version, section_order = _section_rows(section)
+    catalogue_ids = [row["requirement_id"] for row in catalogue["requirements"]]
+    rows_by_id, section_version, section_order, dropped_ids = _section_rows(section, catalogue_ids)
     truncated_lists, truncated_collectors = _truncated_collectors(manifest, coverage_rows)
     coverage = collector_coverage or {}
     incomplete = sorted(
@@ -333,7 +392,6 @@ def build_practice_run(
         if name
     )
     coverage_data = "available" if coverage_rows or coverage else "unavailable"
-    catalogue_ids = [row["requirement_id"] for row in catalogue["requirements"]]
 
     requirements: list[dict[str, Any]] = []
     held_conflicts: dict[str, list[dict[str, str]]] = {}
@@ -477,8 +535,11 @@ def build_practice_run(
         run_flags.append("requirements_version_mismatch")
     engine_unmapped = section.get("uncatalogued_requirement_ids") if rows_by_id is not None else None
     unmapped = [rid for rid in section_order if rid not in catalogue_ids]
-    for rid in map(_id, engine_unmapped if isinstance(engine_unmapped, list) else []):
-        if rid and rid not in catalogue_ids and rid not in unmapped:
+    for entry in engine_unmapped if isinstance(engine_unmapped, list) else []:
+        rid = _requirement_id(entry)
+        if rid is None:
+            dropped_ids += 1  # tenant text, a malformed entry or a foreign id: counted, never copied
+        elif rid not in catalogue_ids and rid not in unmapped:
             unmapped.append(rid)
     by_state = {state: sum(1 for row in requirements if row["evidence_state"] == state) for state in EVIDENCE_STATES}
     source = catalogue["source"]
@@ -503,6 +564,7 @@ def build_practice_run(
             "incomplete_collectors": incomplete,
             "truncated_lists": truncated_lists,
             "unmapped_requirement_ids": unmapped,
+            "dropped_requirement_id_count": dropped_ids,
         },
         "summary": {
             "requirements_total": len(requirements),

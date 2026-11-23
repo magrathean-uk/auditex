@@ -1869,6 +1869,9 @@ def _ce_plus_quality_lines(payload: Mapping[str, Any]) -> list[tuple[str, str]]:
     lines.append(("Requirements version in the bundle", version))
     unmapped = [str(item) for item in quality.get("unmapped_requirement_ids") or []]
     lines.append(("Bundle requirements the catalogue lacks", ", ".join(unmapped) or "none"))
+    dropped = quality.get("dropped_requirement_id_count")
+    if _is_count(dropped) and dropped:
+        lines.append(("Bundle entries dropped as not requirement ids", str(dropped)))
     return lines
 
 
@@ -2370,10 +2373,14 @@ def _prepare_pack_directory(target_dir: Path) -> None:
     if stale.is_dir():
         from azure_tenant_audit.guarded_io import remove_guarded_tree
         remove_guarded_tree(stale)
-    # Generated files only some runs have go too: a run without them must not inherit an earlier run's copies.
+    # Generated files only some runs have go too, so a run without them does not inherit an earlier run's copies;
+    # only a file the previous manifest lists as generated, so notes someone added beside the pack stay (and
+    # verify-pack reports them as unexpected).
     from azure_tenant_audit.guarded_io import remove_guarded_output
+    listed = {row.get("path") for row in _dict_rows(previous.get("generated_files"))}
     for name in _OPTIONAL_PACK_FILES:
-        remove_guarded_output(target_dir / name, field="output-dir")
+        if name in listed:
+            remove_guarded_output(target_dir / name, field="output-dir")
 
 
 @guarded_operation

@@ -296,6 +296,7 @@ def test_a_truncated_list_flags_the_requirements_its_collector_feeds() -> None:
             {"collector": "conditional_access", "list": "policies", "reason": "result_limit"},
         ],
         "unmapped_requirement_ids": [],
+        "dropped_requirement_id_count": 0,
     }
 
 
@@ -348,6 +349,32 @@ def test_engine_listed_uncatalogued_ids_are_reported() -> None:
     payload = build_practice_run(section, M365, CATALOGUE, as_of=AS_OF)
 
     assert payload["evidence_quality"]["unmapped_requirement_ids"] == ["ce.retired.requirement", "ce.withdrawn.mapping"]
+    assert payload["evidence_quality"]["dropped_requirement_id_count"] == 2
+
+
+SUBSIDIARY_CANARY = "Synthetic-Subsidiary-Certified"
+
+
+def test_bundle_ids_that_are_not_requirement_ids_are_counted_and_dropped() -> None:
+    from auditex.reporting import render_ce_plus_markdown
+
+    section = _full_section()
+    section["controls"] += [_clean("ce.retired.requirement"), _clean("Synthetic-Subsidiary-Row")]
+    section["uncatalogued_requirement_ids"] = [
+        "ce.withdrawn.mapping", SUBSIDIARY_CANARY, "CE.UAC.Upper", "ce.uac." + "a" * 60, 7, None,
+    ]
+    payload = build_practice_run(section, M365, CATALOGUE, as_of=AS_OF)
+
+    assert payload["evidence_quality"]["unmapped_requirement_ids"] == ["ce.retired.requirement", "ce.withdrawn.mapping"]
+    assert payload["evidence_quality"]["dropped_requirement_id_count"] == 6
+    jsonschema.validate(payload, SCHEMA)
+    assert "Subsidiary" not in json.dumps(payload)
+    markdown = render_ce_plus_markdown(payload)
+    assert "- Bundle entries dropped as not requirement ids: 6\n" in markdown
+    assert "Subsidiary" not in markdown
+    clean = build_practice_run(_full_section(), M365, CATALOGUE, as_of=AS_OF)
+    assert clean["evidence_quality"]["dropped_requirement_id_count"] == 0
+    assert "dropped as not requirement ids" not in render_ce_plus_markdown(clean)
 
 
 def test_a_truncated_collector_flags_a_requirement_it_feeds_through_a_supporting_rule() -> None:
@@ -411,6 +438,22 @@ def _assert_no_leak(text: str) -> None:
         ("ca.mfa_not_enforced", "verdict_unknown:certified_control", "verdict_unknown"),
         ("ca.mfa_not_enforced", "certified", "reason_unrecognised"),
         ("ca.mfa_not_enforced", "https://resolver.example.net/dns-query", "reason_unrecognised"),
+        # Engine reasons that carry a device count (baselines._device_inputs_gap, _defender_inputs_gap).
+        ("intune.device_os_end_of_life", "os_lifecycle_unknown_for_2_devices", "os_lifecycle_unknown_for_2_devices"),
+        ("intune.device_os_end_of_life", "os_edition_dependent_for_4_devices", "os_edition_dependent_for_4_devices"),
+        ("intune.device_noncompliant", "compliance_unknown_for_17_devices", "compliance_unknown_for_17_devices"),
+        ("intune.defender_av_off", "defender_state_unavailable_for_3_devices", "defender_state_unavailable_for_3_devices"),
+        ("intune.defender_av_off", "defender_av_state_unknown_for_12_devices", "defender_av_state_unknown_for_12_devices"),
+        ("intune.device_os_end_of_life", "os_lifecycle_unknown_for_two_devices", "reason_unrecognised"),
+        ("intune.device_os_end_of_life", "os_lifecycle_unknown_for_2_devices_at_contoso", "reason_unrecognised"),
+        ("intune.device_os_end_of_life", "certified_for_2_devices", "reason_unrecognised"),
+        ("intune.device_os_end_of_life", "os_lifecycle_unknown_for_\u0662_devices", "reason_unrecognised"),
+        ("intune.device_os_end_of_life", "os_lifecycle_unknown_for_1234567890_devices", "reason_unrecognised"),
+        # Exchange protection reasons for a source read that did not finish (exchange_protection).
+        ("exchange.malware_filter_weakened", "malwareFilterPolicy_not_read_in_full", "malwareFilterPolicy_not_read_in_full"),
+        ("exchange.smtp_auth_enabled_tenant_wide", "transportConfig_not_read_in_full", "transportConfig_not_read_in_full"),
+        ("exchange.dkim_signing_disabled", "acceptedDomains_not_read_in_full", "acceptedDomains_not_read_in_full"),
+        ("exchange.dkim_signing_disabled", "contosoSecrets_not_read_in_full", "reason_unrecognised"),
     ],
 )
 def test_rule_reasons_map_to_a_closed_set_of_codes(rule_id: str, reason: str, expected: str) -> None:
@@ -536,8 +579,9 @@ def test_the_practice_run_imports_no_model_code() -> None:
         for alias in (node.names if isinstance(node, ast.Import) else [None])
         if (node.module if isinstance(node, ast.ImportFrom) else alias.name)
     }
-    assert modules == {"__future__", "json", "collections.abc", "datetime", "typing",
-                       "azure_tenant_audit.baselines", "azure_tenant_audit.collection_gaps", "azure_tenant_audit.resources"}
+    assert modules == {"__future__", "json", "re", "collections.abc", "datetime", "typing",
+                       "azure_tenant_audit.baselines", "azure_tenant_audit.collection_gaps",
+                       "azure_tenant_audit.exchange_protection", "azure_tenant_audit.resources"}
 
 
 # -- 5. end to end through the CLI -------------------------------------------------------------------------------------
@@ -815,3 +859,90 @@ def test_the_shipped_catalogue_and_payload_text_carry_no_forbidden_claims() -> N
     payload = build_practice_run(None, M365, CATALOGUE, as_of=AS_OF)
     texts = json.dumps(CATALOGUE) + json.dumps(payload)
     _assert_clean_wording(texts)
+
+
+def _offline_run(tmp_path: Path, label: str, change) -> Path:
+    """The sample bundle run offline, its report pack changed by ``change`` and its hashes recalculated."""
+    from gate_support import rehash
+
+    from azure_tenant_audit.cli import run_offline
+
+    assert run_offline(ROOT / "examples" / "sample_audit_bundle" / "sample_result.json", tmp_path, label, "m365") in (0, 1)
+    run = tmp_path / f"{label}-m365"
+    pack_path = run / "reports" / "report-pack.json"
+    report_pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    change(report_pack["baseline_alignment"]["frameworks"]["cyber_essentials"])
+    pack_path.write_text(json.dumps(report_pack), encoding="utf-8")
+    rehash(run)
+    return run
+
+
+def _five_outputs(run: Path, tmp_path: Path, capsys: pytest.CaptureFixture) -> dict[str, str]:
+    outputs = {}
+    for fmt in ("json", "md", "html"):
+        rc, printed, _ = _report(["report", "ce-plus", str(run), "--format", fmt, "--as-of", _as_of(run)], capsys)
+        assert rc == 0
+        outputs[fmt] = printed
+    pack = tmp_path / "pack"
+    assert _report(["report", "customer-pack", str(run), "--output-dir", str(pack)], capsys)[0] == 0
+    for name in ("ce-plus-practice.md", "ce-plus-practice.json"):
+        outputs[name] = (pack / name).read_text(encoding="utf-8")
+    return outputs
+
+
+def test_an_uncatalogued_entry_that_is_not_a_requirement_id_reaches_no_report_or_pack_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run = _offline_run(tmp_path, "practice-label",
+                       lambda section: section.update(uncatalogued_requirement_ids=[SUBSIDIARY_CANARY]))
+
+    outputs = _five_outputs(run, tmp_path, capsys)
+
+    assert {name: SUBSIDIARY_CANARY in text for name, text in outputs.items()} == {
+        "json": False, "md": False, "html": False, "ce-plus-practice.md": False, "ce-plus-practice.json": False,
+    }
+    for name in ("json", "ce-plus-practice.json"):
+        quality = json.loads(outputs[name])["evidence_quality"]
+        assert (quality["unmapped_requirement_ids"], quality["dropped_requirement_id_count"]) == ([], 1)
+
+
+def test_engine_reason_codes_with_counts_render_in_every_report_and_pack_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    def change(section: dict[str, Any]) -> None:
+        row = next(item for item in section["controls"] if item["control_id"] == PARTIAL)
+        row.update({"status": "not_assessed", "reason": "rules_not_evaluated", "rule_statuses": [
+            {"rule_id": "intune.device_os_end_of_life", "status": "not_assessed", "evaluated": False,
+             "confidence": "full", "reason": "os_lifecycle_unknown_for_2_devices"},
+            {"rule_id": "exchange.dkim_not_enabled", "status": "not_assessed", "evaluated": False,
+             "confidence": "full", "reason": "reported_by:dns_posture.dkim_missing"},
+        ]})
+
+    outputs = _five_outputs(_offline_run(tmp_path, "practice-label", change), tmp_path, capsys)
+
+    for name in ("json", "ce-plus-practice.json"):
+        row = next(item for item in json.loads(outputs[name])["requirements"] if item["requirement_id"] == PARTIAL)
+        assert row["unknown_reasons"] == ["os_lifecycle_unknown_for_2_devices", "reported_by"]
+    for name in ("md", "html", "ce-plus-practice.md"):
+        assert ("os_lifecycle_unknown_for_2_devices" in outputs[name], re.search(r"\breported_by\b", outputs[name]) is not None,
+                "reason_unrecognised" in outputs[name]) == (True, True, False), name
+
+
+def test_a_manual_practice_run_file_beside_a_pack_that_never_listed_it_is_kept(
+    runs: dict[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    older = tmp_path / "older"
+    shutil.copytree(runs["google_workspace"], older)
+    _strip_ce_section(older)
+    pack = tmp_path / "pack"
+    assert _report(["report", "customer-pack", str(older), "--output-dir", str(pack)], capsys)[0] == 0
+    notes = pack / "ce-plus-practice.md"
+    notes.write_text("Assessor notes\n", encoding="utf-8")
+
+    assert _report(["report", "customer-pack", str(older), "--output-dir", str(pack)], capsys)[0] == 0
+    rc, verified, _ = _report(["report", "verify-pack", str(pack)], capsys)
+
+    assert notes.read_text(encoding="utf-8") == "Assessor notes\n"
+    result = json.loads(verified)
+    assert (rc != 0, result["valid"]) == (True, False)
+    assert [issue["code"] for issue in result["issues"]] == ["unexpected_file"]
