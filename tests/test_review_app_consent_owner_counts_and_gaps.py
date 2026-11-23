@@ -70,3 +70,16 @@ def test_a_complete_owner_read_keeps_its_exact_owner_count() -> None:
                             "/servicePrincipals/sp-1/owners": [], "/servicePrincipals/sp-2/owners": [{"id": "owner-1"}]})
     assert _owner_counts(_snapshot(fake)) == {"sp-1": 0, "sp-2": 1}
 
+
+def test_two_cut_assignment_reads_are_two_distinct_collection_gaps() -> None:
+    fake = _CutPages(
+        {"/servicePrincipals/sp-1/appRoleAssignedTo": [{"id": "a-1"}],
+         "/servicePrincipals/sp-2/appRoleAssignedTo": [{"id": "a-2"}]},
+        lists={"/servicePrincipals": SPS, "/oauth2PermissionGrants": GRANTS},
+    )
+    gaps = [row for row in _snapshot(fake)["collection_gaps"]["records"]
+            if row["source"] == "app_consent.servicePrincipalAppRoleAssignments"]
+    assert sorted(row["endpoint"] for row in gaps) == [
+        "/servicePrincipals/sp-1/appRoleAssignedTo", "/servicePrincipals/sp-2/appRoleAssignedTo"]
+    assert len({row["id"] for row in gaps}) == 2
+    assert len({row["key"] for row in gaps}) == 2
