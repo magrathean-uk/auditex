@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import stat
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -156,6 +158,12 @@ def permissions_ledger(run_dir: str) -> dict[str, object]:
     from .reporting import permissions_ledger as _permissions_ledger
 
     return _permissions_ledger(run_dir)
+
+
+def ce_plus_practice_run(run_dir: str, as_of: datetime | None = None) -> dict[str, object]:
+    from .reporting import ce_plus_practice_run as _ce_plus_practice_run
+
+    return _ce_plus_practice_run(run_dir, as_of=as_of if as_of is not None else datetime.now(UTC))
 
 
 def proof_table(run_dir: str) -> dict[str, object]:
@@ -537,6 +545,18 @@ def _build_report_parser() -> argparse.ArgumentParser:
     proof.add_argument("run_dir", help="Completed run directory.")
     proof.add_argument("--format", choices=("json", "md"), default="json")
     proof.add_argument("--output", default=None, help="Optional output file path.")
+    ce_plus = subparsers.add_parser(
+        "ce-plus", allow_abbrev=False,
+        help="Print a CE+ practice run for a completed run: evidence observed and proof still needed per Cyber Essentials "
+        "requirement, and what the CE+ assessor must witness. Not an assessment.",
+    )
+    ce_plus.add_argument("run_dir", help="Completed run directory.")
+    ce_plus.add_argument("--format", choices=("json", "md", "html"), default="json")
+    ce_plus.add_argument("--output", default=None, help="Optional output file path.")
+    ce_plus.add_argument(
+        "--as-of", type=parse_as_of, default=None, metavar="YYYY-MM-DD",
+        help="Date to measure the evidence age against (YYYY-MM-DD); default today (UTC).",
+    )
     handoff = subparsers.add_parser("handoff", allow_abbrev=False, help="Print enterprise customer handoff index for a completed run.")
     handoff.add_argument("run_dir", help="Completed run directory.")
     handoff.add_argument("--format", choices=("json", "md"), default="json")
@@ -615,10 +635,15 @@ def _redacted_report_payload(
     context = context_for_run(run_dir) if run_dir else None
     safe = redact_output(payload, profile=PROFILE_SHAREABLE, context=context)
     note = temporary_key_note(context) if context else ""
-    if format_name == "md" and renderer is not None:
+    if format_name in ("md", "html") and renderer is not None:
         content = redact_output(renderer(safe), profile=PROFILE_SHAREABLE, context=context, markup=True)
-        if note:
+        if note and format_name == "md":
             content = content.rstrip("\n") + "\n\n" + note + "\n"
+        elif note:
+            # As reporting._with_temporary_key_notice places it for HTML: a paragraph before </body>.
+            paragraph = f'<p class="pseudonym-key-note">{html.escape(note)}</p>\n'
+            cut = content.rfind("</body>")
+            content = content[:cut] + paragraph + content[cut:] if cut != -1 else content + paragraph
     else:
         if note and isinstance(safe, dict):
             safe = {**safe, "pseudonym_notice": note}
@@ -1244,7 +1269,7 @@ def main(argv: list[str] | None = None) -> int:
                     _, created = context.create_pseudonym_key(args.run_dir, new_pseudonym_key())
             print("created" if created else "present")
             return 0
-        if args.report_command in {"analyze", "api-calls", "permissions", "proof-table", "handoff"}:
+        if args.report_command in {"analyze", "api-calls", "permissions", "proof-table", "ce-plus", "handoff"}:
             before = snapshot_run(args.run_dir)
         if args.report_command == "analyze":
             _emit_report_payload(
@@ -1274,6 +1299,15 @@ def main(argv: list[str] | None = None) -> int:
             _emit_report_payload(
                 payload=proof_table(args.run_dir), renderer=render_proof_table_markdown, format_name=args.format, output_path=args.output,
                 run_dir=args.run_dir, expected_snapshot=before,
+            )
+            return 0
+        if args.report_command == "ce-plus":
+            from .reporting import render_ce_plus_html, render_ce_plus_markdown
+
+            _emit_report_payload(
+                payload=ce_plus_practice_run(args.run_dir, args.as_of),
+                renderer=render_ce_plus_html if args.format == "html" else render_ce_plus_markdown,
+                format_name=args.format, output_path=args.output, run_dir=args.run_dir, expected_snapshot=before,
             )
             return 0
         if args.report_command == "handoff":

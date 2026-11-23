@@ -506,7 +506,7 @@
     {
       "id": "ce.act.sc.resolve_stale_accounts_google",
       "title": "Suspend or remove the stale Google Workspace accounts",
-      "proof_to_gather": "Suspend or delete each user or administrator the audit found unused or never signed in, or record why it is still needed, then re-run the audit.",
+      "proof_to_gather": "Suspend or delete each user or administrator the audit found unused, including accounts with no recorded sign-in, or record why it is still needed, then re-run the audit.",
       "kind": "resolve_gap",
       "effort": "moderate",
       "platforms": [

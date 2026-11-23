@@ -4,6 +4,8 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import re
+import shutil
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -426,3 +428,151 @@ def test_the_practice_run_imports_no_model_code() -> None:
     }
     assert modules == {"__future__", "json", "collections.abc", "datetime", "typing",
                        "azure_tenant_audit.baselines", "azure_tenant_audit.collection_gaps", "azure_tenant_audit.resources"}
+
+
+# -- 5. end to end through the CLI -------------------------------------------------------------------------------------
+
+NCSC_URL = CATALOGUE["source"]["document_url"]
+FORBIDDEN = re.compile(r"\bpass(ed|es|ing)?\b|certif|guarantee|\bcompliant\b|\bA\d\.\d+\b", re.IGNORECASE)
+
+
+@pytest.fixture(scope="module")
+def runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    from auditex.google_workspace.run import run_google_offline
+    from azure_tenant_audit.cli import run_offline
+
+    root = tmp_path_factory.mktemp("ce-plus")
+    assert run_offline(ROOT / "examples" / "sample_audit_bundle" / "sample_result.json", root, "ci", "m365") in (0, 1)
+    assert run_google_offline(
+        sample_path=ROOT / "examples" / "google_workspace_sample.json", out=root, tenant_name="acme", run_name="google",
+        domain="example.com", customer_id=None,
+    ) in (0, 1)
+    return {"m365": root / "ci-m365", "google_workspace": root / "acme-google"}
+
+
+def _tree(path: Path) -> dict[str, bytes]:
+    return {str(item.relative_to(path)): item.read_bytes() for item in sorted(path.rglob("*")) if item.is_file()}
+
+
+def _report(argv: list[str], capsys: pytest.CaptureFixture) -> tuple[int, str, str]:
+    from auditex import cli as auditex_cli
+
+    rc = auditex_cli.main(argv)
+    captured = capsys.readouterr()
+    return rc, captured.out, captured.err
+
+
+def _assert_clean_wording(text: str) -> None:
+    assert FORBIDDEN.findall(text) == []
+    assert "/Users/" not in text and "/Volumes/" not in text
+    links = {link.replace("\\", "") for link in re.findall(r"https?://[^\s)<,|\"']+", text)}
+    assert links <= {NCSC_URL}
+
+
+@pytest.mark.parametrize("platform", ["m365", "google_workspace"])
+@pytest.mark.parametrize("fmt", ["json", "md", "html"])
+def test_cli_writes_the_practice_run(runs: dict[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture,
+                                     platform: str, fmt: str) -> None:
+    run = runs[platform]
+    before = _tree(run)
+    argv = ["report", "ce-plus", str(run), "--format", fmt, "--as-of", "2026-11-30"]
+
+    rc, printed, _ = _report(argv, capsys)
+    target = tmp_path / f"ce-plus.{fmt}"
+    rc_file, receipt, _ = _report([*argv, "--output", str(target)], capsys)
+
+    assert (rc, rc_file) == (0, 0)
+    assert json.loads(receipt)["output_path"] == str(target)
+    assert target.read_text(encoding="utf-8") == printed
+    assert _tree(run) == before
+    assert str(run) not in printed
+    _assert_clean_wording(printed)
+    if fmt == "json":
+        payload = json.loads(printed)
+        jsonschema.validate(payload, SCHEMA)
+        assert len(payload["requirements"]) == 30 and len(payload["assessor_tests"]) == 5
+        assert payload["run"]["platform"] == platform
+        assert payload["run"]["as_of"] == "2026-11-30"
+        assert isinstance(payload["run"]["evidence_age_days"], int)
+    elif fmt == "md":
+        assert printed.startswith("# Auditex CE+ practice run\n")
+        for heading in ("## Evidence quality", "## Next proof to gather", "## Requirements", "### Firewalls",
+                        "## CE+ assessor tests", "## Ranking formula", "## Source"):
+            assert "\n" + heading + "\n" in printed
+    else:
+        assert printed.startswith("<!doctype html>")
+        assert "<h2>CE+ assessor tests</h2>" in printed and printed.rstrip().endswith("</body></html>")
+
+
+def test_the_google_practice_run_ranks_the_enforcement_fix_first(runs: dict[str, Path], capsys: pytest.CaptureFixture) -> None:
+    rc, printed, _ = _report(["report", "ce-plus", str(runs["google_workspace"]), "--as-of", "2026-11-30"], capsys)
+    payload = json.loads(printed)
+
+    assert rc == 0
+    assert [row["action_id"] for row in payload["next_actions"][:3]] == [
+        "ce.act.uac.resolve_2sv_enforcement_google",
+        "ce.act.uac.resolve_2sv_enrolment_google",
+        "ce.act.sc.resolve_stale_accounts_google",
+    ]
+    assert payload["summary"]["by_evidence_state"] == {
+        "gap_observed": 7, "evidence_unknown": 0, "gap_accepted": 0, "supporting_only": 3,
+        "evidence_observed_partial": 0, "outside_tenant_evidence": 20,
+    }
+
+
+def test_a_run_without_a_manifest_is_refused(runs: dict[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    run = tmp_path / "copy"
+    shutil.copytree(runs["m365"], run)
+    (run / "run-manifest.json").unlink()
+
+    rc, printed, error = _report(["report", "ce-plus", str(run)], capsys)
+
+    assert (rc, printed) == (2, "")
+    assert error == "Refusing run-dir: unsafe input.\n"
+
+
+def test_an_unparseable_manifest_is_refused(runs: dict[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    run = tmp_path / "copy"
+    shutil.copytree(runs["m365"], run)
+    (run / "run-manifest.json").write_text("{not json", encoding="utf-8")
+
+    rc, printed, _ = _report(["report", "ce-plus", str(run)], capsys)
+
+    assert (rc, printed) == (2, "")
+
+
+def test_a_bad_as_of_date_is_a_usage_error(runs: dict[str, Path], capsys: pytest.CaptureFixture) -> None:
+    from auditex import cli as auditex_cli
+
+    with pytest.raises(SystemExit) as caught:
+        auditex_cli.main(["report", "ce-plus", str(runs["m365"]), "--as-of", "30/11/2026"])
+    assert caught.value.code == 2
+    assert capsys.readouterr().out == ""
+
+
+def test_an_older_bundle_without_the_section_reads_unknown(runs: dict[str, Path], tmp_path: Path,
+                                                         capsys: pytest.CaptureFixture) -> None:
+    run = tmp_path / "older"
+    shutil.copytree(runs["m365"], run)
+    pack_path = run / "reports" / "report-pack.json"
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    del pack["baseline_alignment"]["frameworks"]["cyber_essentials"]
+    pack_path.write_text(json.dumps(pack), encoding="utf-8")
+
+    rc, printed, _ = _report(["report", "ce-plus", str(run), "--as-of", "2026-11-30"], capsys)
+    payload = json.loads(printed)
+
+    assert rc == 0
+    jsonschema.validate(payload, SCHEMA)
+    assert {row["evidence_state"] for row in payload["requirements"]} == {"evidence_unknown"}
+    assert {tuple(row["unknown_reasons"]) for row in payload["requirements"]} == {("cyber_essentials_section_missing",)}
+    assert payload["next_actions"][0]["action_id"] == "ce.act.run.recollect_missing_evidence"
+
+
+# -- 6. forbidden wording in the catalogue ---------------------------------------------------------------------------
+
+
+def test_the_shipped_catalogue_and_payload_text_carry_no_forbidden_claims() -> None:
+    payload = build_practice_run(None, M365, CATALOGUE, as_of=AS_OF)
+    texts = json.dumps(CATALOGUE) + json.dumps(payload)
+    _assert_clean_wording(texts)

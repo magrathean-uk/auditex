@@ -419,6 +419,6 @@ def _delegates_to_a_redacting_function(function: ast.AST, functions: dict[str, a
 
 def test_the_report_commands_that_print_or_write_payloads_go_through_the_one_emitter() -> None:
     source = (SRC / "auditex" / "cli.py").read_text(encoding="utf-8")
-    assert source.count("_emit_report_payload(") == 7  # the definition, analyze, api-calls, permissions, proof-table, handoff and the setup guide
+    assert source.count("_emit_report_payload(") == 8  # the definition, analyze, api-calls, permissions, proof-table, ce-plus, handoff and the setup guide
     # The only opt-out is the setup guide's emitter call (the definition's own default is ``redact: bool = True``).
     assert source.count("output_path=output_path, redact=False)") == 1

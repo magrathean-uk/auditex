@@ -45,7 +45,7 @@ WRITER_INVENTORY: tuple[WriterEntry, ...] = (
     WriterEntry("auditex.reporting", "_write_text_artifact", "shareable", PROFILE_CUSTOMER_PACK, "every generated customer-pack file"),
     WriterEntry("auditex.reporting", "_copy_source_artifact", "shareable", PROFILE_CUSTOMER_PACK, "redacted customer-pack source derivatives"),
     WriterEntry("auditex.reporting", "write_enterprise_handoff_pack", "shareable", PROFILE_CUSTOMER_PACK, "customer pack manifest and payloads"),
-    WriterEntry("auditex.cli", "_emit_report_payload", "shareable", PROFILE_SHAREABLE, "report api-calls, permissions, proof-table and handoff files and stdout"),
+    WriterEntry("auditex.cli", "_emit_report_payload", "shareable", PROFILE_SHAREABLE, "report api-calls, permissions, proof-table, ce-plus and handoff files and stdout"),
     WriterEntry("auditex.cli", "_emit_assessment", "private", None, "operator-supplied assessment re-emitted outside bundles; not run evidence"),
     WriterEntry("auditex.notify", "send_notification", "shareable", PROFILE_CUSTOMER_PACK, "webhook, SMTP, Jira and GitHub sinks"),
     WriterEntry("auditex.explorer", "write_explorer", "private", None, "operator's local interactive run explorer"),
