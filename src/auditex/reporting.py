@@ -10,7 +10,7 @@ import os
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
-from datetime import UTC
+from datetime import UTC, date
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -3765,8 +3765,21 @@ def export_tenant_scope(manifest: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _waiver_justification(finding: Mapping[str, Any]) -> str:
+_WITHHELD_WAIVER_REASON = "the waiver reason is withheld from shareable output"
+
+
+def _waiver_justification(finding: Mapping[str, Any], *, withhold_reason: bool = False) -> str:
+    """Why an accepted finding is accepted. A shareable export withholds the operator's free-text reason (it can name
+    a customer id or person in any spelling, which pattern matching cannot be trusted to find) and keeps only the
+    structured facts: that a waiver applies and the date it expires."""
     waiver = finding.get("waiver") if isinstance(finding.get("waiver"), Mapping) else {}
+    if withhold_reason:
+        expires = _text(waiver.get("expires_on")).strip()
+        try:
+            expiry = f", expires {date.fromisoformat(expires).isoformat()}" if expires else ""
+        except ValueError:
+            expiry = ""
+        return f"Accepted risk under a waiver{expiry}; {_WITHHELD_WAIVER_REASON}"
     reason = _text(waiver.get("reason") or waiver.get("comment")).strip()
     return reason or f"Accepted risk (status {_text(finding.get('status'))})"
 
@@ -3778,6 +3791,7 @@ def render_sarif(
     manifest: Mapping[str, Any] | None,
     stable_keys: list[dict[str, Any]] | None = None,
     dispositions: list[str] | None = None,
+    withhold_waiver_reason: bool = False,
 ) -> dict[str, Any]:
     """SARIF 2.1.0 for the findings of a run. ``stable_keys`` (``stable_export_keys``, aligned with ``findings``)
     replace the fingerprints a shareable export would otherwise take from pseudonymised ids; ``dispositions``
@@ -3882,7 +3896,11 @@ def render_sarif(
             result_entry["partialFingerprints"] = partial_fingerprints
         if disposition == "accepted":
             result_entry["suppressions"] = [
-                {"kind": "external", "status": "accepted", "justification": _waiver_justification(finding)}
+                {
+                    "kind": "external",
+                    "status": "accepted",
+                    "justification": _waiver_justification(finding, withhold_reason=withhold_waiver_reason),
+                }
             ]
         confidence = _text(finding.get("confidence"))
         if confidence:
@@ -3992,6 +4010,7 @@ def render_oscal(
     manifest: Mapping[str, Any] | None,
     stable_keys: list[dict[str, Any]] | None = None,
     dispositions: list[str] | None = None,
+    withhold_waiver_reason: bool = False,
 ) -> dict[str, Any]:
     """OSCAL Assessment Results 1.1.2 for the findings of a run.
 
@@ -4118,7 +4137,8 @@ def render_oscal(
             finding_entry["remarks"] = remediation
         if disposition == "accepted":
             finding_entry["target"]["status"]["remarks"] = (
-                f"Accepted risk: {_waiver_justification(finding)}. The control stays not satisfied."
+                f"Accepted risk: {_waiver_justification(finding, withhold_reason=withhold_waiver_reason)}. "
+                "The control stays not satisfied."
             )
         findings_oscal.append(finding_entry)
 
@@ -4167,12 +4187,14 @@ def _render_sarif(
     selected_sections: dict[str, Any],
     stable_keys: list[dict[str, Any]] | None = None,
     dispositions: list[str] | None = None,
+    withhold_waiver_reason: bool = False,
 ) -> str:
     findings = _dict_rows(selected_sections.get("findings"))
     summary = _mapping(selected_sections.get("summary"))
     manifest = _mapping(selected_sections.get("manifest"))
     return _json(render_sarif(
-        findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys, dispositions=dispositions
+        findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys, dispositions=dispositions,
+        withhold_waiver_reason=withhold_waiver_reason,
     ))
 
 
@@ -4180,12 +4202,14 @@ def _render_oscal(
     selected_sections: dict[str, Any],
     stable_keys: list[dict[str, Any]] | None = None,
     dispositions: list[str] | None = None,
+    withhold_waiver_reason: bool = False,
 ) -> str:
     findings = _dict_rows(selected_sections.get("findings"))
     summary = _mapping(selected_sections.get("summary"))
     manifest = _mapping(selected_sections.get("manifest"))
     return _json(render_oscal(
-        findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys, dispositions=dispositions
+        findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys, dispositions=dispositions,
+        withhold_waiver_reason=withhold_waiver_reason,
     ))
 
 
@@ -4299,7 +4323,7 @@ def preview_report(
     # rules such as privileged-user names apply in every format) and the rendered text is passed through the
     # same function again (idempotent) as the last step. Citations above were built from the real paths.
     redaction = context_for_run(run_path)
-    # The run's Google customer id is masked wherever it appears, also in free text (a waiver reason) of an export
+    # The run's Google customer id is masked wherever it appears, also in free text of an export
     # that leaves the manifest section out.
     manifest = RunBundle(run_path).manifest()
     customer_ids = {
@@ -4326,6 +4350,7 @@ def preview_report(
             renderers[format_name],
             stable_keys=stable_keys,
             dispositions=[_export_disposition(row) for row in rows],
+            withhold_waiver_reason=True,
         )
     # Masking can make two citations equal: every nested citation list, count and summary is re-derived after
     # redaction, before any format renders the sections.

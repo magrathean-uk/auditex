@@ -297,35 +297,68 @@ def test_r125_a_matching_mailbox_waiver_is_accepted_in_shareable_exports(tmp_pat
     assert _shareable_disposition(run) == (False, "accepted")
 
 
-def _google_waived(customer_id: str) -> dict[str, Any]:
+def _google_waived(reason: str) -> dict[str, Any]:
     return {
         **GOOGLE_FINDING,
         "status": "accepted_risk",
         "waiver_applied": True,
-        "waiver": {
-            "finding_id": GOOGLE_FINDING["id"],
-            "reason": f"Accepted for customer {customer_id} until the rollout",
-            "expires_on": "2999-01-01",
-        },
+        "waiver": {"finding_id": GOOGLE_FINDING["id"], "reason": reason, "expires_on": "2999-01-01"},
     }
 
 
+_CUSTOMER = "C01abcd23"
+# A waiver reason may name the customer id in any spelling: bare, inside an underscore-delimited reference or a URL.
+_REASON_SPELLINGS = {
+    "bare": f"Accepted for customer {_CUSTOMER} until the rollout",
+    "underscore": f"Approved under workspace_{_CUSTOMER}_rollout",
+    "url": f"See https://admin.google.com/ac/{_CUSTOMER}/security?ref=waiver-7",
+}
+
+
+def _accepted_text(content: str, format_name: str) -> str:
+    """The text a shareable export gives an accepted finding: SARIF's suppression justification or OSCAL's remark."""
+    document = json.loads(content)
+    if format_name == "sarif":
+        (result,) = document["runs"][0]["results"]
+        (suppression,) = result["suppressions"]
+        assert suppression["status"] == "accepted"
+        return suppression["justification"]
+    (finding,) = document["assessment-results"]["results"][0]["findings"]
+    assert {prop["name"]: prop["value"] for prop in finding["props"]}["auditex.status"] == "accepted"
+    return finding["target"]["status"]["remarks"]
+
+
+@pytest.mark.parametrize("spelling", sorted(_REASON_SPELLINGS))
+@pytest.mark.parametrize("declared", [True, False], ids=["declared", "default-selection"])
 @pytest.mark.parametrize("sections", [None, ["findings"]])
 @pytest.mark.parametrize("format_name", ["sarif", "oscal"])
-def test_r125_a_waiver_reason_never_publishes_the_google_customer_id(
-    tmp_path: Path, export_key: str, format_name: str, sections: list[str] | None
+def test_r125_a_shareable_export_withholds_the_waiver_reason(
+    tmp_path: Path, export_key: str, format_name: str, sections: list[str] | None, declared: bool, spelling: str
 ) -> None:
-    """A shareable export must never carry the Google customer id, also not inside a waiver's free-text reason, and
-    also when the manifest section is left out of the export."""
-    customer = "C01abcd23"
+    """A shareable SARIF or OSCAL export never carries the operator's free-text waiver reason (it can name the
+    customer id in any spelling, also when the run never declared it): the finding stays accepted and says the
+    reason is withheld."""
+    reason = _REASON_SPELLINGS[spelling]
     run = _write_google_run(
-        tmp_path / "run-a", domain="alpha.example", customer_id=customer, findings=[_google_waived(customer)]
+        tmp_path / "run-a", domain="alpha.example", customer_id=_CUSTOMER if declared else None,
+        findings=[_google_waived(reason)],
     )
     content = preview_report(run_dir=str(run), format_name=format_name, profile="shareable", include_sections=sections)[
         "content"
     ]
-    assert customer.lower() not in content.lower()
-    assert "Accepted for customer" in content  # the reason itself is still published
+    assert _CUSTOMER.lower() not in content.lower()
+    text = _accepted_text(content, format_name)
+    assert "withheld" in text
+    assert "2999-01-01" in text  # the waiver's expiry date stays
+
+
+@pytest.mark.parametrize("format_name", ["sarif", "oscal"])
+def test_r125_a_local_export_keeps_the_waiver_reason(tmp_path: Path, format_name: str) -> None:
+    reason = _REASON_SPELLINGS["underscore"]
+    run = _write_google_run(tmp_path / "run-a", domain="alpha.example", customer_id=_CUSTOMER,
+                            findings=[_google_waived(reason)])
+    content = preview_report(run_dir=str(run), format_name=format_name, profile="local")["content"]
+    assert reason in _accepted_text(content, format_name)
 
 
 # R126 ---------------------------------------------------------------------------------------------------------------

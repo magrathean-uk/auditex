@@ -655,6 +655,11 @@ Credential masking in the shareable profiles covers:
 Google customer ids (under `tenant_id` and `customer_id` keys) are masked as `Id <pseudonym>` in shareable output;
 local output keeps the real id.
 
+Shareable SARIF and OSCAL exports withhold a waiver's free-text `reason` altogether: pattern matching cannot be
+trusted to find every spelling of an identifier an operator types (a customer id inside `workspace_<id>_rollout`, a
+URL, or an id the run never discovered). They keep the structured facts: that the finding is accepted under a waiver,
+its status and the waiver's expiry date, and say the reason is withheld. Local output keeps the reason.
+
 The report structure is redacted before rendering, so free-text keys work in
 Markdown and HTML as well as JSON. Customer-pack source JSON is a redacted
 derivative: the pack records the original and derivative hashes separately.

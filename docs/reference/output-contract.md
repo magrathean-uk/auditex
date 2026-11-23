@@ -1168,6 +1168,8 @@ The OSCAL shape changed with contract `2026-10-22`, because the earlier export d
 
 SARIF keeps its shape. Each result's `properties` gains `auditex.confidence` and `auditex.evidence` (the first ten references with `artifact_path`, `record_key`, `json_pointer`, `content_hash` and `resolved`).
 
+A finding accepted under a matching, unexpired waiver is a SARIF result with one `suppressions` entry (`kind: "external"`, `status: "accepted"`) and an OSCAL finding whose `auditex.status` property is `accepted` and whose `target.status.remarks` says the risk is accepted while the control stays not satisfied. In the local profile the SARIF `justification` and the OSCAL remark carry the waiver's `reason` (or `comment`). A shareable, customer-pack or explainer export never carries that free-text reason: the justification and the remark read `Accepted risk under a waiver, expires <YYYY-MM-DD>; the waiver reason is withheld from shareable output` (the expiry only when the waiver has a valid `expires_on`), so an identifier the operator typed into the reason cannot reach a recipient in any spelling.
+
 ### Attack paths
 
 New graph-derived paths are explicitly conditional hypotheses:
