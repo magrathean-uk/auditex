@@ -83,3 +83,61 @@ def test_two_cut_assignment_reads_are_two_distinct_collection_gaps() -> None:
         "/servicePrincipals/sp-1/appRoleAssignedTo", "/servicePrincipals/sp-2/appRoleAssignedTo"]
     assert len({row["id"] for row in gaps}) == 2
     assert len({row["key"] for row in gaps}) == 2
+
+
+class _MalformedOwners(FakeGraph):
+    """The sp-1 owner read answers HTTP 200 with a body that carries no owner list."""
+
+    def __init__(self, body: dict[str, Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.body = body
+
+    def get_batch(self, requests):
+        out = super().get_batch(requests)
+        for request, item in zip(requests, out, strict=True):
+            if request["path"] == "/servicePrincipals/sp-1/owners":
+                item.update(status=200, body=dict(self.body))
+        return out
+
+
+def test_a_200_owner_answer_without_a_value_list_is_a_failed_read_not_zero_owners() -> None:
+    for body in ({}, {"value": None}):
+        fake = _MalformedOwners(body, lists={"/servicePrincipals": SPS, "/oauth2PermissionGrants": GRANTS,
+                                             "/servicePrincipals/sp-2/owners": [{"id": "owner-1"}]})
+        result = AppConsentCollector().run({"client": fake, "top": None})
+        owner_rows = {row["endpoint"]: row for row in result.coverage if row.get("name") == "servicePrincipalOwners"}
+        assert owner_rows["/servicePrincipals/sp-1/owners"]["status"] == "failed", body
+        assert owner_rows["/servicePrincipals/sp-1/owners"]["error_class"] == "incomplete_evidence", body
+        assert owner_rows["/servicePrincipals/sp-2/owners"]["status"] == "ok", body
+        snapshot = build_normalized_snapshot(
+            tenant_name="lab", run_id="run", collector_payloads={"app_consent": result.payload},
+            coverage_rows=result.coverage,
+        )
+        assert _owner_counts(snapshot) == {"sp-1": None, "sp-2": 1}, body
+
+
+class _NoBatchNoOwnerList(FakeGraph):
+    """Without a batch answer the collector reads each relationship alone; the sp-1 owner read yields no list."""
+
+    def get_batch(self, requests):
+        raise GraphError("Batch unavailable", status=503, request="/$batch")
+
+    def get_all(self, path, params=None):
+        if path == "/servicePrincipals/sp-1/owners":
+            self.calls.append("all " + path)
+            return None
+        return super().get_all(path, params=params)
+
+
+def test_a_single_owner_read_without_a_list_is_a_failed_read_not_zero_owners() -> None:
+    fake = _NoBatchNoOwnerList(lists={"/servicePrincipals": SPS, "/oauth2PermissionGrants": GRANTS,
+                                      "/servicePrincipals/sp-2/owners": [{"id": "owner-1"}]})
+    result = AppConsentCollector().run({"client": fake, "top": None})
+    owner_rows = {row["endpoint"]: row for row in result.coverage if row.get("name") == "servicePrincipalOwners"}
+    assert owner_rows["/servicePrincipals/sp-1/owners"]["status"] == "failed"
+    assert owner_rows["/servicePrincipals/sp-1/owners"]["error_class"] == "incomplete_evidence"
+    snapshot = build_normalized_snapshot(
+        tenant_name="lab", run_id="run", collector_payloads={"app_consent": result.payload},
+        coverage_rows=result.coverage,
+    )
+    assert _owner_counts(snapshot) == {"sp-1": None, "sp-2": 1}

@@ -12,7 +12,7 @@ from ..collection_gaps import (
     section_total,
     section_was_cut,
 )
-from ..graph import GraphClient, GraphError
+from ..graph import INCOMPLETE_EVIDENCE, GraphClient, GraphError
 from .base import (
     Collector,
     CollectorResult,
@@ -243,10 +243,10 @@ class AppConsentCollector(Collector):
                 target_list = spec["target_list"]
                 status = result.get("status") if isinstance(result, dict) else None
                 body = result.get("body") if isinstance(result, dict) else None
-                if status == 200 and isinstance(body, dict):
-                    rows = body.get("value", [])
-                    if not isinstance(rows, list):
-                        rows = []
+                # A 200 answer is a read only when it carries a value list; one without (a missing or null value) is a
+                # failed read, never an empty list, so an unread owner list is not reported as zero owners.
+                if status == 200 and isinstance(body, dict) and isinstance(body.get("value"), list):
+                    rows = body["value"]
                     next_link = body.get("@odata.nextLink")
                     page_error: Exception | None = None
                     if isinstance(next_link, str) and next_link:
@@ -288,6 +288,8 @@ class AppConsentCollector(Collector):
                         error_message = error_message or error.get("message")
                     elif isinstance(error, str):
                         error_message = error_message or error
+                if status == 200 and not error_message:
+                    error_code, error_message = INCOMPLETE_EVIDENCE, "Graph answered without a value list."
                 error_text = str(error_message or "Graph batch request failed.")
                 error_status = status if isinstance(status, int) else None
                 error_exc = GraphError(
@@ -319,7 +321,8 @@ class AppConsentCollector(Collector):
                 try:
                     rows = client.get_all(endpoint, params={"$top": "50"})
                     if not isinstance(rows, list):
-                        rows = []
+                        raise GraphError("Graph answered without a value list.", status=200, request=endpoint,
+                                         error_code=INCOMPLETE_EVIDENCE)
                     target_list.append(
                         {
                             "servicePrincipalId": spec["service_principal_id"],
