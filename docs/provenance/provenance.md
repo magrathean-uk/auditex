@@ -133,6 +133,11 @@ Crown copyright, and are cited for dates only. The
 sources used to verify each identifier are listed in the catalog and in
 [Framework Mappings](../reference/framework-mappings.md).
 
+`configs/ce-plus-practice.json`, the CE+ practice run action catalogue, is written in Auditex's own words from the
+public NCSC Cyber Essentials Requirements for IT Infrastructure v3.3 and the Cyber Essentials Plus Test Specification
+v3.2, reused under the Open Government Licence v3.0 with the acknowledgement and source link in its
+`_documentation`. It copies no IASME self-assessment question text or numbers and uses no scheme logo.
+
 ## Operating-system end-of-life dates
 
 `configs/os-end-of-life.json` records when each Windows 10 and 11 build, macOS, iOS, iPadOS and Android

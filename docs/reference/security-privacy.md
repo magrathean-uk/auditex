@@ -675,6 +675,12 @@ produced. A derivative is bound to the pack checksums, so detecting an edit
 followed by recomputing those checksums requires a separately recorded digest
 passed to `verify-pack --expect-checksums-sha256`.
 
+The CE+ practice run (`auditex report ce-plus`) is always written under the shareable profile, and in a customer pack
+under the customer-pack profile. It carries requirement, rule, action, conflict and test ids, counts, the run id,
+tenant name, platform, evidence date and age, and Auditex's own catalogue text. It never copies tenant free text:
+no policy, user or group names and no finding titles or descriptions; finding ids are the only tenant-derived strings
+and pass the same redaction as every other output. Its error messages are fixed text and never name a path.
+
 ### Person names
 
 Who is masked: every person in the run's directory records, not only privileged

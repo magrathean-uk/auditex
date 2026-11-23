@@ -186,6 +186,7 @@ auditex report render <run-dir> --format md
 auditex report api-calls <run-dir> --format md
 auditex report permissions <run-dir> --format md
 auditex report proof-table <run-dir> --format md
+auditex report ce-plus <run-dir> --format md
 auditex report customer-pack <run-dir> --output-dir customer-pack
 auditex report verify-pack customer-pack
 auditex report explorer <run-dir>

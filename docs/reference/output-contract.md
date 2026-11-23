@@ -317,6 +317,49 @@ a 1.5.0 run (the key is outside the folders it reads) but rejects its
 `model_assessment.json`, so a 1.4.0 render of a 1.5.0 run omits policy
 explanations.
 
+## CE+ practice run (optional, additive)
+
+`auditex report ce-plus <run-dir> [--format json|md|html] [--output PATH] [--as-of YYYY-MM-DD]` reads one finished
+run bundle (Microsoft 365 or Google Workspace) and contacts no tenant. It writes nothing into the run unless
+`--output` points there; `reports/ce-plus.json`, `.md` and `.html` are accepted post-finalization names. The
+payload (`schema_version` `ce-plus-practice-v1`, schema `schemas/ce_plus_practice.schema.json`) is a pure function of
+`baseline_alignment.frameworks.cyber_essentials` in `reports/report-pack.json`, the run manifest, the coverage rows,
+the shipped action catalogue `configs/ce-plus-practice.json` and the as-of date (default today, UTC; it feeds only the
+evidence age). It adds no verdict, uses no model and is not a Cyber Essentials assessment. Output is always redacted
+under the shareable profile. Exit 0 for any report, including one where every requirement is unknown; exit 2 for an
+unsafe or unreadable run directory, a missing or unparseable `run-manifest.json` or a bad `--as-of`.
+
+**Evidence state** per requirement, first match wins: `evidence_unknown` (row missing or malformed:
+`row_missing_or_malformed`; section missing: `cyber_essentials_section_missing`), `outside_tenant_evidence`
+(`manual`, `ce_plus_assessor_test` or `provider_responsibility`), `gap_observed` (row `fail`), `gap_accepted` (row
+`accepted_risk`; an Auditex waiver is not a scheme exemption), `supporting_only` (`supporting_evidence_only` or
+`no_mapped_rules`), `evidence_unknown` (a deciding rule not evaluated, with the rule's own reasons),
+`evidence_observed_partial` (every deciding rule evaluated with no gap and the row reads
+`partial_requirement_no_gap_found`), otherwise `evidence_unknown` (`state_unreadable`, which also covers an empty or
+null rule list). Rule statuses are re-worded: `fail` to `gap_found`, `pass` to `no_gap_found`, `not_assessed` to
+`not_evaluated`, `accepted_risk` kept; anything else, or a verdict on a rule not marked evaluated, is `not_evaluated`
+(`status_unreadable`).
+
+**Flags**, independent of the state and rolled up in `evidence_quality`: `missing` (a deciding rule not evaluated, or
+the state is `evidence_unknown`), `truncated` (a truncated list or section gap from the coverage rows or the
+manifest's `coverage_gaps` for a collector feeding a deciding rule; no coverage data reads `coverage_data:
+unavailable`), `stale` (evidence age over the catalogue's `stale_after_days`, 14; tenant-evidence requirements only;
+`evidence_age_days` is `null` when `created_utc` is missing or unreadable, when no as-of date is given or when the
+as-of date is before the evidence date) and `conflicting` (a catalogue conflict holds: every policy rule
+`no_gap_found` and at least one state rule `gap_found`; a not-evaluated rule asserts no conflict). At run level
+`requirements_version_mismatch` is added when the section's `version` differs from the catalogue's, and bundle rows the
+catalogue lacks are listed in `unmapped_requirement_ids`.
+
+**Ranking.** An action applies to a requirement it lists when its platform matches (`any`, or the run's `m365` or
+`google_workspace`; an unknown platform gets only `any` actions) and its trigger holds: `rule_gap`,
+`rule_not_evaluated`, `conflict`, `requirement_state`, `assessor_test` or `stale_evidence`. `coverage_gained` sums the
+state weights of the requirements covered (gap observed 3, unknown 2, every other state 1) plus the conflict weight
+(1) where a conflict holds; `rank_score = coverage_gained * 4 // effort_weight` (quick 1, moderate 2, extended 4).
+Order: score descending, effort weight ascending, action id ascending. The weights are catalogue data and product
+defaults, not scheme rules. `requirements` always has the 30 catalogue rows in catalogue order and `assessor_tests`
+the five CE+ tests, each `witness_status: assessor_witness_required`. `CONTRACT_VERSION` is unchanged: nothing in
+the bundle changes.
+
 ## Contract history
 
 The optional `operator_inputs.sensitive_users`, `operator_inputs.partner_domains`
