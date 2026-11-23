@@ -51,7 +51,12 @@ from .data_handling import collector_activity_notices
 from .data_minimisation import minimise_user_text
 from .diagnostics import build_diagnostics as _build_diagnostics
 from .diagnostics import load_permission_hints as _load_permission_hints
-from .dns_lookup import DEFAULT_DOH_ENDPOINT, DOH_ENDPOINT_ENV, resolve_doh_endpoint
+from .dns_lookup import (
+    DEFAULT_DOH_ENDPOINT,
+    DOH_ENDPOINT_ENV,
+    resolve_doh_endpoint,
+    sanitise_resolver_fields,
+)
 from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
 from .graph import GraphClient, GraphError
@@ -362,6 +367,10 @@ def run_offline(
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     # The replayed tenant text enters the run here: each lone UTF-16 surrogate becomes U+FFFD, counted for the summary.
     sample = writer.valid_text(sample)
+    # Resolver diagnostics in the sample are untrusted: they may name the resolver by its full URL (user info, a path
+    # token, a query). Every copy below (sample_input.json, coverage, diagnostics, normalised records) sees only the
+    # safe form (review R164).
+    sample = sanitise_resolver_fields(sample)
     try:
         sensitive_binding = writer.write_sensitive_users(sensitive_users)
         writer.write_partner_domains(partner_domains)
@@ -768,7 +777,7 @@ def run_live(
         return 2
     run_cfg = plan.run_config
     selected = plan.selected_collectors
-    for notice in collector_activity_notices(selected, "live"):
+    for notice in collector_activity_notices(selected, "live", doh_endpoint):
         LOG.info("%s", notice)
     if NON_FATAL_COLLECTORS.intersection(selected):
         LOG.info("Exchange/DNS failures leave overall status partial, process exit 0 when these are the only failures; "
@@ -1199,6 +1208,7 @@ def run_live(
             coverage_ledger=coverage_ledger,
             privacy=privacy,
             trust_selected_collectors=selected_before_preflight,
+            doh_endpoint=doh_endpoint,
             bundle_metadata={
                 "collector_preset": args.collector_preset,
                 "waiver_path": args.waiver_file,

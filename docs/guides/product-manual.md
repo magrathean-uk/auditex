@@ -27,22 +27,29 @@ Auditex is an audit-only evidence collection and reporting toolkit for Microsoft
 
 Use Python 3.11 or newer on Linux, macOS or Windows Subsystem for Linux 2 (WSL2). Native Windows is not supported yet: Auditex needs no-follow, descriptor-relative file opens to read its inputs safely, and on native Windows it refuses with "Auditex needs Linux, macOS or WSL2; native Windows is not supported yet." Install and run it inside a WSL2 distribution instead.
 
+Install Auditex from PyPI with pipx; the [install guide](install-guide.md) covers every step, from installing Python
+and pipx to upgrading and removing it:
+
+```bash
+pipx install auditex
+auditex doctor
+```
+
+Add the optional Google dependencies only when Google Workspace audits are needed, and the MCP dependencies only when
+serving Auditex through MCP. Name every extra you want in one install (`--force` replaces an existing install):
+
+```bash
+pipx install --force "auditex[google,mcp]"
+```
+
+From a source checkout (to change Auditex or run its tests), install it editable in a virtual environment instead:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
-```
-
-Install optional Google dependencies only when Google Workspace audits are needed.
-
-```bash
 python -m pip install -e '.[google]'
-```
-
-Install MCP dependencies only when serving Auditex through MCP.
-
-```bash
 python -m pip install -e '.[mcp]'
 ```
 
@@ -492,7 +499,7 @@ that does not pass the checks shows that check's fixed text, and the answer says
 - The answer is written into the run as `local_answer.json`, shown as a `local_answer` section by `auditex report
   render`, and returned by the read-only MCP tool `auditex_local_answer`; each re-checks the stored answer against the
   run first.
-- The optional runtime is installed with `python -m pip install -e '.[local-answer]'`. The first use of a model downloads
+- The optional runtime is installed with `pipx install --force "auditex[local-answer]"` (keep any other extras inside the brackets), or `python -m pip install -e '.[local-answer]'` in a source checkout. The first use of a model downloads
   one pinned, verified file once; after that the answer runs offline. Nothing about the run or the tenant is sent
   anywhere.
 - `--model` chooses the model; the guide lists the shipped choices, the download sizes, the measured speed and what

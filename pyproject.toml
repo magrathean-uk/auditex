@@ -6,11 +6,33 @@ build-backend = "setuptools.build_meta"
 name = "auditex"
 version = "1.8.0"
 description = "Read-only Microsoft 365 and Google Workspace tenant-audit toolkit for evidence collection"
-readme = "README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "MAGRATHEAN UK LTD", email = "contact+auditex@magrathean.uk" }]
+keywords = [
+    "microsoft-365", "entra-id", "google-workspace", "tenant-audit", "security-audit", "cisa-scuba",
+    "compliance", "evidence", "mcp",
+]
+# Linux, macOS and WSL2 only: native Windows is not supported (issue #18), so no Windows classifier.
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Natural Language :: English",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
 dependencies = [
     "requests>=2.34.2,<3",
     "msal>=1.39.0,<2",
@@ -22,6 +44,8 @@ dependencies = [
 Homepage = "https://magrathean.uk/solutions/auditex/"
 Repository = "https://github.com/magrathean-uk/auditex"
 Issues = "https://github.com/magrathean-uk/auditex/issues"
+Changelog = "https://github.com/magrathean-uk/auditex/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/magrathean-uk/auditex/blob/main/docs/guides/install-guide.md"
 
 [project.optional-dependencies]
 # Capped below 2: the server is tested against a fake FastMCP only, so a 2.x API change
@@ -58,6 +82,8 @@ google = [
 dev = [
     "pip-audit>=2.9,<3",
     "ruff==0.17.0",
+    # make dist-check: validates the built wheel and sdist metadata as PyPI will render it. Nothing is uploaded.
+    "twine>=7,<8",
 ]
 
 [project.scripts]

@@ -182,7 +182,7 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "service-account credentials; google-auth exchanges a JWT bearer grant lazily inside execute()"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "credentials.with_subject", TOKEN_POST, 1, 2, "A22",
             "domain-delegated copy of the service-account credentials; lazy JWT bearer grant"),
-    Allowed(_GOOGLE_AUTH, "build_google_credentials", "Credentials.from_authorized_user_file", TOKEN_POST, 1, 2,
+    Allowed(_GOOGLE_AUTH, "build_google_credentials", "Credentials.from_authorized_user_info", TOKEN_POST, 1, 2,
             "A24", "cached OAuth user credentials; google-auth refreshes them lazily inside execute()"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "credentials.refresh", TOKEN_POST, 1, 2, "A21",
             "explicit refresh of the cached OAuth user token, to read the scopes Google grants it"),

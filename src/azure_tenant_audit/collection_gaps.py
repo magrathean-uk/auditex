@@ -17,13 +17,19 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
+from .dns_lookup import (
+    DEFAULT_DOH_ENDPOINT,
+    DNS_POSTURE_COLLECTORS,
+    doh_resolver_display,
+)
+
 # These default workload enrichments may be unavailable without blocking the core audit.
 # Their actual failed/partial rows and the run's partial coverage remain unchanged.
 NON_FATAL_COLLECTORS = frozenset({"exchange_policy", "dns_posture"})
 
 
-def collector_gap_reason(collector: str, error_class: Any, error: Any = None) -> str | None:
-    """Controlled customer text; never echo credentials or command output into a reason."""
+def collector_gap_reason(collector: str, error_class: Any, error: Any = None, *, doh_endpoint: Any = None) -> str | None:
+    """Controlled customer text. The legacy error argument is ignored."""
     if collector in NON_FATAL_COLLECTORS and error_class == "collection_limit":
         return _COLLECTOR_FAILURE_REASON_TEXT["collection_limit"]
     if collector == "exchange_policy":
@@ -34,9 +40,14 @@ def collector_gap_reason(collector: str, error_class: Any, error: Any = None) ->
         if error_class in {"command_not_found", "module_not_found", "toolchain_unavailable"}:
             return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
         return _COLLECTOR_FAILURE_REASON_TEXT["exchange_policy_failed"]
+    if collector in DNS_POSTURE_COLLECTORS and error_class == "dns_resolver_error":
+        origin = doh_resolver_display(doh_endpoint)
+        if origin and origin == doh_resolver_display(DEFAULT_DOH_ENDPOINT):
+            resolver = f"the public Cloudflare DNS-over-HTTPS resolver at {origin}"
+        else:
+            resolver = f"the DNS-over-HTTPS resolver at {origin}" if origin else _UNNAMED_RESOLVER
+        return _DNS_RESOLVER_REASON.format(resolver=resolver, collector=collector)
     if collector == "dns_posture":
-        if error_class == "dns_resolver_error":
-            return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
         if error_class == "public_lookup_error":
             return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
         return _COLLECTOR_FAILURE_REASON_TEXT["dns_posture_failed"]
@@ -75,6 +86,13 @@ SECTION_GAP_REASON_TEXT = {
     REASON_TEAMS_POWERSHELL_NOT_SUPPORTED: "not collected: Teams PowerShell sessions are not supported",
 }
 
+_UNNAMED_RESOLVER = "the DNS-over-HTTPS resolver (endpoint unknown)"
+_DNS_RESOLVER_REASON = (
+    "Not assessed: {resolver} could not answer or was unreachable; "
+    "DNS records are unknown, not absent. Check resolver connectivity and rerun {collector}."
+)
+
+
 _COLLECTOR_FAILURE_REASON_TEXT = {
     "collection_limit": (
         "Not assessed: the policy input is incomplete because collection stopped at an operator or safety limit; "
@@ -91,10 +109,6 @@ _COLLECTOR_FAILURE_REASON_TEXT = {
         "admin consent and Global Reader on the service principal for app-only access. "
         "Interactive, delegated and access-token authentication cannot open an Exchange Online policy session; "
         "use app authentication or deselect exchange_policy."
-    ),
-    "dns_resolver_error": (
-        "Not assessed: the public Cloudflare DNS-over-HTTPS resolver could not answer or was unreachable; "
-        "DNS records are unknown, not absent. Check resolver connectivity and rerun dns_posture."
     ),
     "public_lookup_error": "Not assessed: the verified domain's MTA-STS or public OpenID discovery HTTPS read failed.",
     "dns_posture_failed": (
@@ -388,9 +402,10 @@ def refusal_gap_records(
     """
     records: dict[tuple[str, str], dict[str, Any]] = {}
 
-    def add(collector: str, operation: str, status: str, error_class: Any, error: Any, rows: int) -> None:
+    def add(collector: str, operation: str, status: str, row: Mapping[str, Any], rows: int) -> None:
+        error_class = row.get("error_class")
         classes = sorted({str(error_class)}) if error_class else []
-        unavailable = classes == [_NOT_FOUND_ERROR_CLASS] or _SEGMENT_NOT_FOUND in str(error or "").lower()
+        unavailable = classes == [_NOT_FOUND_ERROR_CLASS] or _SEGMENT_NOT_FOUND in str(row.get("error") or "").lower()
         records[(collector, operation)] = {
             "collector": collector,
             "list": operation,
@@ -398,7 +413,8 @@ def refusal_gap_records(
             "reason": REASON_ENDPOINT_UNAVAILABLE if unavailable else REASON_READ_FAILED,
             "status": status,
             **({"error_classes": classes} if classes else {}),
-            **({"customer_reason": collector_gap_reason(collector, error_class, error)} if collector in NON_FATAL_COLLECTORS else {}),
+            **({"customer_reason": collector_gap_reason(collector, error_class, doh_endpoint=row.get("doh_endpoint"))}
+               if collector in NON_FATAL_COLLECTORS else {}),
         }
 
     for row in latest_coverage(coverage_rows):
@@ -408,7 +424,7 @@ def refusal_gap_records(
             continue
         if row.get("collection_truncated") is True or row.get(SECTION_SCOPED) is True:
             continue
-        add(collector, operation, "failed" if row.get("status") == "failed" else "partial", row.get("error_class"), row.get("error"), _row_count(row))
+        add(collector, operation, "failed" if row.get("status") == "failed" else "partial", row, _row_count(row))
     for collector, payload in sorted((collector_payloads or {}).items()):
         if not isinstance(payload, Mapping):
             continue
@@ -417,7 +433,7 @@ def refusal_gap_records(
             if (str(collector), operation) in records or not isinstance(section, Mapping):
                 continue
             if section.get("error") or section.get("error_class"):
-                add(str(collector), operation, "failed", section.get("error_class"), section.get("error"), 0)
+                add(str(collector), operation, "failed", section, 0)
     return sorted(records.values(), key=lambda item: (item["collector"], item["list"]))
 
 

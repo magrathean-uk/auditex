@@ -9,6 +9,7 @@ questions and issue reports, see [SUPPORT.md](../.github/SUPPORT.md).
 
 ## Operator docs
 
+- [Install Guide](guides/install-guide.md): step-by-step install from PyPI with pipx on Linux, macOS and WSL2, extras, first offline run, upgrade, uninstall and troubleshooting.
 - [Product Manual](guides/product-manual.md): install, audit, probe, report, export, compare, customer packs, and MCP.
 - [Setup Guide](guides/setup-guide.md): provider scopes, roles, admin steps, and generated setup plans.
 - [Administrator Permission Guide](guides/admin-permission-guide.md): Microsoft 365 and Google Workspace access models.

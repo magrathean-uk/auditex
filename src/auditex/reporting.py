@@ -1840,7 +1840,7 @@ def _local_path_label(value: Any) -> Any:
     return value
 
 
-def _local_path_argument(value: Any) -> Any:
+def local_path_argument(value: Any) -> Any:
     """One command-line item: a bare absolute path, or the value of ``--flag=/abs/path``, as ``<local-path>/<name>``."""
     if isinstance(value, str) and value.startswith("--") and "=" in value:
         flag, _, path = value.partition("=")
@@ -1860,7 +1860,7 @@ def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> d
     if "run_dir" in payload:
         safe["run_dir"] = run_path.name
     if isinstance(safe.get("command_line"), list):
-        safe["command_line"] = [_local_path_argument(item) for item in safe["command_line"]]
+        safe["command_line"] = [local_path_argument(item) for item in safe["command_line"]]
     return _relabel_path_fields(safe)
 
 

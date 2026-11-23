@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import stat
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,6 +19,7 @@ from azure_tenant_audit.secret_hygiene import (
     redact_text,
     sanitize_token_claims,
     secure_write_json,
+    secure_write_text,
     token_freshness,
     validate_token_claims,
 )
@@ -170,3 +175,241 @@ def test_redact_text_round2_cut_off_after_backslash_and_marker_prefix() -> None:
     assert redact_text('password="abc def\\') == "password=***redacted***"
     assert "TAILSECRET" not in redact_text("password=***redacted***TAILSECRET")
     assert redact_text("token: ***redacted-jwt***") == "token: ***redacted-jwt***"
+
+
+# ---- bot review wave 2 (items 22, 23): the secret write is anchored in a verified folder ---------------------------
+
+_posix_owner = pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="POSIX modes, not as root")
+
+
+def _write_mode(path) -> int:
+    return stat.S_IMODE(os.lstat(path).st_mode)
+
+
+@_posix_owner
+def test_folder_that_blocks_the_atomic_write_gives_a_fixed_actionable_error(tmp_path) -> None:
+    folder = tmp_path / "private-marker"
+    folder.mkdir()
+    target = folder / "token.json"
+    target.write_text("old", encoding="utf-8")
+    os.chmod(target, 0o600)
+    os.chmod(folder, 0o500)  # the file could be rewritten in place, but nothing can be created beside it
+    try:
+        with pytest.raises(PermissionError) as caught:
+            secure_write_text(target, "new")
+    finally:
+        os.chmod(folder, 0o700)
+    assert "secret_folder_refused" in str(caught.value) and "writable folder" in str(caught.value)
+    assert "private-marker" not in str(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+    assert target.read_text(encoding="utf-8") == "old"
+    assert sorted(path.name for path in folder.iterdir()) == ["token.json"]
+
+
+@_posix_owner
+def test_folder_other_accounts_can_change_is_refused(tmp_path) -> None:
+    folder = tmp_path / "shared"
+    folder.mkdir()
+    os.chmod(folder, 0o777)
+    with pytest.raises(PermissionError, match="secret_folder_refused"):
+        secure_write_text(folder / "token.json", "secret")
+    assert list(folder.iterdir()) == []
+
+
+@_posix_owner
+def test_sticky_shared_folder_is_accepted(tmp_path) -> None:
+    folder = tmp_path / "sticky"
+    folder.mkdir()
+    os.chmod(folder, 0o1777)
+    target = secure_write_text(folder / "token.json", "secret")
+    assert target.read_text(encoding="utf-8") == "secret" and _write_mode(target) == 0o600
+
+
+@_posix_owner
+def test_entry_swapped_after_the_write_is_neither_chmodded_nor_installed(tmp_path, monkeypatch) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    os.chmod(victim, 0o644)
+    real_fdopen = os.fdopen
+
+    class _SwapOnClose:
+        """Closes the descriptor, then puts a link where the temporary file was (another principal's move)."""
+
+        def __init__(self, handle) -> None:
+            self.handle = handle
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            self.handle.close()
+            (temporary,) = [path for path in folder.iterdir() if path.name.endswith(".tmp")]
+            temporary.unlink()
+            temporary.symlink_to(victim)
+
+    monkeypatch.setattr(os, "fdopen", lambda *a, **k: _SwapOnClose(real_fdopen(*a, **k)))
+    with pytest.raises(PermissionError, match="secret_folder_refused"):
+        secure_write_text(folder / "token.json", "secret")
+    assert _write_mode(victim) == 0o644 and victim.read_text(encoding="utf-8") == "keep"
+    assert not (folder / "token.json").exists() and not (folder / "token.json").is_symlink()
+
+
+# ---- repair round 1 for group H (items 22, 23, 26): every refusal is the fixed message, ACLs count, reads are checked ----
+
+
+@_posix_owner
+def test_item22_blocked_creation_of_a_missing_cache_folder_gives_the_fixed_refusal(tmp_path) -> None:
+    locked = tmp_path / "locked-marker"
+    locked.mkdir()
+    os.chmod(locked, 0o500)  # owner can enter, but nothing can be created inside
+    try:
+        with pytest.raises(PermissionError) as caught:
+            secure_write_text(locked / "sub-marker" / "token.json", "secret")
+    finally:
+        os.chmod(locked, 0o700)
+    assert "secret_folder_refused" in str(caught.value)
+    assert "locked-marker" not in str(caught.value) and "sub-marker" not in str(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+    assert list(locked.iterdir()) == []
+
+
+_macos_owner = pytest.mark.skipif(sys.platform != "darwin" or os.geteuid() == 0, reason="macOS ACLs, not as root")
+
+
+def _add_acl(path, entry: str) -> None:
+    subprocess.run(["chmod", "+a", entry, str(path)], check=True)
+
+
+def _clear_acl(path) -> None:
+    subprocess.run(["chmod", "-N", str(path)], check=False)
+
+
+@_macos_owner
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "everyone allow add_file,delete_child",  # another account can replace the cache in an 0700 folder
+        "everyone allow read,file_inherit",  # a new 0600 cache would inherit read access for another account
+    ],
+)
+def test_item23_folder_whose_acl_grants_other_accounts_is_refused(tmp_path, entry: str) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    _add_acl(folder, entry)
+    try:
+        with pytest.raises(PermissionError, match="secret_folder_refused") as caught:
+            secure_write_text(folder / "token.json", "secret")
+        assert list(folder.iterdir()) == []
+    finally:
+        _clear_acl(folder)
+    assert "cache" not in str(caught.value).split("secret_folder_refused", 1)[0]
+
+
+@_macos_owner
+def test_item23_deny_only_acl_like_the_desktop_folder_is_accepted(tmp_path) -> None:
+    folder = tmp_path / "desktop-like"
+    folder.mkdir(mode=0o700)
+    _add_acl(folder, "everyone deny delete")
+    try:
+        target = secure_write_text(folder / "token.json", "secret")
+        assert target.read_text(encoding="utf-8") == "secret" and _write_mode(target) == 0o600
+    finally:
+        _clear_acl(folder)
+
+
+@_posix_owner
+def test_item26_secure_read_returns_an_owner_written_secret_and_none_when_missing(tmp_path) -> None:
+    from azure_tenant_audit import secret_hygiene
+
+    target = secure_write_text(tmp_path / "cache" / "token.json", "secret")
+    assert secret_hygiene.secure_read_text(target) == "secret"
+    assert secret_hygiene.secure_read_text(tmp_path / "cache" / "absent.json") is None
+    assert secret_hygiene.secure_read_text(tmp_path / "missing-folder" / "token.json") is None
+
+
+@_posix_owner
+def test_item26_secure_read_refuses_a_folder_other_accounts_can_change(tmp_path) -> None:
+    from azure_tenant_audit import secret_hygiene
+
+    folder = tmp_path / "shared-marker"
+    folder.mkdir()
+    (folder / "token.json").write_text("planted", encoding="utf-8")
+    os.chmod(folder, 0o777)
+    with pytest.raises(PermissionError, match="secret_folder_refused") as caught:
+        secret_hygiene.secure_read_text(folder / "token.json")
+    assert "shared-marker" not in str(caught.value) and caught.value.__cause__ is None
+
+
+@_posix_owner
+def test_item26_secure_read_refuses_a_link_or_a_file_others_can_write(tmp_path) -> None:
+    from azure_tenant_audit import secret_hygiene
+
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text("planted", encoding="utf-8")
+    (folder / "linked.json").symlink_to(elsewhere)
+    with pytest.raises(PermissionError, match="secret_file_refused"):
+        secret_hygiene.secure_read_text(folder / "linked.json")
+    writable = folder / "writable.json"
+    writable.write_text("planted", encoding="utf-8")
+    os.chmod(writable, 0o666)
+    with pytest.raises(PermissionError, match="secret_file_refused"):
+        secret_hygiene.secure_read_text(writable)
+
+
+def _mount_options(path) -> set[str] | None:
+    """The options ``mount`` lists for the volume holding ``path`` (macOS), to check the detector independently."""
+    output = subprocess.run(["/sbin/mount"], capture_output=True, text=True, check=True).stdout
+    best: tuple[int, set[str]] | None = None
+    resolved = os.path.realpath(path)
+    for line in output.splitlines():
+        head, _, rest = line.partition(" on ")
+        point, _, options = rest.rpartition(" (")
+        if not point or not (resolved == point or resolved.startswith(point.rstrip("/") + "/")):
+            continue
+        if best is None or len(point) > best[0]:
+            best = (len(point), {option.strip() for option in options.rstrip(")").split(",")})
+    return best[1] if best else None
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS mount policy")
+def test_item26_ownership_enforced_matches_the_volume_mount_policy(tmp_path) -> None:
+    # The test volume decides the expected answer: on a volume mounted with "Ignore ownership" (noowners) every account
+    # is treated as the owner, so the owner and mode checks prove nothing there.
+    from azure_tenant_audit import secret_hygiene
+
+    options = _mount_options(tmp_path)
+    assert options is not None
+    assert secret_hygiene.ownership_enforced(tmp_path / "cache" / "token.json") is ("noowners" not in options)
+    assert secret_hygiene.ownership_enforced("/") is True  # the system volume always enforces ownership
+
+
+def test_item26_ownership_is_not_trusted_when_the_volume_flags_cannot_be_read(monkeypatch, tmp_path) -> None:
+    from azure_tenant_audit import secret_hygiene
+
+    monkeypatch.setattr(secret_hygiene.sys, "platform", "darwin")
+    monkeypatch.setattr(secret_hygiene, "_darwin_mount_flags", lambda _path: None)
+    assert secret_hygiene.ownership_enforced(tmp_path / "token.json") is False
+    monkeypatch.setattr(secret_hygiene, "_darwin_mount_flags", lambda _path: secret_hygiene._MNT_IGNORE_OWNERSHIP)
+    assert secret_hygiene.ownership_enforced(tmp_path / "token.json") is False
+    monkeypatch.setattr(secret_hygiene, "_darwin_mount_flags", lambda _path: 0)
+    assert secret_hygiene.ownership_enforced(tmp_path / "token.json") is True
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="reads macOS mount flags")
+def test_item26_a_vanished_cache_folder_is_not_judged_by_the_volume_above_it() -> None:
+    from pathlib import Path
+
+    from azure_tenant_audit import secret_hygiene
+
+    # A folder that does not exist under a system-volume folder: the volume that held it (say an unmounted noowners
+    # disk) is gone, so the system volume's ownership policy above it says nothing about the cache.
+    gone = Path("/private/var/auditex-missing-volume-check") / "auditex"
+    assert not gone.parent.exists()
+    assert secret_hygiene.ownership_enforced(gone / "token.json") is False

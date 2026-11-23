@@ -34,9 +34,10 @@ def dns_resolver_host(collectors: list[str], doh_endpoint: str | None = None) ->
     endpoint = _resolved_doh_endpoint(doh_endpoint)
     if endpoint is None:
         return None
-    from urllib.parse import urlsplit
+    from .dns_lookup import doh_resolver_address
 
-    return urlsplit(endpoint).hostname
+    address = doh_resolver_address(endpoint)
+    return address.host if address else None
 
 
 def collector_activity_notices(collectors: list[str], mode: str, doh_endpoint: str | None = None) -> list[str]:
