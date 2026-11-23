@@ -414,18 +414,27 @@ def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> P
         except PermissionError:
             raise _secret_folder_refused() from None
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            # The descriptor stays open through the identity check and the rename: while it is open the written
+            # file's inode cannot be freed, so nothing put where the temporary file was (a link or another regular
+            # file) can carry its number. Linux file systems reuse a freed inode number at once.
+            handle = os.fdopen(descriptor, "w", encoding="utf-8")
+            try:
                 os.fchmod(handle.fileno(), mode)
                 handle.write(content)
                 handle.flush()
                 written = os.fstat(handle.fileno())
-            current = os.stat(temporary, dir_fd=folder, follow_symlinks=False)
-            if (current.st_dev, current.st_ino) != (written.st_dev, written.st_ino):
-                raise _secret_folder_refused()
-            try:
-                os.rename(temporary, target.name, src_dir_fd=folder, dst_dir_fd=folder)
-            except PermissionError:
-                raise _secret_folder_refused() from None
+                current = os.stat(temporary, dir_fd=folder, follow_symlinks=False)
+                if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != (
+                    written.st_dev,
+                    written.st_ino,
+                ):
+                    raise _secret_folder_refused()
+                try:
+                    os.rename(temporary, target.name, src_dir_fd=folder, dst_dir_fd=folder)
+                except PermissionError:
+                    raise _secret_folder_refused() from None
+            finally:
+                handle.close()
         except BaseException:
             try:
                 os.unlink(temporary, dir_fd=folder)
