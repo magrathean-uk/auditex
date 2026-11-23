@@ -77,7 +77,8 @@ _LEGACY_POST_FINALIZATION_OUTPUTS = frozenset({"model_assessment_prompts.jsonl"}
 _POST_FINALIZATION_OUTPUT = re.compile(
     r"reports/(?:explorer\.html"
     r"|rendered-report\.(?:json|md|csv|html|sarif\.json|oscal\.json)"
-    r"|(?:api-calls|permissions|proof-table|handoff)\.(?:json|md))"
+    r"|(?:api-calls|permissions|proof-table|handoff)\.(?:json|md)"
+    r"|ce-plus\.(?:json|md|html))"
 )
 # Directories whose files consumers open by name. A file at the root counts too.
 _CONSUMED_DIRECTORIES = ("normalized/", "findings/", "blockers/", "reports/", "ai_safe/")

@@ -185,10 +185,30 @@ What an integrator reading the bundle must know:
   `AUDITEX_EXPORT_FINGERPRINT_KEY` when it is set.
 - **Paths.** `run_dir` and `waiver_path` hold a folder or file name, not an absolute path.
 
+### CE+ practice run
+
+- **`auditex report ce-plus <run-dir>` (DEC-146).** A practice run for Cyber Essentials Plus from one finished
+  Microsoft 365 or Google Workspace run, offline: for each of the 30 Cyber Essentials v3.3 requirements the evidence
+  observed, what is partial, unknown or outside tenant evidence, and the next proof to gather in a published,
+  deterministic order; then the five CE+ assessor tests with what Auditex can prepare and what the assessor must
+  witness. Missing, stale, truncated and conflicting evidence is stated, never read as met. JSON, Markdown or HTML,
+  always redacted for sharing; schema `schemas/ce_plus_practice.schema.json`, catalogue
+  `configs/ce-plus-practice.json`. It adds no verdict and is not an assessment. A requirement id the shipped
+  catalogue lacks is counted (`dropped_requirement_id_count`), never shown. Customer packs gain
+  `ce-plus-practice.md` and `ce-plus-practice.json` when the run has a Cyber Essentials section; rebuilding a pack
+  without the section removes them only when the previous pack manifest listed them.
+- **Redaction refusals exit 2.** Every `auditex` command now answers a malformed, unreadable or changed normalised
+  file with the refusal's fixed text (run-relative labels only) and exit 2, instead of a traceback.
+
 ### Tenant-bootstrap (lab kit)
 
 - The lab seeding scripts verify the named lab tenant before every write, keep tokens out of command lines and keep
   their secret files owner-only. They remain lab-only and are never part of an audit.
+
+### Known issues
+
+- `pip-audit` reports PYSEC-2026-2447 for `diskcache` 5.6.3. It is installed only by `llama-cpp-python` in the
+  optional `local-answer` extra; no fixed release exists, and Auditex never turns on llama's disk cache.
 
 ## [1.8.0] - 2026-11-20
 

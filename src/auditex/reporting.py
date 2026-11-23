@@ -8,7 +8,7 @@ import html
 import json
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from datetime import UTC, date
 from io import StringIO
@@ -1782,10 +1782,251 @@ def render_proof_table_markdown(payload: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_text_artifact(path: Path, content: str, context: RedactionContext | None = None) -> dict[str, Any]:
+def ce_plus_practice_run(run_dir: str | Path, as_of: Any = None) -> dict[str, Any]:
+    """The CE+ practice run for one finished bundle (``auditex.ce_plus``); reads the run, contacts no tenant.
+
+    A run without a readable ``run-manifest.json`` is refused (exit 2 through the guarded CLI). A bundle without a
+    ``cyber_essentials`` section still gives a practice run, with every requirement ``evidence_unknown``.
+    """
+    from .ce_plus import build_practice_run, load_catalogue
+
+    bundle = RunBundle(Path(run_dir))
+    manifest = bundle.manifest()
+    if not manifest:
+        raise UnsafeRunFileError("manifest")
+    _, report_pack_payload = bundle.report_pack()
+    frameworks = _mapping(_mapping(_mapping(report_pack_payload).get("baseline_alignment")).get("frameworks"))
+    _, coverage = bundle._artifact_json("coverage_path", "coverage.json", [])
+    return build_practice_run(
+        frameworks.get("cyber_essentials"),
+        manifest,
+        load_catalogue(),
+        as_of=as_of,
+        coverage_rows=coverage if isinstance(coverage, list) else None,
+        collector_coverage=bundle.collector_coverage(),
+    )
+
+
+_CE_PLUS_PLATFORMS = {"m365": "Microsoft 365", "google_workspace": "Google Workspace"}
+_CE_PLUS_FLAG_LINES = (
+    ("missing", "Missing evidence"),
+    ("stale", "Stale evidence"),
+    ("truncated", "Truncated lists"),
+    ("conflicting", "Conflicting evidence"),
+)
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _ce_plus_words(value: Any) -> str:
+    return _text(value, "").replace("_", " ")
+
+
+def _ce_plus_age(run: Mapping[str, Any]) -> str:
+    age = run.get("evidence_age_days")
+    if not isinstance(age, int) or isinstance(age, bool):
+        return "age not established"
+    return f"{age} day{'' if age == 1 else 's'} old on {_text(run.get('as_of'), '')}"
+
+
+def _ce_plus_quality_lines(payload: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """(label, text) per evidence-quality line, each stated even when there is nothing to report."""
+    quality = _mapping(payload.get("evidence_quality"))
+    requirements = _dict_rows(payload.get("requirements"))
+    lines = []
+    for flag, label in _CE_PLUS_FLAG_LINES:
+        flagged = [row for row in requirements if flag in (row.get("evidence_flags") or [])]
+        if not flagged:
+            lines.append((label, "none"))
+            continue
+        detail = f"{len(flagged)} requirement{'' if len(flagged) == 1 else 's'}"
+        if flag == "missing":
+            reasons = sorted({str(reason) for row in flagged for reason in row.get("unknown_reasons") or []})
+            detail += f" ({', '.join(reasons)})" if reasons else ""
+        elif flag == "truncated":
+            lists = [f"{row.get('collector')}/{row.get('list')}" for row in _dict_rows(quality.get("truncated_lists"))]
+            detail += f" ({', '.join(lists)})" if lists else ""
+        elif flag == "conflicting":
+            ids = sorted({str(item.get("conflict_id")) for row in flagged for item in _dict_rows(row.get("conflicts"))})
+            detail += f" ({', '.join(ids)})"
+        elif flag == "stale":
+            detail += f"; {_ce_plus_age(_mapping(payload.get('run')))}"
+        lines.append((label, detail))
+    lines.append(("Coverage data", _ce_plus_words(quality.get("coverage_data"))))
+    incomplete = [str(item) for item in quality.get("incomplete_collectors") or []]
+    lines.append(("Incomplete collectors", ", ".join(incomplete) or "none"))
+    section_missing = any(
+        "cyber_essentials_section_missing" in (row.get("unknown_reasons") or []) for row in requirements
+    )
+    if section_missing:
+        version = "not established (no Cyber Essentials section)"
+    elif "requirements_version_mismatch" in (quality.get("flags") or []):
+        version = "differs from the catalogue"
+    else:
+        version = "matches"
+    lines.append(("Requirements version in the bundle", version))
+    dropped = quality.get("dropped_requirement_id_count")
+    count = (str(dropped) if dropped else "none") if _is_count(dropped) else "not established"
+    lines.append(("Bundle requirement ids the catalogue lacks (not shown)", count))
+    return lines
+
+
+def _ce_plus_tables(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """The rows every CE+ renderer prints, in order, from the redacted payload only."""
+    actions = [
+        {
+            "rank": row.get("rank"),
+            "action": f"{_text(row.get('title'), '')} ({_text(row.get('action_id'), '')})",
+            "effort": f"{_text(row.get('effort'), '')} ({row.get('effort_weight')})",
+            "covers": ", ".join(
+                f"{item.get('requirement_id')} {_ce_plus_words(item.get('evidence_state'))} +{item.get('weight')}"
+                for item in _dict_rows(row.get("coverage"))
+            ),
+            "score": f"{row.get('coverage_gained')} * 4 // {row.get('effort_weight')} = {row.get('rank_score')}",
+            "proof": row.get("proof_to_gather"),
+        }
+        for row in _dict_rows(payload.get("next_actions"))
+    ]
+    themes: dict[str, list[dict[str, Any]]] = {}
+    for row in _dict_rows(payload.get("requirements")):
+        observed = _mapping(row.get("evidence_observed"))
+        themes.setdefault(_text(row.get("theme"), "other"), []).append(
+            {
+                "requirement": f"{_text(row.get('title'), '')} ({_text(row.get('requirement_id'), '')})",
+                "status": _ce_plus_words(row.get("requirement_status")),
+                "state": _ce_plus_words(row.get("evidence_state")),
+                "flags": ", ".join(str(flag) for flag in row.get("evidence_flags") or []) or "none",
+                "rules": (
+                    f"{observed.get('rules_evaluated')} of {observed.get('rules_mapped')} evaluated, "
+                    f"{observed.get('rules_with_gap')} with a gap"
+                ),
+                "findings": ", ".join(str(item) for item in observed.get("finding_ids") or [])
+                or ("none" if _is_count(observed.get("open_finding_count")) else "not established"),
+                "proof": ", ".join(str(item) for item in row.get("proof_still_needed") or []) or "none",
+                "limits": row.get("evidence_limits"),
+            }
+        )
+    tests = [
+        {
+            "test": f"{row.get('number')}. {_text(row.get('title'), '')}",
+            "prepares": row.get("auditex_prepares"),
+            "witness": row.get("assessor_witnesses"),
+            "evidence": ", ".join(
+                f"{item.get('requirement_id')} {_ce_plus_words(item.get('evidence_state'))}"
+                for item in _dict_rows(row.get("linked_evidence"))
+            ),
+            "actions": ", ".join(str(item) for item in row.get("prepare_action_ids") or []),
+        }
+        for row in _dict_rows(payload.get("assessor_tests"))
+    ]
+    return {"actions": actions, "themes": themes, "tests": tests}
+
+
+_CE_PLUS_ACTION_COLUMNS = (
+    ("Rank", "rank"), ("Action", "action"), ("Effort", "effort"), ("Covers", "covers"), ("Score", "score"),
+    ("Proof to gather", "proof"),
+)
+_CE_PLUS_REQUIREMENT_COLUMNS = (
+    ("Requirement", "requirement"), ("Status", "status"), ("Evidence state", "state"), ("Flags", "flags"),
+    ("Rules", "rules"), ("Findings", "findings"), ("Proof still needed", "proof"), ("Evidence limits", "limits"),
+)
+_CE_PLUS_TEST_COLUMNS = (
+    ("Test", "test"), ("Auditex can prepare", "prepares"), ("Assessor must witness", "witness"),
+    ("Linked evidence", "evidence"), ("Prepare actions", "actions"),
+)
+
+
+def _ce_plus_header(payload: Mapping[str, Any]) -> list[tuple[str, str]]:
+    run = _mapping(payload.get("run"))
+    platform = _text(run.get("platform"), "unknown")
+    return [
+        ("Evidence date", _text(run.get("evidence_collected_utc"), "") or "not established"),
+        ("Evidence age", _ce_plus_age(run)),
+        ("Platform", _CE_PLUS_PLATFORMS.get(platform, platform)),
+        (
+            "Catalogue",
+            f"{_text(payload.get('catalogue_version'), '')}; requirements {_text(payload.get('requirements_version'), '')}; "
+            f"CE+ test specification {_text(payload.get('test_specification_version'), '')}",
+        ),
+    ]
+
+
+def render_ce_plus_markdown(payload: Mapping[str, Any]) -> str:
+    tables = _ce_plus_tables(payload)
+    source = _mapping(payload.get("source"))
+    lines = ["# Auditex CE+ practice run", "", _markdown_cell(payload.get("disclaimer")), ""]
+    lines.extend(f"- {label}: {_markdown_cell(text)}" for label, text in _ce_plus_header(payload))
+    lines.extend(["", "## Evidence quality", ""])
+    lines.extend(f"- {label}: {_markdown_cell(text)}" for label, text in _ce_plus_quality_lines(payload))
+    _append_rows_markdown(lines, "Next proof to gather", tables["actions"], _CE_PLUS_ACTION_COLUMNS)
+    lines.extend(["", "## Requirements"])
+    for theme, rows in tables["themes"].items():
+        title = _ce_plus_words(theme).capitalize()
+        _append_rows_markdown(lines, title, rows, _CE_PLUS_REQUIREMENT_COLUMNS)
+        heading = len(lines) - 1 - lines[::-1].index("## " + title)
+        lines[heading] = "### " + title
+    _append_rows_markdown(lines, "CE+ assessor tests", tables["tests"], _CE_PLUS_TEST_COLUMNS)
+    lines.extend(["", "## Ranking formula", "", _markdown_cell(payload.get("ranking_formula"))])
+    lines.extend([
+        "",
+        "## Source",
+        "",
+        f"{_markdown_cell(source.get('document_title'))}, {_text(source.get('document_url'), '')}, "
+        f"{_markdown_cell(source.get('licence'))}. The wording here is Auditex's own.",
+    ])
+    return "\n".join(lines) + "\n"
+
+
+def _ce_plus_html_table(title: str, rows: list[dict[str, Any]], columns: tuple[tuple[str, str], ...], level: int = 2) -> str:
+    head = "".join(f"<th scope=\"col\">{_html(label)}</th>" for label, _ in columns)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{_html(row.get(field))}</td>" for _, field in columns) + "</tr>" for row in rows
+    ) or f"<tr><td colspan=\"{len(columns)}\">No rows</td></tr>"
+    return f"<h{level}>{_html(title)}</h{level}><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def render_ce_plus_html(payload: Mapping[str, Any]) -> str:
+    tables = _ce_plus_tables(payload)
+    source = _mapping(payload.get("source"))
+    items = "".join(f"<li><strong>{_html(label)}:</strong> {_html(text)}</li>" for label, text in _ce_plus_header(payload))
+    quality = "".join(
+        f"<li><strong>{_html(label)}:</strong> {_html(text)}</li>" for label, text in _ce_plus_quality_lines(payload)
+    )
+    parts = [
+        "<!doctype html>",
+        "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Auditex CE+ practice run</title>",
+        _HTML_STYLE,
+        "</head><body>",
+        "<h1>Auditex CE+ practice run</h1>",
+        f"<p class=\"report-disclaimer\">{_html(payload.get('disclaimer'))}</p>",
+        f"<ul>{items}</ul>",
+        f"<section><h2>Evidence quality</h2><ul>{quality}</ul></section>",
+        f"<section>{_ce_plus_html_table('Next proof to gather', tables['actions'], _CE_PLUS_ACTION_COLUMNS)}</section>",
+        "<section><h2>Requirements</h2>"
+        + "".join(
+            _ce_plus_html_table(_ce_plus_words(theme).capitalize(), rows, _CE_PLUS_REQUIREMENT_COLUMNS, level=3)
+            for theme, rows in tables["themes"].items()
+        )
+        + "</section>",
+        f"<section>{_ce_plus_html_table('CE+ assessor tests', tables['tests'], _CE_PLUS_TEST_COLUMNS)}</section>",
+        f"<section><h2>Ranking formula</h2><p>{_html(payload.get('ranking_formula'))}</p></section>",
+        f"<section><h2>Source</h2><p>{_html(source.get('document_title'))}, {_html(source.get('document_url'))}, "
+        f"{_html(source.get('licence'))}. The wording here is Auditex's own.</p></section>",
+        "</body></html>",
+    ]
+    return "\n".join(parts) + "\n"
+
+
+def _write_text_artifact(
+    path: Path, content: str, context: RedactionContext | None = None, settle: Callable[[str], str] | None = None
+) -> dict[str, Any]:
     # Every generated customer-pack file passes the shared output redaction at the last step; the digest the
-    # manifest records is therefore the digest of what the customer receives.
-    write_private_text(path, redact_output(content, profile=PROFILE_CUSTOMER_PACK, context=context, markup=True))
+    # manifest records is therefore the digest of what the customer receives. ``settle`` lets one payload kind put
+    # back its own fixed field names after that pass (``ce_plus.restore_fixed_fields``).
+    text = redact_output(content, profile=PROFILE_CUSTOMER_PACK, context=context, markup=True)
+    write_private_text(path, settle(text) if settle is not None else text)
     return {
         "path": str(path),
         "name": path.name,
@@ -2019,7 +2260,13 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         "4. Review `api-calls.md`: the declared calls and, where the run has a transport ledger, every Graph request and command the audit log observed, with any call outside the declared set.",
         "5. Review `permissions.md` for required and missing scopes.",
         "6. Review `proof-table.md` for finding-to-evidence rows.",
-        "7. Run `auditex report verify-pack <pack-dir>` or use `checksums.sha256` to verify file integrity. "
+        *(
+            ["7. Review `ce-plus-practice.md` for the CE+ practice run: evidence observed and proof still needed per "
+             "Cyber Essentials requirement (not an assessment)."]
+            if any(_text(row.get("path")).endswith("ce-plus-practice.md") for row in generated)
+            else []
+        ),
+        f"{8 if any(_text(row.get('path')).endswith('ce-plus-practice.md') for row in generated) else 7}. Run `auditex report verify-pack <pack-dir>` or use `checksums.sha256` to verify file integrity. "
         "The pack carries its own checksums, so where origin matters compare the `digests` that command prints with values you "
         "received through a separate channel, or pass them as `--expect-manifest-sha256` and `--expect-checksums-sha256`.",
         "",
@@ -2102,6 +2349,41 @@ def _pack_payload(payload: Mapping[str, Any], run_path: Path) -> dict[str, Any]:
     return safe
 
 
+_OPTIONAL_PACK_FILES = ("ce-plus-practice.md", "ce-plus-practice.json")
+
+
+def _settle_ce_plus_json(payload: Mapping[str, Any], text: str) -> str:
+    """The CE+ pack JSON after the final text pass, with the payload's own fixed vocabulary put back
+    (``ce_plus.restore_fixed_fields``, walked in the file's own key order); text that no longer parses stays as it is."""
+    from .ce_plus import restore_fixed_fields
+
+    try:
+        written = json.loads(text)
+    except ValueError:
+        return text
+    return _json(restore_fixed_fields(json.loads(_json(payload)), written)) + "\n"
+
+
+def _previous_generated_ce_plus_files(previous: Mapping[str, Any]) -> set[str]:
+    """The optional CE+ files a previous pack manifest lists as generated. Only a string path counts, read as a
+    pack-relative POSIX path (a leading ``./`` dropped); an absolute path, one with ``..``, a non-string or a
+    malformed row is ignored, never raised on."""
+    from pathlib import PurePosixPath
+
+    names: set[str] = set()
+    for row in _dict_rows(previous.get("generated_files")):
+        path = row.get("path")
+        if not isinstance(path, str) or not path or "\x00" in path:
+            continue
+        pure = PurePosixPath(path)
+        if pure.is_absolute() or ".." in pure.parts:
+            continue
+        normalised = pure.as_posix()  # PurePosixPath drops a leading "./" and repeated slashes
+        if normalised in _OPTIONAL_PACK_FILES:
+            names.add(normalised)
+    return names
+
+
 def _prepare_pack_directory(target_dir: Path) -> None:
     """Create the pack directory, or reuse one that is empty or holds a pack written earlier.
 
@@ -2119,12 +2401,20 @@ def _prepare_pack_directory(target_dir: Path) -> None:
     previous = _mapping(_read_json(target_dir / "pack-manifest.json", {}))
     if previous.get("kind") != _PACK_KIND:
         raise PackOutputError("refusing to write a customer pack: destination holds other files; use a new directory")
+    # Generated files only some runs have go too, so a run without them does not inherit an earlier run's copies;
+    # only a file the previous manifest lists as generated, so notes someone added beside the pack stay (and
+    # verify-pack reports them as unexpected). Worked out before anything is removed, so a malformed entry cannot
+    # stop the rebuild half way.
+    optional = sorted(_previous_generated_ce_plus_files(previous))
     stale = target_dir / "source-artifacts"
     if stale.is_symlink():
         raise UnsafeRunFileError("output-dir")
     if stale.is_dir():
         from azure_tenant_audit.guarded_io import remove_guarded_tree
         remove_guarded_tree(stale)
+    from azure_tenant_audit.guarded_io import remove_guarded_output
+    for name in optional:
+        remove_guarded_output(target_dir / name, field="output-dir")
 
 
 @guarded_operation
@@ -2159,10 +2449,12 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     # output redaction (customer-pack profile) with the run's pseudonym key, so references stay consistent.
     _prepare_pack_directory(target_dir)
 
-    def pack_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-        settled = _settle_citations(
-            redact_output(_pack_payload(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=redaction)
-        )
+    def pack_payload(
+        payload: Mapping[str, Any], settle: Callable[[Any, Any], Any] | None = None
+    ) -> dict[str, Any]:
+        safe = _pack_payload(payload, run_path)
+        redacted = redact_output(safe, profile=PROFILE_CUSTOMER_PACK, context=redaction)
+        settled = _settle_citations(settle(safe, redacted) if settle is not None else redacted)
         # A keyless run's pack says in each file that its pseudonyms come from a temporary key.
         return {**settled, "pseudonym_notice": TEMPORARY_KEY_NOTICE} if redaction.temporary_key else settled
 
@@ -2177,10 +2469,10 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         preview_report(run_dir=str(run_path), format_name="md", profile=PROFILE_CUSTOMER_PACK)["content"], run_path
     )
 
-    def generated_row(name: str, content: str) -> dict[str, Any]:
+    def generated_row(name: str, content: str, settle: Callable[[str], str] | None = None) -> dict[str, Any]:
         if name.endswith(".md") and name != "report.md":  # the report carries its own notice (preview_report)
             content = _with_temporary_key_notice(content, "md", redaction)
-        row = _write_text_artifact(target_dir / name, content, redaction)
+        row = _write_text_artifact(target_dir / name, content, redaction, settle)
         row["path"] = name
         return row
 
@@ -2195,6 +2487,20 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         generated_row("proof-table.md", render_proof_table_markdown(proof_payload)),
         generated_row("proof-table.json", _json(proof_payload) + "\n"),
     ]
+    # The CE+ practice run joins the pack only for a run whose report pack carries the Cyber Essentials section. No
+    # as-of date: the evidence date is shown and its age reads "not established", so a re-written pack is identical.
+    _, report_pack_payload = RunBundle(run_path).report_pack()
+    frameworks = _mapping(_mapping(_mapping(report_pack_payload).get("baseline_alignment")).get("frameworks"))
+    if isinstance(frameworks.get("cyber_essentials"), Mapping):
+        from .ce_plus import restore_fixed_fields
+
+        ce_plus_payload = pack_payload(ce_plus_practice_run(run_path, as_of=None), settle=restore_fixed_fields)
+        generated.extend([
+            generated_row("ce-plus-practice.md", render_ce_plus_markdown(ce_plus_payload)),
+            generated_row(
+                "ce-plus-practice.json", _json(ce_plus_payload) + "\n", functools.partial(_settle_ce_plus_json, ce_plus_payload)
+            ),
+        ])
     source_dir = target_dir / "source-artifacts"
     listed = listed_artifact_paths(run_path)
     source_artifacts = []
@@ -3419,6 +3725,13 @@ def _csv_value(value: Any) -> str:
     return _text(value, "")
 
 
+_HTML_STYLE = (
+    "<style>body{font-family:system-ui,sans-serif;margin:2rem;line-height:1.4}table{border-collapse:collapse;width:100%;"
+    "margin:1rem 0}th,td{border:1px solid #ccc;padding:.45rem;text-align:left;vertical-align:top}pre{white-space:pre-wrap;"
+    "background:#f6f6f6;padding:1rem;overflow:auto}</style>"
+)
+
+
 def _html(value: Any) -> str:
     return html.escape(_text(value, ""), quote=True)
 
@@ -3503,7 +3816,7 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
     sections = [
         "<!doctype html>",
         "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Auditex Report</title>",
-        "<style>body{font-family:system-ui,sans-serif;margin:2rem;line-height:1.4}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #ccc;padding:.45rem;text-align:left;vertical-align:top}pre{white-space:pre-wrap;background:#f6f6f6;padding:1rem;overflow:auto}</style>",
+        _HTML_STYLE,
         "</head><body>",
         "<h1>Auditex Report</h1>",
         f"<p class=\"report-disclaimer\">{_html(REPORT_DISCLAIMER)}</p>",

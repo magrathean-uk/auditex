@@ -722,12 +722,23 @@ def test_initial_title_and_mapping_key_pseudonyms_come_from_the_matcher_key(monk
 # 19. product field names, derived forms and recorded spellings (M04-T04 repair)
 
 
+# The CE+ practice run keeps its own field names through its path-scoped exemption (``ce_plus.restore_fixed_fields``,
+# tests/test_ce_plus_practice.py), never through the shared one, so its sources are not scanned here.
+CE_PLUS_SOURCES = frozenset({
+    "schemas/ce_plus_practice.schema.json", "configs/ce-plus-practice.json", "src/auditex/ce_plus.py",
+})
+
+
 def _product_field_names() -> set[str]:
     """Every product field name, normalised as ``_D5_FIELD_NAMES`` holds them: property names in ``schemas/``, keys
     in ``configs/``, and the identifier-shaped strings the code under ``src/`` writes as mapping keys (dict displays,
     ``dict()`` keywords, subscript stores) or holds in a module-level constant (surface and collector names). A hex
-    digest (eight or more hex characters, one a digit) is neither a field name nor a person's key and is left out."""
+    digest (eight or more hex characters, one a digit) is neither a field name nor a person's key and is left out.
+    ``CE_PLUS_SOURCES`` are left out."""
     root = Path(__file__).resolve().parents[1]
+
+    def scanned(paths: list[Path]) -> list[Path]:
+        return [path for path in paths if path.relative_to(root).as_posix() not in CE_PLUS_SOURCES]
     names: set[str] = set()
 
     def walk(node: object, schema: bool) -> None:
@@ -744,12 +755,21 @@ def _product_field_names() -> set[str]:
             for item in node:
                 walk(item, schema)
 
-    for path in sorted((root / "schemas").glob("*.json")):
+    for path in scanned(sorted((root / "schemas").glob("*.json"))):
         walk(json.loads(path.read_text(encoding="utf-8")), True)
-    for path in sorted((root / "configs").rglob("*.json")):
+    for path in scanned(sorted((root / "configs").rglob("*.json"))):
         walk(json.loads(path.read_text(encoding="utf-8")), False)
-    for path in sorted((root / "src").rglob("*.py")):
+    def ce_plus_renderer(statement: ast.stmt) -> bool:
+        """A CE+ renderer helper or its constants (``_ce_plus_tables``, ``_CE_PLUS_TEST_COLUMNS``): they lay out an
+        already redacted payload as text, so their row keys never reach the redaction as mapping keys."""
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return "ce_plus" in statement.name.lower()
+        targets = statement.targets if isinstance(statement, ast.Assign) else [getattr(statement, "target", None)]
+        return any(isinstance(target, ast.Name) and "ce_plus" in target.id.lower() for target in targets)
+
+    for path in scanned(sorted((root / "src").rglob("*.py"))):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree.body = [statement for statement in tree.body if not ce_plus_renderer(statement)]
         for statement in tree.body:
             if isinstance(statement, (ast.Assign, ast.AnnAssign)) and statement.value is not None:
                 names.update(node.value for node in ast.walk(statement.value) if isinstance(node, ast.Constant))
@@ -794,6 +814,14 @@ def test_product_field_keys_are_kept_when_a_person_has_that_name() -> None:
                           context=RedactionContext(key=KEY))
     assert found["break_glass"] == 1
     assert redaction._NameMatcher({"break glass": "Break Glass"}, KEY).whole("break_glass") == "break_glass"
+
+
+def test_a_ce_plus_reason_code_is_not_a_product_field_exemption() -> None:
+    # The CE+ practice run's closed reason codes (``reported_by``) are values, not field names: a person called
+    # "Reported By" is still pseudonymised where that spelling is a mapping key.
+    out = redact_output({"by_reviewer": {"ReportedBy": 1}}, context=_people("Reported By"))
+    assert out == {"by_reviewer": {"User 6bc1e770fa498160": 1}}
+    assert "reportedby" not in redaction._D5_FIELD_NAMES
 
 
 @pytest.mark.parametrize(("recorded", "other"), [(JOHN, "John A. Smith"), (JANE, "Dr. Jane Doe")])
@@ -937,3 +965,25 @@ def test_eligible_other_role_ids_field_is_kept_when_a_person_has_that_name(profi
     out = redact_output({"records": [row]}, context=context, profile=profile)
     assert set(out["records"][0]) == set(row)
     assert out["records"][0]["eligible_other_role_ids"] == ["role-reader"]
+
+
+@pytest.mark.parametrize(("person", "key"), [
+    ("Dropped Requirement Id Count", "DroppedRequirementIdCount"), ("Reported By", "ReportedBy"),
+])
+def test_a_ce_plus_spelling_as_a_mapping_key_is_masked_in_the_shareable_json_preview(
+    tmp_path: Path, person: str, key: str
+) -> None:
+    from auditex.reporting import preview_report
+
+    root = _run(tmp_path / "run", [_user(person, "directory-fixture@example.invalid")], narrative=f"{person} reviewed it")
+    report = root / "reports" / "report-pack.json"
+    payload = json.loads(report.read_text())
+    payload["executive_summary"]["per_reviewer"] = {key: 1}
+    report.write_text(json.dumps(payload))
+
+    content = preview_report(run_dir=str(root), format_name="json", include_sections=["executive_summary"],
+                             profile="shareable")["content"]
+
+    assert key not in content
+    assert f'"{_prose(_key(root), person)}": 1' in content
+    assert key.lower() not in redaction._D5_FIELD_NAMES

@@ -189,7 +189,10 @@ def test_an_unlisted_file_where_the_product_reads_fails_the_check(bundle: Path, 
 
 @pytest.mark.parametrize(
     "relative",
-    ["reports/explorer.html", "reports/rendered-report.md", "reports/rendered-report.sarif.json", "reports/api-calls.md", "reports/proof-table.json"],
+    [
+        "reports/explorer.html", "reports/rendered-report.md", "reports/rendered-report.sarif.json", "reports/api-calls.md",
+        "reports/proof-table.json", "reports/ce-plus.json", "reports/ce-plus.html",
+    ],
 )
 def test_a_named_output_written_after_finalization_does_not_fail_the_check(bundle: Path, relative: str) -> None:
     (bundle / relative).write_text("output", encoding="utf-8")

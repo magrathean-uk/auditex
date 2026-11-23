@@ -352,6 +352,7 @@ auditex report handoff <run-dir> --format md --output review-notes/handoff.md
 auditex report api-calls <run-dir> --format md --output review-notes/api-calls.md
 auditex report permissions <run-dir> --format md --output review-notes/permissions.md
 auditex report proof-table <run-dir> --format md --output review-notes/proof-table.md
+auditex report ce-plus <run-dir> --format md --output review-notes/ce-plus.md
 ```
 
 ## Compare And Drift

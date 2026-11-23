@@ -84,13 +84,15 @@ def test_handoff_routes_refuse_normalised_fifo_before_validation(planted_run: Pa
     previous = signal.signal(signal.SIGALRM, timeout)
     signal.alarm(2)
     try:
-        with pytest.raises(ContextIncompleteError, match="incomplete"):
-            if route == "pack":
-                write_enterprise_handoff_pack(planted_run, tmp_path / "refused")
-            elif route == "mcp":
-                mcp_server.enterprise_handoff(str(planted_run))
-            else:
-                cli.main(["report", "handoff", str(planted_run)])
+        if route == "cli":
+            # The CLI prints the refusal's fixed text and exits 2 instead of raising (no traceback, no path).
+            assert cli.main(["report", "handoff", str(planted_run)]) == 2
+        else:
+            with pytest.raises(ContextIncompleteError, match="incomplete"):
+                if route == "pack":
+                    write_enterprise_handoff_pack(planted_run, tmp_path / "refused")
+                else:
+                    mcp_server.enterprise_handoff(str(planted_run))
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)

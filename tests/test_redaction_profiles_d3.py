@@ -364,7 +364,7 @@ def test_d3_link_target_is_not_opened_and_refusal_hides_path(run: Path, monkeypa
 @pytest.mark.parametrize("family", [
     "summarize", "blockers", "analyze", "api", "permissions", "proof", "notify_preview", "notify_send",
     "mcp_handoff", "mcp_diff", "mcp_diff_second", "mcp_compare", "mcp_compare_second", "mcp_external",
-    "cli_analyze", "cli_api", "cli_permissions", "cli_proof", "cli_handoff",
+    "cli_analyze", "cli_api", "cli_permissions", "cli_proof", "cli_ce_plus", "cli_handoff",
 ])
 def test_d3_refuses_change_between_payload_build_and_discovery(
     family: str, run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -401,6 +401,7 @@ def test_d3_refuses_change_between_payload_build_and_discovery(
         "cli_api": (reporting, "api_call_inventory"),
         "cli_permissions": (reporting, "permissions_ledger"),
         "cli_proof": (reporting, "proof_table"),
+        "cli_ce_plus": (reporting, "ce_plus_practice_run"),
         "cli_handoff": (reporting, "enterprise_handoff"),
     }
     owner, builder_name = builders[family]
@@ -442,11 +443,20 @@ def test_d3_refuses_change_between_payload_build_and_discovery(
         "cli_api": lambda: cli.main(["report", "api-calls", str(run), "--output", str(output)]),
         "cli_permissions": lambda: cli.main(["report", "permissions", str(run), "--output", str(output)]),
         "cli_proof": lambda: cli.main(["report", "proof-table", str(run), "--output", str(output)]),
+        "cli_ce_plus": lambda: cli.main(["report", "ce-plus", str(run), "--output", str(output)]),
         "cli_handoff": lambda: cli.main(["report", "handoff", str(run), "--output", str(output)]),
     }
-    with pytest.raises(ContextIncompleteError, match="changed during scan"):
-        calls[family]()
-    assert NAME not in capsys.readouterr().out
+    if family.startswith("cli_"):
+        # The CLI prints the refusal's fixed text and exits 2: no traceback and no path.
+        assert calls[family]() == 2
+        captured = capsys.readouterr()
+        assert "changed during scan" in captured.err and "Traceback" not in captured.err
+        assert str(run) not in captured.err and str(tmp_path) not in captured.err
+        assert NAME not in captured.out
+    else:
+        with pytest.raises(ContextIncompleteError, match="changed during scan"):
+            calls[family]()
+        assert NAME not in capsys.readouterr().out
     assert not output.exists()
     assert not sent
 

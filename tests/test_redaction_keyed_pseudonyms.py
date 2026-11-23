@@ -6,6 +6,7 @@ import base64
 import errno
 import hashlib
 import hmac
+import html
 import json
 import logging
 import os
@@ -1215,14 +1216,14 @@ def test_amendment_6_every_written_report_format_carries_the_notice(
     assert _tree(keyless) == before  # the keyless run was read, never written
 
 
-@pytest.mark.parametrize("command", ["analyze", "api-calls", "permissions", "proof-table", "handoff"])
+@pytest.mark.parametrize("command", ["analyze", "api-calls", "permissions", "proof-table", "ce-plus", "handoff"])
 def test_amendment_6_cli_report_outputs_carry_the_notice(
     sealed: Path, tmp_path: Path, capsys: pytest.CaptureFixture, command: str,
 ) -> None:
     from auditex import cli as auditex_cli
 
     keyless = _keyless_copy(sealed, tmp_path)
-    formats = ("json",) if command == "analyze" else ("json", "md")
+    formats = ("json",) if command == "analyze" else ("json", "md", "html") if command == "ce-plus" else ("json", "md")
     for run, expected in ((keyless, True), (sealed, False)):
         for fmt in formats:
             argv = ["report", command, str(run)] + ([] if command == "analyze" else ["--format", fmt])
@@ -1236,9 +1237,12 @@ def test_amendment_6_cli_report_outputs_carry_the_notice(
                 assert json.loads(capsys.readouterr().out)["output_path"] == str(target)
                 written = target.read_text()
                 assert written == printed  # stdout and the written file carry the same content
-            assert (TEMPORARY_KEY_NOTICE in written) is expected, (command, fmt, run.name)
+            notice = html.escape(TEMPORARY_KEY_NOTICE) if fmt == "html" else TEMPORARY_KEY_NOTICE
+            assert (notice in written) is expected, (command, fmt, run.name)
             if fmt == "json":
                 assert (json.loads(written).get("pseudonym_notice") == TEMPORARY_KEY_NOTICE) is expected
+            elif fmt == "html":
+                assert (f'<p class="pseudonym-key-note">{notice}</p>\n</body>' in written) is expected
             else:
                 assert written.rstrip("\n").endswith(TEMPORARY_KEY_NOTICE) is expected
     assert not (keyless / "operator-inputs").exists()

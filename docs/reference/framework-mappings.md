@@ -610,6 +610,11 @@ assessment, a certificate or a CE+ result. `not_assessed` with `partial_requirem
 the mapped rules found no gap in the audited tenant, which is not the same as the requirement being
 met. The applicant's own answers and the assessor's tests decide that.
 
+The CE+ practice run (`auditex report ce-plus <run-dir>`) reads this section and lists, per requirement, the evidence
+observed, what is unknown or outside tenant evidence and the next proof to gather, then what Auditex can prepare for
+each CE+ assessor test and what the assessor must witness. It adds no verdict. See "CE+ practice run" in
+[the output contract](output-contract.md).
+
 ## Limitations
 
 - CIS v7 coverage is partial. Auditex maps 16 of the benchmark's recommendations, chosen where
