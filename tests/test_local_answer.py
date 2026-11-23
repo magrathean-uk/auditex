@@ -286,6 +286,22 @@ def test_completeness_check_catches_a_dropped_moved_or_hidden_not_met_item(pinne
         assert la.completeness_problems(bad, d)
 
 
+def test_a_model_answer_without_its_licence_fails_the_schema_but_verify_still_asks_for_a_rerun(pinned):
+    d = digest()
+    answer = la.explain_digest(d, "qwen", backend_factory=lambda path: FakeBackend())
+    assert la.verify_answer(answer, d)["status"] == "model"
+    historical = dict(answer, model={k: v for k, v in answer["model"].items() if k != "licence"})
+    with pytest.raises(ValueError):                                     # the contract requires the licence (L5)
+        la.validate_answer(historical)
+    with pytest.raises(la.LocalAnswerError, match="run auditex explain again"):
+        la.verify_answer(historical, d)                                 # an answer saved before L5: rerun
+    damaged = dict(historical, model=dict(historical["model"], size=0))
+    with pytest.raises(ValueError) as caught:                           # not only the licence missing: schema error
+        la.verify_answer(damaged, d)
+    assert "run auditex explain again" not in str(caught.value)
+    with pytest.raises(la.LocalAnswerError, match="belongs to another run"):
+        la.verify_answer(historical, dict(d, run_id="another-run"))     # the run is checked before the version
+
 # -- runtime, download, verification -----------------------------------------------------------------------------------
 
 def test_without_the_runtime_every_item_shows_the_fixed_text_and_the_answer_says_what_to_install(monkeypatch):
@@ -648,6 +664,19 @@ def test_the_answer_is_a_named_post_finalisation_output_of_a_sealed_bundle(tmp_p
     assert tool(str(run))["status"] == "unavailable"
     from auditex.reporting import load_report_bundle
     assert "local_answer" not in load_report_bundle(str(run))["sections"]
+
+
+def test_a_saved_answer_without_its_licence_asks_for_a_rerun_on_every_read(tmp_path, ready):
+    from auditex.mcp_server import tool_handlers
+
+    run = assessed_run(tmp_path)
+    answer = la.explain_run(run, "small")
+    historical = dict(answer, model={k: v for k, v in answer["model"].items() if k != "licence"})
+    (run / la.ANSWER_PATH).write_text(json.dumps(historical))
+    with pytest.raises(la.LocalAnswerError, match="run auditex explain again"):
+        la.load_answer(run)
+    result = tool_handlers()["auditex_local_answer"](str(run))
+    assert result["status"] == "unavailable" and "run auditex explain again" in result["detail"]
 
 
 def test_the_mcp_tool_reports_a_run_without_an_answer(tmp_path):

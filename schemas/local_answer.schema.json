@@ -108,7 +108,7 @@
     "model": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["choice", "family", "repo", "revision", "file", "size", "sha256"],
+      "required": ["choice", "family", "repo", "revision", "file", "size", "sha256", "licence"],
       "properties": {
         "choice": {"type": "string", "enum": ["qwen", "mistral", "gemma", "small"]},
         "family": {"type": "string", "minLength": 1, "maxLength": 32},
