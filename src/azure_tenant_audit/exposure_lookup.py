@@ -43,7 +43,12 @@ MAX_POLICY_AGE_SECONDS = 31557600  # RFC 8461 section 3.2: the largest max_age a
 OIDC_AUTHORITY = "https://login.microsoftonline.com"
 _GUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 _MAX_AGE_RE = re.compile(r"[0-9]{1,10}")
-_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.IGNORECASE)
+# RFC 5321 section 4.1.2 Domain: ASCII letter, digit and hyphen labels. re.ASCII keeps Unicode case folding from
+# admitting a Kelvin sign or a dotless i as k or i. The top-level label is alphabetic or an IDNA A-label (xn--).
+_DOMAIN_RE = re.compile(
+    r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?)",
+    re.IGNORECASE | re.ASCII,
+)
 
 
 class HttpsFetcher(Protocol):
@@ -230,7 +235,7 @@ def _decode_body(raw: bytes, encoding: Any) -> bytes:
 
 
 def is_safe_domain_name(domain: str) -> bool:
-    return bool(_DOMAIN_RE.match(domain or ""))
+    return isinstance(domain, str) and bool(_DOMAIN_RE.fullmatch(domain))
 
 
 def parse_mta_sts_policy(text: str) -> dict[str, Any] | None:

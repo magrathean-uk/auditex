@@ -280,3 +280,21 @@ def test_dmarc_version_tag_must_be_the_first_tag():
     assert dns_lookup.parse_dmarc("p=reject; v=DMARC1") is None
     summary = dns_lookup._summarize_dmarc(["p=reject; v = DMARC1"])
     assert summary["present"] is False
+
+
+def test_mta_sts_mx_a_label_host_is_valid():
+    policy = _policy(mx=("mail.example.xn--p1ai", "*.xn--80ak6aa92e.example"))
+    assert policy["fetch_status"] == "ok" and "invalid_reasons" not in policy
+
+
+@pytest.mark.parametrize("host", ["mail.examp\u212ae.com", "mail.\u0131xample.com", "mail.contoso.example\n"])
+def test_host_name_outside_ascii_ldh_is_not_safe(host):
+    """RFC 5321 Domain labels are ASCII letters, digits and hyphens; Unicode case folding must not admit a Kelvin sign
+    or a dotless i, and a trailing newline is not part of a host name."""
+    assert exposure_lookup.is_safe_domain_name(host) is False
+
+
+@pytest.mark.parametrize("host", ["mail.examp\u212ae.com", "mail.\u0131xample.com"])
+def test_mta_sts_mx_host_outside_ascii_ldh_is_invalid(host):
+    policy = _policy(mx=("mail.contoso.example", host))
+    assert policy["fetch_status"] == "invalid_policy" and policy["invalid_reasons"] == ["mx_invalid"]
