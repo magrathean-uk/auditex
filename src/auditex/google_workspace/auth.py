@@ -183,7 +183,7 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                     if not _granted(credentials, config.scopes):
                         credentials = None
             if not credentials or not credentials.valid:
-                flow = InstalledAppFlow.from_client_secrets_file(str(config.oauth_client.expanduser()), list(config.scopes))
+                flow = _oauth_client_flow(InstalledAppFlow, config.oauth_client.expanduser(), config.scopes)
                 try:
                     credentials = flow.run_local_server(port=0)
                 except Exception as exc:  # noqa: BLE001 - oauthlib's denial and scope-change errors are not GoogleAuthError
@@ -208,6 +208,22 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         return credentials
 
     raise ValueError(f"unsupported Google auth mode: {config.auth_mode}")
+
+
+def _oauth_client_flow(flow_class: Any, client_file: Path, scopes: tuple[str, ...]) -> Any:
+    """The consent flow from the OAuth client file, refused with a fixed message that never repeats the path.
+
+    The library opens the file itself, and its ``OSError`` names the full path, which would reach the probe bundle.
+    """
+    try:
+        return flow_class.from_client_secrets_file(str(client_file), list(scopes))
+    except FileNotFoundError:
+        raise ValueError("oauth_client_missing: the configured OAuth client file was not found.") from None
+    except OSError as exc:
+        raise ValueError(
+            "oauth_client_unreadable: the configured OAuth client file could not be read "
+            f"({exc.strerror or type(exc).__name__})."
+        ) from None
 
 
 # A service-account JSON key is a few KB; anything larger is not one.

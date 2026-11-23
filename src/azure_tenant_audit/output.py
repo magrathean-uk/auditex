@@ -283,7 +283,7 @@ class AuditWriter:
         self.coverage: list[dict[str, Any]] = []
         # Lone UTF-16 surrogates replaced in tenant text this run (a resumed run carries the earlier sessions' count).
         self.lone_surrogates_replaced = 0
-        self._seed_existing_run_artifacts(existing_manifest)
+        self._seed_existing_run_artifacts(resuming=run_dir is not None)
         self.audit = AuditLogger(self.run_dir, listener=event_listener, on_replaced=self._count_replaced)
         self._manifest = {
             "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
@@ -394,7 +394,7 @@ class AuditWriter:
     def _write_json_atomic(self, path: Path, payload: Any) -> None:
         self._write_text_atomic(path, json.dumps(self.valid_text(payload), indent=2))
 
-    def _seed_existing_run_artifacts(self, existing_manifest: Any) -> None:
+    def _seed_existing_run_artifacts(self, *, resuming: bool) -> None:
         existing_summary = self._safe_load_json(self.run_dir / "summary.json")
         if isinstance(existing_summary, dict):
             for key in ("schema_version", "tenant_name", "run_id", "overall_status", "duration_seconds"):
@@ -423,6 +423,10 @@ class AuditWriter:
             replaced = existing_state.get("lone_surrogates_replaced")
             if type(replaced) is int and replaced > self.lone_surrogates_replaced:
                 self.lone_surrogates_replaced = replaced
+            recorded_dir = existing_state.get("run_dir")
+            if resuming and isinstance(recorded_dir, str) and recorded_dir != self.run_dir.name:
+                # Every collector may be carried forward, leaving no later checkpoint write before sealing.
+                self._write_json_atomic(self.checkpoint_state_path, {**existing_state, "run_dir": self.run_dir.name})
 
     def _indexed_coverage(self) -> list[dict[str, Any]]:
         """Coverage rows from ``index/coverage.jsonl`` (one JSON object per line); an unreadable line is skipped."""
@@ -676,7 +680,7 @@ class AuditWriter:
             "operations": operations,
         }
         checkpoint_payload = {
-            "run_dir": str(self.run_dir),
+            "run_dir": self.run_dir.name,
             "run_id": self.run_id,
             "collectors": collectors,
             "operations": operations,
@@ -700,7 +704,7 @@ class AuditWriter:
             collectors[str(collector_name)].update(since=payload.get("since"), until=payload.get("until"))
         self._checkpoint_state = {"collectors": collectors, "operations": operations}
         checkpoint_payload = {
-            "run_dir": str(self.run_dir),
+            "run_dir": self.run_dir.name,
             "run_id": self.run_id,
             "collectors": collectors,
             "operations": operations,
@@ -961,7 +965,13 @@ class AuditWriter:
             value = metadata.get(key)
             if value is not None:
                 self._manifest[key] = value
-        self._manifest["run_dir"] = str(self.run_dir)
+        waiver_path = self._manifest.get("waiver_path")
+        if waiver_path and Path(str(waiver_path)).is_absolute():
+            # An absolute waiver path names the operator's machine: the bundle keeps only the file name, labelled as
+            # the customer pack and the Google command line label it. A relative path is kept as given.
+            self._manifest["waiver_path"] = f"<local-path>/{Path(str(waiver_path)).name}"
+        # The manifest identifies the run by its folder name.
+        self._manifest["run_dir"] = self.run_dir.name
         self._manifest["audit_log_path"] = "audit-log.jsonl"
         self._manifest["debug_log_path"] = "audit-debug.log"
         if self.audit.command_log_path.exists() and self.audit.command_log_path.stat().st_size > 0:

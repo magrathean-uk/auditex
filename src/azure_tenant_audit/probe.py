@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -149,6 +150,26 @@ def _subprocess_probe(command: list[str], *, timeout: int = 120) -> tuple[int | 
     return completed.returncode, completed.stdout, completed.stderr
 
 
+_MODULE_PATH_PREFIX = r"(?:file://|[A-Za-z]:[\\/]|\\\\|/)"
+_MODULE_PATH = re.compile(
+    rf"""(?P<quote>['"])(?P<quoted_path>{_MODULE_PATH_PREFIX}[^\r\n]*?)(?P=quote)"""
+    rf"""|(?<![\w.~:/\\-])(?P<bare_path>{_MODULE_PATH_PREFIX}[^\s'"`]+)""",
+    flags=re.IGNORECASE,
+)
+
+
+def _module_lookup_error(text: str) -> str:
+    """Keep the filename in a local PowerShell diagnostic without recording its directory."""
+    def filename(match: re.Match[str]) -> str:
+        quote = match["quote"] or ""
+        path = match["quoted_path"] or match["bare_path"]
+        stripped = path if quote else path.rstrip(".,;:)]")
+        name = re.split(r"[\\/]", stripped.rstrip("\\/"))[-1]
+        return f"{quote}{name}{quote}{path[len(stripped):]}"
+
+    return _MODULE_PATH.sub(filename, text)
+
+
 def _mask_toolchain_details(value: Any) -> Any:
     """Mask readiness diagnostics after parsing; these are not collector evidence."""
     if isinstance(value, dict):
@@ -227,7 +248,7 @@ def _probe_toolchain_statuses(
                     toolchain="pwsh",
                     status="supported",
                     message="ExchangeOnlineManagement module is installed.",
-                    command=" ".join(module_command),
+                    command=" ".join([Path(pwsh_exe).name, *module_command[1:]]),
                     details={"stdout": stdout.strip()},
                 )
             )
@@ -238,9 +259,9 @@ def _probe_toolchain_statuses(
                     toolchain="pwsh",
                     status="blocked",
                     message="ExchangeOnlineManagement module is not available.",
-                    command=" ".join(module_command),
+                    command=" ".join([Path(pwsh_exe).name, *module_command[1:]]),
                     error_class="command_timeout" if code is None else "module_not_found",
-                    error=(stderr or stdout).strip() or f"return_code:{code}",
+                    error=_module_lookup_error((stderr or stdout).strip()) or f"return_code:{code}",
                 )
             )
     else:
@@ -272,9 +293,9 @@ def _probe_toolchain_statuses(
                     message="Message trace cmdlet is available."
                     if code == 0
                     else "Message trace cmdlet is not available through the local PowerShell module path.",
-                    command=" ".join(response_command),
+                    command=" ".join([Path(pwsh_exe).name, *response_command[1:]]),
                     error_class=None if code == 0 else "command_timeout" if code is None else "command_not_available",
-                    error=None if code == 0 else (stderr or stdout).strip() or f"return_code:{code}",
+                    error=None if code == 0 else _module_lookup_error((stderr or stdout).strip()) or f"return_code:{code}",
                 )
             )
         else:

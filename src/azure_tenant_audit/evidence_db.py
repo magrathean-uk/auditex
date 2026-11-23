@@ -129,8 +129,9 @@ def _create_indexes(conn: sqlite3.Connection) -> None:
 
 
 def _insert_meta(conn: sqlite3.Connection, run_path: Path, manifest: Mapping[str, Any], summary: Mapping[str, Any]) -> None:
-    rows = {"run_dir": str(run_path), "summary": _scalar(summary)}
+    rows = {"summary": _scalar(summary)}
     rows.update({str(key): _scalar(value) for key, value in manifest.items()})
+    rows["run_dir"] = run_path.name
     conn.executemany("INSERT INTO run_meta (key, value) VALUES (?, ?)", sorted(rows.items()))
 
 

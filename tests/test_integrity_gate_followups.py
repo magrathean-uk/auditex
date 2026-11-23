@@ -787,8 +787,10 @@ def test_a_pack_from_a_run_written_with_an_absolute_out_carries_no_local_path(tm
     out = tmp_path / "operator" / "outputs"
     assert run_offline(DEMO, out, "halcyon", "abs", auditor_profile="global-reader", plane="inventory") in (0, 1)
     run = out / "halcyon-abs"
-    assert str(run) in _json(run / "run-manifest.json")["run_dir"]
+    assert _json(run / "run-manifest.json")["run_dir"] == "halcyon-abs"
+    # A bundle from an earlier version recorded the absolute run folder; the pack still reduces it.
     manifest = _json(run / "run-manifest.json")
+    manifest["run_dir"] = str(run)
     manifest["waiver_path"] = str(tmp_path / "operator" / "waivers.json")
     manifest["command_line"] = ["azure-tenant-audit", "--offline", "--out", str(out), "--tenant-name", "halcyon"]
     _write_json(run / "run-manifest.json", manifest)

@@ -246,6 +246,11 @@ Collected evidence and raw inputs to parsers and error classifiers retain their
 original values. This is a boundary for command diagnostics, not a guarantee that
 all other exception messages or API logs are anonymised.
 
+Auditex avoids storing absolute local paths in bundle fields it creates, such as the run folder, sample and waiver
+references, credential-file errors and PowerShell readiness diagnostics. Paths, URLs and policy text collected
+from the tenant are kept exactly as read, with the same evidence handling described above. Audit rows already
+written by an earlier version are kept when the run resumes. See [the output contract](output-contract.md#required-root-artifacts).
+
 Customer packs contain no absolute path of the operator's machine and no file their manifest does not list
 (`verify-pack` reports `unexpected_file`); a symbolic link, or an unlisted file where the product reads, is an
 integrity mismatch and the pack is refused. The effective boundary against a mistake in any of these is the

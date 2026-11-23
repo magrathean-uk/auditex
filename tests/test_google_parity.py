@@ -1384,7 +1384,7 @@ def test_a_waiver_turns_a_google_finding_into_accepted_risk(tmp_path: Path) -> N
     assert findings["google.drive_anyone_with_link:file-1"]["status"] == "accepted_risk"
     assert findings["google.user_2sv_not_enforced:u-user"]["status"] == "open"
     manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["waiver_path"] == str(waivers)
+    assert manifest["waiver_path"] == f"<local-path>/{waivers.name}"  # no absolute local path in the bundle
     assert json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))["valid"] is True
     report = json.loads((run_dir / "reports" / "report-pack.json").read_text(encoding="utf-8"))
     assert report["summary"]["accepted_count"] == 2 and report["summary"]["status_counts"]["accepted_risk"] == 2

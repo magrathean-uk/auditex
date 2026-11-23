@@ -26,7 +26,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .collection_gaps import (
@@ -52,6 +52,26 @@ OFFLINE_ROW_TYPE = "offline_sample"
 SECTION_ABSENT_ERROR_CLASS = "section_absent"
 DNS_RESOLVER_ERROR_CLASS = "dns_resolver_error"
 _COLLECTOR_DEFINITIONS_PATH = Path("configs/collector-definitions.json")
+
+
+def fixture_provenance_for_bundle(provenance: Any) -> Any:
+    """Record only the names of the lab run and its seed manifests in offline provenance."""
+    if not isinstance(provenance, dict) or not isinstance(provenance.get("bootstrap_seed"), dict):
+        return provenance
+
+    def with_path_name(row: dict[str, Any], field: str) -> dict[str, Any]:
+        value = row.get(field)
+        if isinstance(value, str):
+            for path in (PureWindowsPath(value), PurePosixPath(value)):
+                if path.is_absolute():
+                    return {**row, field: path.name}
+        return row
+
+    seed = with_path_name(dict(provenance["bootstrap_seed"]), "run_dir")
+    for stage in ("identity", "workload"):
+        if isinstance(seed.get(stage), dict):
+            seed[stage] = with_path_name(seed[stage], "manifest_path")
+    return {**provenance, "bootstrap_seed": seed}
 
 
 @lru_cache(maxsize=1)

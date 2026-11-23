@@ -68,6 +68,7 @@ from .normalize import (
 )
 from .offline_replay import (
     absent_section_rows,
+    fixture_provenance_for_bundle,
     planned_sections,
     replay_collector_status,
     replay_coverage_rows,
@@ -112,7 +113,7 @@ def _merged_fixture_provenance(
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value
-    return merged or None
+    return fixture_provenance_for_bundle(merged) or None
 
 
 def _offline_item_count(payload: Any) -> int:
@@ -407,8 +408,12 @@ def run_offline(
     # A sample section that carries an error or a cut-list marker replays as the failed or partial read it was.
     coverage_rows: list[dict[str, Any]] = []
     # The replay input is copied into the bundle: mailbox text a live run would have dropped is dropped here too.
+    # Its provenance names a lab seed run by folder name only, as the manifest does.
     from .private_io import write_private_text
-    write_private_text(writer.raw_dir / "sample_input.json", json.dumps(minimise_user_text(sample), indent=2))
+    sample_copy = dict(sample)
+    if "_fixture_provenance" in sample_copy:
+        sample_copy["_fixture_provenance"] = fixture_provenance_for_bundle(sample_copy["_fixture_provenance"])
+    write_private_text(writer.raw_dir / "sample_input.json", json.dumps(minimise_user_text(sample_copy), indent=2))
     writer.record_artifact(writer.raw_dir / "sample_input.json")
     for key, value in sample.items():
         if key in _OFFLINE_SAMPLE_METADATA_KEYS:
@@ -835,7 +840,7 @@ def run_live(
             "run.resume",
             "Resuming from existing run state",
             {
-                "resume_from": str(resume_from),
+                "resume_from": resume_from.name,
                 "checkpoint_entries": len(completed_state.get("collectors", {})),
                 "completed_collectors": sorted(completed_collectors),
                 "rerun_collectors": sorted(
@@ -1011,7 +1016,7 @@ def run_live(
                 "Collector carried forward from the checkpoint",
                 {
                     "collector": name,
-                    "resume_from": str(resume_from),
+                    "resume_from": resume_from.name,
                     "previous_status": previous_state.get("status"),
                     "item_count": previous_state.get("item_count", 0),
                 },

@@ -11,6 +11,7 @@ from typing import Any
 
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.assurance import build_live_readiness_summary
+from azure_tenant_audit.auth_runtime import local_path_argument
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.collector_runner import (
     AuditWriterCollectorAdapter,
@@ -25,6 +26,7 @@ from azure_tenant_audit.dns_lookup import (
 )
 from azure_tenant_audit.offline_replay import (
     absent_section_rows,
+    fixture_provenance_for_bundle,
     replay_collector_status,
     replay_coverage_rows,
     replay_source,
@@ -88,7 +90,7 @@ def _merged_fixture_provenance(
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value
-    return merged or None
+    return fixture_provenance_for_bundle(merged) or None
 # --doh-endpoint: a DoH resolver URL path can carry an account token.
 _SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache",
                             "--doh-endpoint"}
@@ -127,8 +129,6 @@ class GoogleRunConfig:
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
     """The command line as the run bundle records it: secret-bearing values redacted and every absolute path of the
     operator's machine (``--out /home/...``) reduced to ``<local-path>/<name>``."""
-    from ..reporting import local_path_argument
-
     return [local_path_argument(item) for item in redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)]
 
 
@@ -1167,6 +1167,9 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
         )
     except Exception as exc:  # noqa: BLE001
         error_class, message = classify_google_error(exc)
+        if isinstance(exc, OSError):
+            # A file error names its path; the bundle keeps only the reason (the console may still show the path).
+            message = exc.strerror or type(exc).__name__
         payload["preflight"] = [
             {
                 "collector": name,
@@ -1179,7 +1182,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
             }
             for name in selected
         ]
-        payload["preflight_error"] = {"error": "google_probe_failed", "message": str(exc)}
+        payload["preflight_error"] = {"error": "google_probe_failed", "message": message}
         payload["capability_matrix"] = build_google_capability_rows(
             selected,
             auth_mode=config.auth,
