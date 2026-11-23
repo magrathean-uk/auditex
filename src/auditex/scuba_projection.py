@@ -1830,16 +1830,24 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             # redaction cannot grow and enum annotation does not touch, so the check above already passed it.
             report[section].pop("dropped_conditions", None)
             report[section].pop("null_lists_read_as_empty", None)
-    # Review R106: a section withheld from the model can still feed the value rules (its adapter succeeded before a
-    # model-only gate, or a rule variant built it); the report says which, so no verdict rests on unnamed evidence.
-    for section, detail in report.items():
-        rule = result.rule_sections.get(section)
-        if (detail["status"] == "not_collected" and section in result.rule_sections
-                and not (isinstance(rule, dict) and rule.get("collection_status") == "not_collected")):
-            detail["rule_view"] = "variant" if section in variant_built else "adapter"
+    annotate_rule_views(report, result.rule_sections, variant_built)
     result.report = {"schema_version": PROJECTION_VERSION, "sections": report, "redaction": redaction,
                      "bounds": bounds}
     return result
+
+
+def annotate_rule_views(report: dict[str, dict], rule_sections: dict[str, Any], variant_built: set[str]) -> None:
+    """Review R106: name the value-rule view kept for each section withheld from the model.
+
+    A withheld section can still feed the value rules (its adapter succeeded before a model-only gate, or a rule variant
+    built it); the report says which, so no verdict rests on unnamed evidence. Both producers (a run and a ScubaGear
+    export) call this after their last model-only gate.
+    """
+    for section, detail in report.items():
+        rule = rule_sections.get(section)
+        if (detail["status"] == "not_collected" and section in rule_sections
+                and not (isinstance(rule, dict) and rule.get("collection_status") == "not_collected")):
+            detail["rule_view"] = "variant" if section in variant_built else "adapter"
 
 
 # Generated from complete v7 train/test objects; the fixture pins each digest
