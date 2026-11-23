@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://magrathean.uk/solutions/auditex/schemas/model_assessment.schema.json",
+  "$id": "https://magrathean.uk/solutions/auditex/schemas/model_assessment-2026-11-22.schema.json",
   "title": "Optional model assessment (does not change findings)",
   "type": "object",
   "properties": {
@@ -1016,6 +1016,15 @@
     },
     "projection_section": {
       "type": "object",
+      "dependentSchemas": {
+        "rule_view": {
+          "properties": {
+            "status": {
+              "const": "not_collected"
+            }
+          }
+        }
+      },
       "properties": {
         "status": {
           "type": "string",

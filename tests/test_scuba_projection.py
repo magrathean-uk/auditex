@@ -306,6 +306,42 @@ def test_previous_schema_is_byte_identical_to_pinned_predecessor():
     assert sha256(old).hexdigest() == '00cf684c8c08f89f8e7ba714155bd3ac3a7f2aa345592fa0d5d4e1f1cd8b157a'
 
 
+def test_current_and_historical_schemas_resolve_side_by_side_by_id():
+    # Bot review wave 2 (52): the frozen 2026-11-05 file keeps its bytes and $id; the current schema has its own $id,
+    # so a registry built from both by $id holds both versions instead of the later one replacing the earlier.
+    from referencing import Registry, Resource
+
+    historical = json.loads((ROOT / 'schemas/model_assessment-2026-11-05.schema.json').read_text())
+    current = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    registry = Registry().with_resources(
+        (schema['$id'], Resource.from_contents(schema)) for schema in (historical, current))
+    resolved = {registry.contents(schema['$id'])['properties']['schema_version']['const'] for schema in (historical, current)}
+    assert resolved == {'2026-11-05', '2026-11-22'}
+
+
+def test_rule_view_on_a_projected_section_fails_the_published_schema(complete_bundle):
+    # Bot review wave 2 (53): the published schema itself says a rule view belongs only on a withheld section.
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
+    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    sections = result['projection']['sections']
+    assert {d['status'] for d in sections.values()} == {'projected', 'not_collected'}
+    assert not any('rule_view' in d for d in sections.values())
+    jsonschema.validate(result, schema)                     # both statuses with the optional field absent
+    validate_assessment(result)
+    withheld = next(name for name, d in sections.items() if d['status'] == 'not_collected')
+    sections[withheld]['rule_view'] = 'adapter'
+    jsonschema.validate(result, schema)
+    validate_assessment(result)
+    del sections[withheld]['rule_view']
+    sections['scuba_config']['rule_view'] = 'adapter'
+    assert sections['scuba_config']['status'] == 'projected'
+    # Auditex's own validator reads the same published rule (its cross-field check backs it up).
+    with pytest.raises(ValueError, match='sections.scuba_config.status|Inconsistent projection rule view'):
+        validate_assessment(result)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(result, schema)
+
+
 @pytest.mark.parametrize('mutation', ['status_reason', 'missing_section', 'bounds', 'source', 'limitations', 'redaction'])
 def test_projection_envelope_validation_rejects_tampering(complete_bundle, monkeypatch, mutation):
     # Select a missing-section rule so no transport is needed.
