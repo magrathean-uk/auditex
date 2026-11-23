@@ -182,10 +182,7 @@ def _safelinks_core(policy_id, sp, sections, trace):
             return builtin_missing
         if not isinstance(sections[BI], list):
             return _A(policy_id, BAD_SECTION_LIST, f"Data unusable: {BI} is not a list of objects; the policy was not assessed.", "section_not_a_list", [BI])
-        # A preset whose both parts are enabled but scoped to some recipients may also cover the excluded recipients.
-        preset_partial = any(({"q", "x", "u"} & set(eop[t]) or eop_u) and ({"q", "x", "u"} & set(atp[t]) or atp_u)
-                             for t in ("Strict", "Standard"))
-        out = _builtin_exclusions(policy_id, sp, sections, partial, preset_partial)
+        out = _builtin_exclusions(policy_id, sp, sections, partial)
         if out:
             return out
     pols = by_identity.get(applied, [])
@@ -250,17 +247,18 @@ class _Shadows:
     AND or OR: one earlier rule sets the same condition kinds, its values include the later one's, and its exceptions
     are none or the same. When the later rule sets one condition kind, several earlier rules that set only that kind
     (exceptions none or the same) may share its values between them (repair round 2). Built on first use and indexed by
-    value, so a call scans only the rules that share the later rule's rarest value. Each posting is kept in Priority order and
-    a scan stops at the first rule that is not earlier, so rules with the same scope cost one step each, in whatever
-    order they are listed (bot review wave 2, item 60)."""
+    value; each posting holds a distinct scope once, with its lowest Priority, and the lowest Priority of a scope that
+    covers a looked-up scope is kept, so rules with the same scope cost one step each, in whatever order they are
+    listed and whatever earlier scopes overlap them (bot review wave 2, item 60, and its repair round 1)."""
 
     def __init__(self, partial):
         self._partial = partial
         self._postings = None
         self._first = None
+        self._cover = {}
 
     def _build(self):
-        self._postings, self._first = {}, {}
+        postings, self._first = {}, {}
         for rule in self._partial:
             pr, sc = rule.get("Priority"), _scope(rule)
             if not _is_num(pr) or sc is None or not sc[0]:
@@ -269,12 +267,24 @@ class _Shadows:
             shape = (tuple(k for k, _ in inc), exc)
             for k, values in inc:
                 for value in values:
-                    self._postings.setdefault((shape, k, value), []).append((pr, dict(inc)))
+                    scopes = postings.setdefault((shape, k, value), {})
+                    scopes[inc] = min(pr, scopes.get(inc, pr))
                     if len(inc) == 1:
                         key = (k, exc, value)
                         self._first[key] = min(pr, self._first.get(key, pr))
-        for posting in self._postings.values():
-            posting.sort(key=lambda entry: entry[0])
+        self._postings = {key: [(dict(inc), pr) for inc, pr in scopes.items()] for key, scopes in postings.items()}
+
+    def _lowest_cover(self, shape, inc):
+        """The lowest Priority of an indexed rule of ``shape`` whose include values contain ``inc``'s."""
+        key = (shape, inc)
+        if key not in self._cover:
+            mine, lowest = dict(inc), float("inf")
+            lists = [self._postings.get((shape, k, value), ()) for k, values in inc for value in values]
+            for theirs, earlier_pr in min(lists, key=len):
+                if earlier_pr < lowest and all(mine[k] <= theirs[k] for k in shape[0]):
+                    lowest = earlier_pr
+            self._cover[key] = lowest
+        return self._cover[key]
 
     def __call__(self, rule):
         pr, sc = rule.get("Priority"), _scope(rule)
@@ -288,28 +298,25 @@ class _Shadows:
             if all(min(self._first.get((k, (), v), never), self._first.get((k, exc, v), never)) < pr for v in values):
                 return True
         keys = tuple(k for k, _ in inc)
-        mine = dict(inc)
-        for shape in {(keys, ()), (keys, exc)}:
-            lists = [self._postings.get((shape, k, value), ()) for k, values in inc for value in values]
-            for earlier_pr, theirs in min(lists, key=len):
-                if earlier_pr >= pr:
-                    break
-                if all(mine[k] <= theirs[k] for k in keys):
-                    return True
-        return False
+        return any(self._lowest_cover(shape, inc) < pr for shape in {(keys, ()), (keys, exc)})
 
 
 def _covers_scope(earlier, later):
     """True when a rule scoped ``earlier`` applies to every recipient a rule scoped ``later`` names (both from
-    ``_scope``), under AND or OR joins: no include condition, or the same condition kinds with values that include the
-    later rule's; and exceptions none or the same."""
+    ``_scope``). Conditions of different kinds are joined by AND and any matching exception excludes the recipient
+    (repair round 1, item 58), so: each include condition of the earlier rule is one the later rule sets too, with
+    values that include the later rule's; and each earlier exception is one the later rule also makes with no fewer
+    values, or an ExceptIfSentTo naming none of the later rule's SentTo recipients."""
     (inc, exc), (their_inc, their_exc) = later, earlier
-    if their_exc and their_exc != exc:
+    mine, my_exc = dict(inc), dict(exc)
+    sent_to = {v.casefold() for v in mine["SentTo"]} if "SentTo" in mine else None
+    for k, values in their_exc:
+        if k in my_exc and values <= my_exc[k]:
+            continue
+        if k == "ExceptIfSentTo" and sent_to is not None and not sent_to & {v.casefold() for v in values}:
+            continue
         return False
-    if not their_inc:
-        return True
-    theirs = dict(their_inc)
-    return set(theirs) == {k for k, _ in inc} and all(values <= theirs[k] for k, values in inc)
+    return all(k in mine and mine[k] <= values for k, values in their_inc)
 
 
 def _preset_scopes(sections):
@@ -354,11 +361,43 @@ def _excluded_recipients(rules):
 
 def _may_cover(rule, excluded):
     """The excluded recipients a partly scoped rule may cover: all of them unless it is scoped by SentTo alone (under
-    AND or OR joins), then those among its values. None when the excluded recipients are unknown (they all may be)."""
+    AND or OR joins), then those among its values; less any it names in ExceptIfSentTo (repair round 1, item 61). None
+    when the excluded recipients are unknown (they all may be)."""
     sc = _scope(rule) if excluded is not None else None
-    if sc is None or [k for k, _ in sc[0]] != ["SentTo"]:
+    if sc is None:
         return excluded
-    return excluded & {v.casefold() for v in sc[0][0][1]}
+    may = excluded
+    if [k for k, _ in sc[0]] == ["SentTo"]:
+        may = may & {v.casefold() for v in sc[0][0][1]}
+    return may - {v.casefold() for k, values in sc[1] if k == "ExceptIfSentTo" for v in values}
+
+
+def _preset_reach(sections, excluded):
+    """Item 61 and its repair round 1: the excluded recipients a partly scoped preset may cover, the union over tiers of
+    what both its parts (EOP and Defender) may cover. A rule whose Identity is unreadable may be any tier and one whose
+    State is unreadable may be enabled; a disabled rule covers no one. With the excluded recipients unknown: True when
+    some tier has a rule in both parts, else False."""
+    reach = {tier: [set(), set()] for tier in ("Strict", "Standard")}
+    seen = {tier: [False, False] for tier in reach}
+    for part, name in enumerate(("protection_policy_rules", "atp_policy_rules")):
+        for r in sections[name]:
+            if not isinstance(r, dict):
+                continue
+            ident = r.get("Identity")
+            if type(ident) is not str:
+                tiers, may = list(reach), excluded
+            else:
+                tiers = [n for n, rx in zip(reach, PRESET_RE, strict=False) if rx.search(ident)]
+                if not tiers or ("State" in r and r["State"] != "Enabled"):
+                    continue
+                may = _may_cover(r, excluded) if "State" in r else excluded
+            for tier in tiers:
+                seen[tier][part] = True
+                if excluded is not None:
+                    reach[tier][part] |= may
+    if excluded is None:
+        return any(all(parts) for parts in seen.values())
+    return set().union(*(eop & atp for eop, atp in reach.values()))
 
 
 def _builtin_state(rule):
@@ -374,7 +413,7 @@ def _builtin_state(rule):
     return "q" if all(empty) else "x"
 
 
-def _builtin_exclusions(policy_id, sp, sections, partial, preset_partial=False):
+def _builtin_exclusions(policy_id, sp, sections, partial):
     """As SS 1.3 reads the Built-In Protection rule (defender_cascade, attachment variant): None when it covers everyone,
     else the record for recipients it excludes. The rule list exports no Priority; Built-In applies last. A partly
     scoped rule that provably names none of the excluded recipients cannot cover them (repair round 2)."""
@@ -390,23 +429,21 @@ def _builtin_exclusions(policy_id, sp, sections, partial, preset_partial=False):
         return _A(policy_id, "data_unusable_builtin_rule", f"Data unusable: {BI} holds no rule with readable exclusions; the policy was not assessed.",
                   "builtin_rule_unusable", [BI])
     excluded = _excluded_recipients(sections[BI])
-    # Bot review wave 2 (item 61): each known exclusion is judged on its own; one that no earlier rule (or preset) may
-    # cover gets no Safe Links policy.
-    custom, reached = False, set()
-    for r in partial:
-        may = _may_cover(r, excluded)
-        if may is None or may:
-            custom = True
-            if may is None:
-                break
-            reached |= may
-    uncovered = excluded is not None and not preset_partial and reached != excluded
-    if not uncovered and (preset_partial or custom):
-        # Item 50: name and cite what may cover the excluded recipients.
-        if preset_partial and custom:
+    # Bot review wave 2 (item 61, repair round 1): each known exclusion is judged on its own, for custom rules and
+    # presets alike; one that nothing may cover gets no Safe Links policy.
+    preset = _preset_reach(sections, excluded)
+    if excluded is None:
+        custom = bool(partial)
+    else:
+        reached = set().union(*(_may_cover(r, excluded) for r in partial))
+        custom, uncovered = bool(reached), reached | preset != excluded
+        preset = bool(preset)
+    if (custom or preset) and not (excluded is not None and uncovered):
+        # Item 50 (repair round 1): name and cite only what may cover an excluded recipient.
+        if preset and custom:
             what, cited = "a partly scoped preset security policy and Safe Links rule exist", [
                 "atp_policy_rules", BI, "protection_policy_rules", "safe_links_rules"]
-        elif preset_partial:
+        elif preset:
             what, cited = ("a partly scoped Standard or Strict preset security policy exists",
                            ["atp_policy_rules", BI, "protection_policy_rules"])
         else:

@@ -503,3 +503,80 @@ def test_item56_earlier_2026_11_22_answers_without_the_built_in_reference_still_
     _requirement(_legacy_rows(old)[0])["evidence_ids"] = [*ids[:-1], "e4"]
     with pytest.raises(ValueError):
         validate_assessment(old)
+
+
+BI_EXCLUDES_CAROL = [{**BI_ROW, "ExceptIfSentTo": ["carol"]}]
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item50_a_preset_for_other_recipients_does_not_name_or_cite_the_preset(policy_id):
+    policies = [SL_BUILTIN, {"Identity": "carol", **SL_FLAGS}]
+    sections = _with_preset(_safelinks([_sl_rule("carol", _to("carol"))], policies, BI_EXCLUDES_CAROL), _to("bob"), _to("bob"))
+    assert _reason(policy_id, sections) == ("not_assessed", "partial_tier_may_cover", MAY_CUSTOM, [BI, "safe_links_rules"])
+
+
+TEAM_AND_BOB = {**GROUP_ONLY, "SentTo": ["bob"]}
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item58_a_preset_shadows_a_rule_with_an_added_condition(policy_id):
+    # Conditions of different kinds are joined by AND, so the orphan names only members of the preset's group.
+    rules = [_sl_rule("orphan", TEAM_AND_BOB, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    policies = [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}]
+    sections = _with_preset(_safelinks(rules, policies, BI_ALL), GROUP_ONLY, GROUP_ONLY)
+    assert _answer(policy_id, sections) == ("met", "policy_flags_ok")
+    # A preset with the added condition does not cover the rule without it.
+    rules = [_sl_rule("orphan", GROUP_ONLY, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    sections = _with_preset(_safelinks(rules, policies, BI_ALL), TEAM_AND_BOB, TEAM_AND_BOB)
+    assert _answer(policy_id, sections) == ("not_assessed", "policy_not_in_export")
+    # Nor does a preset whose exceptions the rule does not share.
+    excepting = {**GROUP_ONLY, "ExceptIfSentTo": ["bob"]}
+    rules = [_sl_rule("orphan", {**GROUP_ONLY, "SentTo": ["carol"]}, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    sections = _with_preset(_safelinks(rules, policies, BI_ALL), excepting, excepting)
+    assert _answer(policy_id, sections) == ("met", "policy_flags_ok")
+    rules = [_sl_rule("orphan", TEAM_AND_BOB, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    sections = _with_preset(_safelinks(rules, policies, BI_ALL), excepting, excepting)
+    assert _answer(policy_id, sections) == ("not_assessed", "policy_not_in_export")
+
+
+def test_item60_identical_scopes_behind_many_overlapping_earlier_scopes_stay_fast():
+    import time
+    n = 12000
+    team = {**GROUP_ONLY}
+    rules = [_sl_rule(f"e{i}", {**team, "SentTo": ["bob" if i % 2 else "carol"]}, priority=i) for i in range(n)]
+    rules += [_sl_rule(f"p{i}", {**team, "SentTo": ["bob", "carol"]}, priority=i) for i in range(2 * n, n, -1)]
+    rules.append(_sl_rule("cover", SCOPE_ALL, priority=3 * n))
+    off = [{"Identity": f"p{i}", **OFF} for i in range(n + 2, 2 * n + 1)]
+    policies = [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}, {"Identity": f"p{n + 1}", **SL_FLAGS}, *off,
+                *({"Identity": f"e{i}", **SL_FLAGS} for i in range(n))]
+    start = time.perf_counter()
+    answer = _answer("MS.SECURITYSUITE.7.2v1", _safelinks(rules, policies, BI_ALL))
+    assert time.perf_counter() - start < 4.0          # about 18 s before the fix: each lookup walked the earlier one-name scopes
+    assert answer == ("met", "policy_flags_ok")
+
+
+BOB_ONLY = _to("bob")
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item61_a_preset_for_another_excluded_recipient_leaves_the_rest_uncovered(policy_id):
+    sections = _with_preset(_safelinks([], [SL_BUILTIN], BI_EXCLUDES_BOB_CAROL), BOB_ONLY, BOB_ONLY)
+    assert _answer(policy_id, sections) == ("not_met", "no_policy_covers_all")
+    # The preset and a custom rule together may cover both.
+    policies = [SL_BUILTIN, {"Identity": "carol", **SL_FLAGS}]
+    sections = _with_preset(_safelinks([_sl_rule("carol", _to("carol"))], policies, BI_EXCLUDES_BOB_CAROL), BOB_ONLY, BOB_ONLY)
+    assert _reason(policy_id, sections)[:3] == ("not_assessed", "partial_tier_may_cover", MAY_BOTH)
+    # Both parts of one tier must reach the recipient.
+    sections = _with_preset(_safelinks([], [SL_BUILTIN], BI_EXCLUDES_BOB_CAROL), _to("bob", "carol"), _to("bob"))
+    assert _answer(policy_id, sections) == ("not_met", "no_policy_covers_all")
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item61_a_rule_excepting_an_excluded_recipient_does_not_cover_them(policy_id):
+    rules = [_sl_rule("both", {**_to("bob", "carol"), "ExceptIfSentTo": ["CAROL"]})]
+    policies = [SL_BUILTIN, {"Identity": "both", **SL_FLAGS}]
+    assert _answer(policy_id, _safelinks(rules, policies, BI_EXCLUDES_BOB_CAROL)) == ("not_met", "no_policy_covers_all")
+    # A preset excepting the recipient does not cover them either.
+    excepting = {**_to("bob", "carol"), "ExceptIfSentTo": ["carol"]}
+    sections = _with_preset(_safelinks([], [SL_BUILTIN], BI_EXCLUDES_BOB_CAROL), excepting, excepting)
+    assert _answer(policy_id, sections) == ("not_met", "no_policy_covers_all")
