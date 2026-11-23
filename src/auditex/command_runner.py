@@ -127,53 +127,38 @@ def _kill_process_group(process: Any) -> None:
 
 
 # Commands running now. Each starts in its own session, so a signal to the server's process group no longer reaches
-# it: the server stops them itself when it exits (atexit) or is terminated (``mcp_server`` signal handlers).
+# it: the server stops them itself when it exits (atexit) or is terminated (``install_signal_stop``).
 _RUNNING: set[Any] = set()
 # Threads between starting a command and registering it in ``_RUNNING``.
 _LAUNCHING: set[int] = set()
-# Reentrant: the shutdown signal handler runs on the main thread, which may already hold it (a synchronous MCP tool
-# launching a command), and a plain lock would deadlock the server there.
+# Reentrant, so a thread that already holds it (a synchronous MCP tool launching a command) can take it again.
 _RUNNING_LOCK = threading.RLock()
 _LAUNCHES_SETTLED = threading.Condition(_RUNNING_LOCK)
 # Set once a stop begins; no command starts after it.
 _STOPPING = threading.Event()
-# A shutdown signal that arrived while its own (main) thread was mid-launch; that launch re-raises it once its
-# command is registered and stopped.
-_DEFERRED_SIGNALS: list[int] = []
-# How long a stop waits for another thread's launch to register its command.
-_LAUNCH_SETTLE_SECONDS = 10
 
 
 class ShuttingDown(RuntimeError):
     """The server is stopping its commands; no new command starts."""
 
 
-def stop_running_commands() -> bool:
+def stop_running_commands() -> None:
     """Kill the process group of every command still running; the server is going away and nothing will collect
     their results (R063).
 
-    No command starts once this has begun. A command another thread is launching is waited for (up to
-    ``_LAUNCH_SETTLE_SECONDS``) and stopped with the rest. Returns False when the calling thread is itself between
-    starting a command and registering it (a signal handler that interrupted that launch): the launch stops its own
-    command as soon as it registers it, and the caller must leave the shutdown to it (``defer_signal``).
+    No command starts once this has begun. A command another thread is launching is waited for until it is
+    registered, however long its start takes, and stopped with the rest; a launch on the calling thread itself stops
+    its own command when it registers it. Never call this from a signal handler (``install_signal_stop``).
     """
     _STOPPING.set()
     me = threading.get_ident()
     with _LAUNCHES_SETTLED:
-        _LAUNCHES_SETTLED.wait_for(lambda: not (_LAUNCHING - {me}), timeout=_LAUNCH_SETTLE_SECONDS)
+        _LAUNCHES_SETTLED.wait_for(lambda: not (_LAUNCHING - {me}))
         running = list(_RUNNING)
-        own_launch = me in _LAUNCHING
     for process in running:
         # Kill the group even when its first process has exited: a process it started can still be running and
         # holding the output pipes, and the group outlives its leader while any member is left.
         _kill_process_group(process)
-    return not own_launch
-
-
-def defer_signal(signum: int) -> None:
-    """Record a shutdown signal for the interrupted launch on this thread to re-raise once it has stopped its
-    command (see ``stop_running_commands``)."""
-    _DEFERRED_SIGNALS.append(signum)
 
 
 def _start_process(command: list[str], **kwargs: Any) -> Any:
@@ -194,10 +179,48 @@ def _start_process(command: list[str], **kwargs: Any) -> Any:
             _LAUNCHES_SETTLED.notify_all()
         if process is not None and _STOPPING.is_set():
             _kill_process_group(process)
-        if _DEFERRED_SIGNALS and threading.current_thread() is threading.main_thread():
-            # The handler now finds no launch in flight on this thread, stops everything and ends the server.
-            signal.raise_signal(_DEFERRED_SIGNALS.pop())
     return process
+
+
+# How long the stop thread gives the main thread to end the process by the signal before it exits directly.
+_SIGNAL_EXIT_GRACE_SECONDS = 5
+
+
+def install_signal_stop(signal_names: tuple[str, ...] = ("SIGTERM", "SIGHUP")) -> None:
+    """On any of ``signal_names``, stop every running command, then end the process as the first signal would (R063).
+
+    The handler takes no lock: it only writes the signal number to a pipe (a second signal during the stop just adds
+    another byte). A stop thread reads it and does the work outside the handler, so a launch the signal interrupted on
+    the main thread carries on and registers its command, and the stop waits for it. Once the commands are stopped,
+    the stop thread sends the signal again; the handler then restores the default action and re-raises it.
+    """
+    read_fd, write_fd = os.pipe()
+    os.set_blocking(write_fd, False)
+    stopped = threading.Event()
+
+    def handle(signum: int, _frame: Any) -> None:
+        if stopped.is_set():  # reads a flag; takes no lock
+            signal.signal(signum, signal.SIG_DFL)
+            signal.raise_signal(signum)
+            return
+        try:
+            os.write(write_fd, bytes([signum]))
+        except (BlockingIOError, OSError):
+            pass  # the pipe already holds a signal the stop thread will act on
+
+    def stop_on_signal() -> None:
+        signum = os.read(read_fd, 1)[0]
+        stop_running_commands()
+        stopped.set()
+        os.kill(os.getpid(), signum)
+        # The main thread ends the process from the handler; if it cannot run the handler, end it here.
+        threading.Event().wait(_SIGNAL_EXIT_GRACE_SECONDS)
+        os._exit(128 + signum)
+
+    threading.Thread(target=stop_on_signal, name="auditex-signal-stop", daemon=True).start()
+    for name in signal_names:
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), handle)
 
 
 atexit.register(stop_running_commands)

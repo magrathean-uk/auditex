@@ -1037,22 +1037,9 @@ def _install_shutdown_handlers() -> None:
     A command runs in its own session (so a timeout can stop its whole process group), which means a signal sent to
     the server's process group no longer reaches it; without this a terminated server would leave an audit running.
     """
-    import signal
+    from .command_runner import install_signal_stop
 
-    from .command_runner import defer_signal, stop_running_commands
-
-    def handle(signum: int, _frame: Any) -> None:
-        if not stop_running_commands():
-            # The signal interrupted this thread between starting a command and registering it; that launch stops
-            # its command and re-raises the signal once it can.
-            defer_signal(signum)
-            return
-        signal.signal(signum, signal.SIG_DFL)
-        signal.raise_signal(signum)
-
-    for name in ("SIGTERM", "SIGHUP"):
-        if hasattr(signal, name):
-            signal.signal(getattr(signal, name), handle)
+    install_signal_stop(("SIGTERM", "SIGHUP"))
 
 
 def _guard_tool(handler):

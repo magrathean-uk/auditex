@@ -471,17 +471,52 @@ elif mode == "launch_gap":
 
     command_runner.subprocess.Popen = popen_then_signal
     command_runner.run_cli_command(command)
+elif mode == "slow_worker_launch":
+    # A worker thread's command has started but is not yet registered when the server is terminated, and stays so
+    # for longer than the ten seconds the stop once waited for launches to settle.
+    real_popen = command_runner.subprocess.Popen
+
+    def popen_then_stall(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        time.sleep(11)
+        return process
+
+    command_runner.subprocess.Popen = popen_then_stall
+    threading.Thread(target=command_runner.run_cli_command, args=(command,), daemon=True).start()
+    deadline = time.monotonic() + 10
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    os.kill(os.getpid(), signal.SIGTERM)
+elif mode == "nested_signal":
+    # A SIGHUP lands while the SIGTERM stop is inside the stop flag's own lock.
+    class SignalInsideSet(threading.Event):
+        def set(self):
+            with self._cond:
+                os.kill(os.getpid(), signal.SIGHUP)
+                time.sleep(0.3)
+                self._flag = True
+                self._cond.notify_all()
+
+    command_runner._STOPPING = SignalInsideSet()
+    threading.Thread(target=command_runner.run_cli_command, args=(command,), daemon=True).start()
+    deadline = time.monotonic() + 10
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    os.kill(os.getpid(), signal.SIGTERM)
 time.sleep(5)
 sys.exit(0)
 """
 
 
-@pytest.mark.parametrize("mode", ["registered", "leader_exited", "lock_held", "launch_gap"])
+@pytest.mark.parametrize(
+    "mode", ["registered", "leader_exited", "lock_held", "launch_gap", "slow_worker_launch", "nested_signal"]
+)
 def test_a_terminated_mcp_server_stops_its_command_at_every_point_of_launch(mode: str, tmp_path: Path) -> None:
     # R063: the command runs in its own session, so the server must stop it on SIGTERM; the check waits for the
     # command's readiness marker and follows the PID of the process it started. Bot review (coderabbit, PR 172): a
     # signal while the main thread held the registry lock hung the server, and a signal between the launch and its
-    # registration left the command running.
+    # registration left the command running. Review of PR 187: a worker launch that outlasted the stop's wait left its
+    # command running, and a second signal during the stop deadlocked the server.
     import os
     import signal
     import subprocess
@@ -493,7 +528,7 @@ def test_a_terminated_mcp_server_stops_its_command_at_every_point_of_launch(mode
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
 
     try:
-        server = subprocess.run([sys.executable, str(script), str(pid_file), mode], env=env, timeout=15, check=False)
+        server = subprocess.run([sys.executable, str(script), str(pid_file), mode], env=env, timeout=25, check=False)
     finally:
         descendant = int(pid_file.read_text(encoding="utf-8")) if pid_file.exists() else None
         survived = descendant is not None and not _wait_for(lambda: not _alive(descendant), 5)
