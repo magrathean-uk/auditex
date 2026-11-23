@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import auth_context
@@ -38,7 +39,26 @@ def removed_auth_flag(argv: list[str]) -> str | None:
 
 
 def scrub_command_line(command_line: list[str]) -> list[str]:
-    return redact_argv(command_line, sensitive_flags=SENSITIVE_CLI_ARGS)
+    return [local_path_argument(item) for item in redact_argv(command_line, sensitive_flags=SENSITIVE_CLI_ARGS)]
+
+
+_LOCAL_ABSOLUTE_PATH = re.compile(r"^(?:/|\\\\|[A-Za-z]:[\\/])")
+
+
+def local_path_label(value: Any) -> Any:
+    """Label an absolute path in a field known to hold an operator-supplied path."""
+    if isinstance(value, str) and _LOCAL_ABSOLUTE_PATH.match(value):
+        name = re.split(r"[\\/]", value.rstrip("\\/"))[-1]
+        return f"<local-path>/{name}" if name else "<local-path>"
+    return value
+
+
+def local_path_argument(value: str) -> str:
+    """Label a bare absolute path or the value of an inline option in recorded argv."""
+    if value.startswith("--") and "=" in value:
+        flag, _, path = value.partition("=")
+        return f"{flag}={local_path_label(path)}"
+    return local_path_label(value)
 
 
 def inspect_access_token(token: str) -> dict[str, Any]:

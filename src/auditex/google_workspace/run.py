@@ -11,6 +11,7 @@ from typing import Any
 
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.assurance import build_live_readiness_summary
+from azure_tenant_audit.auth_runtime import local_path_argument
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.collector_runner import (
     AuditWriterCollectorAdapter,
@@ -23,9 +24,9 @@ from azure_tenant_audit.dns_lookup import (
     resolve_doh_endpoint,
     sanitise_resolver_fields,
 )
-from azure_tenant_audit.local_paths import path_names
 from azure_tenant_audit.offline_replay import (
     absent_section_rows,
+    fixture_provenance_for_bundle,
     replay_collector_status,
     replay_coverage_rows,
     replay_source,
@@ -89,8 +90,7 @@ def _merged_fixture_provenance(
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value
-    # Provenance names a lab seed run by its folder; where that folder sat on the lab machine stays out of the bundle.
-    return path_names(merged) or None
+    return fixture_provenance_for_bundle(merged) or None
 # --doh-endpoint: a DoH resolver URL path can carry an account token.
 _SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache",
                             "--doh-endpoint"}
@@ -129,8 +129,6 @@ class GoogleRunConfig:
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
     """The command line as the run bundle records it: secret-bearing values redacted and every absolute path of the
     operator's machine (``--out /home/...``) reduced to ``<local-path>/<name>``."""
-    from ..reporting import local_path_argument
-
     return [local_path_argument(item) for item in redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)]
 
 

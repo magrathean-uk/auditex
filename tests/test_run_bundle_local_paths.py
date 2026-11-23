@@ -1,4 +1,4 @@
-"""No file in a run bundle holds an absolute local path (PyPI review C-repair2, follow-up to PR #176).
+"""Run bundles avoid operator paths at their source and preserve tenant paths.
 
 Every bundle (Microsoft 365 or Google Workspace; offline, probe, blocked or failed) is written with an absolute
 ``--out`` and absolute credential, sample and waiver paths under one folder whose name is the needle. Every file the
@@ -166,7 +166,6 @@ def test_a_failed_google_probe_keeps_no_path_from_any_file_error(operator_root: 
     assert result["preflight_error"]["message"] == "Permission denied"
 
 
-# Repair round 1 of PR #194: every writer of the bundle passes one normaliser (azure_tenant_audit/local_paths.py).
 # These runs carry the command line the operator typed (sys.argv, with an absolute program path, --out and
 # --waiver-file), an absolute PowerShell executable, a resumed folder, a lab seed path in an offline sample's
 # provenance and a Python library file error, and must still leave no absolute local path in any file.
@@ -197,7 +196,7 @@ def _m365_live(monkeypatch: pytest.MonkeyPatch, root: Path, *extra: str) -> int:
     argv = _operator_argv(monkeypatch, root, [
         "--tenant-name", "T", "--tenant-id", "t-123", "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
         "--collectors", "identity", "--out", str(root / "out"), "--run-name", "live",
-        "--waiver-file", str(_waiver(root, "entra.mfa.users_not_registered")), *extra,
+        f"--waiver-file={_waiver(root, 'entra.mfa.users_not_registered')}", *extra,
     ])
     monkeypatch.setattr(engine_cli, "GraphClient", _FakeClient)
     monkeypatch.setattr(engine_cli, "REGISTRY", {"identity": _Collector("identity", "ok")})
@@ -207,14 +206,25 @@ def _m365_live(monkeypatch: pytest.MonkeyPatch, root: Path, *extra: str) -> int:
 
 def test_a_mocked_live_microsoft_365_run_and_its_resume_write_no_absolute_local_path(
         operator_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
+
     assert _m365_live(monkeypatch, operator_root) in (0, 1)
     run_dir = operator_root / "out" / "T-live"
     _assert_clean(run_dir, operator_root)
+    checkpoint_path = run_dir / "checkpoints" / "checkpoint-state.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    checkpoint_path.write_text(json.dumps({**checkpoint, "run_dir": str(run_dir)}), encoding="utf-8")
     assert _m365_live(monkeypatch, operator_root, "--resume-from", str(run_dir)) in (0, 1)
+    updated = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert updated["run_dir"] == "T-live"
+    assert updated["collectors"] == checkpoint["collectors"]
+    assert verify_bundle_hashes(run_dir)["status"] == "verified"
     _assert_clean(run_dir, operator_root)
     events = [json.loads(line) for line in (run_dir / "audit-log.jsonl").read_text(encoding="utf-8").splitlines()]
     resumed = [event["details"] for event in events if event["event"] == "run.resume"]
     assert resumed and all(details.get("resume_from") == run_dir.name for details in resumed)
+    carried = [event["details"] for event in events if event["event"] == "collector.resumed"]
+    assert [details["resume_from"] for details in carried] == ["T-live"]
 
 
 def test_a_microsoft_365_probe_with_an_absolute_powershell_writes_no_absolute_local_path(
@@ -307,41 +317,6 @@ def test_a_google_library_file_error_writes_no_absolute_local_path(
     assert holding, "the error keeps the file name, so the operator can still see what failed"
 
 
-# The normaliser itself: the three forms, Windows-style paths, and tenant paths it must leave alone.
-
-def test_the_normaliser_makes_run_paths_relative_home_paths_tilde_and_others_a_bare_name() -> None:
-    from azure_tenant_audit.local_paths import LocalPathScrubber
-
-    scrub = LocalPathScrubber("/w/op place/out/T-run", home="/home/op", others=["/opt/tools"],
-                              argv=["/x/auditex/__main__.py", "--out=/data/a b/out", "/srv/k.pem"])
-    assert scrub("/w/op place/out/T-run") == "T-run"
-    assert scrub({"f": ["/w/op place/out/T-run/raw/a.json"]}) == {"f": ["raw/a.json"]}
-    assert scrub("/home/op/audits/waivers.json") == "~/audits/waivers.json"
-    assert scrub("/opt/tools/pwsh -NoLogo") == "pwsh -NoLogo"
-    assert scrub("/opt/tools/bin/pwsh -NoLogo") == "bin/pwsh -NoLogo"
-    assert scrub("Permission denied: '/opt/tools/lib/x y/doc.json'") == "Permission denied: 'lib/x y/doc.json'"
-    assert scrub("see /home/op/a.json.") == "see ~/a.json."
-    assert scrub(["--out=/data/a b/out", "/srv/k.pem", "/x/auditex/__main__.py"]) == ["--out=out", "k.pem",
-                                                                                      "__main__.py"]
-    assert scrub("/data/a b/other.json") == "other.json"
-    for tenant in ("/users/abc", "https://graph.microsoft.com/v1.0/users", "/tmpfoo", "/Library/Preferences/x",
-                   "C:\\Temp\\exclusion", "/opt/toolsets/x"):
-        assert scrub(tenant) == tenant
-
-
-def test_the_normaliser_reads_windows_style_paths() -> None:
-    from azure_tenant_audit.local_paths import LocalPathScrubber
-
-    scrub = LocalPathScrubber("C:\\Profiles\\op\\out\\T-run", home="C:\\Profiles\\op", others=["D:\\tools\\ps7"], argv=[])
-    assert scrub("C:\\Profiles\\op\\out\\T-run\\raw\\a.json") == "raw\\a.json"
-    assert scrub("C:/Profiles/op/out/T-run") == "T-run"
-    assert scrub("C:\\Profiles\\op\\inputs\\client.json") == "~/inputs\\client.json"
-    assert scrub("D:\\tools\\ps7\\pwsh.exe -NoLogo") == "pwsh.exe -NoLogo"
-    assert scrub("C:\\Temp\\exclusion") == "C:\\Temp\\exclusion"
-
-
-# A PowerShell found at a system path (outside every folder the normaliser knows) is still recorded by name only.
-
 SYSTEM_PWSH = "/usr/local/microsoft/powershell/7/pwsh"
 
 
@@ -369,43 +344,24 @@ def test_the_probe_records_powershell_checks_by_executable_name(monkeypatch: pyt
     assert SYSTEM_PWSH not in json.dumps(rows)
 
 
-# Repair round 2 of PR #194: the normaliser replaces only the known local prefixes of this run and leaves every other
-# string as written. Tenant evidence holds absolute paths of its own (an organisational unit, a URL query, policy text).
-
-TENANT_TEXT = [
-    "/Sales/London",
-    "/tmp/Archive",
-    "https://contoso.sharepoint.com/sites/IT?folder=/tmp/Archive&view=grid",
-    "The tenant excludes /tmp/Archive from this scan",
-    "/home/opal/shared",
-    "/w/op place/out/T-runner/x",
-]
-
-
-def test_the_normaliser_leaves_tenant_paths_urls_and_policy_text_as_written() -> None:
-    from azure_tenant_audit.local_paths import LocalPathScrubber
-
-    scrub = LocalPathScrubber("/w/op place/out/T-run", home="/home/op", others=["/tmp", "/var/tmp/op"], argv=[])
-    for tenant in TENANT_TEXT:
-        assert scrub(tenant) == tenant
-    assert scrub({"/tmp/policy/Archive": 1, "Archive": 2}) == {"/tmp/policy/Archive": 1, "Archive": 2}
-    # Only the known prefix goes; whatever follows it is kept as written.
-    assert scrub("/var/tmp/op/lib/x y/doc.json") == "lib/x y/doc.json"
-    assert scrub("excludes /home/op/a.json.") == "excludes ~/a.json."
-
-
-def test_an_offline_google_run_keeps_tenant_organisational_unit_paths(
+def test_an_offline_google_run_keeps_tenant_path_values_and_keys(
         operator_root: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     import tempfile
 
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: "/tmp")  # the standard Linux temporary folder
+    # Deliberately overlap the tenant OU with a local temporary directory.
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: "/Sales/London")
     sample = json.loads(GOOGLE_SAMPLE.read_text(encoding="utf-8"))
     units = sample["google_directory"]["orgUnits"]["value"]
-    units.append({**units[0], "name": "Archive", "orgUnitPath": "/tmp/Archive", "orgUnitId": "id:archive"})
-    units.append({**units[0], "name": "London", "orgUnitPath": "/Sales/London", "orgUnitId": "id:london"})
+    units.append({**units[0], "name": "Archive", "orgUnitPath": "/Sales/London/Archive", "orgUnitId": "id:archive"})
+    units.append({
+        **units[0], "name": "London", "orgUnitPath": "/Sales/London", "orgUnitId": "id:london",
+        "description": "The tenant excludes /Sales/London/Archive from this scan",
+    })
     users = sample["google_directory"]["users"]["value"]
-    users[0]["orgUnitPath"] = "/tmp/Archive"
+    users[0]["orgUnitPath"] = "/Sales/London/Archive"
     users[1]["orgUnitPath"] = "/Sales/London"
+    users[0]["websites"] = [{"value": "https://example.com/portal?folder=/Sales/London/Archive&view=grid"}]
+    users[0]["customSchemas"] = {"/Sales/London/Archive": {"retention": 7}, "Archive": {"retention": 30}}
     sample_path = operator_root / "inputs" / "google.json"
     sample_path.write_text(json.dumps(sample), encoding="utf-8")
     out = operator_root / "out"
@@ -414,18 +370,33 @@ def test_an_offline_google_run_keeps_tenant_organisational_unit_paths(
     assert rc in (0, 1)
     run_dir = out / "G-ou"
     _assert_clean(run_dir, operator_root)
-    for needle in ("/tmp/Archive", "/Sales/London"):
-        holding = _files_holding(run_dir, (needle,))
-        assert any(name.startswith("raw/") for name in holding), (needle, holding)
-        assert any(name.startswith("normalized/") for name in holding), (needle, holding)
-        assert "index/evidence.sqlite" in holding, (needle, holding)
+    raw = json.loads((run_dir / "raw" / "google_directory.json").read_text(encoding="utf-8"))
+    assert raw["orgUnits"]["value"][-1]["orgUnitPath"] == "/Sales/London"
+    assert raw["orgUnits"]["value"][-1]["description"] == "The tenant excludes /Sales/London/Archive from this scan"
+    raw_user = raw["users"]["value"][0]
+    assert raw_user["orgUnitPath"] == "/Sales/London/Archive"
+    assert raw_user["websites"] == [{"value": "https://example.com/portal?folder=/Sales/London/Archive&view=grid"}]
+    assert raw_user["customSchemas"] == {"/Sales/London/Archive": {"retention": 7}, "Archive": {"retention": 30}}
+    normalized = json.loads((run_dir / "normalized" / "google_users.json").read_text(encoding="utf-8"))
+    assert [row["org_unit_path"] for row in normalized["records"][:2]] == ["/Sales/London/Archive", "/Sales/London"]
+    conn = sqlite3.connect(run_dir / "index" / "evidence.sqlite")
+    try:
+        ou_rows = conn.execute(
+            "SELECT record_json FROM normalized_records WHERE section_name = 'google_users' ORDER BY record_index LIMIT 2",
+        )
+        assert [json.loads(row[0])["org_unit_path"] for row in ou_rows] == ["/Sales/London/Archive", "/Sales/London"]
+    finally:
+        conn.close()
 
 
 def test_an_offline_google_replay_drops_a_lab_seed_path_from_its_provenance(
         operator_root: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     sample = json.loads(GOOGLE_SAMPLE.read_text(encoding="utf-8"))
-    sample["_fixture_provenance"] = {"bootstrap_seed": {"run_dir": "/srv/lab-machine/tenant-bootstrap/runs/seed-0001",
-                                                        "seeded_at": "2026-11-01"}}
+    sample["_fixture_provenance"] = {"bootstrap_seed": {
+        "run_dir": "/srv/lab-machine/tenant-bootstrap/runs/seed-0001",
+        "identity": {"manifest_path": "/srv/lab-machine/tenant-bootstrap/runs/seed-0001/identity-seed-az-manifest.json"},
+        "seeded_at": "2026-11-01",
+    }}
     sample_path = operator_root / "inputs" / "seeded.json"
     sample_path.write_text(json.dumps(sample), encoding="utf-8")
     out = operator_root / "out"
@@ -437,7 +408,9 @@ def test_an_offline_google_replay_drops_a_lab_seed_path_from_its_provenance(
     _assert_clean(run_dir, operator_root)
     assert _files_holding(run_dir, ("/srv/lab-machine",)) == []
     manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["fixture_provenance"]["bootstrap_seed"]["run_dir"] == "seed-0001"
+    seed = manifest["fixture_provenance"]["bootstrap_seed"]
+    assert seed["run_dir"] == "seed-0001"
+    assert seed["identity"]["manifest_path"] == "identity-seed-az-manifest.json"
 
 
 def test_a_powershell_launch_error_names_the_executable_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -457,10 +430,14 @@ def test_a_powershell_launch_error_names_the_executable_only(monkeypatch: pytest
     assert "Permission denied" in written and "pwsh" in written
 
 
-def test_a_powershell_module_lookup_error_keeps_no_absolute_path(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("module", [
+    "/opt/company-powershell/modules/ExchangeOnlineManagement/ExchangeOnlineManagement.psd1",
+    "file:///opt/company%20powershell/modules/ExchangeOnlineManagement/ExchangeOnlineManagement.psd1",
+    r"\\fileserver\PowerShell Modules\ExchangeOnlineManagement\ExchangeOnlineManagement.psd1",
+])
+def test_a_powershell_module_lookup_error_keeps_no_absolute_path(monkeypatch: pytest.MonkeyPatch, module: str) -> None:
     from azure_tenant_audit import probe
 
-    module = "/opt/company-powershell/modules/ExchangeOnlineManagement/ExchangeOnlineManagement.psd1"
     monkeypatch.setattr(probe.shutil, "which", lambda name: SYSTEM_PWSH if name == "pwsh" else None)
     monkeypatch.setattr(probe, "_subprocess_probe",
                         lambda command, **_kw: (1, "", f"Import-Module: The module '{module}' could not be loaded."))
@@ -470,25 +447,10 @@ def test_a_powershell_module_lookup_error_keeps_no_absolute_path(monkeypatch: py
     assert "/opt/company-powershell" not in json.dumps(rows)
 
 
-def test_the_normaliser_reads_escaped_windows_paths_in_error_text() -> None:
-    from azure_tenant_audit.local_paths import LocalPathScrubber
-
-    scrub = LocalPathScrubber("C:\\Profiles\\op\\out\\T-run", home="C:\\Profiles\\op", others=[], argv=[])
-    error = str(PermissionError(13, "Permission denied", "C:\\Profiles\\op\\inputs\\client.json"))
-    assert scrub(error) == "[Errno 13] Permission denied: '~/inputs\\\\client.json'"
-    assert scrub(json.dumps(error)) == json.dumps("[Errno 13] Permission denied: '~/inputs\\\\client.json'")
-
-
-def test_an_audit_log_line_stays_json_with_a_quoted_path_detail(tmp_path: Path) -> None:
-    from azure_tenant_audit.local_paths import LocalPathScrubber
+def test_an_audit_log_line_keeps_a_quoted_path_detail(tmp_path: Path) -> None:
     from azure_tenant_audit.output import AuditLogger
 
-    run_dir = tmp_path / "op place" / "out" / "T-run"
-    run_dir.mkdir(parents=True)
-    scrub = LocalPathScrubber(run_dir, home="/nonexistent-home/op", others=[tmp_path / "op place"], argv=[])
-    logger = AuditLogger(run_dir, local_paths=scrub)
-    logger.log("x.event", "detail with a quote", {"path": tmp_path / "op place" / 'project"blue' / "client.json"})
-    for name in ("audit-log.jsonl",):
-        lines = (run_dir / name).read_text(encoding="utf-8").splitlines()
-        assert [json.loads(line)["details"]["path"] for line in lines] == ['project"blue/client.json']
-    assert str(tmp_path) not in (run_dir / "audit-debug.log").read_text(encoding="utf-8")
+    logger = AuditLogger(tmp_path)
+    logger.log("x.event", "detail with a quote", {"path": Path('/Sales/project"blue/client.json')})
+    line = (tmp_path / "audit-log.jsonl").read_text(encoding="utf-8")
+    assert json.loads(line)["details"]["path"] == '/Sales/project"blue/client.json'

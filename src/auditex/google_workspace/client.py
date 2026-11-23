@@ -145,6 +145,10 @@ def _error_reasons(exc: Exception) -> set[str]:
 def classify_google_error(exc: Exception) -> tuple[str, str]:
     status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
     message = str(exc)
+    if isinstance(exc, OSError) and (exc.filename or exc.filename2):
+        # A local file failure can come from the discovery library as well as from sign-in.
+        filename = re.split(r"[\\/]", str(exc.filename or exc.filename2))[-1]
+        message = f"{exc.strerror or type(exc).__name__}: {filename}"
     if is_token_refusal(message):
         return "insufficient_permissions", message
     if status == 403 and _error_reasons(exc) & _RATE_LIMIT_403_REASONS:

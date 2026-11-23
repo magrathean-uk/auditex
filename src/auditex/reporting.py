@@ -15,6 +15,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.auth_runtime import local_path_argument, local_path_label
 from azure_tenant_audit.autopilot import (
     build_basic_license_intelligence,
     completed_collector_count,
@@ -1829,30 +1830,6 @@ _REDACTED_DERIVATIVE = "customer_pack_redaction"
 # copied verbatim only when the customer-pack redaction leaves it exactly as it is (it holds paths and digests); a
 # manifest the redaction would alter is left out of the pack and the row says why.
 _VERBATIM_IF_UNCHANGED = frozenset({"bundle-hashes.json"})
-_LOCAL_PATH_LABEL = "<local-path>"
-
-
-_LOCAL_ABSOLUTE_PATH = re.compile(r"^(?:/|\\\\|[A-Za-z]:[\\/])")  # POSIX, UNC (\\server\share) or drive path
-
-
-def _local_path_label(value: Any) -> Any:
-    """An absolute path of the operator's machine as ``<local-path>/<name>``; anything else unchanged."""
-    if isinstance(value, str) and _LOCAL_ABSOLUTE_PATH.match(value):
-        name = re.split(r"[\\/]", value.rstrip("\\/"))[-1]
-        return f"{_LOCAL_PATH_LABEL}/{name}" if name else _LOCAL_PATH_LABEL
-    return value
-
-
-def local_path_argument(value: Any) -> Any:
-    """One command-line item: a bare absolute path, or the value of ``--flag=/abs/path``, as ``<local-path>/<name>``."""
-    if isinstance(value, str) and value.startswith("--") and "=" in value:
-        flag, _, path = value.partition("=")
-        if _LOCAL_ABSOLUTE_PATH.match(path):
-            return f"{flag}={_local_path_label(path)}"
-        return value
-    return _local_path_label(value)
-
-
 def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> dict[str, Any]:
     """``run-manifest.json`` for a customer: no absolute path of the machine that ran the audit.
 
@@ -1877,7 +1854,7 @@ def _relabel_path_fields(value: Any, key: str = "") -> Any:
         return {item_key: _relabel_path_fields(item, str(item_key)) for item_key, item in value.items()}
     if isinstance(value, list):
         return [_relabel_path_fields(item, key) for item in value]
-    return _local_path_label(value) if _PATH_FIELD.search(key) else value
+    return local_path_label(value) if _PATH_FIELD.search(key) else value
 
 
 def _copy_source_artifact(
