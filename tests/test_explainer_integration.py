@@ -252,38 +252,80 @@ def test_product_catalogue_is_v391_and_agrees_with_the_independent_pin_on_every_
     _assert_agrees_with_the_reviewed_pin(json.loads(SHIPPED.read_text()), REVIEWED)
 
 
-def _ship(monkeypatch, product):
-    """Every read of the shipped catalogue file returns ``product``, as if it were changed on disk."""
-    import builtins
-    import io
-    import os
+# Bot review wave 2, item 62 (repair round 2): the nine cells SS 7.1 to 7.3 add, written out here as literals. The added
+# cells are checked against these, never against values derived from the shipped catalogue or the overlay, so an overlay
+# that copies the shipped cells (at import or on demand) cannot make a changed shipped cell agree.
+BUILTIN_RULE_UNUSABLE_7X = {
+    "cited": ["built_in_protection_rules"],
+    "evidence_kind": "unusable",
+    "limitations": ["evidence_unusable", "evidence_unusable:<section>:unusable"],
+    "reason_code": "data_unusable_builtin_rule",
+    "reason_texts": [
+        "Data unusable: built_in_protection_rules holds more than one rule; the policy was not assessed.",
+        "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."],
+    "recommendations": ["recollect_unusable_evidence"],
+    "verdict": "not_assessed"}
+NO_POLICY_COVERS_ALL_7X_TEXT = {
+    "MS.SECURITYSUITE.7.1v1": "Requirement not met: the Built-In Protection rule excludes some recipients and no Safe "
+                              "Links rule or preset covers them, so they get no Safe Links policy (URL comparison with "
+                              "a block-list).",
+    "MS.SECURITYSUITE.7.2v1": "Requirement not met: the Built-In Protection rule excludes some recipients and no Safe "
+                              "Links rule or preset covers them, so they get no Safe Links policy (direct download "
+                              "link scanning).",
+    "MS.SECURITYSUITE.7.3v1": "Requirement not met: the Built-In Protection rule excludes some recipients and no Safe "
+                              "Links rule or preset covers them, so they get no Safe Links policy (user click "
+                              "tracking)."}
+PARTIAL_TIER_MAY_COVER_7X = {
+    "cited": ["built_in_protection_rules", "safe_links_rules"],
+    "cited_variants": [["atp_policy_rules", "built_in_protection_rules", "protection_policy_rules"],
+                       ["atp_policy_rules", "built_in_protection_rules", "protection_policy_rules", "safe_links_rules"],
+                       ["built_in_protection_rules", "safe_links_rules"]],
+    "evidence_kind": "undecidable",
+    "limitations": ["evidence_unusable", "evidence_unusable:<section>:undecidable"],
+    "reason_code": "data_unusable_partial_tier_may_cover",
+    "reason_texts": [
+        "Data unusable: the built-in protection rule has exclusions and a partly scoped Safe Links rule exists that may "
+        "cover the excluded recipients; the policy was not assessed.",
+        "Data unusable: the built-in protection rule has exclusions and a partly scoped Standard or Strict preset "
+        "security policy exists that may cover the excluded recipients; the policy was not assessed.",
+        "Data unusable: the built-in protection rule has exclusions and a partly scoped preset security policy and Safe "
+        "Links rule exist that may cover the excluded recipients; the policy was not assessed."],
+    "recommendations": ["review_policy_against_baseline_text"],
+    "verdict": "not_assessed"}
 
-    text, shipped = json.dumps(product), SHIPPED.resolve()
-    read_text, read_bytes, real_open = Path.read_text, Path.read_bytes, builtins.open
 
-    def is_shipped(file):
-        return isinstance(file, (str, os.PathLike)) and Path(file).resolve() == shipped
-
-    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: text if is_shipped(self) else read_text(self, *a, **k))
-    monkeypatch.setattr(Path, "read_bytes", lambda self: text.encode() if is_shipped(self) else read_bytes(self))
-    monkeypatch.setattr(builtins, "open", lambda file, mode="r", *a, **k: (
-        (io.BytesIO(text.encode()) if "b" in mode else io.StringIO(text)) if is_shipped(file) and "r" in mode
-        else real_open(file, mode, *a, **k)))
+def added_cell_7x(pid, name):
+    """The reviewed literal for one added SS 7.x cell."""
+    if name == "builtin_rule_unusable":
+        return BUILTIN_RULE_UNUSABLE_7X
+    if name == "partial_tier_may_cover":
+        return PARTIAL_TIER_MAY_COVER_7X
+    assert name == "no_policy_covers_all", name
+    return {"cited": ["atp_policy_rules", "built_in_protection_rules", "defender_license", "protection_policy_rules",
+                      "safe_links_policies", "safe_links_rules"],
+            "reason_code": "no_policy_covers_all_recipients",
+            "reason_texts": [NO_POLICY_COVERS_ALL_7X_TEXT[pid]],
+            "verdict": "not_met"}
 
 
 @pytest.mark.parametrize("pid", R003_POLICIES)
 @pytest.mark.parametrize("cell", R003_ADDED)
-def test_a_changed_added_cell_disagrees_with_the_reviewed_pin(monkeypatch, pid, cell):
-    # Bot review wave 2, item 62: the overlay once copied the shipped added cells, so a changed verdict still agreed.
-    # The shipped file itself reads as changed while the expectations are built, so expectations taken from it agree.
+def test_the_overlay_adds_the_literal_cells(pid, cell):
+    assert REVIEWED[pid]["cells"][cell] == added_cell_7x(pid, cell)
+
+
+@pytest.mark.parametrize("pid", R003_POLICIES)
+@pytest.mark.parametrize("cell", R003_ADDED)
+def test_a_changed_added_cell_disagrees_even_when_the_expectations_copy_it(pid, cell):
+    # Bot review wave 2, item 62: an overlay that copies the shipped added cells makes a changed cell agree with itself.
+    # Here the expectations hold the changed cell itself, the worst such copy; the literal pin still rejects it.
     product = json.loads(SHIPPED.read_text())
     entry = product["policies"][pid]["cells"][cell]
     entry["verdict"] = "met" if entry["verdict"] != "met" else "not_met"
-    _ship(monkeypatch, product)
-    assert json.loads(SHIPPED.read_text()) == product
-    expected = reviewed_pin()
+    copied = deepcopy(REVIEWED)
+    copied[pid]["cells"][cell] = deepcopy(entry)
     with pytest.raises(AssertionError):
-        _assert_agrees_with_the_reviewed_pin(product, expected)
+        _assert_agrees_with_the_reviewed_pin(product, copied)
 
 
 def _assert_agrees_with_the_reviewed_pin(product, reviewed):
@@ -296,12 +338,14 @@ def _assert_agrees_with_the_reviewed_pin(product, reviewed):
         assert set(row["cells"]) == set(pin["cells"])
         for name, expected in pin["cells"].items():
             cell = row["cells"][name]
+            if pid in R003_POLICIES and name in R003_ADDED:
+                expected = added_cell_7x(pid, name)     # item 62: the literals above, never the given pin
             for key in ("verdict", "reason_code", "evidence_kind", "limitations", "recommendations"):
                 assert cell.get(key) == expected.get(key), (pid, name, key)
             if name != "section_not_collected":
                 assert cell["cited"] == expected["cited"], (pid, name)
             if pid in R003_POLICIES and name in R003_ADDED:
-                assert cell == expected, (pid, name)       # the reviewed overlay pins each added cell in full
+                assert cell == expected, (pid, name)       # each added cell is pinned in full
 
 
 @pytest.mark.parametrize("code", shared_exceptions())
