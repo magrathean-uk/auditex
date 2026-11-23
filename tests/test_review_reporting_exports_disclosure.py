@@ -137,6 +137,70 @@ def test_r066_local_sarif_fingerprint_is_unchanged(tmp_path: Path, export_key: s
     assert _sarif_results(run, profile="local")[0]["fingerprints"] == direct["fingerprints"]
 
 
+GOOGLE_FINDING = {
+    "id": "google.organization.two_step_not_enforced",
+    "rule_id": "google.organization.two_step_not_enforced",
+    "title": "2-Step Verification is not enforced",
+    "severity": "high",
+    "status": "open",
+    "category": "identity",
+    "collector": "google_workspace",
+}
+
+
+def _write_google_run(run_dir: Path, *, domain: str, customer_id: str | None) -> Path:
+    _write_run(run_dir, [dict(GOOGLE_FINDING)], tenant_id=None)
+    manifest_path = run_dir / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update({"platform": "google_workspace", "tenant_name": "Google Workspace", "workspace_domain": domain})
+    if customer_id is not None:
+        manifest["customer_id"] = customer_id
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    ensure_pseudonym_key(run_dir)
+    return run_dir
+
+
+def _export_ids(run: Path) -> tuple[str, str, str]:
+    oscal = _oscal(run)
+    return (
+        _sarif_results(run)[0]["fingerprints"]["auditex/v1"],
+        oscal["findings"][0]["uuid"],
+        oscal["observations"][0]["uuid"],
+    )
+
+
+@pytest.mark.parametrize("customer_id", [None, "my_customer"])
+def test_r066_google_runs_without_a_customer_id_never_share_export_ids(
+    tmp_path: Path, export_key: str, customer_id: str | None
+) -> None:
+    """A missing customer id or the my_customer alias names no tenant: two such Google runs of different domains
+    must not get the same SARIF fingerprint or OSCAL uuids, or one tenant's alerts would close the other's."""
+    run_a = _write_google_run(tmp_path / "run-a", domain="alpha.example", customer_id=customer_id)
+    run_b = _write_google_run(tmp_path / "run-b", domain="beta.example", customer_id=customer_id)
+    first, second = _export_ids(run_a), _export_ids(run_b)
+    assert all(left != right for left, right in zip(first, second, strict=True))
+
+
+def test_r066_google_runs_of_one_customer_keep_their_export_ids(tmp_path: Path, export_key: str) -> None:
+    run_a = _write_google_run(tmp_path / "run-a", domain="alpha.example", customer_id="C01abcd23")
+    run_b = _write_google_run(tmp_path / "run-b", domain="alpha.example", customer_id="C01abcd23")
+    other = _write_google_run(tmp_path / "run-c", domain="beta.example", customer_id="C09wxyz87")
+    assert _export_ids(run_a) == _export_ids(run_b)
+    assert all(left != right for left, right in zip(_export_ids(run_a), _export_ids(other), strict=True))
+
+
+def test_r066_without_the_export_key_ids_of_an_identifier_free_finding_stay_per_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finding whose id holds nothing to pseudonymise must not fall back to a fixed id in a shareable export."""
+    monkeypatch.delenv("AUDITEX_EXPORT_FINGERPRINT_KEY", raising=False)
+    run_a = _write_google_run(tmp_path / "run-a", domain="alpha.example", customer_id="C01abcd23")
+    run_b = _write_google_run(tmp_path / "run-b", domain="beta.example", customer_id="C09wxyz87")
+    first, second = _export_ids(run_a), _export_ids(run_b)
+    assert all(left != right for left, right in zip(first, second, strict=True))
+    assert _export_ids(run_a) == first  # per run, not per render
+
+
 # R125 ---------------------------------------------------------------------------------------------------------------
 
 def _waived(status: str, expires_on: str = "2999-01-01") -> dict[str, Any]:
@@ -192,6 +256,38 @@ def test_r125_oscal_records_the_accepted_status(tmp_path: Path) -> None:
     lapsed_props = {prop["name"]: prop["value"] for prop in lapsed["assessment-results"]["results"][0]["findings"][0]["props"]}
     assert lapsed_props["auditex.status"] == "open"
     assert "accepted risk" in finding["target"]["status"]["remarks"].lower()
+
+
+def _mailbox_waived(waived_id: str) -> dict[str, Any]:
+    return {
+        **APP_FINDING,
+        "id": "mailbox_forwarding:alice@contoso.com",
+        "rule_id": "mailbox_forwarding.external",
+        "affected_objects": ["alice@contoso.com"],
+        "evidence_refs": [],
+        "status": "accepted_risk",
+        "waiver_applied": True,
+        "waiver": {"finding_id": waived_id, "reason": "Approved forwarding", "expires_on": "2999-01-01"},
+    }
+
+
+def _shareable_disposition(run: Path) -> tuple[bool, str]:
+    sarif = _sarif_results(run)
+    props = {prop["name"]: prop["value"] for prop in _oscal(run)["findings"][0]["props"]}
+    return (len(sarif) == 1 and "suppressions" not in sarif[0]), props["auditex.status"]
+
+
+def test_r125_a_waiver_for_another_mailbox_stays_open_in_shareable_exports(tmp_path: Path) -> None:
+    """Masking makes alice@ and bob@ of one domain the same id; the waiver match must use the real ids."""
+    run = _write_run(tmp_path / "run-a", [_mailbox_waived("mailbox_forwarding:bob@contoso.com")])
+    ensure_pseudonym_key(run)
+    assert _shareable_disposition(run) == (True, "open")
+
+
+def test_r125_a_matching_mailbox_waiver_is_accepted_in_shareable_exports(tmp_path: Path) -> None:
+    run = _write_run(tmp_path / "run-a", [_mailbox_waived("mailbox_forwarding:alice@contoso.com")])
+    ensure_pseudonym_key(run)
+    assert _shareable_disposition(run) == (False, "accepted")
 
 
 # R126 ---------------------------------------------------------------------------------------------------------------
