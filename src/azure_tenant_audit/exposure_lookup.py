@@ -116,13 +116,19 @@ def _drop_redirect_body(response: Any, *args: Any, **kwargs: Any) -> Any:
     return response
 
 
+def _zlib_wrapped(raw: bytes) -> bool:
+    """True when the body starts with a zlib header (RFC 1950 section 2.2): method 8, a window of at most 32 KiB and a
+    check value that makes the first two bytes a multiple of 31. Smaller windows start with 0x08 to 0x68, not only 0x78."""
+    return len(raw) >= 2 and raw[0] & 0x0F == 8 and raw[0] >> 4 <= 7 and ((raw[0] << 8) | raw[1]) % 31 == 0
+
+
 def _decode_body(raw: bytes, encoding: Any) -> bytes:
     """Decode a gzip or deflate body after the bounded raw read, never past MAX_POLICY_BYTES + 1 bytes of output."""
     name = str(encoding or "").strip().lower()
     if name in {"gzip", "x-gzip"}:
         decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
     elif name == "deflate":
-        decoder = zlib.decompressobj(zlib.MAX_WBITS if raw[:1] == b"\x78" else -zlib.MAX_WBITS)
+        decoder = zlib.decompressobj(zlib.MAX_WBITS if _zlib_wrapped(raw) else -zlib.MAX_WBITS)
     else:
         return raw
     out = b""

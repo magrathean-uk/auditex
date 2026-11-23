@@ -106,3 +106,21 @@ def test_mta_sts_max_age_must_be_ascii_digits(raw):
 def test_mta_sts_max_age_of_plain_digits_is_read():
     assert exposure_lookup.parse_mta_sts_policy("version: STSv1\nmode: none\nmax_age: 0604800\n")["max_age"] == 604800
 
+
+# ---- Deflate bodies: a zlib stream with a small window is still zlib-wrapped ----
+
+BODY = b"version: STSv1\nmode: enforce\nmx: mail.contoso.example\nmax_age: 604800\n"
+
+
+@pytest.mark.parametrize("wbits", [9, 10, 12, 15])
+def test_zlib_wrapped_deflate_body_with_any_window_decodes(wbits):
+    compressor = zlib.compressobj(wbits=wbits)
+    raw = compressor.compress(BODY) + compressor.flush()
+    assert exposure_lookup._decode_body(raw, "deflate") == BODY
+
+
+def test_raw_deflate_body_still_decodes():
+    compressor = zlib.compressobj(wbits=-15)
+    raw = compressor.compress(BODY) + compressor.flush()
+    assert exposure_lookup._decode_body(raw, "deflate") == BODY
+
