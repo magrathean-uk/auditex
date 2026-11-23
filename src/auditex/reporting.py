@@ -2242,7 +2242,13 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         "4. Review `api-calls.md`: the declared calls and, where the run has a transport ledger, every Graph request and command the audit log observed, with any call outside the declared set.",
         "5. Review `permissions.md` for required and missing scopes.",
         "6. Review `proof-table.md` for finding-to-evidence rows.",
-        "7. Run `auditex report verify-pack <pack-dir>` or use `checksums.sha256` to verify file integrity. "
+        *(
+            ["7. Review `ce-plus-practice.md` for the CE+ practice run: evidence observed and proof still needed per "
+             "Cyber Essentials requirement (not an assessment)."]
+            if any(_text(row.get("path")).endswith("ce-plus-practice.md") for row in generated)
+            else []
+        ),
+        f"{8 if any(_text(row.get('path')).endswith('ce-plus-practice.md') for row in generated) else 7}. Run `auditex report verify-pack <pack-dir>` or use `checksums.sha256` to verify file integrity. "
         "The pack carries its own checksums, so where origin matters compare the `digests` that command prints with values you "
         "received through a separate channel, or pass them as `--expect-manifest-sha256` and `--expect-checksums-sha256`.",
         "",
@@ -2418,6 +2424,16 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         generated_row("proof-table.md", render_proof_table_markdown(proof_payload)),
         generated_row("proof-table.json", _json(proof_payload) + "\n"),
     ]
+    # The CE+ practice run joins the pack only for a run whose report pack carries the Cyber Essentials section. No
+    # as-of date: the evidence date is shown and its age reads "not established", so a re-written pack is identical.
+    _, report_pack_payload = RunBundle(run_path).report_pack()
+    frameworks = _mapping(_mapping(_mapping(report_pack_payload).get("baseline_alignment")).get("frameworks"))
+    if isinstance(frameworks.get("cyber_essentials"), Mapping):
+        ce_plus_payload = pack_payload(ce_plus_practice_run(run_path, as_of=None))
+        generated.extend([
+            generated_row("ce-plus-practice.md", render_ce_plus_markdown(ce_plus_payload)),
+            generated_row("ce-plus-practice.json", _json(ce_plus_payload) + "\n"),
+        ])
     source_dir = target_dir / "source-artifacts"
     listed = listed_artifact_paths(run_path)
     source_artifacts = []

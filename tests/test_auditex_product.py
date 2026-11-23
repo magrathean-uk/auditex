@@ -1236,6 +1236,8 @@ def test_report_customer_pack_writes_complete_handoff_folder(tmp_path: Path, cap
         "pack-manifest.json",
     }
     assert expected.issubset({path.name for path in output_dir.iterdir()})
+    # No Cyber Essentials section in this report pack, so no CE+ practice run in the pack.
+    assert not {"ce-plus-practice.md", "ce-plus-practice.json"} & {path.name for path in output_dir.iterdir()}
     assert (output_dir / "source-artifacts" / "run-manifest.json").exists()
     assert (output_dir / "source-artifacts" / "data-handling.json").exists()
     assert (output_dir / "source-artifacts" / "api-inventory.json").exists()

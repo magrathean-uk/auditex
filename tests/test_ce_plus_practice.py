@@ -569,6 +569,29 @@ def test_an_older_bundle_without_the_section_reads_unknown(runs: dict[str, Path]
     assert payload["next_actions"][0]["action_id"] == "ce.act.run.recollect_missing_evidence"
 
 
+def test_the_customer_pack_carries_the_practice_run_and_still_verifies(runs: dict[str, Path], tmp_path: Path,
+                                                                     capsys: pytest.CaptureFixture) -> None:
+    run = runs["google_workspace"]
+    first, second = tmp_path / "pack-1", tmp_path / "pack-2"
+
+    assert _report(["report", "customer-pack", str(run), "--output-dir", str(first)], capsys)[0] == 0
+    assert _report(["report", "customer-pack", str(run), "--output-dir", str(second)], capsys)[0] == 0
+    rc, verified, _ = _report(["report", "verify-pack", str(first)], capsys)
+
+    assert rc == 0 and json.loads(verified)["valid"] is True
+    manifest = json.loads((first / "pack-manifest.json").read_text(encoding="utf-8"))
+    assert {"ce-plus-practice.md", "ce-plus-practice.json"} <= {row["path"] for row in manifest["generated_files"]}
+    payload = json.loads((first / "ce-plus-practice.json").read_text(encoding="utf-8"))
+    jsonschema.validate(payload, SCHEMA)
+    assert (payload["run"]["as_of"], payload["run"]["evidence_age_days"]) == (None, None)
+    markdown = (first / "ce-plus-practice.md").read_text(encoding="utf-8")
+    assert "- Evidence age: age not established\n" in markdown
+    _assert_clean_wording(markdown + json.dumps(payload))
+    assert "ce-plus-practice.md" in (first / "README.md").read_text(encoding="utf-8")
+    for name in ("ce-plus-practice.md", "ce-plus-practice.json"):
+        assert (first / name).read_bytes() == (second / name).read_bytes()
+
+
 # -- 6. forbidden wording in the catalogue ---------------------------------------------------------------------------
 
 

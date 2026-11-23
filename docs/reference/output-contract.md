@@ -357,7 +357,8 @@ state weights of the requirements covered (gap observed 3, unknown 2, every othe
 (1) where a conflict holds; `rank_score = coverage_gained * 4 // effort_weight` (quick 1, moderate 2, extended 4).
 Order: score descending, effort weight ascending, action id ascending. The weights are catalogue data and product
 defaults, not scheme rules. `requirements` always has the 30 catalogue rows in catalogue order and `assessor_tests`
-the five CE+ tests, each `witness_status: assessor_witness_required`. `CONTRACT_VERSION` is unchanged: nothing in
+the five CE+ tests, each `witness_status: assessor_witness_required`. A customer pack adds `ce-plus-practice.md` and
+`ce-plus-practice.json` (customer-pack profile, no as-of date) when the run's report pack carries the section. `CONTRACT_VERSION` is unchanged: nothing in
 the bundle changes.
 
 ## Contract history
