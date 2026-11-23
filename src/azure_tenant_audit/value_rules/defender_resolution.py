@@ -6,6 +6,8 @@ accepted_domains is optional and only informs domain-scope comparisons.
 """
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from .helpers import (
     BUILTIN,
     EXCEPT_KEYS,
@@ -301,47 +303,73 @@ class _Shadows:
         return any(self._lowest_cover(shape, inc) < pr for shape in {(keys, ()), (keys, exc)})
 
 
-def _covers_scope(earlier, later):
-    """True when a rule scoped ``earlier`` applies to every recipient a rule scoped ``later`` names (both from
-    ``_scope``). Conditions of different kinds are joined by AND and any matching exception excludes the recipient
-    (repair round 1, item 58), so: each include condition of the earlier rule is one the later rule sets too, with
-    values that include the later rule's; and each earlier exception is one the later rule also makes with no fewer
-    values, or an ExceptIfSentTo naming none of the later rule's SentTo recipients."""
-    (inc, exc), (their_inc, their_exc) = later, earlier
-    mine, my_exc = dict(inc), dict(exc)
-    sent_to = {v.casefold() for v in mine["SentTo"]} if "SentTo" in mine else None
-    for k, values in their_exc:
-        if k in my_exc and values <= my_exc[k]:
-            continue
-        if k == "ExceptIfSentTo" and sent_to is not None and not sent_to & {v.casefold() for v in values}:
-            continue
-        return False
-    return all(k in mine and mine[k] <= values for k, values in their_inc)
+class _Reach(NamedTuple):
+    """A rule's recipient scope (repair round 2 of items 50, 58 and 61). Exchange joins a rule's conditions with AND:
+    a recipient is in scope only when it matches every condition set and no exception. ``to``, ``groups`` and
+    ``domains`` hold the SentTo, SentToMemberOf and RecipientDomainIs values (None: the condition is unset and matches
+    everyone); ``not_to``, ``not_groups`` and ``not_domains`` the exceptions. Values are casefolded. When ``to`` is set
+    the recipients it names less those ExceptIfSentTo names are the only ones the rule may reach, so ``not_to`` is
+    folded into it and left empty. Group membership and recipient domains are unknown."""
+    to: frozenset | None
+    groups: frozenset | None
+    domains: frozenset | None
+    not_to: frozenset
+    not_groups: frozenset
+    not_domains: frozenset
+
+
+def _fold(values):
+    return frozenset(v.casefold() for v in values)
+
+
+def _reach(rule):
+    """The one scope model citing, preset shadowing and Built-In exclusion coverage all read; None when unreadable."""
+    sc = _scope(rule) if isinstance(rule, dict) else None
+    if sc is None:
+        return None
+    inc, exc = ({k: _fold(v) for k, v in part} for part in sc)
+    not_to = exc.get("ExceptIfSentTo", frozenset())
+    to = inc["SentTo"] - not_to if "SentTo" in inc else None
+    return _Reach(to, inc.get("SentToMemberOf"), inc.get("RecipientDomainIs"), frozenset() if to is not None else not_to,
+                  exc.get("ExceptIfSentToMemberOf", frozenset()), exc.get("ExceptIfRecipientDomainIs", frozenset()))
+
+
+def _covers(earlier, later):
+    """True when every recipient ``later`` may reach is in ``earlier``'s scope (both ``_Reach``). Each condition
+    ``earlier`` sets, ``later`` sets too with no more values; each recipient ``earlier`` excepts by name is one
+    ``later`` cannot reach; each group or domain ``earlier`` excepts, ``later`` excepts as well."""
+    if later.to is not None and not later.to:
+        return True                                   # its own exceptions remove every recipient it names
+    for mine, theirs in ((later.to, earlier.to), (later.groups, earlier.groups), (later.domains, earlier.domains)):
+        if theirs is not None and (mine is None or not mine <= theirs):
+            return False
+    named_out = not (later.to & earlier.not_to) if later.to is not None else earlier.not_to <= later.not_to
+    return named_out and earlier.not_groups <= later.not_groups and earlier.not_domains <= later.not_domains
 
 
 def _preset_scopes(sections):
     """Bot review wave 2 (item 58): ``covered(rule)`` is True when, for one preset tier, an enabled EOP rule
     (protection_policy_rules) and an enabled Defender rule (atp_policy_rules) both apply to every recipient ``rule``
-    names. Presets apply before every custom policy, so those recipients never get ``rule``'s policy."""
+    may reach. Presets apply before every custom policy, so those recipients never get ``rule``'s policy."""
     tiers = {}
     for name, part in (("protection_policy_rules", 0), ("atp_policy_rules", 1)):
         for r in sections[name]:
             if not isinstance(r, dict) or type(r.get("Identity")) is not str or r.get("State") != "Enabled":
                 continue
-            sc = _scope(r)
-            if sc is None:
+            scope = _reach(r)
+            if scope is None:
                 continue
             for tier, rx in zip(("Strict", "Standard"), PRESET_RE, strict=False):
                 if rx.search(r["Identity"]):
-                    tiers.setdefault(tier, ([], []))[part].append(sc)
+                    tiers.setdefault(tier, ([], []))[part].append(scope)
 
     def covered(rule):
         if not tiers:
             return False
-        sc = _scope(rule)
-        if sc is None or not sc[0]:
+        scope = _reach(rule)
+        if scope is None or (scope.to is None and scope.groups is None and scope.domains is None):
             return False
-        return any(all(any(_covers_scope(earlier, sc) for earlier in scopes) for scopes in parts)
+        return any(all(any(_covers(earlier, scope) for earlier in scopes) for scopes in parts)
                    for parts in tiers.values())
 
     return covered
@@ -360,16 +388,12 @@ def _excluded_recipients(rules):
 
 
 def _may_cover(rule, excluded):
-    """The excluded recipients a partly scoped rule may cover: all of them unless it is scoped by SentTo alone (under
-    AND or OR joins), then those among its values; less any it names in ExceptIfSentTo (repair round 1, item 61). None
-    when the excluded recipients are unknown (they all may be)."""
-    sc = _scope(rule) if excluded is not None else None
-    if sc is None:
+    """The excluded recipients a partly scoped rule may reach (``_reach``): with SentTo set, those it names and does
+    not except; otherwise all but those it excepts by name. None when the excluded recipients are unknown."""
+    scope = _reach(rule) if excluded is not None else None
+    if scope is None:
         return excluded
-    may = excluded
-    if [k for k, _ in sc[0]] == ["SentTo"]:
-        may = may & {v.casefold() for v in sc[0][0][1]}
-    return may - {v.casefold() for k, values in sc[1] if k == "ExceptIfSentTo" for v in values}
+    return excluded & scope.to if scope.to is not None else excluded - scope.not_to
 
 
 def _preset_reach(sections, excluded):

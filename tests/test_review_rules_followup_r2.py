@@ -422,6 +422,52 @@ def test_item50_preset_driven_uncertainty_names_and_cites_the_preset(policy_id):
     assert _reason(policy_id, other)[2:] == (MAY_PRESET, ["atp_policy_rules", BI, "protection_policy_rules"])
 
 
+# Repair round 2: a rule's conditions are joined by AND, so a recipient is in scope only when it matches every condition
+# and no exception. Each case has a recipient that matches one condition of a rule but not another.
+
+BOB_AND_TEAM = {**SCOPE_ALL, "SentTo": ["Bob"], "SentToMemberOf": ["team"]}
+BI_EXCLUDES_CAROL = [{**BI_ROW, "ExceptIfSentTo": ["carol"]}]
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item50_a_preset_for_bob_and_team_is_not_cited_for_carol(policy_id):
+    policies = [SL_BUILTIN, {"Identity": "carol", **SL_FLAGS}]
+    sections = _with_preset(_safelinks([_sl_rule("carol", _to("Carol"))], policies, BI_EXCLUDES_CAROL),
+                            BOB_AND_TEAM, BOB_AND_TEAM)
+    assert _reason(policy_id, sections) == ("not_assessed", "partial_tier_may_cover", MAY_CUSTOM, [BI, "safe_links_rules"])
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item61_a_rule_for_bob_and_team_does_not_mask_carols_exclusion(policy_id):
+    policies = [SL_BUILTIN, {"Identity": "bob", **SL_FLAGS}]
+    custom = _safelinks([_sl_rule("bob", BOB_AND_TEAM)], policies, BI_EXCLUDES_BOB_CAROL)
+    assert _answer(policy_id, custom) == ("not_met", "no_policy_covers_all")
+    preset = _with_preset(_safelinks([], [SL_BUILTIN], BI_EXCLUDES_BOB_CAROL), BOB_AND_TEAM, BOB_AND_TEAM)
+    assert _answer(policy_id, preset) == ("not_met", "no_policy_covers_all")
+    # Naming Carol as well as the group may cover her: the answer stays undecided.
+    both = {**BOB_AND_TEAM, "SentTo": ["Bob", "carol"]}
+    custom = _safelinks([_sl_rule("bob", both)], policies, BI_EXCLUDES_BOB_CAROL)
+    assert _answer(policy_id, custom) == ("not_assessed", "partial_tier_may_cover")
+
+
+TEAM_BUT_BOB_CAROL = {**SCOPE_ALL, "SentToMemberOf": ["team"], "ExceptIfSentTo": ["bob", "carol"]}
+
+
+@pytest.mark.parametrize("policy_id", SL_POLICIES)
+def test_item58_a_preset_shadows_a_rule_whose_own_exceptions_remove_the_overlap(policy_id):
+    # The orphan rule reaches only Dan (Bob is its own exception); the preset applies to Dan first.
+    orphan = {**SCOPE_ALL, "SentTo": ["Bob", "Dan"], "SentToMemberOf": ["team"], "ExceptIfSentTo": ["bob"]}
+    rules = [_sl_rule("orphan", orphan, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    policies = [SL_BUILTIN, {"Identity": "cover", **SL_FLAGS}]
+    sections = _with_preset(_safelinks(rules, policies, BI_ALL), TEAM_BUT_BOB_CAROL, TEAM_BUT_BOB_CAROL)
+    assert _answer(policy_id, sections) == ("met", "policy_flags_ok")
+    # One that may reach Carol, whom the preset excludes, still applies to her.
+    orphan = {**orphan, "SentTo": ["Carol", "Dan"]}
+    rules = [_sl_rule("orphan", orphan, priority=0), _sl_rule("cover", SCOPE_ALL, priority=5)]
+    sections = _with_preset(_safelinks(rules, policies, BI_ALL), TEAM_BUT_BOB_CAROL, TEAM_BUT_BOB_CAROL)
+    assert _answer(policy_id, sections) == ("not_assessed", "policy_not_in_export")
+
+
 # Item 56: a written value-rule answer cites the Built-In rule by its own evidence id, after the case's e1 to e3.
 
 def _written(tmp_path, built_in):

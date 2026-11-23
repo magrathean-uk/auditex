@@ -137,16 +137,18 @@ BI_EXCLUDES_BOB = [{"Identity": "ATP Built-In Protection Rule", "ExceptIfSentTo"
 
 @pytest.mark.parametrize("policy_id", SL_POLICIES)
 def test_r003_partial_rule_for_other_recipients_cannot_cover_the_built_in_exclusion(policy_id):
-    rules = [_sl_rule("alice", _to("alice", "Carol"), priority=0)]
     policies = [SL_BUILTIN, {"Identity": "alice", **SL_FLAGS}]
-    assert _answer(policy_id, _safelinks(rules, policies, BI_EXCLUDES_BOB)) == ("not_met", "no_policy_covers_all")
+    # Conditions are joined by AND (repair round 2 of item 61): naming Alice and a domain still reaches only Alice.
+    for scope in (_to("alice", "Carol"), {**_to("alice"), "RecipientDomainIs": ["example.com"]}):
+        rules = [_sl_rule("alice", scope, priority=0)]
+        assert _answer(policy_id, _safelinks(rules, policies, BI_EXCLUDES_BOB)) == ("not_met", "no_policy_covers_all"), scope
 
 
 @pytest.mark.parametrize("policy_id", SL_POLICIES)
 def test_r003_partial_rule_that_may_name_an_excluded_recipient_still_may_cover(policy_id):
     policies = [SL_BUILTIN, {"Identity": "p", **SL_FLAGS}]
     for scope in (_to("alice", "BOB"), {**SCOPE_ALL, "SentToMemberOf": ["team"]}, {**SCOPE_ALL, "RecipientDomainIs": ["example.com"]},
-                  {**_to("alice"), "RecipientDomainIs": ["example.com"]}):
+                  {**_to("alice", "bob"), "RecipientDomainIs": ["example.com"]}):
         sections = _safelinks([_sl_rule("p", scope, priority=0)], policies, BI_EXCLUDES_BOB)
         assert _answer(policy_id, sections) == ("not_assessed", "partial_tier_may_cover"), scope
     group_excluded = [{**BI_EXCLUDES_BOB[0], "ExceptIfSentToMemberOf": ["team"]}]
