@@ -268,24 +268,6 @@ def test_the_certificate_audit_tool_timeout_names_resume(monkeypatch: pytest.Mon
     assert "--resume-from" in result["error"]
 
 
-def test_a_command_timeout_stops_the_child_and_every_process_it_started(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # Repair round 1 (R063/R026): the engine's own children (pwsh) are in its process group and stop with it.
-    import time
-
-    from auditex.command_runner import run_cli_command
-
-    monkeypatch.setenv("AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS", "1")
-    marker = tmp_path / "grandchild-finished"
-
-    result = run_cli_command(["sh", "-c", f"(sleep 2; touch '{marker}') & wait"])
-
-    assert result["error_class"] == "timeout"
-    time.sleep(2.5)
-    assert not marker.exists()
-
-
 def test_a_resumable_command_timeout_names_the_partial_run_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Repair round 1 (R063/R026): the error names the folder --resume-from needs, not just the option.
     from auditex.command_runner import run_cli_command
@@ -301,40 +283,6 @@ def test_a_resumable_command_timeout_names_the_partial_run_folder(monkeypatch: p
     assert result["error_class"] == "timeout"
     assert result["partial_run_dir"] == str(partial)
     assert f"--resume-from {partial}" in result["error"]
-
-
-_SERVER_STAND_IN = """
-import os, signal, sys, threading, time
-from auditex import command_runner, mcp_server
-install = getattr(mcp_server, "_install_shutdown_handlers", None)
-if install is not None:
-    install()
-marker = sys.argv[1]
-threading.Thread(target=command_runner.run_cli_command, args=(["sh", "-c", f"(sleep 2; touch '{marker}') & wait"],),
-                 daemon=True).start()
-time.sleep(0.5)
-os.kill(os.getpid(), signal.SIGTERM)
-time.sleep(5)
-"""
-
-
-def test_a_terminated_mcp_server_stops_the_commands_it_started(tmp_path: Path) -> None:
-    # Review of repair round 1 (R063): the child runs in its own session, so the server must stop it on SIGTERM.
-    import os
-    import subprocess
-    import sys
-    import time
-
-    marker = tmp_path / "grandchild-finished"
-    script = tmp_path / "server_stand_in.py"
-    script.write_text(_SERVER_STAND_IN, encoding="utf-8")
-    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
-
-    server = subprocess.run([sys.executable, str(script), str(marker)], env=env, timeout=30, check=False)
-
-    assert server.returncode != 0
-    time.sleep(2.5)
-    assert not marker.exists()
 
 
 def test_the_certificate_audit_tool_timeout_names_the_partial_run_folder(
@@ -365,27 +313,6 @@ def test_the_certificate_audit_tool_timeout_names_the_partial_run_folder(
     assert result.get("error_class") == "timeout", result
     assert result.get("partial_run_dir") == str(partial), result
     assert f"--resume-from {partial}" in result["error"]
-
-
-def test_a_terminated_mcp_server_stops_a_command_whose_first_process_already_exited(tmp_path: Path) -> None:
-    # Repair round 2 (R063): the engine's own process has exited but a process it started still holds the pipes.
-    import os
-    import subprocess
-    import sys
-    import time
-
-    marker = tmp_path / "grandchild-finished"
-    script = tmp_path / "server_stand_in.py"
-    script.write_text(
-        _SERVER_STAND_IN.replace("& wait", "& exit 0").replace("time.sleep(0.5)", "time.sleep(1.0)"), encoding="utf-8"
-    )
-    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
-
-    server = subprocess.run([sys.executable, str(script), str(marker)], env=env, timeout=30, check=False)
-
-    assert server.returncode != 0
-    time.sleep(2.5)
-    assert not marker.exists()
 
 
 # Bot review wave 2, group L: summary capping and command shutdown
@@ -464,3 +391,164 @@ def test_emptied_citations_leave_a_citation_summary_that_agrees() -> None:
     summary = result["citation_summary"]
     assert summary == {} or summary.get("citation_count") == 0, summary
     assert payload["citations"] == citations
+
+
+def _alive(pid: int) -> bool:
+    import os
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for(predicate, seconds: float) -> bool:
+    import time
+
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
+
+
+def _descendant_command(pid_file: Path) -> list[str]:
+    # The shell starts a long sleep, writes the sleep's own PID (the readiness marker) and waits for it.
+    return ["sh", "-c", f"sleep 60 & echo $! > '{pid_file}.tmp' && mv '{pid_file}.tmp' '{pid_file}'; wait"]
+
+
+def test_a_command_timeout_stops_the_descendant_it_started(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Bot review (coderabbit, PR 172): the timeout test passed even when the launched sleep survived the timeout.
+    from auditex.command_runner import run_cli_command
+
+    monkeypatch.setenv("AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS", "1")
+    pid_file = tmp_path / "descendant.pid"
+
+    result = run_cli_command(_descendant_command(pid_file))
+
+    assert result["error_class"] == "timeout"
+    assert pid_file.exists(), "the command never started its descendant"
+    descendant = int(pid_file.read_text(encoding="utf-8"))
+    assert _wait_for(lambda: not _alive(descendant), 5), f"descendant {descendant} survived the timeout"
+
+
+_SIGNALLED_SERVER = """
+import os, signal, sys, threading, time
+from pathlib import Path
+from auditex import command_runner, mcp_server
+mcp_server._install_shutdown_handlers()
+pid_file = Path(sys.argv[1])
+command = ["sh", "-c", f"sleep 60 & echo $! > '{pid_file}.tmp' && mv '{pid_file}.tmp' '{pid_file}'; wait"]
+mode = sys.argv[2]
+if mode in ("registered", "leader_exited"):
+    if mode == "leader_exited":
+        # The engine's own process exits; the process it started still runs and holds the output pipes.
+        command[-1] = command[-1].replace("; wait", "; exit 0")
+    threading.Thread(target=command_runner.run_cli_command, args=(command,), daemon=True).start()
+    deadline = time.monotonic() + 10
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(0.3)
+    os.kill(os.getpid(), signal.SIGTERM)
+elif mode == "lock_held":
+    with command_runner._RUNNING_LOCK:
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(0.5)
+elif mode == "launch_gap":
+    real_popen = command_runner.subprocess.Popen
+
+    def popen_then_signal(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        deadline = time.monotonic() + 10
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        os.kill(os.getpid(), signal.SIGTERM)  # the signal lands before the process is registered
+        return process
+
+    command_runner.subprocess.Popen = popen_then_signal
+    command_runner.run_cli_command(command)
+time.sleep(5)
+sys.exit(0)
+"""
+
+
+@pytest.mark.parametrize("mode", ["registered", "leader_exited", "lock_held", "launch_gap"])
+def test_a_terminated_mcp_server_stops_its_command_at_every_point_of_launch(mode: str, tmp_path: Path) -> None:
+    # R063: the command runs in its own session, so the server must stop it on SIGTERM; the check waits for the
+    # command's readiness marker and follows the PID of the process it started. Bot review (coderabbit, PR 172): a
+    # signal while the main thread held the registry lock hung the server, and a signal between the launch and its
+    # registration left the command running.
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    pid_file = tmp_path / "descendant.pid"
+    script = tmp_path / "server_stand_in.py"
+    script.write_text(_SIGNALLED_SERVER, encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+
+    try:
+        server = subprocess.run([sys.executable, str(script), str(pid_file), mode], env=env, timeout=15, check=False)
+    finally:
+        descendant = int(pid_file.read_text(encoding="utf-8")) if pid_file.exists() else None
+        survived = descendant is not None and not _wait_for(lambda: not _alive(descendant), 5)
+        if survived:
+            os.kill(descendant, signal.SIGKILL)
+
+    assert server.returncode == -signal.SIGTERM
+    if mode != "lock_held":
+        assert descendant is not None, "the command never started its descendant"
+    assert not survived, f"descendant {descendant} survived the server"
+
+
+def test_a_command_launched_while_a_stop_is_waiting_is_stopped_and_later_launches_are_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Bot review (coderabbit, PR 172): a stop that snapshots the registry between another thread's launch and its
+    # registration must still stop that command, and no command may start once the stop has begun.
+    import threading
+
+    from auditex import command_runner
+
+    monkeypatch.setattr(command_runner, "_RUNNING", set())
+    monkeypatch.setattr(command_runner, "_STOPPING", threading.Event(), raising=False)
+    pid_file = tmp_path / "descendant.pid"
+    launched, release = threading.Event(), threading.Event()
+    real_popen = command_runner.subprocess.Popen
+
+    def paused_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        launched.set()
+        release.wait(10)
+        return process
+
+    monkeypatch.setattr(command_runner.subprocess, "Popen", paused_popen)
+    results: list[dict] = []
+    worker = threading.Thread(target=lambda: results.append(command_runner.run_cli_command(_descendant_command(pid_file))))
+    worker.start()
+    try:
+        assert launched.wait(10)
+        assert _wait_for(pid_file.exists, 10)
+        threading.Timer(0.3, release.set).start()
+        command_runner.stop_running_commands()
+        descendant = int(pid_file.read_text(encoding="utf-8"))
+        stopped = _wait_for(lambda: not _alive(descendant), 5)
+    finally:
+        release.set()
+        worker.join(15)
+        if pid_file.exists() and _alive(int(pid_file.read_text(encoding="utf-8"))):
+            import os
+            import signal
+
+            os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+    assert stopped, "the command launched during the stop survived it"
+    assert results and results[0]["returncode"] != 0
+    monkeypatch.setattr(command_runner.subprocess, "Popen", real_popen)
+    refused = command_runner.run_cli_command(["sh", "-c", "exit 0"])
+    assert refused.get("error_class") == "shutting_down", refused

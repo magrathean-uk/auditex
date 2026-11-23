@@ -1039,10 +1039,14 @@ def _install_shutdown_handlers() -> None:
     """
     import signal
 
-    from .command_runner import stop_running_commands
+    from .command_runner import defer_signal, stop_running_commands
 
     def handle(signum: int, _frame: Any) -> None:
-        stop_running_commands()
+        if not stop_running_commands():
+            # The signal interrupted this thread between starting a command and registering it; that launch stops
+            # its command and re-raises the signal once it can.
+            defer_signal(signum)
+            return
         signal.signal(signum, signal.SIG_DFL)
         signal.raise_signal(signum)
 

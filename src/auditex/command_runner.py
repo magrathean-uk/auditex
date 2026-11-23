@@ -129,18 +129,75 @@ def _kill_process_group(process: Any) -> None:
 # Commands running now. Each starts in its own session, so a signal to the server's process group no longer reaches
 # it: the server stops them itself when it exits (atexit) or is terminated (``mcp_server`` signal handlers).
 _RUNNING: set[Any] = set()
-_RUNNING_LOCK = threading.Lock()
+# Threads between starting a command and registering it in ``_RUNNING``.
+_LAUNCHING: set[int] = set()
+# Reentrant: the shutdown signal handler runs on the main thread, which may already hold it (a synchronous MCP tool
+# launching a command), and a plain lock would deadlock the server there.
+_RUNNING_LOCK = threading.RLock()
+_LAUNCHES_SETTLED = threading.Condition(_RUNNING_LOCK)
+# Set once a stop begins; no command starts after it.
+_STOPPING = threading.Event()
+# A shutdown signal that arrived while its own (main) thread was mid-launch; that launch re-raises it once its
+# command is registered and stopped.
+_DEFERRED_SIGNALS: list[int] = []
+# How long a stop waits for another thread's launch to register its command.
+_LAUNCH_SETTLE_SECONDS = 10
 
 
-def stop_running_commands() -> None:
+class ShuttingDown(RuntimeError):
+    """The server is stopping its commands; no new command starts."""
+
+
+def stop_running_commands() -> bool:
     """Kill the process group of every command still running; the server is going away and nothing will collect
-    their results (R063)."""
-    with _RUNNING_LOCK:
+    their results (R063).
+
+    No command starts once this has begun. A command another thread is launching is waited for (up to
+    ``_LAUNCH_SETTLE_SECONDS``) and stopped with the rest. Returns False when the calling thread is itself between
+    starting a command and registering it (a signal handler that interrupted that launch): the launch stops its own
+    command as soon as it registers it, and the caller must leave the shutdown to it (``defer_signal``).
+    """
+    _STOPPING.set()
+    me = threading.get_ident()
+    with _LAUNCHES_SETTLED:
+        _LAUNCHES_SETTLED.wait_for(lambda: not (_LAUNCHING - {me}), timeout=_LAUNCH_SETTLE_SECONDS)
         running = list(_RUNNING)
+        own_launch = me in _LAUNCHING
     for process in running:
         # Kill the group even when its first process has exited: a process it started can still be running and
         # holding the output pipes, and the group outlives its leader while any member is left.
         _kill_process_group(process)
+    return not own_launch
+
+
+def defer_signal(signum: int) -> None:
+    """Record a shutdown signal for the interrupted launch on this thread to re-raise once it has stopped its
+    command (see ``stop_running_commands``)."""
+    _DEFERRED_SIGNALS.append(signum)
+
+
+def _start_process(command: list[str], **kwargs: Any) -> Any:
+    """Start ``command`` and register it, so a stop at any moment either refuses it or stops it."""
+    me = threading.get_ident()
+    with _RUNNING_LOCK:
+        if _STOPPING.is_set():
+            raise ShuttingDown("the MCP server is shutting down; the command was not started")
+        _LAUNCHING.add(me)
+    process = None
+    try:
+        process = subprocess.Popen(command, **kwargs)
+    finally:
+        with _LAUNCHES_SETTLED:
+            if process is not None:
+                _RUNNING.add(process)  # before leaving _LAUNCHING, so a stop always sees one or the other
+            _LAUNCHING.discard(me)
+            _LAUNCHES_SETTLED.notify_all()
+        if process is not None and _STOPPING.is_set():
+            _kill_process_group(process)
+        if _DEFERRED_SIGNALS and threading.current_thread() is threading.main_thread():
+            # The handler now finds no launch in flight on this thread, stops everything and ends the server.
+            signal.raise_signal(_DEFERRED_SIGNALS.pop())
+    return process
 
 
 atexit.register(stop_running_commands)
@@ -157,12 +214,10 @@ def _run_process(
     with whatever output was read.
     """
     del text, capture_output, check  # always text, captured and unchecked, as every caller asks
-    process = subprocess.Popen(
+    process = _start_process(
         command, cwd=cwd, env=env, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         start_new_session=True,
     )
-    with _RUNNING_LOCK:
-        _RUNNING.add(process)
     try:
         return _collect(command, process, timeout)
     finally:
@@ -266,6 +321,15 @@ def run_cli_command(
             env=child_env,
             stdin=subprocess.DEVNULL if scrub_operator_inputs else None,
         )
+    except ShuttingDown as exc:
+        return {
+            "command": redact_command(command),
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+            "error_class": "shutting_down",
+            "error": str(exc),
+        }
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""
         stderr = exc.stderr or ""
