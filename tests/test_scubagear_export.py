@@ -603,6 +603,28 @@ def test_service_plan_budget_and_config_outcomes(tmp_path):
         assert rule_policy_section(projection, pid, "scuba_config")["M365Environment"] == "gcc"
 
 
+def test_export_names_the_rule_view_kept_for_a_withheld_section_in_its_written_assessment(tmp_path):
+    # Bot review wave 2 (54): an export section withheld from the model after its rule view was kept says so, as the
+    # run producer's report does; the written 2026-11-22 assessment carries it and validates.
+    raw = json.loads(PROVIDER.read_text())
+    raw["service_plans"] = [deepcopy(raw["service_plans"][0]) for _ in range(41)]
+    result, _, _ = _assess(tmp_path / "plans", _save(tmp_path, raw, "plans-41.json"))
+    sections = result["projection"]["sections"]
+    assert (sections["service_plans"]["status"], sections["service_plans"]["reason"]) == ("not_collected", "oversize")
+    assert sections["service_plans"]["rule_view"] == "adapter"
+    # Exactly the withheld sections whose rule view was kept say so: the fixture's two unseen model shapes as well;
+    # a section never read, or refused before its rule view, and every projected one carry none.
+    kept = {"directory_settings", "safe_links_policies"}
+    assert {name for name, detail in sections.items() if "rule_view" in detail} == kept | {"service_plans"}
+    assert all(sections[name]["detail"] == {"field": "$", "kind": "unseen_shape"} for name in kept)
+    validate_assessment(result)
+    projection, _ = project_export(load_export(PROVIDER), policy_catalogue()["policies"])
+    report = projection.report["sections"]
+    assert {name for name, detail in report.items() if "rule_view" in detail} == kept
+    assert {name for name, detail in report.items() if detail["status"] == "not_collected"
+            and projection.rule_sections.get(name, NOT_COLLECTED) != NOT_COLLECTED} == kept
+
+
 def test_baselines_map_and_reasons():
     assert VERDICT_MAP == {"Pass": "pass", "Fail": "fail", "Warning": "fail", "N/A": "not_assessed"}
     raw = json.loads(PROVIDER.read_text())

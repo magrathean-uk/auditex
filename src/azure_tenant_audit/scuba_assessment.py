@@ -103,7 +103,7 @@ def safe_projection_enum_value(field: str, value: Any) -> bool:
 def _check(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str) -> None:
     supported = {"$schema", "$id", "$defs", "title", "description", "$ref", "type", "const", "enum",
                  "required", "properties", "additionalProperties", "items", "uniqueItems", "pattern",
-                 "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "anyOf"}
+                 "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "anyOf", "dependentSchemas"}
     if set(schema) - supported:
         raise ValueError("Unsupported model assessment schema keyword")
     if "anyOf" in schema:
@@ -138,6 +138,9 @@ def _check(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str) 
         for key, item in value.items():
             if key in properties:
                 _check(item, properties[key], root, f"{path}.{key}")
+        for key, dependent in schema.get("dependentSchemas", {}).items():
+            if key in value:
+                _check(value, dependent, root, path)
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", len(value)):
             raise ValueError(f"Invalid model assessment array length at {path}")
@@ -337,6 +340,8 @@ def validate_assessment(payload: Any) -> None:
             ignored_fields = detail.get("ignored_fields", [])
             if not _sorted_unique(ignored_fields):
                 raise ValueError("Unsorted ignored projection fields")
+            if not _sorted_unique(detail.get("rule_view_omitted_fields", [])):
+                raise ValueError("Unsorted rule view omitted fields")
             for name in ("dropped_conditions", "null_lists_read_as_empty"):
                 if name in detail and (section != "conditional_access_policies" or detail["status"] != "projected"
                                        or not _sorted_unique(detail[name])):

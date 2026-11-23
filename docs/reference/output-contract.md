@@ -377,14 +377,29 @@ Assessment is rules only: the model layer is removed and nothing is called. Curr
 Its schema is `schemas/model_assessment.schema.json` (version `2026-11-22`), listed
 by the schema manifest and checked when present by bundle validation. `2026-11-22` is
 `2026-11-05` plus the optional projection-section field `rule_view` (`adapter` or `variant`),
-which names the value-rule view still built for a `not_collected` section. A `2026-11-22`
+which names the value-rule view still built for a `not_collected` section; the schema itself
+rejects it on a `projected` section. Beside `rule_view: variant`, optional
+`rule_view_omitted_fields` lists, sorted, the recognised settings the rule variant dropped as
+unusable (SharePoint: names from its fixed setting list, never values), apart from the model
+diagnostic in `detail`. A `2026-11-22`
 value-rule answer also cites a section its rule reads beyond the policy's catalogued case sections
 (SS 7.1 to 7.3: `built_in_protection_rules`) by its own evidence id after the case's (`e4` there), so
 `e1` onwards keep their meaning; `2026-11-05` answers, and `2026-11-22` answers written before
-that change, cite the case's sections only and still validate. Nothing else
-differs, and both versions are otherwise validated by the same rules. The known older versions `2026-10-27`,
+that change, cite the case's sections only and still validate. Both versions are otherwise
+validated by the same rules, with one exception kept to `2026-11-05`: an SS 7.1 to 7.3 answer from
+the earlier Safe Links writer that cites exactly the five sections it read (`atp_policy_rules`,
+`defender_license`, `protection_policy_rules`, `safe_links_policies`, `safe_links_rules`) still
+validates, including one on the since-retired `no_rules_configured` cell. A `2026-11-22` file
+rejects both: it must cite what the current rule reads and use its current cells. Nothing else
+differs. The known older versions `2026-10-27`,
 `2026-10-27.1`, `2026-10-28`, `2026-10-29` and `2026-11-05` use their byte-preserved,
 date-named schema files; `2026-11-05` is the most recent of these and never carries `rule_view`.
+The older files all keep the `$id` they were published with, `.../schemas/model_assessment.schema.json`,
+which all five share; the current schema has its own, version-named `$id`
+(`.../schemas/model_assessment-2026-11-22.schema.json`). A JSON Schema registry keyed by `$id`
+therefore holds the current schema beside one of the older files, not all six. Auditex never
+selects a schema by `$id`: it reads the file's `schema_version` and validates against that
+version's file named above.
 Earlier Auditex releases reject a `2026-11-22` file on its version.
 Malformed or unknown-version optional assessments produce warnings and never change
 the deterministic gate result. It contains

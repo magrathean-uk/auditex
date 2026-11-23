@@ -46,6 +46,7 @@ from .scuba_projection import (
     _rule_target,
     _seen_shape,
     _user_entries,
+    annotate_rule_views,
 )
 from .scubagear_prune_proof import (
     PINNED_REVISION,
@@ -664,6 +665,7 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
                 report[section].pop("ignored_fields", None)
                 if section in pruning:
                     pruning[section]["outcome"] = "withheld"
+        annotate_rule_views(report, projection.rule_sections, set())
         projection.report = {"schema_version": PROJECTION_VERSION, "sections": report, "redaction": redaction,
                              "bounds": {"max_items": max_items, "max_chars": max_chars}}
         return projection, {"canonicalised": {"privileged_users": canonicalised}, "pruning": pruning,
