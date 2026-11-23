@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from ..secret_hygiene import redact_command_string, redact_output
@@ -353,7 +354,7 @@ class PowerShellGraphAdapter(Adapter):
                         "adapter": adapter_label,
                         "command": safe_command,
                         "command_words": list(command_words),
-                        "executable": exe,
+                        "executable": Path(exe).name,
                     },
                 )
 
@@ -518,7 +519,7 @@ class PowerShellGraphAdapter(Adapter):
 
         numbers: dict[str, Any] = {}
         try:
-            event("command.started", "PowerShell command started", {"executable": exe})
+            event("command.started", "PowerShell command started", {"executable": Path(exe).name})
             run = _run_bounded(self._child_argv(exe, prepared), env=env, timeout=timeout,
                                stdout_limit=boundary.STDOUT_LIMIT)
             numbers = {"duration_ms": run.duration_ms, "stdout_bytes": run.stdout_total, "stderr_bytes": run.stderr_total}

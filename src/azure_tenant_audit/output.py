@@ -27,6 +27,7 @@ from .data_minimisation import minimise_user_text
 from .evidence_db import register_run_log
 from .findings import apply_coverage_gaps_to_report_pack
 from .guarded_io import UnsafeRunFileError
+from .local_paths import LocalPathScrubber
 from .partner_domains import (
     BUNDLE_PATH as PARTNER_DOMAINS_PATH,
 )
@@ -133,7 +134,11 @@ class AuditLogger:
 
     _command_events = frozenset({"command.started", "command.completed", "command.failed"})
 
-    def __init__(self, run_dir: Path, listener: Any = None, on_replaced: Any = None) -> None:
+    def __init__(
+        self, run_dir: Path, listener: Any = None, on_replaced: Any = None, local_paths: Any = None,
+    ) -> None:
+        # The log files hold no absolute local path (local_paths.py); the listener (the operator's console) is unchanged.
+        self.local_paths = local_paths if local_paths is not None else LocalPathScrubber(run_dir)
         self.jsonl_path = run_dir / "audit-log.jsonl"
         self.command_log_path = run_dir / "audit-command-log.jsonl"
         self.debug_path = run_dir / "audit-debug.log"
@@ -155,8 +160,10 @@ class AuditLogger:
         # Event text can carry tenant text (a Graph error message, an exception): a lone surrogate becomes U+FFFD so
         # the UTF-8 log line can be written, and the count joins the run's data-quality note.
         payload, replaced = _valid_text(payload)
+        listener_payload = payload
+        payload = self.local_paths(payload)
         # A detail that is not JSON (an exception object) is written as its str(), which can carry one too.
-        line, more = _valid_text(json.dumps(payload, default=str, ensure_ascii=False))
+        line, more = _valid_text(self.local_paths.text(json.dumps(payload, default=str, ensure_ascii=False)))
         if replaced + more and self.on_replaced is not None:
             self.on_replaced(replaced + more)
         with _open_private(self.jsonl_path, "a") as handle:
@@ -166,11 +173,11 @@ class AuditLogger:
                 handle.write(line + "\n")
         with _open_private(self.debug_path, "a") as handle:
             debug = f"[{payload['ts_utc']}] {payload['event']}: {payload['message']} {payload['details']}\n"
-            handle.write(_valid_text(debug)[0])
+            handle.write(self.local_paths.text(_valid_text(debug)[0]))
         LOG.debug("%s: %s", payload["event"], payload["message"])
         if self.listener is not None:
             try:
-                self.listener(payload)
+                self.listener(listener_payload)
             except Exception:  # noqa: BLE001
                 LOG.exception("Failed to dispatch audit event listener.")
 
@@ -238,6 +245,8 @@ class AuditWriter:
                 self.run_id = normalized
         make_private_dirs(self.run_dir.parent, mode=0o755)
         self._mkdir_private(self.run_dir)
+        # Every file this writer produces passes through one normaliser, so no absolute local path reaches the bundle.
+        self.local_paths = LocalPathScrubber(self.run_dir)
 
         self.resume_from_path = None
         self.raw_dir = self.run_dir / "raw"
@@ -284,7 +293,8 @@ class AuditWriter:
         # Lone UTF-16 surrogates replaced in tenant text this run (a resumed run carries the earlier sessions' count).
         self.lone_surrogates_replaced = 0
         self._seed_existing_run_artifacts(existing_manifest)
-        self.audit = AuditLogger(self.run_dir, listener=event_listener, on_replaced=self._count_replaced)
+        self.audit = AuditLogger(self.run_dir, listener=event_listener, on_replaced=self._count_replaced,
+                                 local_paths=self.local_paths)
         self._manifest = {
             "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
             "tenant_name": tenant_name,
@@ -384,15 +394,21 @@ class AuditWriter:
     def _count_replaced(self, replaced: int) -> None:
         self.lone_surrogates_replaced += replaced
 
+    def without_local_paths(self, value: Any) -> Any:
+        """``value`` with the operator's absolute local paths made run-relative, ``~`` or a bare name (local_paths.py)."""
+        local_paths = getattr(self, "local_paths", None)
+        return value if local_paths is None else local_paths(value)
+
     def _write_text_atomic(self, path: Path, content: str) -> None:
         self._mkdir_private(path.parent)
         # Backstop: text that reached a file write without passing an entry point (a coverage error, metadata, a
         # report line) never writes a lone surrogate either, and its replacements are counted. Text an entry point
         # already repaired holds no surrogate, so it is never counted twice.
-        write_private_text(path, self.valid_text(content))
+        write_private_text(path, self.without_local_paths(self.valid_text(content)))
 
     def _write_json_atomic(self, path: Path, payload: Any) -> None:
-        self._write_text_atomic(path, json.dumps(self.valid_text(payload), indent=2))
+        self._mkdir_private(path.parent)
+        write_private_text(path, json.dumps(self.without_local_paths(self.valid_text(payload)), indent=2))
 
     def _seed_existing_run_artifacts(self, existing_manifest: Any) -> None:
         existing_summary = self._safe_load_json(self.run_dir / "summary.json")
@@ -528,7 +544,8 @@ class AuditWriter:
                         # Establish an empty run before publishing its private
                         # pair, then replace this manifest under the same lock.
                         # The guarded write refuses a pre-existing unmarked pair.
-                        write_private_text(self.run_dir / "run-manifest.json", json.dumps(self._manifest, indent=2))
+                        write_private_text(self.run_dir / "run-manifest.json",
+                                           json.dumps(self.without_local_paths(self._manifest), indent=2))
                         manifest_exists = True
                     if manifest_exists:
                         context.bind_run(self.run_dir)
@@ -608,7 +625,8 @@ class AuditWriter:
                     redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
                     self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if entries else [])
                     if manifest_exists:
-                        write_private_text(self.run_dir / "run-manifest.json", json.dumps(self._manifest, indent=2))
+                        write_private_text(self.run_dir / "run-manifest.json",
+                                           json.dumps(self.without_local_paths(self._manifest), indent=2))
             except (OSError, ValueError, TypeError):
                 failed = True
             finally:
@@ -750,7 +768,8 @@ class AuditWriter:
         target = collector_dir / f"{name}-{page_number:05d}.jsonl"
         with _open_private(target, "w") as handle:
             for record in records:
-                handle.write(json.dumps(minimise_user_text(self.valid_text(record)), default=str) + "\n")
+                handle.write(json.dumps(self.without_local_paths(minimise_user_text(self.valid_text(record))),
+                                        default=str) + "\n")
         if metadata:
             meta_path = collector_dir / f"{name}-{page_number:05d}.meta.json"
             self._write_json_atomic(meta_path, metadata)
@@ -785,7 +804,8 @@ class AuditWriter:
         target = section_dir / f"part-{page_number:05d}.jsonl"
         with _open_private(target, "w") as handle:
             for record in records:
-                handle.write(json.dumps(minimise_user_text(self.valid_text(record)), default=str) + "\n")
+                handle.write(json.dumps(self.without_local_paths(minimise_user_text(self.valid_text(record))),
+                                        default=str) + "\n")
         if metadata:
             meta_path = section_dir / f"part-{page_number:05d}.meta.json"
             self._write_json_atomic(meta_path, metadata)
@@ -809,7 +829,7 @@ class AuditWriter:
             for record in records:
                 record = self.valid_text(record)
                 self.coverage.append(record)
-                handle.write(json.dumps(record, default=str) + "\n")
+                handle.write(json.dumps(self.without_local_paths(record), default=str) + "\n")
         self._record_artifact(index_path)
 
     def log_event(self, event: str, message: str, details: dict[str, Any] | None = None) -> None:

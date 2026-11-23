@@ -112,7 +112,9 @@ def _merged_fixture_provenance(
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value
-    return merged or None
+    # Provenance names a lab seed run by its folder; where that folder sat on the lab machine stays out of the bundle.
+    from .local_paths import path_names
+    return path_names(merged) or None
 
 
 def _offline_item_count(payload: Any) -> int:
@@ -407,8 +409,12 @@ def run_offline(
     # A sample section that carries an error or a cut-list marker replays as the failed or partial read it was.
     coverage_rows: list[dict[str, Any]] = []
     # The replay input is copied into the bundle: mailbox text a live run would have dropped is dropped here too.
+    # Its provenance names a lab seed run by folder name only, as the manifest does.
+    from .local_paths import path_names
     from .private_io import write_private_text
-    write_private_text(writer.raw_dir / "sample_input.json", json.dumps(minimise_user_text(sample), indent=2))
+    sample_copy = {key: path_names(value) if key in _OFFLINE_SAMPLE_METADATA_KEYS else value for key, value in sample.items()}
+    write_private_text(writer.raw_dir / "sample_input.json",
+                       json.dumps(writer.without_local_paths(minimise_user_text(sample_copy)), indent=2))
     writer.record_artifact(writer.raw_dir / "sample_input.json")
     for key, value in sample.items():
         if key in _OFFLINE_SAMPLE_METADATA_KEYS:

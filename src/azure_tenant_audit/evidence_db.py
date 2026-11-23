@@ -239,6 +239,10 @@ def build_run_evidence_index(
     summary = _read_json(run_path / "summary.json", {})
     manifest = manifest if isinstance(manifest, Mapping) else {}
     summary = summary if isinstance(summary, Mapping) else {}
+    # Every text value of the index passes the bundle's one local-path normaliser, as every file does (local_paths.py).
+    from .local_paths import LocalPathScrubber
+    local_paths = LocalPathScrubber(os.path.abspath(run_path))
+    manifest, summary = local_paths(dict(manifest)), local_paths(dict(summary))
 
     # SQLite writes inside a private directory on the run's own volume. Publish
     # the completed database through an admitted destination descriptor.
@@ -259,7 +263,8 @@ def build_run_evidence_index(
                 run_id = _scalar(manifest.get("run_id"))
                 tenant_name = _scalar(manifest.get("tenant_name"))
                 for section_name, path, records in _normalized_payloads(run_path):
-                    _insert_records(conn, run_path, section_name, path, records, run_id=run_id, tenant_name=tenant_name)
+                    _insert_records(conn, run_path, section_name, path, local_paths(records), run_id=run_id,
+                                    tenant_name=tenant_name)
                 _create_indexes(conn)
                 conn.commit()
                 checkpoint = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()

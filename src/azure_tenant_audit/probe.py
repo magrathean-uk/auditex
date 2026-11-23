@@ -227,7 +227,7 @@ def _probe_toolchain_statuses(
                     toolchain="pwsh",
                     status="supported",
                     message="ExchangeOnlineManagement module is installed.",
-                    command=" ".join(module_command),
+                    command=" ".join([Path(pwsh_exe).name, *module_command[1:]]),
                     details={"stdout": stdout.strip()},
                 )
             )
@@ -238,7 +238,7 @@ def _probe_toolchain_statuses(
                     toolchain="pwsh",
                     status="blocked",
                     message="ExchangeOnlineManagement module is not available.",
-                    command=" ".join(module_command),
+                    command=" ".join([Path(pwsh_exe).name, *module_command[1:]]),
                     error_class="command_timeout" if code is None else "module_not_found",
                     error=(stderr or stdout).strip() or f"return_code:{code}",
                 )
@@ -272,7 +272,7 @@ def _probe_toolchain_statuses(
                     message="Message trace cmdlet is available."
                     if code == 0
                     else "Message trace cmdlet is not available through the local PowerShell module path.",
-                    command=" ".join(response_command),
+                    command=" ".join([Path(pwsh_exe).name, *response_command[1:]]),
                     error_class=None if code == 0 else "command_timeout" if code is None else "command_not_available",
                     error=None if code == 0 else (stderr or stdout).strip() or f"return_code:{code}",
                 )

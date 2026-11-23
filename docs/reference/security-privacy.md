@@ -247,7 +247,9 @@ original values. This is a boundary for command diagnostics, not a guarantee tha
 all other exception messages or API logs are anonymised.
 
 Run bundles hold no absolute path of the operator's machine: the run folder, sample, waiver and credential files
-are recorded by name or described (output-contract.md, "Required root artifacts").
+are recorded by name or described, and every bundle file and SQLite text value passes one normaliser that makes a run
+path run-relative, a home path `~/...` and any other local path its file name (output-contract.md, "Required root
+artifacts"). Local paths are recognised by the folders this machine names, so tenant evidence keeps its own paths.
 
 Customer packs contain no absolute path of the operator's machine and no file their manifest does not list
 (`verify-pack` reports `unexpected_file`); a symbolic link, or an unlisted file where the product reads, is an
