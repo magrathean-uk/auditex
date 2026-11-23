@@ -421,6 +421,25 @@ def test_an_offline_google_run_keeps_tenant_organisational_unit_paths(
         assert "index/evidence.sqlite" in holding, (needle, holding)
 
 
+def test_an_offline_google_replay_drops_a_lab_seed_path_from_its_provenance(
+        operator_root: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    sample = json.loads(GOOGLE_SAMPLE.read_text(encoding="utf-8"))
+    sample["_fixture_provenance"] = {"bootstrap_seed": {"run_dir": "/srv/lab-machine/tenant-bootstrap/runs/seed-0001",
+                                                        "seeded_at": "2026-11-01"}}
+    sample_path = operator_root / "inputs" / "seeded.json"
+    sample_path.write_text(json.dumps(sample), encoding="utf-8")
+    out = operator_root / "out"
+    argv = _operator_argv(monkeypatch, operator_root, [
+        "google", "run", "--offline", "--sample", str(sample_path), "--domain", "example.com",
+        "--tenant-name", "G", "--run-name", "seeded", "--out", str(out)])
+    assert _run(argv, capsys) in (0, 1)
+    run_dir = out / "G-seeded"
+    _assert_clean(run_dir, operator_root)
+    assert _files_holding(run_dir, ("/srv/lab-machine",)) == []
+    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["fixture_provenance"]["bootstrap_seed"]["run_dir"] == "seed-0001"
+
+
 def test_a_powershell_launch_error_names_the_executable_only(monkeypatch: pytest.MonkeyPatch) -> None:
     from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 

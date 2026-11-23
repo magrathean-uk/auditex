@@ -23,6 +23,7 @@ from azure_tenant_audit.dns_lookup import (
     resolve_doh_endpoint,
     sanitise_resolver_fields,
 )
+from azure_tenant_audit.local_paths import path_names
 from azure_tenant_audit.offline_replay import (
     absent_section_rows,
     replay_collector_status,
@@ -88,7 +89,8 @@ def _merged_fixture_provenance(
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value
-    return merged or None
+    # Provenance names a lab seed run by its folder; where that folder sat on the lab machine stays out of the bundle.
+    return path_names(merged) or None
 # --doh-endpoint: a DoH resolver URL path can carry an account token.
 _SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache",
                             "--doh-endpoint"}
