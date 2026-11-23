@@ -160,6 +160,9 @@ def _assessment(tmp_path, rules):
     for detail in payload["projection"]["sections"].values():
         detail.pop("rule_view", None)          # the pre-lane writer had no rule_view (R106)
     payload["schema_version"] = "2026-11-05"   # ... and wrote this version
+    for row in payload["policies"]:               # ... with the case's evidence ids only (item 56)
+        for claim in row["claims"]:
+            claim["evidence_ids"] = [ref for ref in claim["evidence_ids"] if ref != "e4"]
     return payload
 
 
@@ -223,6 +226,9 @@ def test_r106_rule_view_is_written_under_a_new_schema_version(tmp_path):
     with pytest.raises(ValueError):
         validate_assessment(old)
     old["projection"] = payload["projection"]         # rule_view removed, as the pre-lane writer wrote it
+    with pytest.raises(ValueError):
+        validate_assessment(old)                      # the Built-In evidence id is 2026-11-22's (item 56)
+    old["policies"] = payload["policies"]
     validate_assessment(old)
 
 
@@ -414,3 +420,59 @@ def test_item50_preset_driven_uncertainty_names_and_cites_the_preset(policy_id):
     policies = [SL_BUILTIN, {"Identity": "alice", **SL_FLAGS}]
     other = _with_preset(_safelinks([_sl_rule("alice", _to("alice"))], policies, BI_EXCLUDES_GROUP_MEMBER), GROUP_ONLY, GROUP_ONLY)
     assert _reason(policy_id, other)[2:] == (MAY_PRESET, ["atp_policy_rules", BI, "protection_policy_rules"])
+
+
+# Item 56: a written value-rule answer cites the Built-In rule by its own evidence id, after the case's e1 to e3.
+
+def _written(tmp_path, built_in):
+    import auditex.rule_assessment as rule_assessment
+    ops = {"eopProtectionPolicyRules": [], "atpProtectionPolicyRules": [], "atpPolicyForO365": [{"Identity": "Default"}],
+           "atpBuiltInProtectionRules": built_in,
+           "safeLinksPolicies": [{"Name": "Built-In Protection Policy", **SL_BUILTIN}], "safeLinksRules": []}
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "run-manifest.json").write_text(json.dumps({"run_id": "synthetic-item56", "platform": "m365"}) + "\n")
+    (tmp_path / "raw/exchange_policy.json").write_text(json.dumps({n: {"value": r, "status": "ok"} for n, r in ops.items()}) + "\n")
+    rule_assessment.assess_run(tmp_path, policies=SL_POLICIES)
+    return json.loads((tmp_path / "model_assessment.json").read_text())
+
+
+def _requirement(row):
+    return next(c for c in row["claims"] if c["id"] == "requirement_met")
+
+
+def test_item56_built_in_answer_cites_the_built_in_evidence_reference(tmp_path):
+    from azure_tenant_audit.scuba_assessment import validate_assessment
+    written = _written(tmp_path, [])
+    assert written["schema_version"] == "2026-11-22"
+    for row in _legacy_rows(written):
+        assert (row["rule_precheck"]["cell"], row["rule_precheck"]["section"]) == ("builtin_rule_unusable", [BI])
+        # e1 to e3 keep the case's protection_policy_rules, safe_links_policies and safe_links_rules.
+        assert _requirement(row)["evidence_ids"] == ["e0", "e4"]
+    validate_assessment(written)
+    dropped = json.loads(json.dumps(written))
+    _requirement(_legacy_rows(dropped)[0])["evidence_ids"] = ["e0"]
+    with pytest.raises(ValueError):
+        validate_assessment(dropped)
+
+
+def test_item56_met_answer_cites_every_section_the_rule_reads(tmp_path):
+    from azure_tenant_audit.scuba_assessment import validate_assessment
+    written = _written(tmp_path, [{"Identity": "ATP Built-In Protection Rule", **EVERYONE}])
+    for row in _legacy_rows(written):
+        assert row["rule_precheck"]["cell"] == "policy_flags_ok"
+        assert _requirement(row)["evidence_ids"] == ["e0", "e1", "e2", "e3", "e4"]
+    validate_assessment(written)
+
+
+def test_item56_2026_11_05_answers_keep_the_case_only_references(tmp_path):
+    from azure_tenant_audit.scuba_assessment import validate_assessment
+    old = _written(tmp_path, [])
+    for detail in old["projection"]["sections"].values():
+        detail.pop("rule_view", None)
+    old["schema_version"] = "2026-11-05"
+    for row in _legacy_rows(old):
+        _requirement(row)["evidence_ids"] = ["e0"]       # as the 2026-11-05 writer cited the Built-In answer
+    validate_assessment(old)
+    _requirement(_legacy_rows(old)[0])["evidence_ids"] = ["e0", "e4"]
+    with pytest.raises(ValueError):
+        validate_assessment(old)                         # that version has no e4

@@ -14,7 +14,13 @@ from typing import Any
 
 from .guarded_io import UnsafeRunFileError
 from .resources import open_text_resource
-from .scuba_precheck import field_name, policy_rule, precheck_response, rule_catalogue
+from .scuba_precheck import (
+    evidence_sections,
+    field_name,
+    policy_rule,
+    precheck_response,
+    rule_catalogue,
+)
 from .scuba_scope import (
     NAME_LIMIT as SCOPE_NAME_LIMIT,
 )
@@ -42,6 +48,9 @@ ASSESSMENT_SCHEMAS = {
 }
 # The versions that share the 2026-11-05 validation rules.
 _CURRENT = frozenset({"2026-11-05", "2026-11-22"})
+# Bot review wave 2 (item 56): the versions whose value-rule answers cite a late rule section (SS 7.x
+# built_in_protection_rules) by its own evidence id after the case's (``scuba_precheck.evidence_sections``).
+_LATE_EVIDENCE = frozenset({"2026-11-22"})
 
 
 SCAN_BOUND_FIELDS = frozenset({"scan_max_rows", "scan_max_bytes", "scan_max_chunks"})
@@ -404,7 +413,11 @@ def validate_assessment(payload: Any) -> None:
             counts["rule_answered"] += is_rule
             if ("rule_precheck" in row) != is_rule or "model_shadow" in row and not is_rule:
                 raise ValueError("Invalid rule pre-check metadata")
-        allowed_evidence = {f"e{index}" for index in range(len(policy["sections"]) + 1)} if policy else set()
+        late = version in _LATE_EVIDENCE
+        evidence_order = policy["sections"] if policy else []
+        if policy and late and is_rule and row.get("rule_precheck", {}).get("class") == "value_rule":
+            evidence_order = evidence_sections(row["policy_id"], policy["sections"])
+        allowed_evidence = {f"e{index}" for index in range(len(evidence_order) + 1)} if policy else set()
         status = row["validation_status"]
         requirement = next((c for c in row["claims"] if c["id"] == "requirement_met"), {})
         model_status = None
@@ -560,11 +573,12 @@ def validate_assessment(payload: Any) -> None:
                 elif detail["value"] is not None:
                     raise ValueError("Absent gate input must have null value")
             verdict = cell["verdict"] if detail["class"] == "value_rule" else None
-            expected = precheck_response(detail, policy["policy_item"], sections, verdict=verdict)
+            expected = precheck_response(detail, policy["policy_item"], sections, verdict=verdict, late_evidence=late)
             if any(row[key] != expected[key] for key in expected):
                 # A1 is additive within unreleased 2026-11-05. Previously written
                 # value-rule rows used the missing-evidence vocabulary for all abstentions.
-                previous = precheck_response(detail, policy["policy_item"], sections, legacy=True, verdict=verdict)
+                previous = precheck_response(detail, policy["policy_item"], sections, legacy=True, verdict=verdict,
+                                             late_evidence=late)
                 if detail["class"] != "value_rule" or any(row[key] != previous[key] for key in previous):
                     raise ValueError("Invalid rule pre-check answer")
             if "explainer" in row:
