@@ -246,6 +246,12 @@ def test_five_assessor_tests_link_the_framework_requirements() -> None:
         assert test["title"] and test["auditex_prepares"] and test["assessor_witnesses"]
 
 
+def test_the_patching_test_names_the_whole_scope_the_assessor_checks() -> None:
+    witness = CATALOGUE["assessor_tests"][1]["assessor_witnesses"]
+    for phrase in ("servers", "IaaS", "high or critical", "CVSS 7 or above", "without a published severity", "14 days"):
+        assert phrase in witness, phrase
+
+
 def test_catalogue_wording_has_no_forbidden_claims_and_only_the_ncsc_link() -> None:
     texts = _strings(CATALOGUE)
     assert [text for text in texts if FORBIDDEN.search(text)] == []

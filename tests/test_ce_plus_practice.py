@@ -6,7 +6,7 @@ import copy
 import json
 import re
 import shutil
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -238,7 +238,7 @@ def test_a_section_without_rows_reads_unknown_everywhere_and_validates() -> None
         "evidence_observed_partial": 0, "outside_tenant_evidence": 0,
     }
     assert payload["run"] == {
-        "run_id": None, "tenant_name": None, "platform": "m365", "evidence_collected_utc": None, "as_of": None,
+        "run_id": None, "platform": "m365", "evidence_collected_utc": None, "as_of": None,
         "evidence_age_days": None,
     }
     assert payload["next_actions"][0]["action_id"] == "ce.act.run.recollect_missing_evidence"
@@ -341,6 +341,103 @@ def test_a_version_mismatch_and_uncatalogued_rows_are_reported() -> None:
     assert len(payload["requirements"]) == 30
 
 
+def test_engine_listed_uncatalogued_ids_are_reported() -> None:
+    section = _full_section()
+    section["controls"].append(_clean("ce.retired.requirement"))
+    section["uncatalogued_requirement_ids"] = ["ce.withdrawn.mapping", "ce.retired.requirement", 7, None]
+    payload = build_practice_run(section, M365, CATALOGUE, as_of=AS_OF)
+
+    assert payload["evidence_quality"]["unmapped_requirement_ids"] == ["ce.retired.requirement", "ce.withdrawn.mapping"]
+
+
+def test_a_truncated_collector_flags_a_requirement_it_feeds_through_a_supporting_rule() -> None:
+    manifest = {**GOOGLE, "coverage_gaps": [{"truncated_lists": [{"collector": "google_drive_posture", "list": "files",
+                                                                "reason": "result_limit"}]}]}
+    row = _row("ce.sc.user_authentication", "not_assessed",
+               [_rule("clean.rule", "pass"), _rule("google.drive_anyone_with_link", "pass", confidence="supporting")],
+               reason="partial_requirement_no_gap_found")
+    payload = build_practice_run(_full_section(**{"ce.sc.user_authentication": row}), manifest, CATALOGUE, as_of=AS_OF)
+
+    assert _by_id(payload)["ce.sc.user_authentication"]["evidence_flags"] == ["truncated"]
+    assert payload["evidence_quality"]["flags"] == ["truncated"]
+
+
+@pytest.mark.parametrize("rules", [None, []], ids=["null", "empty"])
+def test_null_or_empty_rule_statuses_on_a_partial_row_get_the_recollection_action(rules: Any) -> None:
+    row = _row(PARTIAL, "not_assessed", reason="partial_requirement_no_gap_found")
+    row["rule_statuses"] = rules
+    payload = build_practice_run(_full_section(**{PARTIAL: row}), M365, CATALOGUE, as_of=AS_OF)
+    result = _by_id(payload)[PARTIAL]
+
+    assert (result["evidence_state"], result["unknown_reasons"]) == ("evidence_unknown", ["state_unreadable"])
+    assert "ce.act.run.recollect_missing_evidence" in result["proof_still_needed"]
+
+
+@pytest.mark.parametrize("reason", [[], {}, 3, True], ids=["list", "dict", "int", "bool"])
+def test_a_row_reason_that_is_not_a_string_reads_unknown(reason: Any) -> None:
+    row = _row(PARTIAL, "not_assessed", [])
+    row["reason"] = reason
+    payload = build_practice_run(_full_section(**{PARTIAL: row}), M365, CATALOGUE, as_of=AS_OF)
+    result = _by_id(payload)[PARTIAL]
+
+    assert (result["evidence_state"], result["unknown_reasons"]) == ("evidence_unknown", ["row_missing_or_malformed"])
+    assert "missing" in result["evidence_flags"]
+
+
+TENANT_LABEL = "Sensitive-Certified-Project"
+LEAKY_REASON = f"certified for {TENANT_LABEL} by https://resolver.example.net/dns-query at /Users/someone/run"
+MALFORMED_USERS_REFUSAL = (
+    "Shareable output refused: identity discovery was incomplete for 1 file(s): normalized/users.json (malformed JSON). "
+    "Nothing was redacted or returned. Repair or remove the listed files and retry.\n"
+)
+LEAK_NEEDLES = (TENANT_LABEL, "resolver.example.net", "/Users/", "dns-query", "someone")
+
+
+def _assert_no_leak(text: str) -> None:
+    for needle in LEAK_NEEDLES:
+        assert needle.lower() not in text.lower(), needle
+    assert re.search("certif", text, re.IGNORECASE) is None
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "reason", "expected"),
+    [
+        ("ca.mfa_not_enforced", LEAKY_REASON, "reason_unrecognised"),
+        ("ca.mfa_not_enforced", "collector_not_complete:conditional_access", "collector_not_complete:conditional_access"),
+        ("ca.mfa_not_enforced", "collector_not_complete:certified", "collector_not_complete"),
+        ("identity.user_mfa_not_registered", "registration_report_incomplete:3", "registration_report_incomplete:3"),
+        ("identity.user_mfa_not_registered", "registration_report_incomplete:/Users/x", "registration_report_incomplete"),
+        ("identity.stale_enabled_account", "signin_activity_unavailable", "signin_activity_unavailable"),
+        ("ca.mfa_not_enforced", "verdict_unknown:certified_control", "verdict_unknown"),
+        ("ca.mfa_not_enforced", "certified", "reason_unrecognised"),
+        ("ca.mfa_not_enforced", "https://resolver.example.net/dns-query", "reason_unrecognised"),
+    ],
+)
+def test_rule_reasons_map_to_a_closed_set_of_codes(rule_id: str, reason: str, expected: str) -> None:
+    row = _row(PARTIAL, "not_assessed", [_rule(rule_id, "not_assessed", reason=reason)], reason="rules_not_evaluated")
+    payload = build_practice_run(_full_section(**{PARTIAL: row}), M365, CATALOGUE, as_of=AS_OF)
+    result = _by_id(payload)[PARTIAL]
+
+    assert result["unknown_reasons"] == [expected]
+    assert result["evidence_observed"]["rule_states"] == [
+        {"rule_id": rule_id, "state": "not_evaluated", "confidence": "full", "reason": expected}
+    ]
+
+
+def test_tenant_text_and_unrecognised_reasons_never_reach_the_payload() -> None:
+    manifest = {**M365, "tenant_name": TENANT_LABEL}
+    row = _row(PARTIAL, "not_assessed", [_rule("ca.mfa_not_enforced", "not_assessed", reason=LEAKY_REASON)],
+               reason="rules_not_evaluated")
+    payload = build_practice_run(_full_section(**{PARTIAL: row}), manifest, CATALOGUE, as_of=AS_OF)
+
+    assert payload["run"] == {
+        "run_id": "practice", "platform": "m365", "evidence_collected_utc": "2026-11-01T09:30:00Z",
+        "as_of": "2026-11-02", "evidence_age_days": 1,
+    }
+    jsonschema.validate(payload, SCHEMA)
+    _assert_no_leak(json.dumps(payload))
+
+
 # -- 4. both providers -----------------------------------------------------------------------------------------------
 
 
@@ -348,23 +445,36 @@ def _platform_of(action_id: str) -> str:
     return next(action["platforms"] for action in CATALOGUE["actions"] if action["id"] == action_id)[0]
 
 
-def test_m365_administrator_outside_the_mfa_policy() -> None:
-    section = _full_section(**{
-        PARTIAL: _row(PARTIAL, "fail", [_rule("ca.mfa_not_enforced", "fail"), _rule("identity.user_mfa_not_registered", "pass", confidence="partial")]),
-        "ce.uac.mfa_admin_accounts": _row("ce.uac.mfa_admin_accounts", "fail", [_rule("ca.admin_mfa_not_enforced", "fail")]),
-    })
-    payload = build_practice_run(section, M365, CATALOGUE, as_of=AS_OF)
-    first = payload["next_actions"][0]
+ADMIN_MFA = "ce.uac.mfa_admin_accounts"
 
-    assert (first["action_id"], first["coverage_gained"], first["rank_score"]) == ("ce.act.uac.resolve_mfa_gap_m365", 6, 24)
-    assert {_platform_of(row["action_id"]) for row in payload["next_actions"]} == {"any", "m365"}
-    test_4 = payload["assessor_tests"][3]
-    assert test_4["witness_status"] == "assessor_witness_required"
-    assert test_4["linked_evidence"] == [
-        {"requirement_id": PARTIAL, "evidence_state": "gap_observed", "evidence_flags": []},
-        {"requirement_id": "ce.uac.mfa_admin_accounts", "evidence_state": "gap_observed", "evidence_flags": []},
+
+def test_m365_administrator_outside_the_mfa_policy() -> None:
+    """The proposal's paired case: one fact changes, the administrator MFA coverage from clean to a gap."""
+    def section(admin_row: dict[str, Any]) -> dict[str, Any]:
+        return _full_section(**{PARTIAL: _clean(PARTIAL, "ca.mfa_not_enforced"), ADMIN_MFA: admin_row})
+
+    clean = build_practice_run(section(_clean(ADMIN_MFA, "ca.admin_mfa_not_enforced")), M365, CATALOGUE, as_of=AS_OF)
+    gap = build_practice_run(
+        section(_row(ADMIN_MFA, "fail", [_rule("ca.admin_mfa_not_enforced", "fail")])), M365, CATALOGUE, as_of=AS_OF
+    )
+    first = gap["next_actions"][0]
+
+    assert (first["action_id"], first["coverage_gained"], first["effort_weight"], first["rank_score"]) == (
+        "ce.act.uac.resolve_mfa_gap_m365", 3, 1, 12
+    )
+    assert first["triggered_by"] == ["ca.admin_mfa_not_enforced"]
+    assert "ce.act.uac.resolve_mfa_gap_m365" not in [row["action_id"] for row in clean["next_actions"]]
+    assert _by_id(clean)[ADMIN_MFA]["evidence_state"] == "evidence_observed_partial"
+    assert _by_id(gap)[ADMIN_MFA]["evidence_state"] == "gap_observed"
+    assert {_platform_of(row["action_id"]) for row in gap["next_actions"]} == {"any", "m365"}
+    for payload in (clean, gap):
+        assert {_platform_of(row["action_id"]) for row in payload["next_actions"]} <= {"any", "m365"}
+        assert payload["assessor_tests"][3]["witness_status"] == "assessor_witness_required"
+        assert "ce.act.plus.prepare_test_4_mfa" in [row["action_id"] for row in payload["next_actions"]]
+    assert gap["assessor_tests"][3]["linked_evidence"] == [
+        {"requirement_id": PARTIAL, "evidence_state": "evidence_observed_partial", "evidence_flags": []},
+        {"requirement_id": ADMIN_MFA, "evidence_state": "gap_observed", "evidence_flags": []},
     ]
-    assert "ce.act.plus.prepare_test_4_mfa" in [row["action_id"] for row in payload["next_actions"]]
 
 
 def test_google_administrator_not_enrolled_under_an_enforced_policy() -> None:
@@ -450,6 +560,12 @@ def runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     return {"m365": root / "ci-m365", "google_workspace": root / "acme-google"}
 
 
+def _as_of(run: Path, days: int = 3) -> str:
+    """An as-of date a fixed number of days after the fixture's own evidence date, so no test reads the wall clock."""
+    created = json.loads((run / "run-manifest.json").read_text(encoding="utf-8"))["created_utc"]
+    return (date.fromisoformat(created[:10]) + timedelta(days=days)).isoformat()
+
+
 def _tree(path: Path) -> dict[str, bytes]:
     return {str(item.relative_to(path)): item.read_bytes() for item in sorted(path.rglob("*")) if item.is_file()}
 
@@ -475,7 +591,8 @@ def test_cli_writes_the_practice_run(runs: dict[str, Path], tmp_path: Path, caps
                                      platform: str, fmt: str) -> None:
     run = runs[platform]
     before = _tree(run)
-    argv = ["report", "ce-plus", str(run), "--format", fmt, "--as-of", "2026-11-30"]
+    as_of = _as_of(run)
+    argv = ["report", "ce-plus", str(run), "--format", fmt, "--as-of", as_of]
 
     rc, printed, _ = _report(argv, capsys)
     target = tmp_path / f"ce-plus.{fmt}"
@@ -492,8 +609,8 @@ def test_cli_writes_the_practice_run(runs: dict[str, Path], tmp_path: Path, caps
         jsonschema.validate(payload, SCHEMA)
         assert len(payload["requirements"]) == 30 and len(payload["assessor_tests"]) == 5
         assert payload["run"]["platform"] == platform
-        assert payload["run"]["as_of"] == "2026-11-30"
-        assert isinstance(payload["run"]["evidence_age_days"], int)
+        assert payload["run"]["as_of"] == as_of
+        assert payload["run"]["evidence_age_days"] == 3
     elif fmt == "md":
         assert printed.startswith("# Auditex CE+ practice run\n")
         for heading in ("## Evidence quality", "## Next proof to gather", "## Requirements", "### Firewalls",
@@ -505,7 +622,8 @@ def test_cli_writes_the_practice_run(runs: dict[str, Path], tmp_path: Path, caps
 
 
 def test_the_google_practice_run_ranks_the_enforcement_fix_first(runs: dict[str, Path], capsys: pytest.CaptureFixture) -> None:
-    rc, printed, _ = _report(["report", "ce-plus", str(runs["google_workspace"]), "--as-of", "2026-11-30"], capsys)
+    run = runs["google_workspace"]
+    rc, printed, _ = _report(["report", "ce-plus", str(run), "--as-of", _as_of(run)], capsys)
     payload = json.loads(printed)
 
     assert rc == 0
@@ -559,7 +677,7 @@ def test_an_older_bundle_without_the_section_reads_unknown(runs: dict[str, Path]
     del pack["baseline_alignment"]["frameworks"]["cyber_essentials"]
     pack_path.write_text(json.dumps(pack), encoding="utf-8")
 
-    rc, printed, _ = _report(["report", "ce-plus", str(run), "--as-of", "2026-11-30"], capsys)
+    rc, printed, _ = _report(["report", "ce-plus", str(run), "--as-of", _as_of(run)], capsys)
     payload = json.loads(printed)
 
     assert rc == 0
@@ -590,6 +708,104 @@ def test_the_customer_pack_carries_the_practice_run_and_still_verifies(runs: dic
     assert "ce-plus-practice.md" in (first / "README.md").read_text(encoding="utf-8")
     for name in ("ce-plus-practice.md", "ce-plus-practice.json"):
         assert (first / name).read_bytes() == (second / name).read_bytes()
+
+
+def _strip_ce_section(run: Path) -> None:
+    from gate_support import rehash
+
+    pack_path = run / "reports" / "report-pack.json"
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    del pack["baseline_alignment"]["frameworks"]["cyber_essentials"]
+    pack_path.write_text(json.dumps(pack), encoding="utf-8")
+    rehash(run)
+
+
+def test_a_reused_pack_directory_drops_the_practice_run_of_an_earlier_bundle(
+    runs: dict[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    older = tmp_path / "older"
+    shutil.copytree(runs["google_workspace"], older)
+    _strip_ce_section(older)
+    pack = tmp_path / "pack"
+
+    assert _report(["report", "customer-pack", str(runs["google_workspace"]), "--output-dir", str(pack)], capsys)[0] == 0
+    assert (pack / "ce-plus-practice.json").is_file() and (pack / "ce-plus-practice.md").is_file()
+    assert _report(["report", "customer-pack", str(older), "--output-dir", str(pack)], capsys)[0] == 0
+    rc, verified, _ = _report(["report", "verify-pack", str(pack)], capsys)
+
+    assert not (pack / "ce-plus-practice.json").exists() and not (pack / "ce-plus-practice.md").exists()
+    assert (rc, json.loads(verified)["valid"]) == (0, True)
+
+
+def test_malformed_normalised_evidence_is_a_fixed_refusal(runs: dict[str, Path], tmp_path: Path,
+                                                          capsys: pytest.CaptureFixture) -> None:
+    run = tmp_path / "copy"
+    shutil.copytree(runs["m365"], run)
+    (run / "normalized" / "users.json").write_text("{not json", encoding="utf-8")
+
+    rc, printed, error = _report(["report", "ce-plus", str(run), "--format", "md"], capsys)
+
+    assert (rc, printed) == (2, "")
+    assert error == MALFORMED_USERS_REFUSAL
+    assert str(tmp_path) not in error and "Traceback" not in error
+
+
+def test_a_bundle_without_the_section_renders_unknown_not_clean() -> None:
+    from auditex.reporting import (
+        _ce_plus_tables,
+        render_ce_plus_html,
+        render_ce_plus_markdown,
+    )
+
+    payload = build_practice_run(None, M365, CATALOGUE, as_of=AS_OF)
+    markdown = render_ce_plus_markdown(payload)
+
+    assert "- Requirements version in the bundle: not established (no Cyber Essentials section)\n" in markdown
+    assert "matches" not in markdown
+    assert {row["findings"] for rows in _ce_plus_tables(payload)["themes"].values() for row in rows} == {"not established"}
+    assert "not established (no Cyber Essentials section)" in render_ce_plus_html(payload)
+    clean = _ce_plus_tables(build_practice_run(_full_section(), M365, CATALOGUE, as_of=AS_OF))
+    assert {row["findings"] for rows in clean["themes"].values() for row in rows} == {"none"}
+    assert "- Requirements version in the bundle: matches\n" in render_ce_plus_markdown(
+        build_practice_run(_full_section(), M365, CATALOGUE, as_of=AS_OF)
+    )
+
+
+def test_tenant_text_and_rule_reason_text_reach_no_report_or_pack_file(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    from gate_support import rehash
+
+    from azure_tenant_audit.cli import run_offline
+
+    assert run_offline(ROOT / "examples" / "sample_audit_bundle" / "sample_result.json", tmp_path, TENANT_LABEL, "m365") in (0, 1)
+    run = tmp_path / f"{TENANT_LABEL}-m365"
+    pack_path = run / "reports" / "report-pack.json"
+    report_pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    rows = report_pack["baseline_alignment"]["frameworks"]["cyber_essentials"]["controls"]
+    row = next(item for item in rows if item["control_id"] == PARTIAL)
+    row.update({"status": "not_assessed", "reason": "rules_not_evaluated", "rule_statuses": [
+        {"rule_id": "ca.mfa_not_enforced", "status": "not_assessed", "evaluated": False, "confidence": "full",
+         "reason": LEAKY_REASON},
+    ]})
+    pack_path.write_text(json.dumps(report_pack), encoding="utf-8")
+    rehash(run)
+
+    outputs = {}
+    for fmt in ("json", "md", "html"):
+        rc, printed, _ = _report(["report", "ce-plus", str(run), "--format", fmt, "--as-of", _as_of(run)], capsys)
+        assert rc == 0
+        outputs[fmt] = printed
+    pack = tmp_path / "pack"
+    assert _report(["report", "customer-pack", str(run), "--output-dir", str(pack)], capsys)[0] == 0
+    for name in ("ce-plus-practice.md", "ce-plus-practice.json"):
+        outputs[name] = (pack / name).read_text(encoding="utf-8")
+
+    for text in outputs.values():
+        _assert_no_leak(text)
+        _assert_clean_wording(text)
+    for name in ("json", "ce-plus-practice.json"):
+        assert next(item for item in json.loads(outputs[name])["requirements"] if item["requirement_id"] == PARTIAL)[
+            "unknown_reasons"
+        ] == ["reason_unrecognised"]
 
 
 # -- 6. forbidden wording in the catalogue ---------------------------------------------------------------------------

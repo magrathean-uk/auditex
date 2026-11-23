@@ -52,7 +52,6 @@
       "additionalProperties": false,
       "required": [
         "run_id",
-        "tenant_name",
         "platform",
         "evidence_collected_utc",
         "as_of",
@@ -60,12 +59,6 @@
       ],
       "properties": {
         "run_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tenant_name": {
           "type": [
             "string",
             "null"

@@ -327,28 +327,35 @@ payload (`schema_version` `ce-plus-practice-v1`, schema `schemas/ce_plus_practic
 the shipped action catalogue `configs/ce-plus-practice.json` and the as-of date (default today, UTC; it feeds only the
 evidence age). It adds no verdict, uses no model and is not a Cyber Essentials assessment. Output is always redacted
 under the shareable profile. Exit 0 for any report, including one where every requirement is unknown; exit 2 for an
-unsafe or unreadable run directory, a missing or unparseable `run-manifest.json` or a bad `--as-of`.
+unsafe or unreadable run directory, a missing or unparseable `run-manifest.json`, a bad `--as-of` or a redaction
+refusal (a malformed, unreadable or changed normalised file), each with fixed text and no path.
 
 **Evidence state** per requirement, first match wins: `evidence_unknown` (row missing or malformed:
 `row_missing_or_malformed`; section missing: `cyber_essentials_section_missing`), `outside_tenant_evidence`
 (`manual`, `ce_plus_assessor_test` or `provider_responsibility`), `gap_observed` (row `fail`), `gap_accepted` (row
 `accepted_risk`; an Auditex waiver is not a scheme exemption), `supporting_only` (`supporting_evidence_only` or
-`no_mapped_rules`), `evidence_unknown` (a deciding rule not evaluated, with the rule's own reasons),
+`no_mapped_rules`), `evidence_unknown` (a deciding rule not evaluated, with the rule's reasons),
 `evidence_observed_partial` (every deciding rule evaluated with no gap and the row reads
 `partial_requirement_no_gap_found`), otherwise `evidence_unknown` (`state_unreadable`, which also covers an empty or
-null rule list). Rule statuses are re-worded: `fail` to `gap_found`, `pass` to `no_gap_found`, `not_assessed` to
-`not_evaluated`, `accepted_risk` kept; anything else, or a verdict on a rule not marked evaluated, is `not_evaluated`
-(`status_unreadable`).
+null rule list); a row whose `reason` is not a string reads `row_missing_or_malformed`. Rule statuses are
+re-worded: `fail` to `gap_found`, `pass` to `no_gap_found`, `not_assessed` to `not_evaluated`, `accepted_risk`
+kept; anything else, or a verdict on a rule not marked evaluated, is `not_evaluated` (`status_unreadable`). Rule
+reasons are mapped to a closed set of the codes the engine writes: a `code:detail` reason keeps its detail only for
+`registration_report_incomplete:<count>` and for `collector_not_complete:<collectors>` naming the rule's own
+collectors, otherwise the code alone; any other reason reads `reason_unrecognised`. Ids that are not id-shaped
+(ASCII letters, digits, `.`, `_`, `-`) are dropped.
 
 **Flags**, independent of the state and rolled up in `evidence_quality`: `missing` (a deciding rule not evaluated, or
 the state is `evidence_unknown`), `truncated` (a truncated list or section gap from the coverage rows or the
-manifest's `coverage_gaps` for a collector feeding a deciding rule; no coverage data reads `coverage_data:
+manifest's `coverage_gaps` for a collector feeding any of the requirement's rules, supporting ones included; no coverage data reads `coverage_data:
 unavailable`), `stale` (evidence age over the catalogue's `stale_after_days`, 14; tenant-evidence requirements only;
 `evidence_age_days` is `null` when `created_utc` is missing or unreadable, when no as-of date is given or when the
 as-of date is before the evidence date) and `conflicting` (a catalogue conflict holds: every policy rule
 `no_gap_found` and at least one state rule `gap_found`; a not-evaluated rule asserts no conflict). At run level
 `requirements_version_mismatch` is added when the section's `version` differs from the catalogue's, and bundle rows the
-catalogue lacks are listed in `unmapped_requirement_ids`.
+catalogue lacks, and the section's own `uncatalogued_requirement_ids`, are listed in `unmapped_requirement_ids`. A
+bundle without the section renders its requirements version and finding counts as "not established". `run` carries
+the run id, platform, evidence date, as-of date and age; it carries no tenant name.
 
 **Ranking.** An action applies to a requirement it lists when its platform matches (`any`, or the run's `m365` or
 `google_workspace`; an unknown platform gets only `any` actions) and its trigger holds: `rule_gap`,
@@ -358,7 +365,8 @@ state weights of the requirements covered (gap observed 3, unknown 2, every othe
 Order: score descending, effort weight ascending, action id ascending. The weights are catalogue data and product
 defaults, not scheme rules. `requirements` always has the 30 catalogue rows in catalogue order and `assessor_tests`
 the five CE+ tests, each `witness_status: assessor_witness_required`. A customer pack adds `ce-plus-practice.md` and
-`ce-plus-practice.json` (customer-pack profile, no as-of date) when the run's report pack carries the section. `CONTRACT_VERSION` is unchanged: nothing in
+`ce-plus-practice.json` (customer-pack profile, no as-of date) when the run's report pack carries the section; a pack
+directory reused for a run without the section loses an earlier run's copies of both files. `CONTRACT_VERSION` is unchanged: nothing in
 the bundle changes.
 
 ## Contract history

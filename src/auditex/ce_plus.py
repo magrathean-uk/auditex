@@ -5,8 +5,9 @@ manifest, the shipped action catalogue (``configs/ce-plus-practice.json``) and a
 every state is re-worded from the section the value rules and the Google findings already wrote. Unknown is never
 folded into observed: an unevaluated rule, an empty rule list or a malformed row reads ``evidence_unknown``.
 
-The output carries ids, counts, catalogue text and dates only; tenant free text (policy or user names, finding titles)
-is never copied. Finding ids are the only tenant-derived strings.
+The output carries ids, counts, catalogue text and dates only; tenant free text (the tenant label, policy or user
+names, finding titles) is never copied. Rule reasons are mapped to a closed set of codes (anything else reads
+``reason_unrecognised``) and ids that are not id-shaped are dropped. Finding ids are the only tenant-derived strings.
 """
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ REASON_SECTION_MISSING = "cyber_essentials_section_missing"
 REASON_ROW_MALFORMED = "row_missing_or_malformed"
 REASON_STATE_UNREADABLE = "state_unreadable"
 REASON_STATUS_UNREADABLE = "status_unreadable"
+REASON_UNRECOGNISED = "reason_unrecognised"
 _ROW_REASONS = frozenset({REASON_SECTION_MISSING, REASON_ROW_MALFORMED, REASON_STATE_UNREADABLE})
 
 _RULE_STATUS_WORDS = {
@@ -56,6 +58,34 @@ _CONFIDENCE_VALUES = ("full", "partial", "supporting")
 _PARTIAL_NO_GAP_REASON = "partial_requirement_no_gap_found"
 _SUPPORTING_REASONS = frozenset({"supporting_evidence_only", "no_mapped_rules"})
 _FINDING_ID_LIMIT = 20
+_ID_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+_ID_MAX_LENGTH = 128
+
+# The rule reasons the engine writes (baselines._rule_evaluation and its input checks), kept as they are.
+_KNOWN_RULE_REASONS = frozenset({
+    "admin_set_not_collected", "break_glass_accounts_not_identified", "break_glass_accounts_unresolved",
+    "break_glass_exclusion_unverified", "compliance_policies_not_collected", "default_malware_policy_not_identified",
+    "defender_state_not_collected", "device_configurations_not_collected", "device_configurations_not_read_in_full",
+    "device_posture_not_collected", "dkim_state_not_returned_for_domain", "federation_allow_list_not_read",
+    "federation_configuration_not_collected", "federation_setting_not_read", "inputs_not_available",
+    "mailbox_smtp_auth_count_not_returned", "malware_filter_settings_not_returned", "mta_sts_policy_not_fetched",
+    "no_assigned_update_ring", "no_collector_mapping", "no_custom_domains", "no_device_configurations",
+    "no_devices_in_os_lifecycle_scope", "no_domain_records", "no_managed_devices", "no_windows_devices",
+    "policy_assignments_not_read_for_every_policy", "policy_assignments_not_read_in_full", "resolver_error",
+    "ring_assignments_not_read_for_every_ring", "ring_settings_not_returned", "risk_detail_hidden",
+    "sharepoint_settings_not_collected", "signal_not_collected", "signin_activity_unavailable",
+    "site_permissions_not_read", "smtp_auth_setting_not_returned", "status_unreadable", "tenant_domains_unknown",
+    "tls_rpt_not_collected", "transport_config_not_returned", "update_managed_by_other_means",
+    "update_management_not_collected",
+})
+# Engine reasons of the form ``code:detail``. Only two details are kept, and only when they hold what the engine
+# writes there: a count for ``registration_report_incomplete`` and the rule's own collectors for
+# ``collector_not_complete``. Every other detail is dropped and the code alone is kept.
+_PREFIXED_RULE_REASONS = frozenset({
+    "admin_set_unknown", "collector_not_complete", "evidence_not_returned", "licence_data_unavailable",
+    "registration_report_incomplete", "reported_by", "sharing_setting_not_read", "verdict_not_collected",
+    "verdict_unknown",
+})
 
 DISCLAIMER = (
     "This practice run lists the evidence observed in one read-only audit and the proof still needed. It is not a "
@@ -86,6 +116,28 @@ def load_catalogue() -> dict[str, Any]:
 
 def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _id(value: Any) -> str | None:
+    """An id-shaped string (ASCII letters, digits, ``.``, ``_``, ``-``), else ``None``: no free text passes."""
+    text = _text(value)
+    if text is None or len(text) > _ID_MAX_LENGTH or not set(text) <= _ID_CHARACTERS:
+        return None
+    return text
+
+
+def _reason_code(rule_id: str, reason: str) -> str:
+    """A rule reason as a closed-set code; never the bundle's text unless it is a code the engine writes."""
+    if reason in _KNOWN_RULE_REASONS:
+        return reason
+    code, separator, detail = reason.partition(":")
+    if not separator or code not in _PREFIXED_RULE_REASONS:
+        return REASON_UNRECOGNISED
+    if code == "registration_report_incomplete" and detail.isascii() and detail.isdigit():
+        return reason
+    if code == "collector_not_complete" and detail and set(detail.split(",")) <= set(rule_evidence_collectors(rule_id)):
+        return reason
+    return code
 
 
 def _platform(manifest: Mapping[str, Any]) -> str:
@@ -125,6 +177,7 @@ def _rule_state(item: Mapping[str, Any]) -> dict[str, Any]:
     status = item.get("status")
     state = _RULE_STATUS_WORDS.get(status) if isinstance(status, str) else None
     reason = _text(item.get("reason"))
+    reason = _reason_code(item["rule_id"], reason) if reason else None
     if state is None:
         state, reason = "not_evaluated", REASON_STATUS_UNREADABLE
     elif item.get("evaluated") is not True and state != "not_evaluated":
@@ -147,11 +200,12 @@ def _read_rules(row: Mapping[str, Any]) -> tuple[list[dict[str, Any]], bool, boo
     """(rule states, list readable, every entry readable) from a section row's ``rule_statuses``."""
     raw = row.get("rule_statuses")
     if not isinstance(raw, list):
-        return [], False, False
+        # A null or unreadable list reads as an empty one: no rule to show, so the requirement is unknown.
+        return [], True, True
     states = []
     clean = True
     for item in raw:
-        if not isinstance(item, Mapping) or not _text(item.get("rule_id")):
+        if not isinstance(item, Mapping) or not _id(item.get("rule_id")):
             clean = False
             continue
         states.append(_rule_state(item))
@@ -162,6 +216,8 @@ def _evidence_state(
     row: Any, requirement_status: str | None, rules: list[dict[str, Any]], readable: bool, clean: bool
 ) -> tuple[str, list[str]]:
     if not isinstance(row, Mapping) or requirement_status is None:
+        return "evidence_unknown", [REASON_ROW_MALFORMED]
+    if row.get("reason") is not None and not isinstance(row.get("reason"), str):
         return "evidence_unknown", [REASON_ROW_MALFORMED]
     if requirement_status in OUTSIDE_TENANT_STATUSES:
         return "outside_tenant_evidence", []
@@ -202,9 +258,10 @@ def _truncated_collectors(manifest: Mapping[str, Any], coverage_rows: list[Any] 
     records: dict[tuple[str, str], dict[str, str]] = {}
     rows = coverage_rows or []
     for item in list_truncations(rows):
-        records[(item["collector"], item["list"])] = {"collector": item["collector"], "list": item["list"], "reason": item["reason"]}
+        collector, name = _id(item.get("collector")) or "", _id(item.get("list")) or ""
+        records[(collector, name)] = {"collector": collector, "list": name, "reason": _id(item.get("reason")) or "truncated"}
     for item in section_gap_records(rows):
-        collector, section = str(item.get("collector") or ""), str(item.get("section") or "")
+        collector, section = _id(item.get("collector")) or "", _id(item.get("section")) or ""
         records.setdefault((collector, section), {"collector": collector, "list": section, "reason": "section_gap"})
     gaps = manifest.get("coverage_gaps")
     for gap in gaps if isinstance(gaps, list) else []:
@@ -213,8 +270,8 @@ def _truncated_collectors(manifest: Mapping[str, Any], coverage_rows: list[Any] 
         for key, field, default in (("truncated_lists", "list", "truncated"), ("section_gaps", "section", "section_gap")):
             entries = gap.get(key)
             for entry in entries if isinstance(entries, list) else []:
-                if isinstance(entry, Mapping) and _text(entry.get("collector")) and _text(entry.get(field)):
-                    reason = _text(entry.get("reason")) if key == "truncated_lists" else None
+                if isinstance(entry, Mapping) and _id(entry.get("collector")) and _id(entry.get(field)):
+                    reason = _id(entry.get("reason")) if key == "truncated_lists" else None
                     records.setdefault(
                         (entry["collector"], entry[field]),
                         {"collector": entry["collector"], "list": entry[field], "reason": reason or default},
@@ -241,7 +298,7 @@ def _section_rows(section: Any) -> tuple[dict[str, Any] | None, str | None, list
     rows: dict[str, Any] = {}
     order: list[str] = []
     for row in section["controls"]:
-        requirement_id = _text(row.get("control_id")) if isinstance(row, Mapping) else None
+        requirement_id = _id(row.get("control_id")) if isinstance(row, Mapping) else None
         if requirement_id is None or requirement_id in rows:
             continue
         rows[requirement_id] = row
@@ -271,7 +328,10 @@ def build_practice_run(
     rows_by_id, section_version, section_order = _section_rows(section)
     truncated_lists, truncated_collectors = _truncated_collectors(manifest, coverage_rows)
     coverage = collector_coverage or {}
-    incomplete = sorted(str(name) for name, row in coverage.items() if not (isinstance(row, Mapping) and row.get("complete") is True))
+    incomplete = sorted(
+        name for name in map(_id, (key for key, row in coverage.items() if not (isinstance(row, Mapping) and row.get("complete") is True)))
+        if name
+    )
     coverage_data = "available" if coverage_rows or coverage else "unavailable"
     catalogue_ids = [row["requirement_id"] for row in catalogue["requirements"]]
 
@@ -295,7 +355,8 @@ def build_practice_run(
         if unevaluated or state == "evidence_unknown":
             flags.append("missing")
         unknown_reasons = sorted({*(rule.get("reason") or REASON_STATUS_UNREADABLE for rule in unevaluated), *reasons})
-        feeding = {collector for rule in deciding for collector in rule_evidence_collectors(rule["rule_id"])}
+        # Every mapped rule counts here, supporting ones too: a truncated list weakens whatever it feeds.
+        feeding = {collector for rule in rules for collector in rule_evidence_collectors(rule["rule_id"])}
         if feeding & truncated_collectors:
             flags.append("truncated")
         if stale and (tenant_evidence or requirement_status is None):
@@ -414,6 +475,11 @@ def build_practice_run(
     version_mismatch = rows_by_id is not None and section_version != catalogue["requirements_version"]
     if version_mismatch:
         run_flags.append("requirements_version_mismatch")
+    engine_unmapped = section.get("uncatalogued_requirement_ids") if rows_by_id is not None else None
+    unmapped = [rid for rid in section_order if rid not in catalogue_ids]
+    for rid in map(_id, engine_unmapped if isinstance(engine_unmapped, list) else []):
+        if rid and rid not in catalogue_ids and rid not in unmapped:
+            unmapped.append(rid)
     by_state = {state: sum(1 for row in requirements if row["evidence_state"] == state) for state in EVIDENCE_STATES}
     source = catalogue["source"]
     return {
@@ -426,7 +492,6 @@ def build_practice_run(
         "ranking_formula": _ranking_formula(catalogue),
         "run": {
             "run_id": _text(manifest.get("run_id")),
-            "tenant_name": _text(manifest.get("tenant_name")),
             "platform": platform,
             "evidence_collected_utc": created.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if created else None,
             "as_of": _as_of_date(as_of).isoformat() if _as_of_date(as_of) else None,
@@ -437,7 +502,7 @@ def build_practice_run(
             "coverage_data": coverage_data,
             "incomplete_collectors": incomplete,
             "truncated_lists": truncated_lists,
-            "unmapped_requirement_ids": [rid for rid in section_order if rid not in catalogue_ids],
+            "unmapped_requirement_ids": unmapped,
         },
         "summary": {
             "requirements_total": len(requirements),

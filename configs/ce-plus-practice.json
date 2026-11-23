@@ -279,7 +279,7 @@
       "title": "Keep the cloud provider's contract or assurance statement",
       "proof_to_gather": "Keep the part of the provider's contract, terms or published assurance statement that commits them to run firewalls, security updates and malware protection for the service.",
       "kind": "provider_assurance",
-      "effort": "quick",
+      "effort": "moderate",
       "platforms": [
         "any"
       ],
@@ -1408,7 +1408,7 @@
         "ce.sum.vulnerability_fixes_14_days"
       ],
       "auditex_prepares": "A device inventory to sample from and the device update evidence the tenant holds. It cannot reproduce the scan or tell fix age from an update policy.",
-      "assessor_witnesses": "The assessor runs an authenticated scan of sample devices and checks for high or critical fixes released more than 14 days earlier.",
+      "assessor_witnesses": "The assessor runs an authenticated vulnerability scan of sample devices, including servers and IaaS hosts in scope, and checks that each fix for a vulnerability rated high or critical, scored CVSS 7 or above, or released without a published severity was applied within 14 days of release.",
       "prepare_action_ids": [
         "ce.act.plus.prepare_test_2_patching",
         "ce.act.sum.gather_vulnerability_fixes"

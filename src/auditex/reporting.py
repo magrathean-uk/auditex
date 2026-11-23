@@ -1816,6 +1816,10 @@ _CE_PLUS_FLAG_LINES = (
 )
 
 
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _ce_plus_words(value: Any) -> str:
     return _text(value, "").replace("_", " ")
 
@@ -1853,7 +1857,15 @@ def _ce_plus_quality_lines(payload: Mapping[str, Any]) -> list[tuple[str, str]]:
     lines.append(("Coverage data", _ce_plus_words(quality.get("coverage_data"))))
     incomplete = [str(item) for item in quality.get("incomplete_collectors") or []]
     lines.append(("Incomplete collectors", ", ".join(incomplete) or "none"))
-    version = "differs from the catalogue" if "requirements_version_mismatch" in (quality.get("flags") or []) else "matches"
+    section_missing = any(
+        "cyber_essentials_section_missing" in (row.get("unknown_reasons") or []) for row in requirements
+    )
+    if section_missing:
+        version = "not established (no Cyber Essentials section)"
+    elif "requirements_version_mismatch" in (quality.get("flags") or []):
+        version = "differs from the catalogue"
+    else:
+        version = "matches"
     lines.append(("Requirements version in the bundle", version))
     unmapped = [str(item) for item in quality.get("unmapped_requirement_ids") or []]
     lines.append(("Bundle requirements the catalogue lacks", ", ".join(unmapped) or "none"))
@@ -1889,7 +1901,8 @@ def _ce_plus_tables(payload: Mapping[str, Any]) -> dict[str, Any]:
                     f"{observed.get('rules_evaluated')} of {observed.get('rules_mapped')} evaluated, "
                     f"{observed.get('rules_with_gap')} with a gap"
                 ),
-                "findings": ", ".join(str(item) for item in observed.get("finding_ids") or []) or "none",
+                "findings": ", ".join(str(item) for item in observed.get("finding_ids") or [])
+                or ("none" if _is_count(observed.get("open_finding_count")) else "not established"),
                 "proof": ", ".join(str(item) for item in row.get("proof_still_needed") or []) or "none",
                 "limits": row.get("evidence_limits"),
             }
@@ -2331,6 +2344,9 @@ def _pack_payload(payload: Mapping[str, Any], run_path: Path) -> dict[str, Any]:
     return safe
 
 
+_OPTIONAL_PACK_FILES = ("ce-plus-practice.md", "ce-plus-practice.json")
+
+
 def _prepare_pack_directory(target_dir: Path) -> None:
     """Create the pack directory, or reuse one that is empty or holds a pack written earlier.
 
@@ -2354,6 +2370,10 @@ def _prepare_pack_directory(target_dir: Path) -> None:
     if stale.is_dir():
         from azure_tenant_audit.guarded_io import remove_guarded_tree
         remove_guarded_tree(stale)
+    # Generated files only some runs have go too: a run without them must not inherit an earlier run's copies.
+    from azure_tenant_audit.guarded_io import remove_guarded_output
+    for name in _OPTIONAL_PACK_FILES:
+        remove_guarded_output(target_dir / name, field="output-dir")
 
 
 @guarded_operation

@@ -677,9 +677,11 @@ passed to `verify-pack --expect-checksums-sha256`.
 
 The CE+ practice run (`auditex report ce-plus`) is always written under the shareable profile, and in a customer pack
 under the customer-pack profile. It carries requirement, rule, action, conflict and test ids, counts, the run id,
-tenant name, platform, evidence date and age, and Auditex's own catalogue text. It never copies tenant free text:
-no policy, user or group names and no finding titles or descriptions; finding ids are the only tenant-derived strings
-and pass the same redaction as every other output. Its error messages are fixed text and never name a path.
+platform, evidence date and age, and Auditex's own catalogue text. It never copies tenant free text: no tenant name,
+no policy, user or group names, no finding titles or descriptions and no rule reason text (reasons are mapped to a
+closed set of codes, anything else reading `reason_unrecognised`; ids that are not id-shaped are dropped); finding
+ids are the only tenant-derived strings and pass the same redaction as every other output. Its error messages are
+fixed text and never name a path: a redaction refusal exits 2 with run-relative labels only.
 
 ### Person names
 
