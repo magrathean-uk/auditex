@@ -34,7 +34,6 @@ from azure_tenant_audit.provider_runtime import (
     ProviderFinalizePlan,
     write_provider_bundle,
 )
-from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.rule_parameters import google_rule_parameters
 from azure_tenant_audit.run import build_coverage_ledger
 from azure_tenant_audit.secret_hygiene import redact_argv
@@ -667,10 +666,17 @@ def run_google_offline(
     except WaiverFileError as exc:
         LOG.error("%s", exc)
         return 2
-    target = resolve_resource_path(sample_path)
+    from azure_tenant_audit.resources import (
+        read_selected_resource,
+        selected_resource_record,
+    )
+
+    sample_default = "examples/google_workspace_sample.json"
+    # The run log names the file actually read (an operator's local copy, not the shipped sample of the same name),
+    # and never by an absolute workstation path.
+    sample_record = selected_resource_record(sample_path, default=sample_default)
     try:
-        from azure_tenant_audit.resources import read_selected_resource
-        sample_bytes = read_selected_resource(sample_path, default="examples/google_workspace_sample.json", field="sample")
+        sample_bytes = read_selected_resource(sample_path, default=sample_default, field="sample")
         sample = json.loads(sample_bytes.decode("utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
         LOG.error("Unable to load Google sample bundle.")
@@ -702,7 +708,7 @@ def run_google_offline(
     writer.log_event(
         "run.started",
         "Google Workspace offline run started",
-        {"mode": "offline", "platform": "google_workspace", "sample": str(target)},
+        {"mode": "offline", "platform": "google_workspace", **sample_record},
     )
     # ``null``, a list or an empty object under a collector's name is a collector that delivered nothing, not one that is
     # absent from the sample: it stays in the run, with every section it should have carried recorded as absent.
@@ -762,7 +768,7 @@ def run_google_offline(
         mode="offline",
         command_line=[],
         waiver_rows=waiver_rows,
-        replay=replay_source(target, data=sample_bytes),
+        replay=replay_source(sample_record["sample"], data=sample_bytes),
         as_of=as_of,
     )
 

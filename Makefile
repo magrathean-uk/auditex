@@ -64,10 +64,13 @@ doctor:
 
 AUDIT_DEPS_DIR ?= build/audit-deps
 AUDIT_DEPS_IGNORE ?= scripts/audit-deps-ignore.json
+# Pins PyPI publishes as a source archive only (no wheel): uv may prepare their metadata from the sdist, which runs
+# the package's build backend metadata hook but compiles nothing. Every other package must resolve from wheels.
+AUDIT_DEPS_SOURCE_ONLY ?= llama-cpp-python
 
 # Resolves the base install and every extra declared in pyproject.toml (read from it, so a new extra
 # is never skipped) to a pinned list with uv for the running interpreter and platform (metadata only:
-# --no-build forbids source distribution builds; no install into $(VENV)), then audits each list with
+# --only-binary :all: forbids source distribution builds; no install into $(VENV)), then audits each list with
 # pip-audit --no-deps --disable-pip. pip-audit lives in the dev extra and runs from a tool
 # environment under $(AUDIT_DEPS_DIR), never from $(VENV). Stale lists are removed first
 # so earlier pins never steer resolution; ignore entries need id, package, reason and decision (a DECISIONS.md id).
@@ -78,7 +81,8 @@ audit-deps:
 		out="$(AUDIT_DEPS_DIR)"; \
 		mkdir -p "$$out"; \
 		rm -f "$$out"/*.txt; \
-		resolve() { name=$$1; shift; uv pip compile --quiet --no-build --no-header --no-annotate --python "$(PYTHON)" "$$@" pyproject.toml -o "$$out/$$name.txt" || { echo "audit-deps: metadata-only resolution of $$name failed (--no-build forbids source builds; a dependency without a wheel needs a pin change)" >&2; exit 1; }; }; \
+		sdist_ok=""; for pkg in $(AUDIT_DEPS_SOURCE_ONLY); do sdist_ok="$$sdist_ok --no-binary $$pkg"; done; \
+		resolve() { name=$$1; shift; uv pip compile --quiet --only-binary :all: $$sdist_ok --no-header --no-annotate --python "$(PYTHON)" "$$@" pyproject.toml -o "$$out/$$name.txt" || { echo "audit-deps: metadata-only resolution of $$name failed (only $(AUDIT_DEPS_SOURCE_ONLY) may resolve from a source archive; any other dependency without a wheel needs a pin change)" >&2; exit 1; }; }; \
 		resolve base; \
 		extras=$$($(PYTHON) -c 'import tomllib; print(" ".join(tomllib.load(open("pyproject.toml", "rb"))["project"]["optional-dependencies"]))'); \
 		test -n "$$extras" || { echo "audit-deps: no extras read from pyproject.toml" >&2; exit 1; }; \

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -404,3 +405,48 @@ def test_the_one_step_extras_install_keeps_every_step_4_python_option() -> None:
     for form in step4_forms:
         assert form.removesuffix("auditex") + '"auditex[google,mcp]"' in step7_lines, form
     assert "--fetch-missing-python" in step7.split('pipx install "auditex[google,mcp]"', 1)[0]
+
+
+def _installed_with_direct_url(monkeypatch, direct_url: str) -> None:
+    class _Dist:
+        def read_text(self, name: str) -> str | None:
+            return direct_url if name == "direct_url.json" else None
+
+    monkeypatch.setattr("importlib.metadata.distribution", lambda name: _Dist())
+    monkeypatch.setattr(bootstrap, "_installed_from_file", _REAL_INSTALLED_FROM_FILE, raising=False)
+    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+
+
+# Wave-2 review of PR #193 (items 4 and 10): a wheel installed straight from its GitHub release URL was steered to the
+# package index when adding an extra, which can fetch a different release. The hint names the same wheel URL.
+def test_a_wheel_installed_from_a_release_url_hint_reinstalls_that_wheel(installed_package: Path, monkeypatch) -> None:
+    import shlex
+
+    url = "https://github.com/magrathean-uk/auditex/releases/download/v1.0.0/auditex-1.0.0-py3-none-any.whl"
+    _installed_with_direct_url(monkeypatch, json.dumps({"url": url, "archive_info": {"hash": "sha256=ab"}}))
+    assert shlex.split(bootstrap.extra_install_command("mcp")) == ["/usr/bin/python3", "-m", "pip", "install",
+                                                                   f"auditex[mcp] @ {url}"]
+    assert shlex.split(bootstrap.extra_install_command("mcp", for_record=True)) == ["python", "-m", "pip", "install",
+                                                                                    f"auditex[mcp] @ {url}"]
+    (installed_package / "pipx_metadata.json").write_text("{}", encoding="utf-8")
+    assert shlex.split(bootstrap.extra_install_command("mcp")) == ["pipx", "install", "--force",
+                                                                   f"auditex[mcp] @ {url}"]
+
+
+def test_a_url_install_hint_for_a_record_keeps_credentials_and_signed_queries_out(installed_package: Path,
+                                                                                  monkeypatch) -> None:
+    for url in ("https://user:tok3n@example.test/auditex-1.0.0-py3-none-any.whl",
+                "https://example.test/auditex-1.0.0-py3-none-any.whl?X-Sig=tok3n"):
+        _installed_with_direct_url(monkeypatch, json.dumps({"url": url, "archive_info": {}}))
+        recorded = bootstrap.extra_install_command("mcp", for_record=True)
+        assert "tok3n" not in recorded
+        assert "auditex wheel" in recorded
+
+
+def test_a_git_install_hint_reinstalls_the_same_commit(installed_package: Path, monkeypatch) -> None:
+    import shlex
+
+    _installed_with_direct_url(monkeypatch, '{"url": "https://github.com/magrathean-uk/auditex.git", "vcs_info": '
+                                            '{"vcs": "git", "commit_id": "abc123", "requested_revision": "v1.0.0"}}')
+    assert shlex.split(bootstrap.extra_install_command("mcp"))[-1] == (
+        "auditex[mcp] @ git+https://github.com/magrathean-uk/auditex.git@abc123")

@@ -78,7 +78,6 @@ from .partner_domains import PartnerDomains, PartnerDomainsError, load_partner_d
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
-from .resources import resolve_resource_path
 from .rule_parameters import effective_rule_parameters
 from .secret_hygiene import build_argument_parser
 from .sensitive_users import SensitiveUsers, SensitiveUsersError, load_sensitive_users
@@ -355,11 +354,14 @@ def run_offline(
     """Replay an offline sample. ``as_of`` pins the instant that stale sync and operating-system end of life are judged at."""
     sensitive_users = sensitive_users if sensitive_users is not None else SensitiveUsers()
     partner_domains = partner_domains if partner_domains is not None else PartnerDomains()
-    selected_sample = sample_path
-    sample_path = resolve_resource_path(sample_path)
+    from .resources import read_selected_resource, selected_resource_record
+
+    sample_default = "examples/sample_audit_bundle/sample_result.json"
+    # The run log names the file actually read (an operator's relative sample from the cwd, not a same-named path
+    # under the package root), and never by an absolute workstation path.
+    sample_record = selected_resource_record(sample_path, default=sample_default)
     try:
-        from .resources import read_selected_resource
-        sample_bytes = read_selected_resource(selected_sample, default="examples/sample_audit_bundle/sample_result.json", field="sample")
+        sample_bytes = read_selected_resource(sample_path, default=sample_default, field="sample")
         sample = json.loads(sample_bytes.decode("utf-8"))
     except (ValueError, OSError):
         LOG.error("Unable to load sample bundle.")
@@ -392,7 +394,7 @@ def run_offline(
         "Offline run started",
         {
             "mode": "offline",
-            "sample": str(sample_path),
+            **sample_record,
             "auditor_profile": auditor_profile,
             "plane": plane,
             "since": since,
@@ -533,7 +535,7 @@ def run_offline(
                 "rule_parameters": effective_rule_parameters(
                     stale_sync_days=stale_sync_days, break_glass_accounts=break_glass_accounts
                 ),
-                "replay_source": replay_source(sample_path, data=sample_bytes),
+                "replay_source": replay_source(sample_record["sample"], data=sample_bytes),
             },
             as_of=as_of,
         ),

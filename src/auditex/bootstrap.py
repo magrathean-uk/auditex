@@ -44,8 +44,8 @@ def _extra_installed(extra: str) -> bool:
         return False
 
 
-def _installed_from_file() -> str | None:
-    """The local wheel or sdist this Auditex was installed from (PEP 610 direct_url.json), or None for an index install."""
+def _direct_url() -> dict[str, Any] | None:
+    """This Auditex's PEP 610 direct_url.json, or None for an index install."""
     try:
         from importlib.metadata import PackageNotFoundError, distribution
 
@@ -56,12 +56,42 @@ def _installed_from_file() -> str | None:
         data = json.loads(text or "{}")
     except ValueError:
         return None
-    url = str(data.get("url") or "") if isinstance(data, dict) else ""
+    return data if isinstance(data, dict) and data.get("url") else None
+
+
+def _installed_from_file() -> str | None:
+    """The local wheel or sdist this Auditex was installed from (PEP 610 direct_url.json), or None for an index install."""
+    data = _direct_url()
+    url = str(data.get("url") or "") if data else ""
     if not url.startswith("file:") or "dir_info" in data:
         return None
     from urllib.parse import unquote, urlparse
 
     return unquote(urlparse(url).path) or None
+
+
+def _installed_from_url() -> str | None:
+    """The remote wheel, sdist or git commit this Auditex was installed from, as a PEP 508 direct-reference URL, or None
+    for an index or local-file install. A git install names the commit it got, so a reinstall gets the same code."""
+    data = _direct_url()
+    url = str(data.get("url") or "") if data else ""
+    if not url or url.startswith("file:") or "dir_info" in data:
+        return None
+    vcs = data.get("vcs_info")
+    if isinstance(vcs, dict):
+        kind, commit = str(vcs.get("vcs") or ""), str(vcs.get("commit_id") or "")
+        if not kind:
+            return None
+        return f"{kind}+{url}@{commit}" if commit else f"{kind}+{url}"
+    return url if "archive_info" in data else None
+
+
+def _url_fit_for_record(url: str) -> bool:
+    """A URL that may go into a run bundle: no user credentials and no query or fragment (a signed download link)."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    return not (parts.username or parts.password or parts.query or parts.fragment)
 
 
 def extra_install_command(extra: str, *, for_record: bool = False) -> str:
@@ -70,7 +100,8 @@ def extra_install_command(extra: str, *, for_record: bool = False) -> str:
     A source checkout takes an editable install in its folder. A pipx install is reinstalled with the extras it
     already has plus the new one (pipx keeps only the extras named on its last install). Any other environment
     installs through the interpreter that runs Auditex, never a bare `python` that may be another one. An Auditex
-    installed from a downloaded wheel or sdist names that file again, not the package index.
+    installed from a downloaded wheel or sdist names that file again, and one installed from a URL or git commit
+    names that URL or commit, not the package index.
 
     ``for_record`` gives a command that may be written into a run bundle: it never names a local path (the interpreter
     or the wheel file). In a plain environment it starts with a bare ``python``; ``extra_install_note`` says which one.
@@ -80,10 +111,15 @@ def extra_install_command(extra: str, *, for_record: bool = False) -> str:
     pipx = (Path(sys.prefix) / "pipx_metadata.json").is_file()
     extras = ",".join(sorted({name for name in _EXTRA_MODULES if _extra_installed(name)} | {extra})) if pipx else extra
     local_file = _installed_from_file()
+    remote = None if local_file else _installed_from_url()
     if local_file and for_record:
         local_file = "<downloaded auditex wheel>"
+    if remote and for_record and not _url_fit_for_record(remote):
+        remote, local_file = None, "<downloaded auditex wheel>"
     if local_file:
         spec = shlex.quote(f"{local_file}[{extras}]")
+    elif remote:
+        spec = shlex.quote(f"auditex[{extras}] @ {remote}")
     else:
         spec = f'"auditex[{extras}]"' if pipx else f"'auditex[{extras}]'"
     if pipx:

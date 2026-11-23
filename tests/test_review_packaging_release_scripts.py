@@ -156,3 +156,78 @@ def test_an_operator_path_ending_like_shipped_content_is_not_shipped(tmp_path, m
     monkeypatch.setenv(resources.RESOURCE_ROOT_ENV, str(tmp_path))
     assert not resources.is_shipped_resource("customer/configs/input.json")
     assert not resources.is_shipped_resource(tmp_path / "customer" / "configs" / "input.json")
+
+
+# Wave-2 bot review (PR #168): an operator's explicitly selected input that the CLI guard pinned is read from its own
+# path, even when it is shaped like shipped content (configs/customer.json); an implicit shipped default is not.
+def test_an_explicit_pinned_input_shaped_like_shipped_content_is_read_from_its_own_path(tmp_path, monkeypatch):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.guarded_io import guard_session, open_pinned_binary
+
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    (tmp_path / "configs").mkdir()
+    payload = {"collectors": {"operator_only": {"description": "mine", "enabled": True}}, "default_order": []}
+    (tmp_path / "configs" / "customer.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "configs" / "collector-definitions.json").write_text(json.dumps({"collectors": {}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with guard_session() as context:
+        with open_pinned_binary("configs/customer.json", field="config", context=context):
+            pass
+        assert list(CollectorConfig.from_path("configs/customer.json").collectors) == ["operator_only"]
+        # The implicit default, never pinned, still comes from the shipped root and not the same-named cwd file.
+        assert "operator_only" not in CollectorConfig.from_path("configs/collector-definitions.json").collectors
+        assert CollectorConfig.from_path("configs/collector-definitions.json").collectors
+
+
+def _run_started_details(run_root: Path) -> dict:
+    (log,) = run_root.glob("*/audit-log.jsonl")
+    events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line]
+    return next(event["details"] for event in events if event["event"] == "run.started")
+
+
+# Wave-2 review of PR #193 (item 8): after the pinned-input fix, a replay read the operator's relative sample from the
+# cwd but logged the same relative path resolved against the package root, an absolute checkout path to another (or
+# no) file. The log names the file actually read, as the operator gave it, and never an absolute workstation path.
+def test_an_m365_replay_logs_the_operator_sample_it_read_not_a_shipped_path(tmp_path, monkeypatch):
+    from azure_tenant_audit import cli
+
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    shipped = resources.resolve_resource_path("examples/sample_audit_bundle/sample_result.json")
+    work = tmp_path / "work"
+    (work / "examples" / "sample_audit_bundle").mkdir(parents=True)
+    selected = "examples/sample_audit_bundle/operator-review.json"
+    (work / selected).write_bytes(shipped.read_bytes())
+    monkeypatch.chdir(work)
+
+    assert cli.main(["--tenant-name", "acme", "--offline", "--sample", selected, "--out", "out"]) == 0
+    details = _run_started_details(work / "out")
+    assert details["sample"] == selected
+    assert details["sample_source"] == "operator"
+
+
+def test_an_m365_replay_of_the_shipped_default_logs_its_shipped_path(tmp_path, monkeypatch):
+    from azure_tenant_audit import cli
+
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["--tenant-name", "acme", "--offline", "--out", "out"]) == 0
+    details = _run_started_details(tmp_path / "out")
+    assert details["sample"] == cli.DEFAULT_SAMPLE
+    assert details["sample_source"] == "shipped"
+
+
+def test_a_google_replay_logs_the_local_copy_it_read_not_the_shipped_sample(tmp_path, monkeypatch):
+    from auditex import cli as auditex_cli
+
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    selected = "examples/google_workspace_sample.json"
+    (tmp_path / "examples").mkdir()
+    (tmp_path / selected).write_bytes(resources.resolve_resource_path(selected).read_bytes())
+    monkeypatch.chdir(tmp_path)
+
+    assert auditex_cli.main(["google", "run", "--offline", "--sample", selected, "--domain", "example.com",
+                             "--customer-id", "C123", "--tenant-name", "Example", "--out", "out"]) == 0
+    details = _run_started_details(tmp_path / "out")
+    assert details["sample"] == selected
+    assert details["sample_source"] == "operator"
