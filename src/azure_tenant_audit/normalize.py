@@ -2070,10 +2070,12 @@ def build_normalized_snapshot(
         # nodes, but a second observation must not erase its enabled state.
         service_principal_records[object_id] = {**consent_record, **service_principal_records.get(object_id, {})}
     service_principals = list(service_principal_records.values())
+    # Only a complete owner read gives an exact count: a list cut by a failed next page keeps its observed owners for
+    # the ownership edges, but its count is unknown, not the rows read so far.
     app_owners_by_sp_id = {
         str(item.get("servicePrincipalId")): item.get("owners", [])
         for item in _values(app_consent_payload, "servicePrincipalOwners")
-        if item.get("servicePrincipalId")
+        if item.get("servicePrincipalId") and item.get("collection_truncated") is not True
     }
     application_consents = [
         _record(
@@ -2086,8 +2088,8 @@ def build_normalized_snapshot(
             scope=item.get("scope"),
             consent_type=item.get("consentType"),
             principal_id=item.get("principalId"),
-            # None when the client's owners were never read (fan-out limit or a failed read), so an unread
-            # owner list is never reported as an app with no owners.
+            # None when the client's owners were never read in full (fan-out limit, a failed read or a cut page), so
+            # an unread owner list is never reported as an app with no owners.
             owner_count=(
                 len(app_owners_by_sp_id[str(item.get("clientId"))] or [])
                 if str(item.get("clientId")) in app_owners_by_sp_id
