@@ -560,7 +560,12 @@ def _ca_exists(policy_id, sp, sections):
                   "exemption_key_ambiguous", ["scuba_config"])
     ctl = [r for r in res if r[1]]
     if len(ctl) >= 2 and not restricted_pass:
-        gap = _shared_gap(c, [p for p, r in zip(objs, res, strict=True) if r[1]], sections, allowed_sets)
+        # A failing object whose control cannot be read may still carry it, so it joins the shared-gap test: the gap is definite only when every object
+        # that could carry the control shares it (review: an unreadable control on a narrow policy that includes the shared role kept the union possible).
+        # Such an object weakens the gap only for the roles, users and applications it may target (review: one scoped to a different app kept the gap).
+        carriers = [p for p, r in zip(objs, res, strict=True) if r[1]]
+        maybe = [p for p, r in zip(objs, res, strict=True) if not r[1] and _may_carry(c, p, sections, inventory)]
+        gap = _shared_gap(c, carriers, sections, allowed_sets, maybe)
         if gap == "role":
             return _rec(policy_id, "not_met", "no_policy_meets_requirement", f"Requirement not met: no Conditional Access policy meets every condition ({sp['what']}).", "no_policy_meets", None)
         if gap:
@@ -581,22 +586,63 @@ def _ca_exists(policy_id, sp, sections):
     return _rec(policy_id, "not_met", "no_policy_meets_requirement", f"Requirement not met: no Conditional Access policy meets every condition ({sp['what']}).", "no_policy_meets", None)
 
 
+def _may_carry(c, p, sections, inventory=None):
+    """True when no control (C) conjunct of the object is known false and no restriction is known: it may carry the control even where an unreadable value
+    keeps it from being shown to (`ctl` needs every C conjunct true and the restriction known absent)."""
+    return all(_conj(n, p, sections, inventory)[0] != "f" for n, k in c["conj"] if k == "C") and _restricted(c, p) is not True
+
+
 _EXCLUDED = {"users": (("Conditions", "Users", "ExcludeUsers"), "Users"), "groups": (("Conditions", "Users", "ExcludeGroups"), "Groups"),
              "apps": (("Conditions", "Applications", "ExcludeApplications"), "Applications")}
 
 
-def _shared_gap(c, ctl_objs, sections, allowed_sets):
+_APP_GROUPS = {"All", "Office365", "MicrosoftAdminPortals"}      # include values that name a set of applications, so they may target any one application
+
+
+def _empty(p, *path):
+    v = _lst(p, *path)
+    return v is not None and all(x == "None" for x in v)
+
+
+def _no_guests(p):
+    cond = p.get("Conditions")
+    u = cond.get("Users") if isinstance(cond, dict) else None
+    return isinstance(u, dict) and not _present(u.get("IncludeGuestsOrExternalUsers"))
+
+
+def _may_target(kind, p, x):
+    """False only when the object provably does not apply to the role, user or application `x` (`kind` as in `_EXCLUDED`, plus "roles"): its include lists are readable
+    and name neither `x` nor anything that may contain it. Group membership is not read, so a group is always possibly targeted, and so is a user or role holder where a
+    group, role, guest or other user is included (a user may hold the role or belong to the group)."""
+    users = ("Conditions", "Users")
+    if kind == "apps":
+        inc = _lst(p, "Conditions", "Applications", "IncludeApplications")
+        return inc is None or x in inc or bool(_APP_GROUPS & set(inc))
+    if kind == "roles":
+        inc = _lst(p, *users, "IncludeRoles")
+        return not (inc is not None and x not in inc and _empty(p, *users, "IncludeUsers") and _empty(p, *users, "IncludeGroups") and _no_guests(p))
+    if kind == "users":
+        inc = _lst(p, *users, "IncludeUsers")
+        return not (inc is not None and x not in inc and "All" not in inc and _empty(p, *users, "IncludeRoles") and _empty(p, *users, "IncludeGroups") and _no_guests(p))
+    return True
+
+
+def _shared_gap(c, ctl_objs, sections, allowed_sets, maybe_objs=()):
     """Review R027: the gap every control-carrying object shares, so no union of them can cover it; None when there is none. "role" when the row requires no
     excluded role and every object excludes the same role: a role exclusion is never exemptable, so the set fails as ScubaGear judges each object (no_policy_meets).
     "exclusion" when every object excludes the same user, group or application and it is not on the configured exemption list (the near miss of each object is then
     a near miss of the set). A list or exemption list that cannot be read is no shared gap (the union stays possible). Guest exclusions are not read here: they
     also name tenants, so the same guest type may be excluded for different tenants."""
-    def common(path):
+    def common(path, kind):
         lists = [_lst(p, *path) for p in ctl_objs]
         if any(v is None for v in lists):
             return set()
-        return set.intersection(*(set(v) for v in lists))
-    if any(n == "no_role_excl" for n, _ in c["conj"]) and common(("Conditions", "Users", "ExcludeRoles")):
+        shared = set.intersection(*(set(v) for v in lists))
+        for p in maybe_objs:
+            excl = _lst(p, *path) or []
+            shared = {x for x in shared if x in excl or not _may_target(kind, p, x)}
+        return shared
+    if any(n == "no_role_excl" for n, _ in c["conj"]) and common(("Conditions", "Users", "ExcludeRoles"), "roles"):
         return "role"
     for kind in c["ex"]:
         if kind not in _EXCLUDED:
@@ -605,7 +651,7 @@ def _shared_gap(c, ctl_objs, sections, allowed_sets):
         if kind not in allowed_sets:
             allowed_sets[kind] = _allowed_exemptions(sections, c["key"], cfgkey)
         allowed = allowed_sets[kind]
-        if allowed is not None and common(path) - allowed:
+        if allowed is not None and common(path, kind) - allowed:
             return "exclusion"
     return None
 

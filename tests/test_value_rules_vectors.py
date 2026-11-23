@@ -454,8 +454,19 @@ def test_optional_full_source_vectors():
     d94_controls = 0
     overlays_applied = set()
     # Review lane rules-followup: kit labels its rulings moved are mapped (review_relabel), and its constructed
-    # Built-In vectors reach the cells the kit predates.
-    for row in chain((review_relabel(row)[0] for row in _rows(Path(path))), review_vectors()):
+    # Built-In vectors reach the cells the kit predates, only for policies the source carries (a Stage 1-only
+    # source has none of them).
+    source_policies = set()
+
+    def source_rows():
+        for row in _rows(Path(path)):
+            source_policies.add(row["policy"])
+            yield review_relabel(row)[0]
+
+    def added_review_vectors():
+        yield from (row for row in review_vectors() if row["policy"] in source_policies)
+
+    for row in chain(source_rows(), added_review_vectors()):
         if row["policy"] not in STAGE_POLICIES:
             continue
         detail = precheck_policy(row["policy"], row["sections"], list(row["sections"]), value_rules=True)
@@ -607,3 +618,15 @@ def test_covered_vectors_never_reach_rule_not_implemented(rule_view, monkeypatch
     # Full cell reach is a production-view assertion; both routes must keep every covered vector in rules.
     if rule_view:
         assert all(set(cells_for(policy)) - {'rule_evaluation_failed'} <= cells for policy, cells in reached.items())
+
+
+def test_optional_full_source_vectors_accepts_a_stage1_only_source(tmp_path, monkeypatch):
+    """Wave 2 bot review (item 65): a source of only the Stage 1 policies is a supported mode; the review vectors for
+    policies the source does not carry are not appended to it."""
+    from test_value_rules_replay import SAMPLE
+    source = tmp_path / "vectors.jsonl"
+    rows = [row for row in _rows(SAMPLE) if row["policy"] in STAGE1_POLICIES]
+    assert rows and {row["policy"] for row in rows} == STAGE1_POLICIES
+    source.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    monkeypatch.setenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391", str(source))
+    test_optional_full_source_vectors()
