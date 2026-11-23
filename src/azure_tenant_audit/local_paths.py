@@ -1,23 +1,33 @@
 """Absolute local paths never reach a run bundle: one normaliser applied where bundle files are written.
 
 Every JSON, JSONL and log file the writer produces, and every text value of the SQLite evidence index, passes through
-``LocalPathScrubber``. An absolute path of the operator's machine becomes:
+``LocalPathScrubber``. It knows a fixed set of local folders, collected once per run, and replaces only those folders
+where a string starts with one (as an exact prefix followed by a path separator or the end of the name):
 
-- a path inside the run folder: run-relative (``raw/users.json``), the run folder itself its name;
-- a path under the user's home: ``~`` plus the rest (``~/audits/waivers.json``);
-- any other local path: its file or executable name only (``pwsh``, ``client.json``).
+- the run folder: removed, so a path inside it is run-relative (``raw/users.json``); the folder alone is its name;
+- the home folder: ``~`` (``~/audits/waivers.json``);
+- each absolute path on the command line (an input file, ``--out``): its last name (``client.json``);
+- the folder holding the run folder, the working and temporary folders, the folder of the PowerShell executable and of
+  each command-line path, and Python's install and library folders: removed, so a file directly inside one keeps its
+  name (``pwsh``) and anything deeper keeps the rest of its path as written.
 
-A path is recognised by a prefix the machine itself names (the run folder and the folder it sits in, the home, the
-working and temporary folders, the Python install and library folders, and each absolute path on the command line),
-POSIX or Windows style. Tenant evidence carries absolute paths of its own (Graph endpoints such as ``/users``,
-Intune and Defender path settings), so a path is never rewritten for its shape alone. Console output to the operator
-is not passed through here and may still name a path.
+Each folder is matched as written, resolved, with ``/`` for ``\\``, and in its JSON-escaped (and doubly escaped) form,
+so a Windows path quoted inside an error message is found too. A folder only one level below the root (``/tmp``,
+``/srv``, a home of ``/root``) is not used, apart from the run folder itself: tenant evidence uses such paths (an
+organisational unit ``/tmp/Archive``) and a path below one names no person or workstation.
+
+Every other string is left exactly as written. Tenant evidence carries absolute paths of its own (Graph endpoints
+such as ``/users``, organisational units such as ``/Sales/London``, URL queries, policy text), so nothing is rewritten
+for its shape alone. Console output to the operator is not passed through here and may still name a path. Log rows a
+resumed run folder already held from an older version are left as they were written.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import site
 import sys
 import sysconfig
@@ -26,19 +36,20 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-_RUN, _HOME, _OTHER = "run", "home", "other"
 _SEPARATORS = "/\\"
 # A character that can continue a path name: a prefix followed by one is a different folder (/tmp vs /tmpfoo), and a
-# prefix preceded by one is part of a longer path (/x/tmp is not /tmp).
+# prefix preceded by one (or by a separator) is part of a longer path (/x/tmp is not /tmp).
 _NAME_CHARS = r"A-Za-z0-9_.\-~"
-# Where a path written in running text ends; a path that is the whole value, a flag's value or quoted may hold spaces.
-_TEXT_END = re.compile(r"[\s'\"`,;()\[\]{}<>|]")
-_VALUE_END = re.compile(r"[\n\r\t'\"`]|: ")
-_FLAG_VALUE = re.compile(r"^-{1,2}[A-Za-z0-9][A-Za-z0-9_-]*=$")
-_TRAILING = ".,:;"
+# Replacement kinds, in the order that wins when two kinds name the same folder.
+_RUN, _HOME, _NAMED, _OTHER = 0, 1, 2, 3
+
+
+def _escaped(text: str) -> str:
+    return json.dumps(text, ensure_ascii=False)[1:-1]
 
 
 def _variants(path: str | os.PathLike[str] | None) -> set[str]:
+    """``path`` as written, resolved and with ``/`` separators: the forms a run can write it in."""
     if not path:
         return set()
     text = os.fspath(path)
@@ -65,6 +76,10 @@ def _depth(text: str) -> int:
     return len([part for part in re.split(r"[\\/]", text) if part and not re.fullmatch(r"[A-Za-z]:", part)])
 
 
+def _last_name(text: str) -> str:
+    return re.split(r"[\\/]", text.rstrip(_SEPARATORS))[-1]
+
+
 def _interpreter_folders() -> set[str]:
     """Python's install and library folders (a library error names a file there); too-shallow ones (``/usr``) skipped."""
     found: set[str] = set()
@@ -82,19 +97,25 @@ def _interpreter_folders() -> set[str]:
     return {item for item in found if _depth(item) >= 3}
 
 
-def _argv_paths(argv: Iterable[str]) -> set[str]:
-    found: set[str] = set()
+def _argv_paths(argv: Iterable[str]) -> list[str]:
+    found: list[str] = []
     for item in argv:
         if not isinstance(item, str):
             continue
         value = item.partition("=")[2] if item.startswith("-") and "=" in item else item
-        if _is_absolute(value):
-            found |= _variants(value)
+        if _is_absolute(value) and not _is_root(value):
+            found.append(value)
     return found
 
 
+def _parent(text: str) -> str:
+    stripped = text.rstrip(_SEPARATORS)
+    cut = max(stripped.rfind("/"), stripped.rfind("\\"))
+    return stripped[:cut] if cut > 0 else ""
+
+
 class LocalPathScrubber:
-    """Rewrite the operator's absolute local paths in a value bound for a run bundle (see the module docstring)."""
+    """Replace this run's known local folders in a value bound for a run bundle (see the module docstring)."""
 
     def __init__(
         self,
@@ -107,36 +128,55 @@ class LocalPathScrubber:
         run_text = os.fspath(run_dir)
         if not _is_absolute(run_text):
             run_text = os.path.abspath(run_text)
-        self.run_name = re.split(r"[\\/]", run_text.rstrip(_SEPARATORS))[-1]
-        self._run = _variants(run_text)
-        home_text = os.fspath(home) if home is not None else os.path.expanduser("~")
-        self._home = _variants(home_text) if _depth(home_text) >= 1 else set()
+        self.run_name = _last_name(run_text)
+        # Folder form -> (kind, the name a named path renders as).
+        self._known: dict[str, tuple[int, str]] = {}
+        self._add(_RUN, run_text, deep_only=False)
+        self._add(_HOME, os.fspath(home) if home is not None else os.path.expanduser("~"))
+        folders: list[str] = []
         if others is None:
-            other: set[str] = set()
-            other |= _variants(os.path.dirname(run_text.rstrip(_SEPARATORS)))
+            folders.append(_parent(run_text))
             try:
-                other |= _variants(os.getcwd())
+                folders.append(os.getcwd())
             except OSError:
                 pass
-            other |= _variants(tempfile.gettempdir())
-            other |= _interpreter_folders()
+            folders.append(tempfile.gettempdir())
+            pwsh = shutil.which("pwsh")
+            if pwsh:
+                folders.append(os.path.dirname(pwsh))
+            folders.extend(_interpreter_folders())
         else:
-            other = {item for value in others for item in _variants(value)}
-        other |= _argv_paths(sys.argv if argv is None else argv)
-        prefixes = sorted(self._run | self._home | other, key=len, reverse=True)
+            folders.extend(os.fspath(item) for item in others)
+        for path in _argv_paths(sys.argv if argv is None else argv):
+            self._add(_NAMED, path)
+            folders.append(_parent(path))
+        for folder in folders:
+            self._add(_OTHER, folder)
+        forms = sorted(self._known, key=len, reverse=True)
         self._pattern = (
             re.compile(
-                rf"(?<![{_NAME_CHARS}/\\])(?:{'|'.join(re.escape(item) for item in prefixes)})(?![{_NAME_CHARS}])"
+                rf"(?<![{_NAME_CHARS}/\\])(?P<prefix>{'|'.join(re.escape(item) for item in forms)})"
+                rf"(?:(?P<sep>[\\/]+)|(?![{_NAME_CHARS}]))"
             )
-            if prefixes
+            if forms
             else None
         )
+
+    def _add(self, kind: int, path: str, *, deep_only: bool = True) -> None:
+        if not path or (deep_only and _depth(path) < 2):
+            return
+        name = _last_name(path)
+        for form in _variants(path):
+            for written in (form, _escaped(form), _escaped(_escaped(form))):
+                held = self._known.get(written)
+                if held is None or kind < held[0]:
+                    self._known[written] = (kind, name)
 
     def __call__(self, value: Any) -> Any:
         return self.scrub(value)
 
     def scrub(self, value: Any) -> Any:
-        """``value`` with every local path rewritten; strings in lists, tuples and mapping keys and values included."""
+        """``value`` with every known local folder replaced; strings in lists, tuples and mapping keys included."""
         if isinstance(value, str):
             return self.text(value)
         if isinstance(value, dict):
@@ -158,59 +198,18 @@ class LocalPathScrubber:
     def text(self, value: str) -> str:
         if self._pattern is None or ("/" not in value and "\\" not in value):
             return value
-        parts: list[str] = []
-        position = 0
-        for match in self._pattern.finditer(value):
-            start = match.start()
-            if start < position:
-                continue
-            end = self._token_end(value, start, match.end())
-            token = value[start:end]
-            trailing = ""
-            if not self._is_value(value, start):
-                while token and token[-1] in _TRAILING and len(token) > match.end() - start:
-                    trailing = token[-1] + trailing
-                    token = token[:-1]
-            parts.append(value[position:start])
-            parts.append(self._render(token) + trailing)
-            position = end
-        if not parts:
-            return value
-        parts.append(value[position:])
-        return "".join(parts)
+        return self._pattern.sub(self._render, value)
 
-    @staticmethod
-    def _is_value(value: str, start: int) -> bool:
-        """The path opens the string, a ``--flag=`` value or a quotation, so it ends only where the value does."""
-        return start == 0 or bool(_FLAG_VALUE.match(value[:start])) or value[start - 1] in "'\"`"
-
-    def _token_end(self, value: str, start: int, prefix_end: int) -> int:
-        if start > 0 and value[start - 1] in "'\"`":
-            close = value.find(value[start - 1], prefix_end)
-            return len(value) if close < 0 else close
-        ender = _VALUE_END if self._is_value(value, start) else _TEXT_END
-        found = ender.search(value, prefix_end)
-        return len(value) if found is None else found.start()
-
-    def _render(self, token: str) -> str:
-        for prefix in sorted(self._run, key=len, reverse=True):
-            rest = _rest(token, prefix)
-            if rest is not None:
-                return rest.replace("\\", "/") if rest else self.run_name
-        for prefix in sorted(self._home, key=len, reverse=True):
-            rest = _rest(token, prefix)
-            if rest is not None:
-                return "~/" + rest.replace("\\", "/") if rest else "~"
-        name = re.split(r"[\\/]", token.rstrip(_SEPARATORS))[-1]
-        return name or "<local-path>"
-
-
-def _rest(token: str, prefix: str) -> str | None:
-    if token == prefix:
-        return ""
-    if token.startswith(prefix) and token[len(prefix)] in _SEPARATORS:
-        return token[len(prefix):].lstrip(_SEPARATORS)
-    return None
+    def _render(self, match: re.Match[str]) -> str:
+        kind, name = self._known[match.group("prefix")]
+        inside = match.group("sep") is not None
+        if kind == _RUN:
+            return "" if inside else self.run_name
+        if kind == _HOME:
+            return "~/" if inside else "~"
+        if kind == _NAMED:
+            return f"{name}/" if inside else name
+        return "" if inside else "<local-path>"
 
 
 def path_names(value: Any) -> Any:
@@ -221,10 +220,30 @@ def path_names(value: Any) -> Any:
     """
     if isinstance(value, str):
         if _is_absolute(value) and not _is_root(value):
-            return re.split(r"[\\/]", value.rstrip(_SEPARATORS))[-1]
+            return _last_name(value)
         return value
     if isinstance(value, dict):
         return {key: path_names(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [path_names(item) for item in value]
     return value
+
+
+# An absolute path written in running text: it starts at a word boundary (not inside a URL or a longer path) and ends
+# at white space or a quotation mark.
+_PATH_IN_TEXT = re.compile(r"(?<![\w.~:/\\-])(?:[A-Za-z]:[\\/]|/)[^\s'\"`]+")
+
+
+def path_names_in_text(text: str) -> str:
+    """``text`` with every absolute path in it reduced to its last name.
+
+    Only for a local diagnostic that holds no tenant text (a PowerShell module lookup on the operator's machine): it
+    rewrites by shape, which tenant evidence must never be.
+    """
+
+    def name(match: re.Match[str]) -> str:
+        token = match.group(0)
+        stripped = token.rstrip(".,;:)]")
+        return (_last_name(stripped) or stripped) + token[len(stripped):]
+
+    return _PATH_IN_TEXT.sub(name, text)

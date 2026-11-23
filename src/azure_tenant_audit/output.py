@@ -161,9 +161,11 @@ class AuditLogger:
         # the UTF-8 log line can be written, and the count joins the run's data-quality note.
         payload, replaced = _valid_text(payload)
         listener_payload = payload
-        payload = self.local_paths(payload)
-        # A detail that is not JSON (an exception object) is written as its str(), which can carry one too.
-        line, more = _valid_text(self.local_paths.text(json.dumps(payload, default=str, ensure_ascii=False)))
+        # A detail that is not JSON (an exception, a Path) becomes its str() first, so the normaliser reads it as one
+        # string; the line is then serialised from the normalised value, never edited as text (a quote in a path).
+        plain, more = _valid_text(json.loads(json.dumps(payload, default=str, ensure_ascii=False)))
+        payload = self.local_paths(plain)
+        line = json.dumps(payload, ensure_ascii=False)
         if replaced + more and self.on_replaced is not None:
             self.on_replaced(replaced + more)
         with _open_private(self.jsonl_path, "a") as handle:
@@ -173,7 +175,7 @@ class AuditLogger:
                 handle.write(line + "\n")
         with _open_private(self.debug_path, "a") as handle:
             debug = f"[{payload['ts_utc']}] {payload['event']}: {payload['message']} {payload['details']}\n"
-            handle.write(self.local_paths.text(_valid_text(debug)[0]))
+            handle.write(_valid_text(debug)[0])
         LOG.debug("%s: %s", payload["event"], payload["message"])
         if self.listener is not None:
             try:

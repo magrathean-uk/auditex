@@ -317,11 +317,13 @@ def test_the_normaliser_makes_run_paths_relative_home_paths_tilde_and_others_a_b
     assert scrub("/w/op place/out/T-run") == "T-run"
     assert scrub({"f": ["/w/op place/out/T-run/raw/a.json"]}) == {"f": ["raw/a.json"]}
     assert scrub("/home/op/audits/waivers.json") == "~/audits/waivers.json"
-    assert scrub("/opt/tools/bin/pwsh -NoLogo") == "pwsh -NoLogo"
-    assert scrub("Permission denied: '/opt/tools/lib/x y/doc.json'") == "Permission denied: 'doc.json'"
+    assert scrub("/opt/tools/pwsh -NoLogo") == "pwsh -NoLogo"
+    assert scrub("/opt/tools/bin/pwsh -NoLogo") == "bin/pwsh -NoLogo"
+    assert scrub("Permission denied: '/opt/tools/lib/x y/doc.json'") == "Permission denied: 'lib/x y/doc.json'"
     assert scrub("see /home/op/a.json.") == "see ~/a.json."
     assert scrub(["--out=/data/a b/out", "/srv/k.pem", "/x/auditex/__main__.py"]) == ["--out=out", "k.pem",
                                                                                       "__main__.py"]
+    assert scrub("/data/a b/other.json") == "other.json"
     for tenant in ("/users/abc", "https://graph.microsoft.com/v1.0/users", "/tmpfoo", "/Library/Preferences/x",
                    "C:\\Temp\\exclusion", "/opt/toolsets/x"):
         assert scrub(tenant) == tenant
@@ -330,11 +332,11 @@ def test_the_normaliser_makes_run_paths_relative_home_paths_tilde_and_others_a_b
 def test_the_normaliser_reads_windows_style_paths() -> None:
     from azure_tenant_audit.local_paths import LocalPathScrubber
 
-    scrub = LocalPathScrubber("C:\\Profiles\\op\\out\\T-run", home="C:\\Profiles\\op", others=["D:\\tools"], argv=[])
-    assert scrub("C:\\Profiles\\op\\out\\T-run\\raw\\a.json") == "raw/a.json"
+    scrub = LocalPathScrubber("C:\\Profiles\\op\\out\\T-run", home="C:\\Profiles\\op", others=["D:\\tools\\ps7"], argv=[])
+    assert scrub("C:\\Profiles\\op\\out\\T-run\\raw\\a.json") == "raw\\a.json"
     assert scrub("C:/Profiles/op/out/T-run") == "T-run"
-    assert scrub("C:\\Profiles\\op\\inputs\\client.json") == "~/inputs/client.json"
-    assert scrub("D:\\tools\\pwsh.exe -NoLogo") == "pwsh.exe -NoLogo"
+    assert scrub("C:\\Profiles\\op\\inputs\\client.json") == "~/inputs\\client.json"
+    assert scrub("D:\\tools\\ps7\\pwsh.exe -NoLogo") == "pwsh.exe -NoLogo"
     assert scrub("C:\\Temp\\exclusion") == "C:\\Temp\\exclusion"
 
 
@@ -365,3 +367,79 @@ def test_the_probe_records_powershell_checks_by_executable_name(monkeypatch: pyt
     commands = [row["command"] for row in rows if row.get("command")]
     assert len(commands) == 2 and all(command.startswith("pwsh -NoLogo") for command in commands)
     assert SYSTEM_PWSH not in json.dumps(rows)
+
+
+# Repair round 2 of PR #194: the normaliser replaces only the known local prefixes of this run and leaves every other
+# string as written. Tenant evidence holds absolute paths of its own (an organisational unit, a URL query, policy text).
+
+TENANT_TEXT = [
+    "/Sales/London",
+    "/tmp/Archive",
+    "https://contoso.sharepoint.com/sites/IT?folder=/tmp/Archive&view=grid",
+    "The tenant excludes /tmp/Archive from this scan",
+    "/home/opal/shared",
+    "/w/op place/out/T-runner/x",
+]
+
+
+def test_the_normaliser_leaves_tenant_paths_urls_and_policy_text_as_written() -> None:
+    from azure_tenant_audit.local_paths import LocalPathScrubber
+
+    scrub = LocalPathScrubber("/w/op place/out/T-run", home="/home/op", others=["/tmp", "/var/tmp/op"], argv=[])
+    for tenant in TENANT_TEXT:
+        assert scrub(tenant) == tenant
+    assert scrub({"/tmp/policy/Archive": 1, "Archive": 2}) == {"/tmp/policy/Archive": 1, "Archive": 2}
+    # Only the known prefix goes; whatever follows it is kept as written.
+    assert scrub("/var/tmp/op/lib/x y/doc.json") == "lib/x y/doc.json"
+    assert scrub("excludes /home/op/a.json.") == "excludes ~/a.json."
+
+
+def test_an_offline_google_run_keeps_tenant_organisational_unit_paths(
+        operator_root: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: "/tmp")  # the standard Linux temporary folder
+    sample = json.loads(GOOGLE_SAMPLE.read_text(encoding="utf-8"))
+    units = sample["google_directory"]["orgUnits"]["value"]
+    units.append({**units[0], "name": "Archive", "orgUnitPath": "/tmp/Archive", "orgUnitId": "id:archive"})
+    units.append({**units[0], "name": "London", "orgUnitPath": "/Sales/London", "orgUnitId": "id:london"})
+    users = sample["google_directory"]["users"]["value"]
+    users[0]["orgUnitPath"] = "/tmp/Archive"
+    users[1]["orgUnitPath"] = "/Sales/London"
+    sample_path = operator_root / "inputs" / "google.json"
+    sample_path.write_text(json.dumps(sample), encoding="utf-8")
+    out = operator_root / "out"
+    rc = _run(["google", "run", "--offline", "--sample", str(sample_path), "--domain", "example.com",
+               "--tenant-name", "G", "--run-name", "ou", "--out", str(out)], capsys)
+    assert rc in (0, 1)
+    run_dir = out / "G-ou"
+    _assert_clean(run_dir, operator_root)
+    for needle in ("/tmp/Archive", "/Sales/London"):
+        holding = _files_holding(run_dir, (needle,))
+        assert any(name.startswith("raw/") for name in holding), (needle, holding)
+        assert any(name.startswith("normalized/") for name in holding), (needle, holding)
+        assert "index/evidence.sqlite" in holding, (needle, holding)
+
+
+def test_the_normaliser_reads_escaped_windows_paths_in_error_text() -> None:
+    from azure_tenant_audit.local_paths import LocalPathScrubber
+
+    scrub = LocalPathScrubber("C:\\Profiles\\op\\out\\T-run", home="C:\\Profiles\\op", others=[], argv=[])
+    error = str(PermissionError(13, "Permission denied", "C:\\Profiles\\op\\inputs\\client.json"))
+    assert scrub(error) == "[Errno 13] Permission denied: '~/inputs\\\\client.json'"
+    assert scrub(json.dumps(error)) == json.dumps("[Errno 13] Permission denied: '~/inputs\\\\client.json'")
+
+
+def test_an_audit_log_line_stays_json_with_a_quoted_path_detail(tmp_path: Path) -> None:
+    from azure_tenant_audit.local_paths import LocalPathScrubber
+    from azure_tenant_audit.output import AuditLogger
+
+    run_dir = tmp_path / "op place" / "out" / "T-run"
+    run_dir.mkdir(parents=True)
+    scrub = LocalPathScrubber(run_dir, home="/nonexistent-home/op", others=[tmp_path / "op place"], argv=[])
+    logger = AuditLogger(run_dir, local_paths=scrub)
+    logger.log("x.event", "detail with a quote", {"path": tmp_path / "op place" / 'project"blue' / "client.json"})
+    for name in ("audit-log.jsonl",):
+        lines = (run_dir / name).read_text(encoding="utf-8").splitlines()
+        assert [json.loads(line)["details"]["path"] for line in lines] == ['project"blue/client.json']
+    assert str(tmp_path) not in (run_dir / "audit-debug.log").read_text(encoding="utf-8")
