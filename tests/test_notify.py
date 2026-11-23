@@ -277,7 +277,7 @@ def test_jira_dedup_search_reports_a_malformed_first_hit_as_failed(monkeypatch) 
     """A 200 reply whose first hit is not a usable issue is not a clean miss: dedup must show as skipped."""
     from auditex.notify import _SEARCH_FAILED, _jira_search_existing
 
-    for issues in ([None], [{}], [{"key": ""}], [{"key": 7}]):
+    for issues in ([None], [{}], [{"key": ""}], [{"key": 7}], [{"key": "not a key"}], [{"key": "SEC-0"}], [{"key": "SEC"}]):
         _search_with(monkeypatch, {"issues": issues})
         assert _jira_search_existing("https://jira.example", "SEC", "label", ("u", "t")) == (None, _SEARCH_FAILED)
 
@@ -295,7 +295,7 @@ def test_jira_dedup_search_keeps_an_empty_result_and_a_real_hit(monkeypatch) -> 
 def test_github_dedup_search_reports_a_malformed_first_hit_as_failed(monkeypatch) -> None:
     from auditex.notify import _SEARCH_FAILED, _github_search_existing_issue
 
-    for items in ([None], ["x"], [{}]):
+    for items in ([None], ["x"], [{}], [{"number": 0}], [{"number": -1}], [{"number": True}]):
         _search_with(monkeypatch, {"items": items})
         assert _github_search_existing_issue("https://api.github.example", "o/r", "fp", "t") == (None, None, _SEARCH_FAILED)
 
