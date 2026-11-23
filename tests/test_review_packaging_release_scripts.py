@@ -156,3 +156,25 @@ def test_an_operator_path_ending_like_shipped_content_is_not_shipped(tmp_path, m
     monkeypatch.setenv(resources.RESOURCE_ROOT_ENV, str(tmp_path))
     assert not resources.is_shipped_resource("customer/configs/input.json")
     assert not resources.is_shipped_resource(tmp_path / "customer" / "configs" / "input.json")
+
+
+# Wave-2 bot review (PR #168): an operator's explicitly selected input that the CLI guard pinned is read from its own
+# path, even when it is shaped like shipped content (configs/customer.json); an implicit shipped default is not.
+def test_an_explicit_pinned_input_shaped_like_shipped_content_is_read_from_its_own_path(tmp_path, monkeypatch):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.guarded_io import guard_session, open_pinned_binary
+
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    (tmp_path / "configs").mkdir()
+    payload = {"collectors": {"operator_only": {"description": "mine", "enabled": True}}, "default_order": []}
+    (tmp_path / "configs" / "customer.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "configs" / "collector-definitions.json").write_text(json.dumps({"collectors": {}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with guard_session() as context:
+        with open_pinned_binary("configs/customer.json", field="config", context=context):
+            pass
+        assert list(CollectorConfig.from_path("configs/customer.json").collectors) == ["operator_only"]
+        # The implicit default, never pinned, still comes from the shipped root and not the same-named cwd file.
+        assert "operator_only" not in CollectorConfig.from_path("configs/collector-definitions.json").collectors
+        assert CollectorConfig.from_path("configs/collector-definitions.json").collectors

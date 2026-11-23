@@ -133,7 +133,11 @@ def read_selected_resource(path: str | Path, *, default: str, field: str) -> byt
 
     context = current_context()
     pinned = context is not None and context._absolute(path) in context._pinned
-    if not pinned and (str(path) == default or is_shipped_resource(path)):
+    if pinned:
+        # The operator selected this file and the CLI guard admitted it at its own path: read exactly that file, even
+        # when it is shaped like shipped content, which resolve_resource_path would send to the resource roots.
+        return read_guarded_bytes(path, field=field)
+    if str(path) == default or is_shipped_resource(path):
         return resolve_resource_path(path).read_bytes()
     return read_guarded_bytes(resolve_resource_path(path), field=field)
 
