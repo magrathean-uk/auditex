@@ -127,19 +127,46 @@ def _is_shipped_directory(relative: Path) -> bool:
     return bool(parts) and any(PurePosixPath(directory).parts[: len(parts)] == parts for directory in shipped_directories())
 
 
-def read_selected_resource(path: str | Path, *, default: str, field: str) -> bytes:
-    """Keep the shipped default route; admit explicit alternate local inputs."""
-    from .guarded_io import current_context, read_guarded_bytes
+def _selected_resource(path: str | Path, *, default: str) -> tuple[Path, bool, bool]:
+    """The file a selected input is read from, whether the CLI guard pinned it and whether it is shipped content."""
+    from .guarded_io import current_context
 
     context = current_context()
-    pinned = context is not None and context._absolute(path) in context._pinned
-    if pinned:
+    if context is not None and context._absolute(path) in context._pinned:
         # The operator selected this file and the CLI guard admitted it at its own path: read exactly that file, even
         # when it is shaped like shipped content, which resolve_resource_path would send to the resource roots.
-        return read_guarded_bytes(path, field=field)
+        return Path(context._absolute(path)), True, False
     if str(path) == default or is_shipped_resource(path):
-        return resolve_resource_path(path).read_bytes()
-    return read_guarded_bytes(resolve_resource_path(path), field=field)
+        return resolve_resource_path(path), False, True
+    return resolve_resource_path(path), False, False
+
+
+def read_selected_resource(path: str | Path, *, default: str, field: str) -> bytes:
+    """Keep the shipped default route; admit explicit alternate local inputs."""
+    from .guarded_io import read_guarded_bytes
+
+    target, pinned, shipped = _selected_resource(path, default=default)
+    if pinned:
+        return read_guarded_bytes(path, field=field)
+    if shipped:
+        return target.read_bytes()
+    return read_guarded_bytes(target, field=field)
+
+
+def selected_resource_record(path: str | Path, *, default: str) -> dict[str, str]:
+    """How a run log names the input ``read_selected_resource`` reads, with no workstation path: shipped content by its
+    path inside the package, an operator's file by the relative path they gave (an absolute one by its file name)."""
+    target, _pinned, shipped = _selected_resource(path, default=default)
+    if shipped:
+        for adapter in _resource_adapters():
+            try:
+                return {"sample": target.relative_to(adapter.root).as_posix(), "sample_source": "shipped"}
+            except ValueError:
+                continue
+        return {"sample": target.name, "sample_source": "shipped"}
+    given = Path(path).expanduser()
+    label = given.as_posix() if not given.is_absolute() and ".." not in given.parts else target.name
+    return {"sample": label, "sample_source": "operator"}
 
 
 def is_shipped_resource(path: str | Path) -> bool:
