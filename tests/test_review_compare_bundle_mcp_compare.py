@@ -649,3 +649,43 @@ def test_diff_gives_an_anonymous_row_and_a_row_whose_id_matches_its_position_dif
     by_key = {row["key"]: row["after"]["v"] for row in things["changed"]}
     assert by_key["things:0"] == "explicit changed"
     assert things["duplicate_keys"] == ["things:0"]
+
+
+def test_cli_diff_blocks_a_normalised_artifact_whose_records_are_not_a_list(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_a, run_b = _pair(tmp_path, later_identity="complete")
+    _write(run_a / "normalized" / "policies.json", {"kind": "policies", "records": [{"id": "p1"}]})
+    _write(run_b / "normalized" / "policies.json", {"kind": "policies", "records": {"id": "p1"}})
+
+    code, result = _cli_diff(run_a, run_b, capsys)
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "run_evidence_malformed:current"
+    assert "changes" not in result or result["changes"] == {}
+    assert code == 1
+
+
+@pytest.mark.parametrize(
+    ("relative", "content"),
+    [
+        ("reports/report-pack.json", "{not json"),
+        ("reports/report-pack.json", json.dumps({"findings": {"id": FINDING["id"]}})),
+        ("findings/findings.json", "{not json"),
+    ],
+)
+def test_cli_diff_blocks_a_legacy_run_whose_findings_cannot_be_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], relative: str, content: str
+) -> None:
+    run_a = _legacy_run(tmp_path, "run-a", "2026-10-01T00:00:00Z", FINDING)
+    run_b = _legacy_run(tmp_path, "run-b", "2026-10-02T00:00:00Z", FINDING)
+    if relative == "findings/findings.json":
+        (run_b / "reports" / "report-pack.json").unlink()
+    (run_b / relative).write_text(content, encoding="utf-8")
+
+    code, result = _cli_diff(run_a, run_b, capsys)
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "run_evidence_malformed:current"
+    assert "drift_summary" not in result
+    assert code == 1

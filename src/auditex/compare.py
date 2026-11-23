@@ -220,6 +220,11 @@ def _compare_pair(
         # sealed bundle is, rather than the comparison failing.
         side = "baseline" if os.path.realpath(exc.run_dir) == os.path.realpath(left_run["path"]) else "current"
         return _blocked_diff(left_run, right_run, f"run_evidence_malformed:{side}")
+    for side, run in (("baseline", left_run), ("current", right_run)):
+        # A finding artifact that cannot be read holds unknown findings, not none: reading it as empty would call every
+        # baseline finding resolved (or every later one new), so the pair is blocked and says which run it was.
+        if RunBundle(Path(str(run["path"]))).unreadable_finding_source():
+            return _blocked_diff(left_run, right_run, f"run_evidence_malformed:{side}")
     delta, shared = _finding_delta_and_drift(left_run, right_run)
     diff["drift_summary"] = _reassessed_drift_summary({**(diff.get("drift_summary") or {}), **shared}, delta)
     # The markdown renders this snapshot, so it gives the same answer as the JSON even if the evidence changes later.

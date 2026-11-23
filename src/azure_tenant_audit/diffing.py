@@ -14,10 +14,11 @@ from .waivers import accepted_risk_summary, is_accepted_status
 
 
 class MalformedRunEvidence(ValueError):
-    """A regular, admitted normalised artifact that is not a JSON object; the comparison cannot read it."""
+    """A regular, admitted artifact the comparison cannot read: a normalised artifact that is not a JSON object or
+    whose records are not a list, or a report pack that is not a JSON object with a findings list."""
 
     def __init__(self, run_dir: Path, relative: str) -> None:
-        super().__init__(f"normalised artifact {relative} is not a JSON object")
+        super().__init__(f"run artifact {relative} is not readable JSON of its shape")
         self.run_dir = run_dir
         self.relative = relative
 
@@ -33,10 +34,20 @@ def _load_json(run_dir: Path, relative: str) -> dict[str, Any]:
 
 
 def _load_findings(run_dir: Path) -> list[dict[str, Any]]:
-    pack = _load_json(run_dir, "reports/report-pack.json")
-    rows = pack.get("findings") if isinstance(pack, dict) else []
+    """The report pack's findings. A pack that is present but not a JSON object with a findings list holds unknown
+    findings, not none, so it raises ``MalformedRunEvidence`` rather than reading as a run whose findings all went."""
+    relative = "reports/report-pack.json"
+    try:
+        payload = json.loads(read_run_file(run_dir, relative).decode("utf-8"))
+    except FileNotFoundError:
+        return []
+    except UnsafeRunFileError:
+        raise
+    except (OSError, ValueError):
+        raise MalformedRunEvidence(run_dir, relative) from None
+    rows = payload.get("findings", []) if isinstance(payload, dict) else None
     if not isinstance(rows, list):
-        rows = []
+        raise MalformedRunEvidence(run_dir, relative)
     return [dict(item) for item in rows if isinstance(item, dict)]
 
 
@@ -289,7 +300,8 @@ def _load_records(run_dir: Path, path: Path) -> tuple[str, list[dict[str, Any]]]
     kind = str(payload.get("kind") or path.stem)
     records = payload.get("records", [])
     if not isinstance(records, list):
-        records = []
+        # Present but not a list: the rows are unknown, not gone, so they must not read as removed.
+        raise MalformedRunEvidence(run_dir, relative.as_posix())
     return kind, [item for item in records if isinstance(item, dict)]
 
 
