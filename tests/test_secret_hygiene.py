@@ -442,7 +442,46 @@ def test_regular_file_swapped_in_after_the_write_is_not_installed(tmp_path, monk
         def close(self) -> None:
             self.handle.close()
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            self.handle.close()
+
     monkeypatch.setattr(os, "fdopen", lambda *a, **k: _ReplaceOnFlush(real_fdopen(*a, **k)))
     with pytest.raises(PermissionError, match="secret_folder_refused"):
         secure_write_text(folder / "token.json", "secret")
     assert not (folder / "token.json").exists()
+
+
+@_posix_owner
+def test_written_file_stays_open_through_the_identity_check_and_the_rename(tmp_path, monkeypatch) -> None:
+    # While the descriptor is open the written inode cannot be freed, so its number cannot be reused by anything put
+    # where the temporary file was (Linux reuses a freed inode number at once).
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    handles: list = []
+    seen: list[tuple[str, bool]] = []
+    real_fdopen, real_stat, real_rename = os.fdopen, os.stat, os.rename
+
+    def fdopen(*args, **kwargs):
+        handles.append(real_fdopen(*args, **kwargs))
+        return handles[-1]
+
+    def stat_(path, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None and handles:
+            seen.append(("stat", handles[-1].closed))
+        return real_stat(path, *args, **kwargs)
+
+    def rename(src, dst, *args, **kwargs):
+        if kwargs.get("src_dir_fd") is not None and handles:
+            seen.append(("rename", handles[-1].closed))
+        return real_rename(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    monkeypatch.setattr(os, "stat", stat_)
+    monkeypatch.setattr(os, "rename", rename)
+    secure_write_text(folder / "token.json", "secret")
+    assert ("stat", False) in seen and ("rename", False) in seen
+    assert all(closed is False for _, closed in seen)
+    assert handles[-1].closed and (folder / "token.json").read_text(encoding="utf-8") == "secret"
