@@ -399,6 +399,8 @@ class Bundle:
         self.ignored_fields: set[str] = set()
         self.dropped_conditions: set[str] = set()
         self.null_lists: set[str] = set()
+        # A rule variant's recognised settings it dropped as unusable (names from its fixed list, never values).
+        self.rule_omitted_fields: set[str] = set()
 
     def known_fields(self, row: Any, allowed: set[str], path: str = "") -> None:
         """Require an object; record its fields the training shape does not know, which are never projected.
@@ -1814,6 +1816,10 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                 try:
                     result.rule_sections[section] = variant(bundle)
                     variant_built.add(section)
+                    # Bot review wave 2 (55): the model diagnostic names one refusal; the variant's own omissions are
+                    # listed apart from it, so a verdict never rests on a silently shortened rule view.
+                    if bundle.rule_omitted_fields:
+                        report[section]["rule_view_omitted_fields"] = sorted(bundle.rule_omitted_fields)
                 except Unavailable as exc:
                     # A fresh source/coverage/scan failure must never become rule evidence.
                     if exc.reason != "incomplete_shape":

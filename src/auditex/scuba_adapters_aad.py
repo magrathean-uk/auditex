@@ -319,6 +319,11 @@ def _ca_rule(bundle: Bundle) -> Any:
                                     else convert(row, spec, variant=True) for row, item in zip(rows, base, strict=True)]
 
 
+_SPO_RULE_OPTIONAL = ("RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays")
+# The recognised settings the SharePoint rule variant reads: the only names its report may list as dropped.
+SPO_RULE_FIELDS = (*ENUM_NAME_KEYS, *_SPO_RULE_OPTIONAL)
+
+
 def _spo_rule(bundle: Bundle) -> Any:
     rows = bundle.alternatives([("sharepoint_access", "sharePointSettings"), ("onedrive_posture", "sharePointSettings")])
     _require(len(rows) == 1)
@@ -335,12 +340,16 @@ def _spo_rule(bundle: Bundle) -> Any:
         numbers = [v if type(v) is int else reverse.get(v) if isinstance(v, str) else None for v in values]
         if all(type(n) is int and n in names and n == numbers[0] for n in numbers):
             result[key] = numbers[0]
-    for key in ("RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays"):
+        else:
+            bundle.rule_omitted_fields.add(key)
+    for key in _SPO_RULE_OPTIONAL:
         values = [raw[k] for k in (key, key[0].lower() + key[1:]) if k in raw]
         check = (lambda v: type(v) is bool) if key == "EmailAttestationRequired" else (
             lambda v: type(v) is int and v >= (-1 if key == "RequireAnonymousLinksExpireInDays" else 0))  # noqa: B023 - the closure runs within this loop iteration, so late binding cannot leak
         if values and all(check(v) and v == values[0] for v in values):
             result[key] = values[0]
+        elif values:
+            bundle.rule_omitted_fields.add(key)
     _require("SharingCapability" in result, "SharingCapability", "missing_field")
     return [result]
 
@@ -358,8 +367,7 @@ ADAPTERS: dict[str, Callable[[Bundle], Any]] = {
 # to the model's enum domain. Parsing, health, coverage and scan failures do not
 # identify a retryable shape, even when their reason is also incomplete_shape.
 _SPO_RULE_SHAPE_FAILURES = {
-    ("missing_field", field) for field in (
-        *ENUM_NAME_KEYS, "RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays")
+    ("missing_field", field) for field in SPO_RULE_FIELDS
 } | {
     ("unseen_enum_value", field) for field in (
         "DefaultLinkPermission", "DefaultSharingLinkType", "SharingDomainRestrictionMode")

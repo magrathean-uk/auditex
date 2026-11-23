@@ -1023,6 +1023,16 @@
               "const": "not_collected"
             }
           }
+        },
+        "rule_view_omitted_fields": {
+          "required": [
+            "rule_view"
+          ],
+          "properties": {
+            "rule_view": {
+              "const": "variant"
+            }
+          }
         }
       },
       "properties": {
@@ -1067,6 +1077,27 @@
             "adapter",
             "variant"
           ]
+        },
+        "rule_view_omitted_fields": {
+          "type": "array",
+          "description": "Present only beside rule_view variant: the recognised settings the rule variant dropped as unusable, apart from the model diagnostic. Names from a fixed list, never values, sorted.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "SharingCapability",
+              "ODBSharingCapability",
+              "DefaultSharingLinkType",
+              "DefaultLinkPermission",
+              "SharingDomainRestrictionMode",
+              "FileAnonymousLinkType",
+              "FolderAnonymousLinkType",
+              "RequireAnonymousLinksExpireInDays",
+              "EmailAttestationRequired",
+              "EmailAttestationReAuthDays"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
         },
         "unsupported_conditions": {
           "type": "array",

@@ -2754,7 +2754,7 @@ rowcount rowindex rows rowscollected rtype ruaabsent rufabsent rule ruleabsent r
 rulefailure ruleid ruleids ruleindex rulenotblocking rulenotimplemented rulenotnotifying ruleparameters rulepolicies
 ruleprecheck ruleprioritytie rules rulesacceptedrisk rulesaffected rulescopeunusable rulesevaluated rulesfailed
 rulesmapped rulesnotassessed rulesnotevaluated rulesource rulesourcetype rulespassed rulesspec rulessupporting
-rulestateunusable rulestatuses ruleunusable ruleview runa runainfo runb runbinfo runcount rundir rundirmissing rundirs
+rulestateunusable rulestatuses ruleunusable ruleview ruleviewomittedfields runa runainfo runb runbinfo runcount rundir rundirmissing rundirs
 runfile runfingerprint rungooglelive rungoogleoffline rungoogleprobe runid runmode runnablecollectors runname runoffline
 runpaths runs runtime runtimemissing runtimeversion safe safeattachmentpolicies safeattachmentpolicy safeattachmentrules
 safeforexternalllm safelinkspolicies safelinkspolicy safelinksresolution safelinksrules safety sales sameplatform

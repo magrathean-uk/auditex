@@ -378,7 +378,10 @@ Its schema is `schemas/model_assessment.schema.json` (version `2026-11-22`), lis
 by the schema manifest and checked when present by bundle validation. `2026-11-22` is
 `2026-11-05` plus the optional projection-section field `rule_view` (`adapter` or `variant`),
 which names the value-rule view still built for a `not_collected` section; the schema itself
-rejects it on a `projected` section. A `2026-11-22`
+rejects it on a `projected` section. Beside `rule_view: variant`, optional
+`rule_view_omitted_fields` lists, sorted, the recognised settings the rule variant dropped as
+unusable (SharePoint: names from its fixed setting list, never values), apart from the model
+diagnostic in `detail`. A `2026-11-22`
 value-rule answer also cites a section its rule reads beyond the policy's catalogued case sections
 (SS 7.1 to 7.3: `built_in_protection_rules`) by its own evidence id after the case's (`e4` there), so
 `e1` onwards keep their meaning; `2026-11-05` answers, and `2026-11-22` answers written before

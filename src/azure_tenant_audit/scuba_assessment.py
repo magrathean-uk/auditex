@@ -340,6 +340,8 @@ def validate_assessment(payload: Any) -> None:
             ignored_fields = detail.get("ignored_fields", [])
             if not _sorted_unique(ignored_fields):
                 raise ValueError("Unsorted ignored projection fields")
+            if not _sorted_unique(detail.get("rule_view_omitted_fields", [])):
+                raise ValueError("Unsorted rule view omitted fields")
             for name in ("dropped_conditions", "null_lists_read_as_empty"):
                 if name in detail and (section != "conditional_access_policies" or detail["status"] != "projected"
                                        or not _sorted_unique(detail[name])):
