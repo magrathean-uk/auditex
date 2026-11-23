@@ -148,8 +148,11 @@ GOOGLE_FINDING = {
 }
 
 
-def _write_google_run(run_dir: Path, *, domain: str, customer_id: str | None) -> Path:
-    _write_run(run_dir, [dict(GOOGLE_FINDING)], tenant_id=None)
+def _write_google_run(
+    run_dir: Path, *, domain: str, customer_id: str | None, tenant_id: str | None = None,
+    findings: list[dict[str, Any]] | None = None,
+) -> Path:
+    _write_run(run_dir, findings if findings is not None else [dict(GOOGLE_FINDING)], tenant_id=tenant_id)
     manifest_path = run_dir / "run-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest.update({"platform": "google_workspace", "tenant_name": "Google Workspace", "workspace_domain": domain})
@@ -169,14 +172,18 @@ def _export_ids(run: Path) -> tuple[str, str, str]:
     )
 
 
-@pytest.mark.parametrize("customer_id", [None, "my_customer"])
+@pytest.mark.parametrize(
+    ("customer_id", "tenant_id"),
+    [(None, None), ("my_customer", None), ("unknown", None), (None, "Google Workspace"), ("n/a", "unknown")],
+)
 def test_r066_google_runs_without_a_customer_id_never_share_export_ids(
-    tmp_path: Path, export_key: str, customer_id: str | None
+    tmp_path: Path, export_key: str, customer_id: str | None, tenant_id: str | None
 ) -> None:
-    """A missing customer id or the my_customer alias names no tenant: two such Google runs of different domains
-    must not get the same SARIF fingerprint or OSCAL uuids, or one tenant's alerts would close the other's."""
-    run_a = _write_google_run(tmp_path / "run-a", domain="alpha.example", customer_id=customer_id)
-    run_b = _write_google_run(tmp_path / "run-b", domain="beta.example", customer_id=customer_id)
+    """A missing customer id, the my_customer alias or a placeholder (``unknown``, the tenant label) names no tenant:
+    two such Google runs of different domains must not get the same SARIF fingerprint or OSCAL uuids, or one tenant's
+    alerts would close the other's."""
+    run_a = _write_google_run(tmp_path / "run-a", domain="alpha.example", customer_id=customer_id, tenant_id=tenant_id)
+    run_b = _write_google_run(tmp_path / "run-b", domain="beta.example", customer_id=customer_id, tenant_id=tenant_id)
     first, second = _export_ids(run_a), _export_ids(run_b)
     assert all(left != right for left, right in zip(first, second, strict=True))
 
@@ -288,6 +295,37 @@ def test_r125_a_matching_mailbox_waiver_is_accepted_in_shareable_exports(tmp_pat
     run = _write_run(tmp_path / "run-a", [_mailbox_waived("mailbox_forwarding:alice@contoso.com")])
     ensure_pseudonym_key(run)
     assert _shareable_disposition(run) == (False, "accepted")
+
+
+def _google_waived(customer_id: str) -> dict[str, Any]:
+    return {
+        **GOOGLE_FINDING,
+        "status": "accepted_risk",
+        "waiver_applied": True,
+        "waiver": {
+            "finding_id": GOOGLE_FINDING["id"],
+            "reason": f"Accepted for customer {customer_id} until the rollout",
+            "expires_on": "2999-01-01",
+        },
+    }
+
+
+@pytest.mark.parametrize("sections", [None, ["findings"]])
+@pytest.mark.parametrize("format_name", ["sarif", "oscal"])
+def test_r125_a_waiver_reason_never_publishes_the_google_customer_id(
+    tmp_path: Path, export_key: str, format_name: str, sections: list[str] | None
+) -> None:
+    """A shareable export must never carry the Google customer id, also not inside a waiver's free-text reason, and
+    also when the manifest section is left out of the export."""
+    customer = "C01abcd23"
+    run = _write_google_run(
+        tmp_path / "run-a", domain="alpha.example", customer_id=customer, findings=[_google_waived(customer)]
+    )
+    content = preview_report(run_dir=str(run), format_name=format_name, profile="shareable", include_sections=sections)[
+        "content"
+    ]
+    assert customer.lower() not in content.lower()
+    assert "Accepted for customer" in content  # the reason itself is still published
 
 
 # R126 ---------------------------------------------------------------------------------------------------------------

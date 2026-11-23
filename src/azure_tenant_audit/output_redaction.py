@@ -264,6 +264,13 @@ _IDENTITY_KEYS = ("onpremisesimmutableid", "immutableid")
 # it. Masked like an immutable id; the ``my_customer`` alias and plain words (no digit) are kept.
 _CUSTOMER_ID_KEYS = frozenset({"customerid", "tenantid", "tenantidrequested"})
 _GOOGLE_CUSTOMER_ID_RE = re.compile(r"C(?=[0-9A-Za-z]*[0-9])[0-9A-Za-z]{6,12}")
+
+
+def google_customer_id(value: Any) -> str | None:
+    """``value`` when it has the shape of a Google Workspace customer id (``C03az79cb``), else ``None``: the
+    ``my_customer`` alias, a domain, a tenant label and placeholders such as ``unknown`` are not customer ids."""
+    text = value.strip() if isinstance(value, str) else ""
+    return text if _GOOGLE_CUSTOMER_ID_RE.fullmatch(text) else None
 _ADMIN_FLAGS = ("isadmin", "isdelegatedadmin", "issuperadmin", "isprivileged")
 _NOT_USER_TYPES = frozenset({"group", "serviceprincipal", "application", "app", "device"})
 
@@ -647,6 +654,10 @@ def _collect(value: Any, found: _Found, *, names: bool) -> None:
                     if privileged and norm == "displayname" and isinstance(member, str) and member and not _PSEUDONYM_RE.match(member):
                         found.names.add(member)
                     if norm in _IDENTITY_KEYS and isinstance(member, str) and member and not _PSEUDONYM_RE.match(member):
+                        found.ids.add(member)
+                    # A Google customer id is masked in free text too (a waiver reason that quotes it), not only
+                    # under its own key.
+                    if norm in _CUSTOMER_ID_KEYS and google_customer_id(member):
                         found.ids.add(member)
                     if norm in _ROLE_KEYS or (_is_group(item) and norm == "displayname"):
                         if isinstance(member, str) and member:

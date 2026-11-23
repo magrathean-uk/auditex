@@ -9,6 +9,7 @@ import json
 import os
 import re
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from datetime import UTC
 from io import StringIO
 from pathlib import Path
@@ -44,6 +45,7 @@ from azure_tenant_audit.output_redaction import (
     RedactionContext,
     assert_snapshot_stable,
     context_for_run,
+    google_customer_id,
     read_normalized_sections,
     redact_output,
     run_path_roots,
@@ -3746,22 +3748,20 @@ def _disposition_at(finding: Mapping[str, Any], position: int, dispositions: lis
     return _export_disposition(finding)
 
 
-_GOOGLE_CUSTOMER_ALIAS = "my_customer"
-
-
 def export_tenant_scope(manifest: Mapping[str, Any]) -> str | None:
     """Review R066: the tenant a shareable export's dedup ids are scoped to, or ``None`` when the run names none.
 
-    Microsoft 365: the Entra tenant UUID. Google Workspace: the customer id, never the ``my_customer`` alias (it means
-    "the signed-in customer", so every tenant has it) and never a domain or the default tenant label. ``None`` makes
-    the caller scope the ids to the run instead."""
+    Microsoft 365: the Entra tenant UUID. Google Workspace: a value shaped like a customer id (``C03az79cb``), never
+    the ``my_customer`` alias (it means "the signed-in customer", so every tenant has it), a domain, the default tenant
+    label or a placeholder such as ``unknown``, which every tenant could carry. ``None`` makes the caller scope the
+    ids to the run instead."""
     platform = _text(manifest.get("platform")).strip().lower() or "m365"
     if platform == "m365":
         return canonical_tenant_uuid(manifest.get("tenant_id"))
     for value in (manifest.get("customer_id"), manifest.get("tenant_id")):
-        text = _text(value).strip()
-        if text and text.lower() != _GOOGLE_CUSTOMER_ALIAS and "." not in text and "@" not in text:
-            return text
+        customer = google_customer_id(value)
+        if customer is not None:
+            return customer
     return None
 
 
@@ -4299,6 +4299,14 @@ def preview_report(
     # rules such as privileged-user names apply in every format) and the rendered text is passed through the
     # same function again (idempotent) as the last step. Citations above were built from the real paths.
     redaction = context_for_run(run_path)
+    # The run's Google customer id is masked wherever it appears, also in free text (a waiver reason) of an export
+    # that leaves the manifest section out.
+    manifest = RunBundle(run_path).manifest()
+    customer_ids = {
+        value for value in (google_customer_id(manifest.get(key)) for key in ("customer_id", "tenant_id")) if value
+    }
+    if customer_ids:
+        redaction = replace(redaction, protected_ids=redaction.protected_ids | customer_ids)
     render = renderers[format_name]
     if format_name in {"sarif", "oscal"}:
         # Review R066: dedup keys and waiver dispositions come from the unredacted findings, before redaction
@@ -4310,7 +4318,7 @@ def preview_report(
         rows = _dict_rows(selected.get("findings"))
         run_secret = hmac.new(redaction.key, b"auditex|export-ids", hashlib.sha256).digest()
         secret = export_fingerprint_key()
-        tenant_scope = export_tenant_scope(RunBundle(run_path).manifest()) if secret is not None else None
+        tenant_scope = export_tenant_scope(manifest) if secret is not None else None
         if secret is None or tenant_scope is None:
             tenant_scope = f"run/{hmac.new(run_secret, b'scope', hashlib.sha256).hexdigest()}"
         stable_keys = stable_export_keys(rows, tenant_scope, secret if secret is not None else run_secret)
