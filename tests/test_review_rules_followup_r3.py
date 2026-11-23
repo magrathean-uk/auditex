@@ -137,16 +137,18 @@ BI_EXCLUDES_BOB = [{"Identity": "ATP Built-In Protection Rule", "ExceptIfSentTo"
 
 @pytest.mark.parametrize("policy_id", SL_POLICIES)
 def test_r003_partial_rule_for_other_recipients_cannot_cover_the_built_in_exclusion(policy_id):
-    rules = [_sl_rule("alice", _to("alice", "Carol"), priority=0)]
     policies = [SL_BUILTIN, {"Identity": "alice", **SL_FLAGS}]
-    assert _answer(policy_id, _safelinks(rules, policies, BI_EXCLUDES_BOB)) == ("not_met", "no_policy_covers_all")
+    # Conditions are joined by AND (repair round 2 of item 61): naming Alice and a domain still reaches only Alice.
+    for scope in (_to("alice", "Carol"), {**_to("alice"), "RecipientDomainIs": ["example.com"]}):
+        rules = [_sl_rule("alice", scope, priority=0)]
+        assert _answer(policy_id, _safelinks(rules, policies, BI_EXCLUDES_BOB)) == ("not_met", "no_policy_covers_all"), scope
 
 
 @pytest.mark.parametrize("policy_id", SL_POLICIES)
 def test_r003_partial_rule_that_may_name_an_excluded_recipient_still_may_cover(policy_id):
     policies = [SL_BUILTIN, {"Identity": "p", **SL_FLAGS}]
     for scope in (_to("alice", "BOB"), {**SCOPE_ALL, "SentToMemberOf": ["team"]}, {**SCOPE_ALL, "RecipientDomainIs": ["example.com"]},
-                  {**_to("alice"), "RecipientDomainIs": ["example.com"]}):
+                  {**_to("alice", "bob"), "RecipientDomainIs": ["example.com"]}):
         sections = _safelinks([_sl_rule("p", scope, priority=0)], policies, BI_EXCLUDES_BOB)
         assert _answer(policy_id, sections) == ("not_assessed", "partial_tier_may_cover"), scope
     group_excluded = [{**BI_EXCLUDES_BOB[0], "ExceptIfSentToMemberOf": ["team"]}]
@@ -188,3 +190,54 @@ def test_r106_rule_view_key_is_kept_when_a_person_is_named_rule_view():
     value = {"projection": {"sections": {"safe_links_rules": {"status": "not_collected", "rule_view": "adapter"}}}}
     out = redact_output(value, context=_people("Rule View"))
     assert out["projection"]["sections"]["safe_links_rules"] == {"status": "not_collected", "rule_view": "adapter"}
+
+
+# ---- Wave 2 bot review (item 57): an unreadable control may still carry the control in the R027 shared-gap test ----
+
+def _ca_unreadable_narrow(**users):
+    from test_value_rules_aad_review import ca
+    return ca({"BuiltInControls": "unreadable", "Operator": "OR"}, users={"IncludeUsers": [], "IncludeGroups": [], **users})
+
+
+def test_r027_unreadable_control_including_the_shared_role_keeps_the_union_possible():
+    from test_value_rules_aad_review import MFA, ca, ca_sections, cell
+    one = ca(MFA, users={"ExcludeRoles": ["synthetic-role"]})
+    narrow = _ca_unreadable_narrow(IncludeRoles=["synthetic-role"])
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), narrow)) == ("not_assessed", "union_possible")
+
+
+def test_r027_shared_role_gap_still_decides_when_every_possible_carrier_excludes_it():
+    from test_value_rules_aad_review import MFA, ca, ca_sections, cell
+    one = ca(MFA, users={"ExcludeRoles": ["synthetic-role"]})
+    twin = json.loads(json.dumps(one))
+    excluding = _ca_unreadable_narrow(IncludeRoles=["synthetic-other"], ExcludeRoles=["synthetic-role"])
+    assert cell("MS.AAD.3.2v2", ca_sections(one, twin, excluding)) == ("not_met", "no_policy_meets")
+    other_control = ca({"BuiltInControls": ["compliantDevice"], "Operator": "OR"}, users={"IncludeUsers": [], "IncludeRoles": ["synthetic-role"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, twin, other_control)) == ("not_met", "no_policy_meets")
+
+
+def test_r027_unreadable_control_without_the_shared_exclusion_keeps_the_union_possible():
+    from test_value_rules_aad_review import MFA, ca, ca_sections, cell
+    one = ca(MFA, users={"ExcludeUsers": ["synthetic-principal"]})
+    narrow = _ca_unreadable_narrow(IncludeUsers=["synthetic-principal"])
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), narrow)) == ("not_assessed", "union_possible")
+
+
+def test_r027_unreadable_control_on_a_different_app_keeps_the_shared_app_gap():
+    from test_value_rules_aad_review import MFA, ca, ca_sections, cell
+    one = ca(MFA, apps={"ExcludeApplications": ["synthetic-app-b"]})
+    other_app = ca({"BuiltInControls": "unreadable", "Operator": "OR"}, apps={"IncludeApplications": ["synthetic-app-a"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), other_app)) == ("not_met", "near_miss_exclusions")
+    same_app = ca({"BuiltInControls": "unreadable", "Operator": "OR"}, apps={"IncludeApplications": ["synthetic-app-b"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), same_app)) == ("not_assessed", "union_possible")
+    office = ca({"BuiltInControls": "unreadable", "Operator": "OR"}, apps={"IncludeApplications": ["Office365"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), office)) == ("not_assessed", "union_possible")
+
+
+def test_r027_unreadable_control_on_a_different_role_keeps_the_shared_role_gap():
+    from test_value_rules_aad_review import MFA, ca, ca_sections, cell
+    one = ca(MFA, users={"ExcludeRoles": ["synthetic-role"]})
+    other_role = _ca_unreadable_narrow(IncludeRoles=["synthetic-other"])
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), other_role)) == ("not_met", "no_policy_meets")
+    with_user = _ca_unreadable_narrow(IncludeRoles=["synthetic-other"], IncludeUsers=["synthetic-principal"])
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), with_user)) == ("not_assessed", "union_possible")

@@ -377,8 +377,12 @@ Assessment is rules only: the model layer is removed and nothing is called. Curr
 Its schema is `schemas/model_assessment.schema.json` (version `2026-11-22`), listed
 by the schema manifest and checked when present by bundle validation. `2026-11-22` is
 `2026-11-05` plus the optional projection-section field `rule_view` (`adapter` or `variant`),
-which names the value-rule view still built for a `not_collected` section; nothing else differs,
-and both versions are validated by the same rules. The known older versions `2026-10-27`,
+which names the value-rule view still built for a `not_collected` section. A `2026-11-22`
+value-rule answer also cites a section its rule reads beyond the policy's catalogued case sections
+(SS 7.1 to 7.3: `built_in_protection_rules`) by its own evidence id after the case's (`e4` there), so
+`e1` onwards keep their meaning; `2026-11-05` answers, and `2026-11-22` answers written before
+that change, cite the case's sections only and still validate. Nothing else
+differs, and both versions are otherwise validated by the same rules. The known older versions `2026-10-27`,
 `2026-10-27.1`, `2026-10-28`, `2026-10-29` and `2026-11-05` use their byte-preserved,
 date-named schema files; `2026-11-05` is the most recent of these and never carries `rule_view`.
 Earlier Auditex releases reject a `2026-11-22` file on its version.

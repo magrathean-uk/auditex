@@ -14,7 +14,7 @@ from auditex.rule_assessment import (
     policy_catalogue,
     precheck_case,
 )
-from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.scuba_assessment import _LATE_EVIDENCE, validate_assessment
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import as_pack_response, assess
 from azure_tenant_audit.value_rules import catalogue as loader
@@ -54,20 +54,24 @@ def assessment_for(template, record, *, legacy=False):
               "section": record["cited_sections"], "field": None, "value": None,
               **{k: record[k] for k in ("cell", "reason_code", "reason_text")}}
     result["policies"][0].update(policy_id=policy, rule_precheck=detail)
-    result["policies"][0].update(precheck_response(detail, item["policy_item"], item["sections"], legacy=legacy))
+    # Like the writer (rule_assessment.precheck_case): from 2026-11-22 a late rule section has its own evidence id.
+    late = result["schema_version"] in _LATE_EVIDENCE
+    result["policies"][0].update(precheck_response(detail, item["policy_item"], item["sections"], legacy=legacy,
+                                                   late_evidence=late))
     return result
 
 
 def test_a1_exception_set_is_pinned_and_does_not_register_policies():
     # A2 citation-domains.json supplies 64 source-derived domains (190 variants); review R003 adds
-    # built_in_protection_rules to the three SS 7.x not-a-list domains (193).
+    # built_in_protection_rules to the three SS 7.x not-a-list domains (193). Bot review wave 2 (item 50) gives the
+    # three SS 7.x partial_tier_may_cover cells their custom, preset and combined citations (67 domains, 202).
     # The immutable catalogue supplies the three fixed SS7 order exceptions.
     serial = {p + ":" + c: variants for (p, c), variants in VARIANTS.items()}
-    assert len(VARIANTS) == 67
-    assert sum(len(v) > 1 for v in VARIANTS.values()) == 64
-    assert sum(len(v) for v in VARIANTS.values() if len(v) > 1) == 193
-    assert sum(map(len, VARIANTS.values())) == 196
-    assert sha256(canonical(serial).encode()).hexdigest() == "23364537a797676bf43fbc60113b76919ae157c92793ff86964f515917b54009"
+    assert len(VARIANTS) == 70
+    assert sum(len(v) > 1 for v in VARIANTS.values()) == 67
+    assert sum(len(v) for v in VARIANTS.values() if len(v) > 1) == 202
+    assert sum(map(len, VARIANTS.values())) == 205
+    assert sha256(canonical(serial).encode()).hexdigest() == "84c360979d357843ad8ff7e67a9c57334f27ef4ce432815f259164d1a4a5a7a3"
     # v3.9.1: all 102 policies are registered, including SS 1.1, 6.1 and 6.2 (previously held for the collector).
     assert len(SOURCE["policies"]) == 102
     # Review R003/R099: SS 7.1 to 7.3 retire no_rules_configured and add three Built-In cells each.
