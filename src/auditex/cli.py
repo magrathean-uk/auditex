@@ -1080,7 +1080,11 @@ def _build_notify_parser() -> argparse.ArgumentParser:
 
 
 def _cli_size_refusal(function: Callable[[list[str] | None], int]) -> Callable[[list[str] | None], int]:
-    """Let the CLI print the size refusal once, without a traceback containing paths."""
+    """Let the CLI print a redaction refusal once, without a traceback containing paths.
+
+    The size refusal keeps its own exit; any other refusal (a malformed, unreadable or changed normalised file) prints
+    the error's fixed text, which names run-relative labels and reason classes only, and exits 2.
+    """
     @wraps(function)
     def wrapped(argv: list[str] | None = None) -> int:
         try:
@@ -1088,7 +1092,8 @@ def _cli_size_refusal(function: Callable[[list[str] | None], int]) -> Callable[[
         except ContextIncompleteError as exc:
             if exc.size_limit:
                 raise SystemExit(str(exc)) from None
-            raise
+            print(f"Shareable output refused: {exc}.", file=sys.stderr)
+            return 2
 
     return wrapped
 

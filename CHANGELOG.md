@@ -195,6 +195,8 @@ What an integrator reading the bundle must know:
   always redacted for sharing; schema `schemas/ce_plus_practice.schema.json`, catalogue
   `configs/ce-plus-practice.json`. It adds no verdict and is not an assessment. Customer packs gain
   `ce-plus-practice.md` and `ce-plus-practice.json` when the run has a Cyber Essentials section.
+- **Redaction refusals exit 2.** Every `auditex` command now answers a malformed, unreadable or changed normalised
+  file with the refusal's fixed text (run-relative labels only) and exit 2, instead of a traceback.
 
 ### Tenant-bootstrap (lab kit)
 

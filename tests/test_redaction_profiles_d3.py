@@ -446,9 +446,17 @@ def test_d3_refuses_change_between_payload_build_and_discovery(
         "cli_ce_plus": lambda: cli.main(["report", "ce-plus", str(run), "--output", str(output)]),
         "cli_handoff": lambda: cli.main(["report", "handoff", str(run), "--output", str(output)]),
     }
-    with pytest.raises(ContextIncompleteError, match="changed during scan"):
-        calls[family]()
-    assert NAME not in capsys.readouterr().out
+    if family.startswith("cli_"):
+        # The CLI prints the refusal's fixed text and exits 2: no traceback and no path.
+        assert calls[family]() == 2
+        captured = capsys.readouterr()
+        assert "changed during scan" in captured.err and "Traceback" not in captured.err
+        assert str(run) not in captured.err and str(tmp_path) not in captured.err
+        assert NAME not in captured.out
+    else:
+        with pytest.raises(ContextIncompleteError, match="changed during scan"):
+            calls[family]()
+        assert NAME not in capsys.readouterr().out
     assert not output.exists()
     assert not sent
 
