@@ -495,11 +495,13 @@ def with_restriction(extra):
     return row
 
 
-def without_rule_view(report):
-    """Review R106: the report names a withheld section's rule view; everything else stays as without the variant."""
+def without_rule_view(report, section):
+    """Review R106: the report names a withheld section's rule view; everything else stays as without the variant.
+
+    Only the toggled section's rule view is dropped (bot review wave 2, 63): another section's must still compare.
+    """
     out = deepcopy(report)
-    for detail in out["sections"].values():
-        detail.pop("rule_view", None)
+    out["sections"][section].pop("rule_view", None)
     return out
 
 
@@ -517,7 +519,7 @@ def test_ca_variant_changes_only_rules(run, monkeypatch, extra):
     monkeypatch.setattr(aad, "RULE_VARIANTS", {})
     without = projection.project_run(run)
     assert dict(with_variant) == dict(without)
-    assert without_rule_view(with_variant.report) == without.report
+    assert without_rule_view(with_variant.report, "conditional_access_policies") == without.report
     assert with_variant.report["sections"]["conditional_access_policies"]["rule_view"] == "variant"
     assert "rule_view" not in without.report["sections"]["conditional_access_policies"]
     on, off = public_projection_bytes(with_variant), public_projection_bytes(without)
@@ -587,8 +589,9 @@ def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(
     # Review R106: the projection report names the variant's rule view; nothing else in it changes.
     assert on["projection"]["sections"][section]["rule_view"] == "variant"
     assert "rule_view" not in off["projection"]["sections"][section]
-    assert without_rule_view(json.loads(with_variant["report.json"])) == without_rule_view(json.loads(without["report.json"]))
-    on["projection"], off["projection"] = without_rule_view(on["projection"]), without_rule_view(off["projection"])
+    assert without_rule_view(json.loads(with_variant["report.json"]), section) == without_rule_view(
+        json.loads(without["report.json"]), section)
+    on["projection"], off["projection"] = without_rule_view(on["projection"], section), without_rule_view(off["projection"], section)
     # Every envelope field and unaffected row must remain identical, including order.
     assert {k: v for k, v in on.items() if k not in {"policies", "totals"}} == {
         k: v for k, v in off.items() if k not in {"policies", "totals"}}
@@ -728,7 +731,7 @@ def test_sp_closed_values_and_model_report_unchanged(run, monkeypatch, field, va
     without = projection.project_run(run)
     assert with_variant.rule_sections["SPO_tenant"] == [raw]
     assert dict(with_variant) == dict(without)
-    assert without_rule_view(with_variant.report) == without.report
+    assert without_rule_view(with_variant.report, "SPO_tenant") == without.report
     assert with_variant.report["sections"]["SPO_tenant"]["rule_view"] == "variant"
 
 
