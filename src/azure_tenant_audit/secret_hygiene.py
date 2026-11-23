@@ -420,7 +420,9 @@ def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> P
                 handle.flush()
                 written = os.fstat(handle.fileno())
             current = os.stat(temporary, dir_fd=folder, follow_symlinks=False)
-            if (current.st_dev, current.st_ino) != (written.st_dev, written.st_ino):
+            # The file type is compared as well as the inode: once the descriptor is closed, Linux file systems reuse
+            # a freed inode number at once, so a link put where the temporary file was can carry the same number.
+            if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != (written.st_dev, written.st_ino):
                 raise _secret_folder_refused()
             try:
                 os.rename(temporary, target.name, src_dir_fd=folder, dst_dir_fd=folder)
