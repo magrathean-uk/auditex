@@ -143,7 +143,8 @@ def _session_tenant(exchange_session: Any) -> str | None:
         return None
     try:
         tenant = inspect_token_claims(token).get("tenant_id")
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError, OSError):
+        # An out-of-range timestamp claim makes the token unreadable: the session is refused, not a crash.
         return None
     return str(tenant) if tenant else None
 

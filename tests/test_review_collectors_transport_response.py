@@ -95,3 +95,20 @@ def test_message_trace_runs_inside_the_supplied_exchange_session(tmp_path: Path,
     assert run_response(_config(tmp_path, exchange_session=SESSION)) == 0
     assert adapter.sessions == [SESSION]
     assert "constructed-token" not in repr(_config(tmp_path, exchange_session=SESSION))
+
+
+def test_a_session_token_with_an_out_of_range_expiry_is_refused_not_a_crash(tmp_path: Path, monkeypatch) -> None:
+    import base64
+
+    def part(value: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    token = f"{part({'alg': 'none'})}.{part({'tid': 'lab-tenant', 'exp': 10**30})}.constructed-token"
+    adapter = _Adapter()
+    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"lab-tenant"})
+    rc = run_response(_config(tmp_path, exchange_session={**SESSION, "access_token": token}))
+    assert rc == 1
+    assert adapter.sessions == []
+    assert [(row["error_class"], row["item"]) for row in _blockers(tmp_path)] == [
+        ("lab_guard", "response.session:message_trace")]
