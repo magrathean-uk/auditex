@@ -394,9 +394,12 @@ rejects both: it must cite what the current rule reads and use its current cells
 differs. The known older versions `2026-10-27`,
 `2026-10-27.1`, `2026-10-28`, `2026-10-29` and `2026-11-05` use their byte-preserved,
 date-named schema files; `2026-11-05` is the most recent of these and never carries `rule_view`.
-The older files all keep the `$id` they were published with; the current schema has its own,
-version-named `$id` (`.../schemas/model_assessment-2026-11-22.schema.json`), so a JSON Schema
-registry can hold every version at once.
+The older files all keep the `$id` they were published with, `.../schemas/model_assessment.schema.json`,
+which all five share; the current schema has its own, version-named `$id`
+(`.../schemas/model_assessment-2026-11-22.schema.json`). A JSON Schema registry keyed by `$id`
+therefore holds the current schema beside one of the older files, not all six. Auditex never
+selects a schema by `$id`: it reads the file's `schema_version` and validates against that
+version's file named above.
 Earlier Auditex releases reject a `2026-11-22` file on its version.
 Malformed or unknown-version optional assessments produce warnings and never change
 the deterministic gate result. It contains

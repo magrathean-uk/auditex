@@ -319,6 +319,36 @@ def test_current_and_historical_schemas_resolve_side_by_side_by_id():
     assert resolved == {'2026-11-05', '2026-11-22'}
 
 
+def test_every_shipped_assessment_schema_is_named_by_the_published_id_the_contract_gives():
+    # Bot review wave 2 (52): the date-named files keep their published bytes, so the five historical versions share one
+    # $id. The contract must say so, rather than promise a registry keyed by $id that holds every version at once, and
+    # each version must still be reached from its schema_version through its own file.
+    import re
+
+    from azure_tenant_audit.scuba_assessment import ASSESSMENT_SCHEMAS
+    assert len(ASSESSMENT_SCHEMAS) == 6
+    by_id: dict[str, list[str]] = {}
+    for version, path in ASSESSMENT_SCHEMAS.items():
+        schema = json.loads((ROOT / path).read_text())
+        assert schema['properties']['schema_version']['const'] == version
+        by_id.setdefault(schema['$id'], []).append(version)
+    current = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())['$id']
+    assert by_id.pop(current) == ['2026-11-22']
+    [(historical_id, historical)] = by_id.items()
+    assert historical == ['2026-10-27', '2026-10-27.1', '2026-10-28', '2026-10-29', '2026-11-05']
+
+    text = (ROOT / 'docs/reference/output-contract.md').read_text()
+    paragraph = text[text.index('Its schema is `schemas/model_assessment.schema.json`'):]
+    paragraph = ' '.join(paragraph[:paragraph.index('\n\n')].split())
+    assert 'every version at once' not in paragraph
+    ids = re.search(r'The older files all keep the `\$id` they were published with, `\.\.\./(schemas/[^`]+)`, which all five '
+                    r'share; the current schema has its own, version-named `\$id` \(`\.\.\./(schemas/[^`]+)`\)', paragraph)
+    assert ids, 'the contract no longer states which published $id each assessment schema carries'
+    assert historical_id.endswith('/' + ids.group(1)) and current.endswith('/' + ids.group(2))
+    for version in historical:
+        assert f'`{version}`' in paragraph
+
+
 def test_rule_view_on_a_projected_section_fails_the_published_schema(complete_bundle):
     # Bot review wave 2 (53): the published schema itself says a rule view belongs only on a withheld section.
     result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
