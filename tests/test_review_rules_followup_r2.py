@@ -449,10 +449,10 @@ def test_item56_built_in_answer_cites_the_built_in_evidence_reference(tmp_path):
         # e1 to e3 keep the case's protection_policy_rules, safe_links_policies and safe_links_rules.
         assert _requirement(row)["evidence_ids"] == ["e0", "e4"]
     validate_assessment(written)
-    dropped = json.loads(json.dumps(written))
-    _requirement(_legacy_rows(dropped)[0])["evidence_ids"] = ["e0"]
+    wrong = json.loads(json.dumps(written))
+    _requirement(_legacy_rows(wrong)[0])["evidence_ids"] = ["e0", "e1"]
     with pytest.raises(ValueError):
-        validate_assessment(dropped)
+        validate_assessment(wrong)
 
 
 def test_item56_met_answer_cites_every_section_the_rule_reads(tmp_path):
@@ -476,3 +476,30 @@ def test_item56_2026_11_05_answers_keep_the_case_only_references(tmp_path):
     _requirement(_legacy_rows(old)[0])["evidence_ids"] = ["e0", "e4"]
     with pytest.raises(ValueError):
         validate_assessment(old)                         # that version has no e4
+
+
+# Repair round 1 (review of ff15cba2).
+
+def _case_only(payload):
+    """The assessment as the 2026-11-22 writer before item 56 wrote it: the same version, case evidence ids only."""
+    old = json.loads(json.dumps(payload))
+    for row in _legacy_rows(old):
+        for claim in row["claims"]:
+            claim["evidence_ids"] = [ref for ref in claim["evidence_ids"] if ref != "e4"]
+    return old
+
+
+@pytest.mark.parametrize("built_in, ids", [
+    pytest.param([], ["e0"], id="built-in-unusable"),
+    pytest.param([{"Identity": "ATP Built-In Protection Rule", **EVERYONE}], ["e0", "e1", "e2", "e3"], id="met"),
+])
+def test_item56_earlier_2026_11_22_answers_without_the_built_in_reference_still_validate(tmp_path, built_in, ids):
+    from azure_tenant_audit.scuba_assessment import validate_assessment
+    old = _case_only(_written(tmp_path, built_in))
+    assert old["schema_version"] == "2026-11-22"
+    assert all(_requirement(row)["evidence_ids"] == ids for row in _legacy_rows(old))
+    validate_assessment(old)
+    # A reference list that is neither form is still refused.
+    _requirement(_legacy_rows(old)[0])["evidence_ids"] = [*ids[:-1], "e4"]
+    with pytest.raises(ValueError):
+        validate_assessment(old)
