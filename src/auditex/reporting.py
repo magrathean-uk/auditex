@@ -8,7 +8,7 @@ import html
 import json
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from datetime import UTC, date
 from io import StringIO
@@ -1867,11 +1867,9 @@ def _ce_plus_quality_lines(payload: Mapping[str, Any]) -> list[tuple[str, str]]:
     else:
         version = "matches"
     lines.append(("Requirements version in the bundle", version))
-    unmapped = [str(item) for item in quality.get("unmapped_requirement_ids") or []]
-    lines.append(("Bundle requirements the catalogue lacks", ", ".join(unmapped) or "none"))
     dropped = quality.get("dropped_requirement_id_count")
-    if _is_count(dropped) and dropped:
-        lines.append(("Bundle entries dropped as not requirement ids", str(dropped)))
+    count = (str(dropped) if dropped else "none") if _is_count(dropped) else "not established"
+    lines.append(("Bundle requirement ids the catalogue lacks (not shown)", count))
     return lines
 
 
@@ -2021,10 +2019,14 @@ def render_ce_plus_html(payload: Mapping[str, Any]) -> str:
     return "\n".join(parts) + "\n"
 
 
-def _write_text_artifact(path: Path, content: str, context: RedactionContext | None = None) -> dict[str, Any]:
+def _write_text_artifact(
+    path: Path, content: str, context: RedactionContext | None = None, settle: Callable[[str], str] | None = None
+) -> dict[str, Any]:
     # Every generated customer-pack file passes the shared output redaction at the last step; the digest the
-    # manifest records is therefore the digest of what the customer receives.
-    write_private_text(path, redact_output(content, profile=PROFILE_CUSTOMER_PACK, context=context, markup=True))
+    # manifest records is therefore the digest of what the customer receives. ``settle`` lets one payload kind put
+    # back its own fixed field names after that pass (``ce_plus.restore_fixed_fields``).
+    text = redact_output(content, profile=PROFILE_CUSTOMER_PACK, context=context, markup=True)
+    write_private_text(path, settle(text) if settle is not None else text)
     return {
         "path": str(path),
         "name": path.name,
@@ -2350,6 +2352,38 @@ def _pack_payload(payload: Mapping[str, Any], run_path: Path) -> dict[str, Any]:
 _OPTIONAL_PACK_FILES = ("ce-plus-practice.md", "ce-plus-practice.json")
 
 
+def _settle_ce_plus_json(payload: Mapping[str, Any], text: str) -> str:
+    """The CE+ pack JSON after the final text pass, with the payload's own fixed vocabulary put back
+    (``ce_plus.restore_fixed_fields``, walked in the file's own key order); text that no longer parses stays as it is."""
+    from .ce_plus import restore_fixed_fields
+
+    try:
+        written = json.loads(text)
+    except ValueError:
+        return text
+    return _json(restore_fixed_fields(json.loads(_json(payload)), written)) + "\n"
+
+
+def _previous_generated_ce_plus_files(previous: Mapping[str, Any]) -> set[str]:
+    """The optional CE+ files a previous pack manifest lists as generated. Only a string path counts, read as a
+    pack-relative POSIX path (a leading ``./`` dropped); an absolute path, one with ``..``, a non-string or a
+    malformed row is ignored, never raised on."""
+    from pathlib import PurePosixPath
+
+    names: set[str] = set()
+    for row in _dict_rows(previous.get("generated_files")):
+        path = row.get("path")
+        if not isinstance(path, str) or not path or "\x00" in path:
+            continue
+        pure = PurePosixPath(path)
+        if pure.is_absolute() or ".." in pure.parts:
+            continue
+        normalised = pure.as_posix()  # PurePosixPath drops a leading "./" and repeated slashes
+        if normalised in _OPTIONAL_PACK_FILES:
+            names.add(normalised)
+    return names
+
+
 def _prepare_pack_directory(target_dir: Path) -> None:
     """Create the pack directory, or reuse one that is empty or holds a pack written earlier.
 
@@ -2367,20 +2401,20 @@ def _prepare_pack_directory(target_dir: Path) -> None:
     previous = _mapping(_read_json(target_dir / "pack-manifest.json", {}))
     if previous.get("kind") != _PACK_KIND:
         raise PackOutputError("refusing to write a customer pack: destination holds other files; use a new directory")
+    # Generated files only some runs have go too, so a run without them does not inherit an earlier run's copies;
+    # only a file the previous manifest lists as generated, so notes someone added beside the pack stay (and
+    # verify-pack reports them as unexpected). Worked out before anything is removed, so a malformed entry cannot
+    # stop the rebuild half way.
+    optional = sorted(_previous_generated_ce_plus_files(previous))
     stale = target_dir / "source-artifacts"
     if stale.is_symlink():
         raise UnsafeRunFileError("output-dir")
     if stale.is_dir():
         from azure_tenant_audit.guarded_io import remove_guarded_tree
         remove_guarded_tree(stale)
-    # Generated files only some runs have go too, so a run without them does not inherit an earlier run's copies;
-    # only a file the previous manifest lists as generated, so notes someone added beside the pack stay (and
-    # verify-pack reports them as unexpected).
     from azure_tenant_audit.guarded_io import remove_guarded_output
-    listed = {row.get("path") for row in _dict_rows(previous.get("generated_files"))}
-    for name in _OPTIONAL_PACK_FILES:
-        if name in listed:
-            remove_guarded_output(target_dir / name, field="output-dir")
+    for name in optional:
+        remove_guarded_output(target_dir / name, field="output-dir")
 
 
 @guarded_operation
@@ -2415,10 +2449,12 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     # output redaction (customer-pack profile) with the run's pseudonym key, so references stay consistent.
     _prepare_pack_directory(target_dir)
 
-    def pack_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-        settled = _settle_citations(
-            redact_output(_pack_payload(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=redaction)
-        )
+    def pack_payload(
+        payload: Mapping[str, Any], settle: Callable[[Any, Any], Any] | None = None
+    ) -> dict[str, Any]:
+        safe = _pack_payload(payload, run_path)
+        redacted = redact_output(safe, profile=PROFILE_CUSTOMER_PACK, context=redaction)
+        settled = _settle_citations(settle(safe, redacted) if settle is not None else redacted)
         # A keyless run's pack says in each file that its pseudonyms come from a temporary key.
         return {**settled, "pseudonym_notice": TEMPORARY_KEY_NOTICE} if redaction.temporary_key else settled
 
@@ -2433,10 +2469,10 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         preview_report(run_dir=str(run_path), format_name="md", profile=PROFILE_CUSTOMER_PACK)["content"], run_path
     )
 
-    def generated_row(name: str, content: str) -> dict[str, Any]:
+    def generated_row(name: str, content: str, settle: Callable[[str], str] | None = None) -> dict[str, Any]:
         if name.endswith(".md") and name != "report.md":  # the report carries its own notice (preview_report)
             content = _with_temporary_key_notice(content, "md", redaction)
-        row = _write_text_artifact(target_dir / name, content, redaction)
+        row = _write_text_artifact(target_dir / name, content, redaction, settle)
         row["path"] = name
         return row
 
@@ -2456,10 +2492,14 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     _, report_pack_payload = RunBundle(run_path).report_pack()
     frameworks = _mapping(_mapping(_mapping(report_pack_payload).get("baseline_alignment")).get("frameworks"))
     if isinstance(frameworks.get("cyber_essentials"), Mapping):
-        ce_plus_payload = pack_payload(ce_plus_practice_run(run_path, as_of=None))
+        from .ce_plus import restore_fixed_fields
+
+        ce_plus_payload = pack_payload(ce_plus_practice_run(run_path, as_of=None), settle=restore_fixed_fields)
         generated.extend([
             generated_row("ce-plus-practice.md", render_ce_plus_markdown(ce_plus_payload)),
-            generated_row("ce-plus-practice.json", _json(ce_plus_payload) + "\n"),
+            generated_row(
+                "ce-plus-practice.json", _json(ce_plus_payload) + "\n", functools.partial(_settle_ce_plus_json, ce_plus_payload)
+            ),
         ])
     source_dir = target_dir / "source-artifacts"
     listed = listed_artifact_paths(run_path)

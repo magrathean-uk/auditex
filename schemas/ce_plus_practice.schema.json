@@ -101,7 +101,6 @@
         "coverage_data",
         "incomplete_collectors",
         "truncated_lists",
-        "unmapped_requirement_ids",
         "dropped_requirement_id_count"
       ],
       "properties": {
@@ -155,14 +154,6 @@
                 "minLength": 1
               }
             }
-          }
-        },
-        "unmapped_requirement_ids": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^ce\\.[a-z]{2,16}\\.[a-z0-9]+(?:_[a-z0-9]+)*$",
-            "maxLength": 64
           }
         },
         "dropped_requirement_id_count": {

@@ -193,7 +193,8 @@ What an integrator reading the bundle must know:
   deterministic order; then the five CE+ assessor tests with what Auditex can prepare and what the assessor must
   witness. Missing, stale, truncated and conflicting evidence is stated, never read as met. JSON, Markdown or HTML,
   always redacted for sharing; schema `schemas/ce_plus_practice.schema.json`, catalogue
-  `configs/ce-plus-practice.json`. It adds no verdict and is not an assessment. Customer packs gain
+  `configs/ce-plus-practice.json`. It adds no verdict and is not an assessment. A requirement id the shipped
+  catalogue lacks is counted (`dropped_requirement_id_count`), never shown. Customer packs gain
   `ce-plus-practice.md` and `ce-plus-practice.json` when the run has a Cyber Essentials section; rebuilding a pack
   without the section removes them only when the previous pack manifest listed them.
 - **Redaction refusals exit 2.** Every `auditex` command now answers a malformed, unreadable or changed normalised

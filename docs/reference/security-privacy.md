@@ -680,11 +680,16 @@ under the customer-pack profile. It carries requirement, rule, action, conflict 
 platform, evidence date and age, and Auditex's own catalogue text. It never copies tenant free text: no tenant name,
 no policy, user or group names, no finding titles or descriptions and no rule reason text (reasons are mapped to a
 closed set of codes, anything else reading `reason_unrecognised`; ids that are not id-shaped are dropped, and a
-requirement id read from the bundle is kept only in the `ce.<theme>.<name>` shape, anything else only counted); finding
+requirement id the shipped catalogue lacks is only counted, in `dropped_requirement_id_count`, never shown); finding
 ids are the only tenant-derived strings and pass the same redaction as every other output. Its error messages are
-fixed text and never name a path: a redaction refusal exits 2 with run-relative labels only. Its reason codes are
-values, not field names, so they are not in the person-name field-name exemption (`_D5_FIELD_NAMES`): a person
-whose name is spelt like a code is still pseudonymised where that spelling is a mapping key.
+fixed text and never name a path: a redaction refusal exits 2 with run-relative labels only. None of its field names
+or reason codes is in the shared person-name field-name exemption (`_D5_FIELD_NAMES`), so a mapping key anywhere
+else is masked exactly as before. The practice run has its own exemption, which covers only its payload's fixed
+paths (`ce_plus.restore_fixed_fields`): after the shared redaction of the payload (and, for the pack JSON, after the
+final text pass) a key the payload schema names, and a value that is a schema enum value, a shipped catalogue id or
+a reason code, is put back where a directory person's name had replaced it. Markdown and HTML keep the shared final
+text pass, so there a code spelt like a directory person's name (`reported_by` and a person called "Reported By")
+shows as that person's pseudonym.
 
 ### Person names
 

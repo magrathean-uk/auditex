@@ -295,7 +295,6 @@ def test_a_truncated_list_flags_the_requirements_its_collector_feeds() -> None:
             {"collector": "auth_methods", "list": "userRegistrationDetails", "reason": "result_limit"},
             {"collector": "conditional_access", "list": "policies", "reason": "result_limit"},
         ],
-        "unmapped_requirement_ids": [],
         "dropped_requirement_id_count": 0,
     }
 
@@ -338,7 +337,8 @@ def test_a_version_mismatch_and_uncatalogued_rows_are_reported() -> None:
     payload = build_practice_run(section, M365, CATALOGUE, as_of=AS_OF)
 
     assert payload["evidence_quality"]["flags"] == ["requirements_version_mismatch"]
-    assert payload["evidence_quality"]["unmapped_requirement_ids"] == ["ce.retired.requirement"]
+    assert payload["evidence_quality"]["dropped_requirement_id_count"] == 1
+    assert "ce.retired.requirement" not in json.dumps(payload)
     assert len(payload["requirements"]) == 30
 
 
@@ -348,8 +348,8 @@ def test_engine_listed_uncatalogued_ids_are_reported() -> None:
     section["uncatalogued_requirement_ids"] = ["ce.withdrawn.mapping", "ce.retired.requirement", 7, None]
     payload = build_practice_run(section, M365, CATALOGUE, as_of=AS_OF)
 
-    assert payload["evidence_quality"]["unmapped_requirement_ids"] == ["ce.retired.requirement", "ce.withdrawn.mapping"]
-    assert payload["evidence_quality"]["dropped_requirement_id_count"] == 2
+    assert payload["evidence_quality"]["dropped_requirement_id_count"] == 4  # two distinct ids, two non-strings
+    assert "retired" not in json.dumps(payload) and "withdrawn" not in json.dumps(payload)
 
 
 SUBSIDIARY_CANARY = "Synthetic-Subsidiary-Certified"
@@ -365,16 +365,15 @@ def test_bundle_ids_that_are_not_requirement_ids_are_counted_and_dropped() -> No
     ]
     payload = build_practice_run(section, M365, CATALOGUE, as_of=AS_OF)
 
-    assert payload["evidence_quality"]["unmapped_requirement_ids"] == ["ce.retired.requirement", "ce.withdrawn.mapping"]
-    assert payload["evidence_quality"]["dropped_requirement_id_count"] == 6
+    assert payload["evidence_quality"]["dropped_requirement_id_count"] == 8
     jsonschema.validate(payload, SCHEMA)
-    assert "Subsidiary" not in json.dumps(payload)
+    assert "Subsidiary" not in json.dumps(payload) and "retired" not in json.dumps(payload)
     markdown = render_ce_plus_markdown(payload)
-    assert "- Bundle entries dropped as not requirement ids: 6\n" in markdown
+    assert "- Bundle requirement ids the catalogue lacks (not shown): 8\n" in markdown
     assert "Subsidiary" not in markdown
     clean = build_practice_run(_full_section(), M365, CATALOGUE, as_of=AS_OF)
     assert clean["evidence_quality"]["dropped_requirement_id_count"] == 0
-    assert "dropped as not requirement ids" not in render_ce_plus_markdown(clean)
+    assert "- Bundle requirement ids the catalogue lacks (not shown): none\n" in render_ce_plus_markdown(clean)
 
 
 def test_a_truncated_collector_flags_a_requirement_it_feeds_through_a_supporting_rule() -> None:
@@ -579,7 +578,7 @@ def test_the_practice_run_imports_no_model_code() -> None:
         for alias in (node.names if isinstance(node, ast.Import) else [None])
         if (node.module if isinstance(node, ast.ImportFrom) else alias.name)
     }
-    assert modules == {"__future__", "json", "re", "collections.abc", "datetime", "typing",
+    assert modules == {"__future__", "json", "re", "collections.abc", "datetime", "functools", "typing",
                        "azure_tenant_audit.baselines", "azure_tenant_audit.collection_gaps",
                        "azure_tenant_audit.exchange_protection", "azure_tenant_audit.resources"}
 
@@ -903,7 +902,7 @@ def test_an_uncatalogued_entry_that_is_not_a_requirement_id_reaches_no_report_or
     }
     for name in ("json", "ce-plus-practice.json"):
         quality = json.loads(outputs[name])["evidence_quality"]
-        assert (quality["unmapped_requirement_ids"], quality["dropped_requirement_id_count"]) == ([], 1)
+        assert ("unmapped_requirement_ids" in quality, quality["dropped_requirement_id_count"]) == (False, 1)
 
 
 def test_engine_reason_codes_with_counts_render_in_every_report_and_pack_file(
@@ -946,3 +945,139 @@ def test_a_manual_practice_run_file_beside_a_pack_that_never_listed_it_is_kept(
     result = json.loads(verified)
     assert (rc != 0, result["valid"]) == (True, False)
     assert [issue["code"] for issue in result["issues"]] == ["unexpected_file"]
+
+
+# -- round 3: uncatalogued ids are only counted; fixed CE+ fields survive masking; pack rebuild cleanup -------------
+
+ORCHARD = "ce.hr.orchard_private_acquisition"
+REDWOOD = "ce.uac.redwood_payroll_directory"
+
+
+def _with_people(run: Path, *names: str) -> None:
+    """Directory people with these display names in the run's normalised users, hashes recalculated."""
+    from gate_support import rehash
+
+    records = [{"kind": "user", "display_name": name, "principal_name": f"person{index}@example.invalid",
+                "user_type": "Member"} for index, name in enumerate(names)]
+    (run / "normalized" / "users.json").write_text(json.dumps({"kind": "users", "records": records}), encoding="utf-8")
+    rehash(run)
+
+
+def test_uncatalogued_ids_reach_no_report_or_pack_file_only_their_count(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def change(section: dict[str, Any]) -> None:
+        section["uncatalogued_requirement_ids"] = [ORCHARD]
+        section["controls"].append(_clean(REDWOOD))
+
+    outputs = _five_outputs(_offline_run(tmp_path, "practice-label", change), tmp_path, capsys)
+
+    assert {name: ("orchard" in text, "redwood" in text) for name, text in outputs.items()} == {
+        "json": (False, False), "md": (False, False), "html": (False, False),
+        "ce-plus-practice.md": (False, False), "ce-plus-practice.json": (False, False),
+    }
+    for name in ("json", "ce-plus-practice.json"):
+        payload = json.loads(outputs[name])
+        jsonschema.validate(payload, SCHEMA)
+        assert payload["evidence_quality"]["dropped_requirement_id_count"] == 2
+        assert "unmapped_requirement_ids" not in payload["evidence_quality"]
+    for name in ("md", "ce-plus-practice.md"):
+        assert "- Bundle requirement ids the catalogue lacks (not shown): 2\n" in outputs[name], name
+    assert "<li><strong>Bundle requirement ids the catalogue lacks (not shown):</strong> 2</li>" in outputs["html"]
+
+
+def test_the_schema_has_no_list_of_uncatalogued_ids_and_needs_the_count() -> None:
+    quality = SCHEMA["properties"]["evidence_quality"]
+    assert "unmapped_requirement_ids" not in quality["properties"]
+    assert "unmapped_requirement_ids" not in quality["required"]
+    assert quality["properties"]["dropped_requirement_id_count"] == {"type": "integer", "minimum": 0}
+    assert "dropped_requirement_id_count" in quality["required"]
+
+
+CE_PLUS_KEY_PEOPLE = ("Dropped Requirement Id Count", "Reported By", "Evidence State", "Requirement Id", "Unknown Reasons")
+
+
+def test_ce_plus_fields_and_reason_codes_render_when_people_share_their_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    def change(section: dict[str, Any]) -> None:
+        section["uncatalogued_requirement_ids"] = [ORCHARD]
+        row = next(item for item in section["controls"] if item["control_id"] == PARTIAL)
+        row.update({"status": "not_assessed", "reason": "rules_not_evaluated", "rule_statuses": [
+            {"rule_id": "intune.device_os_end_of_life", "status": "not_assessed", "evaluated": False,
+             "confidence": "full", "reason": "os_lifecycle_unknown_for_2_devices"},
+            {"rule_id": "exchange.dkim_not_enabled", "status": "not_assessed", "evaluated": False,
+             "confidence": "full", "reason": "reported_by:dns_posture.dkim_missing"},
+        ]})
+
+    run = _offline_run(tmp_path, "practice-label", change)
+    _with_people(run, *CE_PLUS_KEY_PEOPLE)
+    outputs = _five_outputs(run, tmp_path, capsys)
+
+    for name in ("json", "ce-plus-practice.json"):
+        payload = json.loads(outputs[name])
+        jsonschema.validate(payload, SCHEMA)
+        assert payload["evidence_quality"]["dropped_requirement_id_count"] == 1
+        row = next(item for item in payload["requirements"] if item["requirement_id"] == PARTIAL)
+        assert (row["evidence_state"], row["unknown_reasons"]) == (
+            "evidence_unknown", ["os_lifecycle_unknown_for_2_devices", "reported_by"]
+        )
+    for name in ("md", "ce-plus-practice.md"):
+        assert "- Bundle requirement ids the catalogue lacks (not shown): 1\n" in outputs[name], name
+    # Rendered text keeps the shared final pass: a code spelt like a directory person (``reported_by``) is masked
+    # there as prose; a code no person shares still renders.
+    for name in ("md", "html", "ce-plus-practice.md"):
+        assert ("os_lifecycle_unknown_for_2_devices" in outputs[name], "reported_by" in outputs[name]) == (True, False), name
+
+
+def _rebuild_after_editing_the_manifest(pack: Path, edit) -> None:
+    manifest_path = pack / "pack-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    edit(manifest)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_a_malformed_previous_manifest_path_never_stops_a_rebuild(
+    runs: dict[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    older = tmp_path / "older"
+    shutil.copytree(runs["google_workspace"], older)
+    _strip_ce_section(older)
+    pack = tmp_path / "pack"
+    assert _report(["report", "customer-pack", str(older), "--output-dir", str(pack)], capsys)[0] == 0
+    _rebuild_after_editing_the_manifest(pack, lambda manifest: manifest["generated_files"][0].update(path=["handoff.md"]))
+
+    rc, _, error = _report(["report", "customer-pack", str(older), "--output-dir", str(pack)], capsys)
+    verify_rc, verified, _ = _report(["report", "verify-pack", str(pack)], capsys)
+
+    assert (rc, "Traceback" in error) == (0, False)
+    assert sorted(path.name for path in (pack / "source-artifacts").rglob("*") if path.is_file()) != []
+    assert (verify_rc, json.loads(verified)["valid"]) == (0, True)
+
+
+def test_previous_ce_plus_files_listed_with_a_leading_dot_slash_go_on_a_ce_less_rebuild(
+    runs: dict[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    older = tmp_path / "older"
+    shutil.copytree(runs["google_workspace"], older)
+    _strip_ce_section(older)
+    pack = tmp_path / "pack"
+    assert _report(["report", "customer-pack", str(runs["google_workspace"]), "--output-dir", str(pack)], capsys)[0] == 0
+
+    def dot_slash(manifest: dict[str, Any]) -> None:
+        for row in manifest["generated_files"]:
+            if row["path"] in ("ce-plus-practice.md", "ce-plus-practice.json"):
+                row["path"] = "./" + row["path"]
+
+    _rebuild_after_editing_the_manifest(pack, dot_slash)
+    assert _report(["report", "customer-pack", str(older), "--output-dir", str(pack)], capsys)[0] == 0
+    rc, verified, _ = _report(["report", "verify-pack", str(pack)], capsys)
+
+    assert ((pack / "ce-plus-practice.md").exists(), (pack / "ce-plus-practice.json").exists()) == (False, False)
+    assert (rc, json.loads(verified)["valid"]) == (0, True)
+
+
+@pytest.mark.parametrize("entry", [["ce-plus-practice.md"], None, 7, "/ce-plus-practice.md", "../pack/ce-plus-practice.md"])
+def test_previous_generated_ce_plus_files_ignore_malformed_entries(entry: Any) -> None:
+    from auditex.reporting import _previous_generated_ce_plus_files
+
+    manifest = {"generated_files": [{"path": entry}, {"path": "./ce-plus-practice.json"}, "x", None]}
+    assert _previous_generated_ce_plus_files(manifest) == {"ce-plus-practice.json"}

@@ -355,10 +355,10 @@ unavailable`), `stale` (evidence age over the catalogue's `stale_after_days`, 14
 `evidence_age_days` is `null` when `created_utc` is missing or unreadable, when no as-of date is given or when the
 as-of date is before the evidence date) and `conflicting` (a catalogue conflict holds: every policy rule
 `no_gap_found` and at least one state rule `gap_found`; a not-evaluated rule asserts no conflict). At run level
-`requirements_version_mismatch` is added when the section's `version` differs from the catalogue's, and bundle rows the
-catalogue lacks, and the section's own `uncatalogued_requirement_ids`, are listed in `unmapped_requirement_ids` when
-they have the requirement id shape (`ce.<theme>.<name>`, lower-case ASCII, at most 64 characters); any other entry
-or row id is dropped and counted in `dropped_requirement_id_count`, and a report adds a line for a non-zero count. A
+`requirements_version_mismatch` is added when the section's `version` differs from the catalogue's. A requirement id
+the shipped catalogue lacks, from a control row or the section's own `uncatalogued_requirement_ids`, is never copied:
+the row is dropped and `dropped_requirement_id_count` (a non-negative integer, each distinct id once, each non-string
+entry once) counts them; every report states the count ("none" for zero). There is no list of such ids. A
 bundle without the section renders its requirements version and finding counts as "not established". `run` carries
 the run id, platform, evidence date, as-of date and age; it carries no tenant name.
 

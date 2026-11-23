@@ -7,7 +7,9 @@ folded into observed: an unevaluated rule, an empty rule list or a malformed row
 
 The output carries ids, counts, catalogue text and dates only; tenant free text (the tenant label, policy or user
 names, finding titles) is never copied. Rule reasons are mapped to a closed set of codes (anything else reads
-``reason_unrecognised``) and ids that are not id-shaped are dropped. Finding ids are the only tenant-derived strings.
+``reason_unrecognised``) and ids that are not id-shaped are dropped. A requirement id the shipped catalogue lacks
+(a control row or an ``uncatalogued_requirement_ids`` entry) is counted, never copied. Finding ids are the only
+tenant-derived strings.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime
+from functools import cache
 from typing import Any
 
 from azure_tenant_audit.baselines import (
@@ -34,6 +37,7 @@ from azure_tenant_audit.exchange_protection import (
 SCHEMA_VERSION = "ce-plus-practice-v1"
 PAYLOAD_KIND = "ce_plus_practice_run"
 CATALOGUE_PATH = "configs/ce-plus-practice.json"
+SCHEMA_PATH = "schemas/ce_plus_practice.schema.json"
 FRAMEWORK_CATALOGUE_PATH = "configs/framework-catalog.json"
 
 EVIDENCE_STATES = (
@@ -121,10 +125,6 @@ _COUNTED_RULE_REASON = re.compile(
 _SOURCE_RULE_REASONS = frozenset(
     f"{source}_not_read_in_full" for source in (SOURCE_MALWARE, SOURCE_TRANSPORT, SOURCE_DKIM, SOURCE_DOMAINS, SOURCE_CAS_SMTP)
 )
-# A Cyber Essentials requirement id as the framework catalogue writes it (``ce.<theme>.<name>``, lower-case ASCII).
-# Requirement ids read from the bundle are shared only in this shape; anything else is counted and dropped.
-_REQUIREMENT_ID = re.compile(r"ce\.[a-z]{2,16}\.[a-z0-9]+(?:_[a-z0-9]+)*")
-_REQUIREMENT_ID_MAX_LENGTH = 64
 
 DISCLAIMER = (
     "This practice run lists the evidence observed in one read-only audit and the proof still needed. It is not a "
@@ -153,6 +153,99 @@ def load_catalogue() -> dict[str, Any]:
     return catalogue
 
 
+def _schema() -> dict[str, Any]:
+    from azure_tenant_audit.resources import open_text_resource
+
+    return json.loads(open_text_resource(SCHEMA_PATH))
+
+
+@cache
+def field_names() -> frozenset[str]:
+    """Every property name of the shipped payload schema (``SCHEMA_PATH``). The schema allows no other key, so each
+    mapping key of a practice-run payload is one of these: product vocabulary, never tenant data."""
+    names: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            if isinstance(node.get("properties"), Mapping):
+                names.update(node["properties"])
+            for item in node.values():
+                walk(item)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(_schema())
+    return frozenset(names)
+
+
+@cache
+def _fixed_values() -> frozenset[str]:
+    """The closed-set strings a payload carries as values: the schema's enum and const values and the shipped
+    catalogue's ids (requirements, actions, assessor tests, conflicts). Reason codes are checked by ``_is_reason_code``."""
+    values: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            values.update(item for item in node.get("enum") or [] if isinstance(item, str))
+            if isinstance(node.get("const"), str):
+                values.add(node["const"])
+            for item in node.values():
+                walk(item)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(_schema())
+    catalogue = load_catalogue()
+    values.update(row["requirement_id"] for row in catalogue["requirements"])
+    for part in ("actions", "assessor_tests", "conflicts"):
+        values.update(row["id"] for row in catalogue[part] if isinstance(row.get("id"), str))
+    return frozenset(values)
+
+
+def _is_reason_code(value: str) -> bool:
+    """A reason code the builder writes with no detail: the engine's closed sets, a counted reason, a bare prefixed
+    code, a registration count, or one of the practice run's own codes."""
+    if value in _KNOWN_RULE_REASONS or value in _SOURCE_RULE_REASONS or value in _PREFIXED_RULE_REASONS:
+        return True
+    if value in _ROW_REASONS or value in (REASON_STATUS_UNREADABLE, REASON_UNRECOGNISED):
+        return True
+    code, separator, detail = value.partition(":")
+    if separator:
+        return code == "registration_report_incomplete" and detail.isascii() and detail.isdigit()
+    return _COUNTED_RULE_REASON.fullmatch(value) is not None
+
+
+def restore_fixed_fields(original: Any, redacted: Any) -> Any:
+    """``redacted`` (the shared output redaction of the practice-run payload ``original``) with the payload's own
+    fixed vocabulary put back where the redaction replaced it because a directory person shares its spelling
+    (``Reported By``, ``Evidence State``).
+
+    This is the CE+ payload's exemption, and it covers only that payload's fixed field paths, walked in step with
+    the redacted copy: a mapping key is restored only in a mapping of the same size at the same position (a mapping
+    in another order is left as redacted) and only when the original key is a schema property name (``field_names``); a string value only when the original is a
+    schema enum or const value, a shipped catalogue id or a reason code (``_is_reason_code``). Every other value
+    stays as redacted, and the shared redaction's rules (its product field-name exemption included) are untouched,
+    so a mapping key anywhere else is masked exactly as before."""
+    if isinstance(original, Mapping) and isinstance(redacted, Mapping):
+        if len(original) != len(redacted):
+            return redacted
+        names = field_names()
+        restored: dict[Any, Any] = {}
+        for (key, value), (new_key, new_value) in zip(original.items(), redacted.items(), strict=True):
+            if key != new_key and new_key in original:
+                return redacted  # not walked in step (another order): nothing is put back
+            restored[key if isinstance(key, str) and key in names else new_key] = restore_fixed_fields(value, new_value)
+        return restored if len(restored) == len(redacted) else redacted
+    if isinstance(original, list) and isinstance(redacted, list) and len(original) == len(redacted):
+        return [restore_fixed_fields(value, new_value) for value, new_value in zip(original, redacted, strict=True)]
+    if isinstance(original, str) and isinstance(redacted, str) and original != redacted:
+        if original in _fixed_values() or _is_reason_code(original):
+            return original
+    return redacted
+
+
 def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -163,13 +256,6 @@ def _id(value: Any) -> str | None:
     if text is None or len(text) > _ID_MAX_LENGTH or not set(text) <= _ID_CHARACTERS:
         return None
     return text
-
-
-def _requirement_id(value: Any) -> str | None:
-    """A Cyber Essentials requirement id (``_REQUIREMENT_ID``, at most 64 characters), else ``None``."""
-    if not isinstance(value, str) or len(value) > _REQUIREMENT_ID_MAX_LENGTH or not _REQUIREMENT_ID.fullmatch(value):
-        return None
-    return value
 
 
 def _reason_code(rule_id: str, reason: str) -> str:
@@ -337,31 +423,31 @@ def _ranking_formula(catalogue: Mapping[str, Any]) -> str:
     )
 
 
-def _section_rows(
-    section: Any, catalogue_ids: Iterable[str]
-) -> tuple[dict[str, Any] | None, str | None, list[str], int]:
-    """(rows by requirement id, section version, ids in order, rows dropped for an id that is not a requirement id)
-    or (None, None, [], 0) for a missing section. An id the shipped catalogue lists is taken as it is."""
-    known = frozenset(catalogue_ids)
+def _section_rows(section: Any, known: frozenset[str]) -> tuple[dict[str, Any] | None, str | None, int]:
+    """(rows by requirement id, section version, requirement ids dropped) or (None, None, 0) for a missing section.
+
+    Only a row whose id the shipped catalogue lists is kept. Any other id, from a control row or the section's
+    ``uncatalogued_requirement_ids``, is counted once per distinct string (a non-string entry once each) and never
+    copied: an id-shaped label can still be tenant text."""
     if not isinstance(section, Mapping) or not isinstance(section.get("controls"), list):
-        return None, None, [], 0
+        return None, None, 0
     rows: dict[str, Any] = {}
-    order: list[str] = []
-    dropped = 0
-    for row in section["controls"]:
+    dropped: set[Any] = set()
+    for index, row in enumerate(section["controls"]):
         if not isinstance(row, Mapping):
             continue
         control_id = row.get("control_id")
-        listed = isinstance(control_id, str) and control_id in known
-        requirement_id = control_id if listed else _requirement_id(control_id)
-        if requirement_id is None:
-            dropped += 1
-            continue
-        if requirement_id in rows:
-            continue
-        rows[requirement_id] = row
-        order.append(requirement_id)
-    return rows, _text(section.get("version")), order, dropped
+        if isinstance(control_id, str) and control_id in known:
+            rows.setdefault(control_id, row)
+        else:
+            dropped.add(control_id if isinstance(control_id, str) else ("row", index))
+    listed = section.get("uncatalogued_requirement_ids")
+    for index, entry in enumerate(listed if isinstance(listed, list) else []):
+        if not isinstance(entry, str):
+            dropped.add(("entry", index))
+        elif entry not in known:
+            dropped.add(entry)
+    return rows, _text(section.get("version")), len(dropped)
 
 
 def build_practice_run(
@@ -383,8 +469,9 @@ def build_practice_run(
     effort_weights = {row["id"]: int(row["weight"]) for row in catalogue["effort_bands"]}
     conflict_weight = int(catalogue["conflict_weight"])
 
-    catalogue_ids = [row["requirement_id"] for row in catalogue["requirements"]]
-    rows_by_id, section_version, section_order, dropped_ids = _section_rows(section, catalogue_ids)
+    rows_by_id, section_version, dropped_ids = _section_rows(
+        section, frozenset(row["requirement_id"] for row in catalogue["requirements"])
+    )
     truncated_lists, truncated_collectors = _truncated_collectors(manifest, coverage_rows)
     coverage = collector_coverage or {}
     incomplete = sorted(
@@ -533,14 +620,6 @@ def build_practice_run(
     version_mismatch = rows_by_id is not None and section_version != catalogue["requirements_version"]
     if version_mismatch:
         run_flags.append("requirements_version_mismatch")
-    engine_unmapped = section.get("uncatalogued_requirement_ids") if rows_by_id is not None else None
-    unmapped = [rid for rid in section_order if rid not in catalogue_ids]
-    for entry in engine_unmapped if isinstance(engine_unmapped, list) else []:
-        rid = _requirement_id(entry)
-        if rid is None:
-            dropped_ids += 1  # tenant text, a malformed entry or a foreign id: counted, never copied
-        elif rid not in catalogue_ids and rid not in unmapped:
-            unmapped.append(rid)
     by_state = {state: sum(1 for row in requirements if row["evidence_state"] == state) for state in EVIDENCE_STATES}
     source = catalogue["source"]
     return {
@@ -563,7 +642,6 @@ def build_practice_run(
             "coverage_data": coverage_data,
             "incomplete_collectors": incomplete,
             "truncated_lists": truncated_lists,
-            "unmapped_requirement_ids": unmapped,
             "dropped_requirement_id_count": dropped_ids,
         },
         "summary": {

@@ -626,14 +626,18 @@ def _redact_report_content(content: str, format_name: str, run_dir: str | None) 
 
 
 def _redacted_report_payload(
-    payload: Any, renderer: Callable[[Any], str] | None, format_name: str, run_dir: str | None
+    payload: Any, renderer: Callable[[Any], str] | None, format_name: str, run_dir: str | None,
+    settle: Callable[[Any, Any], Any] | None = None,
 ) -> str:
     """Redact the payload as structure first, then render it; the markup-safe text pass only runs over the
     already redacted Markdown (it repeats the redaction, idempotently, and skips the inline secret pattern).
     Output made with a temporary key (a keyless run) says so: a top-level ``pseudonym_notice`` in JSON, a closing
-    line in Markdown (``output_redaction.temporary_key_note``)."""
+    line in Markdown (``output_redaction.temporary_key_note``). ``settle(payload, redacted)`` lets one payload kind
+    put back its own fixed field names (``ce_plus.restore_fixed_fields``); it never sees the rendered text."""
     context = context_for_run(run_dir) if run_dir else None
     safe = redact_output(payload, profile=PROFILE_SHAREABLE, context=context)
+    if settle is not None:
+        safe = settle(payload, safe)
     note = temporary_key_note(context) if context else ""
     if format_name in ("md", "html") and renderer is not None:
         content = redact_output(renderer(safe), profile=PROFILE_SHAREABLE, context=context, markup=True)
@@ -663,12 +667,13 @@ def _emit_report_payload(
     run_dir: str | None = None,
     redact: bool = True,
     expected_snapshot: Snapshot | None = None,
+    settle: Callable[[Any, Any], Any] | None = None,
 ) -> None:
     # Every report payload leaves through the output redaction boundary. Pass ``payload`` (and, for Markdown, a
     # ``renderer``) so it is redacted before it is rendered; ``content`` is for text that is already rendered.
     # Only the setup guide (the operator's own parameters, no tenant evidence) opts out with ``redact=False``.
     if payload is not None:
-        content = _redacted_report_payload(payload, renderer, format_name, run_dir)
+        content = _redacted_report_payload(payload, renderer, format_name, run_dir, settle)
     elif redact:
         content = _redact_report_content(content or "", format_name, run_dir)
     if expected_snapshot is not None:
@@ -1307,12 +1312,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.report_command == "ce-plus":
+            from .ce_plus import restore_fixed_fields
             from .reporting import render_ce_plus_html, render_ce_plus_markdown
 
             _emit_report_payload(
                 payload=ce_plus_practice_run(args.run_dir, args.as_of),
                 renderer=render_ce_plus_html if args.format == "html" else render_ce_plus_markdown,
                 format_name=args.format, output_path=args.output, run_dir=args.run_dir, expected_snapshot=before,
+                settle=restore_fixed_fields,
             )
             return 0
         if args.report_command == "handoff":
