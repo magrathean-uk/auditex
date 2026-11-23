@@ -184,6 +184,18 @@ def build_google_auth_context_payload(config: GoogleRunConfig, auth_config: Goog
     }
 
 
+def _authenticated_google_read(row: dict[str, Any]) -> bool:
+    """Whether a coverage row is a Google read that completed on the collector's token, whatever its row count.
+
+    Every collector reads through one token asking for all of its scopes (see ``_collector_client``), so a completed
+    read proves that token carries them. A DNS lookup uses no Google token, and a row with no read behind it (a
+    skipped-mailbox note) proves nothing. Rows recorded before the explicit marker count only when they hold data.
+    """
+    if str(row.get("type") or "google") != "google" or row.get("status") not in {"ok", "partial"}:
+        return False
+    return bool(row.get("authenticated_read")) or int(row.get("item_count") or 0) > 0
+
+
 def build_google_capability_rows(
     selected: list[str],
     *,
@@ -214,21 +226,15 @@ def build_google_capability_rows(
         row_status = status
         row_reason = reason
         missing_permissions: list[str] = []
-        if not failures and seen_by_collector.get(name) and status == "supported":
+        scopes_proven = any(_authenticated_google_read(item) for item in seen_by_collector.get(name, []))
+        if not failures and scopes_proven and status == "supported":
             row_status = "supported_exact_scope"
             row_reason = "runtime_preflight_ok"
         elif failures:
             # Only a read refused outright is a scope block; a read that partly succeeded proves the scopes work.
             classes = {str(item.get("error_class") or "") for item in failures if item.get("status") == "failed"}
-            # A Google read of this collector that returned data proves its token carries the collector's scopes
-            # (one token per collector), so another read refused beside it is a role limit, not a missing scope. A
-            # DNS lookup uses no Google token and proves nothing.
-            scopes_proven = any(
-                str(item.get("type") or "google") == "google"
-                and item.get("status") in {"ok", "partial"}
-                and int(item.get("item_count") or 0) > 0
-                for item in seen_by_collector.get(name, [])
-            )
+            # A completed Google read of this collector, even an empty one, proves its token carries the collector's
+            # scopes, so another read refused beside it is a role limit, not a missing scope.
             if classes & {"insufficient_permissions", "unauthenticated"} and not scopes_proven:
                 row_status = "blocked_by_scope"
                 row_reason = "runtime_permission_block"
@@ -247,6 +253,10 @@ def build_google_capability_rows(
                     if classes & {"insufficient_permissions", "unauthenticated"}
                     else "runtime_endpoint_block"
                 )
+        seen = seen_by_collector.get(name, [])
+        if seen and not failures and all(item.get("live_read") is False for item in seen):
+            # Only a DNS readiness note: nothing was looked up and no Google request was made.
+            row_reason = "dns_only_not_verified"
         if auth_mode == "offline" and not failures:
             # A replay observed nothing on a tenant: it is an offline sample, not an exact-scope read.
             row_status = "offline_sample"
@@ -260,6 +270,7 @@ def build_google_capability_rows(
             "observed_permissions": [],
             "delegated_roles": [],
             "minimum_role_hints": ["Google Workspace super admin or delegated admin"],
+            "scopes_proven": scopes_proven,
             "notes": f"Google Workspace {auth_mode} auth.",
             "endpoint_statuses": [
                 {
@@ -384,8 +395,9 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
         status = "partial"
         error_class = max(set(classes), key=classes.count)
         error = f"Sharing of {len(permission_errors)} Drive files could not be read ({', '.join(sorted(set(classes)))})."
-    return {
+    row = {
         "collector": collector,
+        "type": "google",
         "name": name,
         "status": status,
         "item_count": len(rows) if isinstance(rows, list) else 1,
@@ -393,6 +405,9 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
         "error_class": error_class,
         "error": error,
     }
+    if status != "failed":
+        row["authenticated_read"] = True
+    return row
 
 
 def _gmail_preflight_status(row: dict[str, Any], check: Any) -> dict[str, Any]:
@@ -454,7 +469,9 @@ def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None
     elif collector == "google_devices":
         rows.append(_preflight_call(collector, "mobileDevices", lambda: client.list_devices("mobile", top=top)))
     elif collector == "google_dns_posture":
-        rows.append({"collector": collector, "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None})
+        # Only the run's resolver is ready to look the domain up; no Google token is used, so no Google scope is proven.
+        # The row is a readiness note with no lookup behind it (``live_read`` false): it verifies nothing.
+        rows.append({"collector": collector, "type": "dns", "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None, "live_read": False})
     elif collector == "google_drive_posture":
         rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
         rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
@@ -923,15 +940,21 @@ def _google_probe_summary_rows(selected: list[str], preflight_rows: list[dict[st
         rows = rows_by_collector.get(collector, [])
         failures = [row for row in rows if row.get("status") != "ok"]
         item_count = sum(int(row.get("item_count") or 0) for row in rows)
-        summary_rows.append(
-            {
-                "name": collector,
-                "status": "failed" if failures else "ok",
-                "item_count": item_count,
-                "message": "preflight ok" if not failures else "preflight blocked",
-                "coverage_rows": len(rows),
-            }
-        )
+        summary = {
+            "name": collector,
+            "status": "failed" if failures else "ok",
+            "item_count": item_count,
+            "message": "preflight ok" if not failures else "preflight blocked",
+            "coverage_rows": len(rows),
+        }
+        if rows and not failures and all(row.get("live_read") is False for row in rows):
+            # Only a readiness note, no lookup or Google request: the probe verified nothing for this collector.
+            summary.update({
+                "live_read": False,
+                "reason": "dns_only_not_verified",
+                "message": "DNS-only readiness; nothing was looked up or verified",
+            })
+        summary_rows.append(summary)
     return summary_rows
 
 

@@ -219,7 +219,14 @@ def _drive_client(files: list[dict[str, Any]], permissions: Any, calls: list[dic
             calls.append({"permissions.list": kwargs})
             return _Request(permissions)
 
-    drive = type("Drive", (), {"files": lambda self: _Files(), "permissions": lambda self: _Permissions()})()
+    class _Drives:
+        def list(self, **kwargs: Any) -> _Request:
+            calls.append({"drives.list": kwargs})
+            return _Request({"drives": [{"id": "d1", "name": "Finance"}]})
+
+    drive = type(
+        "Drive", (), {"files": lambda self: _Files(), "permissions": lambda self: _Permissions(), "drives": lambda self: _Drives()}
+    )()
     client = GoogleWorkspaceClient(credentials=None)
     assert client._services is not None
     client._services[("drive", "v3")] = drive
@@ -262,6 +269,8 @@ def test_r057_unreadable_shared_drive_permissions_are_a_coverage_gap_not_clean()
     row = next(item for item in result.coverage if item["name"] == "drivePermissions")
     assert row["status"] == "failed"
     assert row["error_class"] == "insufficient_permissions"
+    # Every other read succeeds, so the unreadable sharing alone makes the collector partial.
+    assert next(item for item in result.coverage if item["name"] == "sharedDrives")["status"] == "ok"
     assert result.status == "partial"
 
 
@@ -321,3 +330,256 @@ def test_r011_r058_dropping_deleted_alerts_keeps_a_page_error() -> None:
     alerts = client.list_alerts()
     assert [alert["alertId"] for alert in alerts] == ["a2"]
     assert getattr(alerts, "page_error", None) is not None and alerts.truncated is True
+
+
+# ---- bot review wave 2, group I: read completion, DNS-only preflight, scope refusals and quota 403s ---------------
+
+
+def _real_http_error(status: int, body: dict[str, Any]) -> Exception:
+    import json
+
+    from googleapiclient.errors import HttpError
+
+    resp = type("Resp", (), {"status": status, "reason": "Forbidden"})()
+    return HttpError(resp, json.dumps(body).encode("utf-8"), uri="https://admin.googleapis.com/admin/directory/v1/users")
+
+
+def _quota_403(reason: str) -> Exception:
+    return _real_http_error(403, {"error": {"code": 403, "message": "Quota exceeded.", "errors": [
+        {"domain": "usageLimits", "reason": reason, "message": "Quota exceeded."}]}})
+
+
+@pytest.mark.parametrize("reason", ["userRateLimitExceeded", "rateLimitExceeded"])
+def test_w2_20_quota_403_is_retried_with_backoff(reason: str, _no_backoff_sleep: list[float]) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    factory = _paged({None: [_quota_403(reason), {"users": [{"id": "u1"}]}]})
+    rows = client._collect_pages(factory, "users", limit=None)
+    assert [row["id"] for row in rows] == ["u1"]
+    assert len(_no_backoff_sleep) == 1
+    assert google_client.classify_google_error(_quota_403(reason))[0] == "rate_limited"
+
+
+def test_w2_20_a_permission_403_is_still_not_retried(_no_backoff_sleep: list[float]) -> None:
+    denied = _real_http_error(403, {"error": {"code": 403, "message": "Not Authorized to access this resource/api",
+                                              "errors": [{"domain": "global", "reason": "forbidden"}]}})
+    client = GoogleWorkspaceClient(credentials=None)
+    with pytest.raises(Exception, match="HttpError 403"):
+        client._collect_pages(_paged({None: [denied]}), "users", limit=None)
+    assert _no_backoff_sleep == []
+    assert google_client.classify_google_error(denied)[0] == "insufficient_permissions"
+
+
+def _refresh_error(error: str, description: str) -> Exception:
+    from google.auth.exceptions import RefreshError
+
+    return RefreshError(f"{error}: {description}", {"error": error, "error_description": description})
+
+
+def test_w2_19_a_delegated_access_denied_token_exchange_is_a_scope_refusal() -> None:
+    refused = _refresh_error("access_denied", "Requested client not authorized.")
+    assert google_client.is_token_refusal(str(refused))
+    assert google_client.classify_google_error(refused)[0] == "insufficient_permissions"
+
+
+def test_w2_19_other_token_and_api_failures_are_not_scope_refusals() -> None:
+    invalid_grant = _refresh_error("invalid_grant", "Invalid JWT Signature.")
+    assert not google_client.is_token_refusal(str(invalid_grant))
+    assert google_client.classify_google_error(invalid_grant)[0] == "client_error"
+    api_denied = _real_http_error(403, {"error": {"code": 403, "message": "access_denied by policy"}})
+    assert not google_client.is_token_refusal(str(api_denied))
+
+
+def test_w2_19_per_scope_check_names_each_access_denied_scope() -> None:
+    granted = {"https://www.googleapis.com/auth/a"}
+
+    class _Credentials:
+        def __init__(self, scopes: tuple[str, ...] = ()) -> None:
+            self.scopes = scopes
+
+        def with_scopes(self, scopes: list[str]) -> _Credentials:
+            return _Credentials(tuple(scopes))
+
+        def refresh(self, _request: Any) -> None:
+            if not set(self.scopes) <= granted:
+                raise _refresh_error("access_denied", "Requested client not authorized.")
+
+    client = GoogleWorkspaceClient(credentials=_Credentials())
+    original = google_client._token_request
+    google_client._token_request = lambda: None  # type: ignore[assignment]
+    try:
+        missing = client.unauthorised_scopes(
+            ("https://www.googleapis.com/auth/a", "https://www.googleapis.com/auth/b", "https://www.googleapis.com/auth/c")
+        )
+    finally:
+        google_client._token_request = original  # type: ignore[assignment]
+    assert missing == ["https://www.googleapis.com/auth/b", "https://www.googleapis.com/auth/c"]
+
+
+def test_w2_21_an_empty_completed_read_proves_the_collector_token_scopes() -> None:
+    from auditex.google_workspace.collectors import GoogleDevicesCollector
+    from auditex.google_workspace.run import build_google_capability_rows
+
+    class _Client:
+        def list_devices(self, resource: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            if resource == "chromeos":
+                raise _HttpError(403)
+            return []
+
+    result = GoogleDevicesCollector().run({"client": _Client()})
+    mobile = next(row for row in result.coverage if row["name"] == "mobileDevices")
+    assert mobile["status"] == "ok" and mobile["item_count"] == 0
+    row = build_google_capability_rows(
+        ["google_devices"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=result.coverage,
+    )[0]
+    assert row["status"] == "partial"
+    assert row["reason"] == "runtime_permission_block"
+    assert row["missing_permissions"] == []
+
+
+def test_w2_21_a_row_with_no_read_behind_it_proves_no_scope() -> None:
+    from auditex.google_workspace.run import build_google_capability_rows
+
+    coverage = [
+        {"collector": "google_gmail_settings", "type": "google", "name": "mailboxSettingsSkipped", "status": "ok",
+         "item_count": 0, "endpoint": "gmail.users.settings"},
+        {"collector": "google_gmail_settings", "type": "google", "name": "mailboxSettings:a", "status": "failed",
+         "item_count": 0, "error_class": "insufficient_permissions", "error": "HTTP 403"},
+    ]
+    row = build_google_capability_rows(
+        ["google_gmail_settings"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=coverage,
+    )[0]
+    assert row["status"] == "blocked_by_scope"
+
+
+def test_w2_25_a_dns_only_preflight_never_marks_the_google_scope_exact() -> None:
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
+
+    preflight = build_google_preflight_rows(object(), ["google_dns_posture"], domain="example.com")
+    assert [row.get("type") for row in preflight] == ["dns"]
+    row = build_google_capability_rows(
+        ["google_dns_posture"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=preflight,
+    )[0]
+    assert row["status"] != "supported_exact_scope"
+    assert row["status"] == "supported"
+
+
+def test_w2_25_a_completed_google_preflight_read_is_still_exact_scope() -> None:
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
+
+    class _Client:
+        def list_alerts(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            return []
+
+    preflight = build_google_preflight_rows(_Client(), ["google_alert_center"], domain="example.com")
+    row = build_google_capability_rows(
+        ["google_alert_center"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=preflight,
+    )[0]
+    assert row["status"] == "supported_exact_scope"
+
+
+def test_w2_21_a_permission_block_beside_proven_scopes_asks_for_a_role_not_scopes() -> None:
+    from auditex.google_workspace.collectors import GoogleDevicesCollector
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_live_readiness,
+    )
+
+    class _Client:
+        def list_devices(self, resource: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            if resource == "chromeos":
+                raise _HttpError(403)
+            return []
+
+    result = GoogleDevicesCollector().run({"client": _Client()})
+    rows = build_google_capability_rows(
+        ["google_devices"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=result.coverage,
+    )
+    row = rows[0]
+    assert row["missing_permissions"] == []
+    assert row["blocker_kind"] == "admin_role"
+    assert "scope" not in row["next_step"].lower()
+    readiness = build_google_live_readiness(["google_devices"], rows, coverage_rows=result.coverage)
+    gate = readiness["evidence_gates"][0]
+    assert gate["blocker_kind"] == "admin_role"
+    assert readiness["blocker_summary"]["counts"].get("auth_scope") is None
+
+
+def test_w2_21_a_refused_token_with_no_proven_scope_still_asks_for_scopes() -> None:
+    from auditex.google_workspace.run import build_google_capability_rows
+
+    coverage = [
+        {"collector": "google_devices", "type": "google", "name": "mobileDevices", "status": "failed",
+         "item_count": 0, "error_class": "insufficient_permissions", "error": "HTTP 403"},
+    ]
+    row = build_google_capability_rows(
+        ["google_devices"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=coverage,
+    )[0]
+    assert row["status"] == "blocked_by_scope"
+    assert row["blocker_kind"] == "auth_scope"
+
+
+def test_w2_25_a_dns_only_probe_is_not_live_verified_or_exact_scope() -> None:
+    from auditex.google_workspace.run import (
+        _google_probe_summary_rows,
+        build_google_capability_rows,
+        build_google_live_readiness,
+        build_google_preflight_rows,
+    )
+    from azure_tenant_audit.run import build_coverage_ledger
+
+    selected = ["google_dns_posture"]
+    preflight = build_google_preflight_rows(object(), selected, domain="example.com")
+    capability = build_google_capability_rows(
+        selected, auth_mode="domain-delegation", dependency_status={"available": True}, coverage_rows=preflight,
+    )
+    readiness = build_google_live_readiness(selected, capability, coverage_rows=preflight)
+    assert readiness["trust_level"] != "live_verified"
+    gate = readiness["evidence_gates"][0]
+    assert gate["status"] == "unverified"
+    assert "dns-only" in gate["reason"].replace("_", "-")
+    ledger = build_coverage_ledger(
+        capability_rows=capability,
+        result_rows=_google_probe_summary_rows(selected, preflight),
+        diagnostics=[],
+    )
+    assert ledger[0]["coverage_status"] != "complete_exact_scope"
+    assert ledger[0]["coverage_status"] == "not_run"
+    assert "dns-only" in ledger[0]["coverage_reason"].replace("_", "-")
+
+
+def test_w2_25_a_completed_google_probe_read_is_still_live_verified() -> None:
+    from auditex.google_workspace.run import (
+        _google_probe_summary_rows,
+        build_google_capability_rows,
+        build_google_live_readiness,
+        build_google_preflight_rows,
+    )
+    from azure_tenant_audit.run import build_coverage_ledger
+
+    class _Client:
+        def list_alerts(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            return []
+
+    selected = ["google_alert_center"]
+    preflight = build_google_preflight_rows(_Client(), selected, domain="example.com")
+    capability = build_google_capability_rows(
+        selected, auth_mode="domain-delegation", dependency_status={"available": True}, coverage_rows=preflight,
+    )
+    readiness = build_google_live_readiness(selected, capability, coverage_rows=preflight)
+    assert readiness["trust_level"] == "live_verified"
+    ledger = build_coverage_ledger(
+        capability_rows=capability, result_rows=_google_probe_summary_rows(selected, preflight), diagnostics=[],
+    )
+    assert ledger[0]["coverage_status"] == "complete_exact_scope"

@@ -411,7 +411,7 @@ def test_google_capability_rows_include_live_readiness() -> None:
     )
     readiness = build_google_live_readiness(
         ["google_directory", "google_drive_posture"], capability_rows,
-        coverage_rows=[{"collector": "google_directory", "name": "users", "status": "ok"}],
+        coverage_rows=[{"collector": "google_directory", "name": "users", "status": "ok", "authenticated_read": True}],
     )
 
     assert readiness["trust_level"] == "partial"
@@ -764,7 +764,7 @@ def test_google_capability_rows_mark_successful_preflight_exact() -> None:
         ["google_directory"],
         auth_mode="domain-delegation",
         dependency_status={"available": True},
-        coverage_rows=[{"collector": "google_directory", "name": "users", "status": "ok"}],
+        coverage_rows=[{"collector": "google_directory", "name": "users", "status": "ok", "authenticated_read": True}],
     )
 
     assert rows[0]["status"] == "supported_exact_scope"
@@ -2383,12 +2383,14 @@ def test_google_preflight_checks_calendar_posture() -> None:
     assert rows == [
         {
             "collector": "google_calendar_posture",
+            "type": "google",
             "name": "calendarResources",
             "status": "ok",
             "item_count": 1,
             "duration_ms": rows[0]["duration_ms"],
             "error_class": None,
             "error": None,
+            "authenticated_read": True,
         }
     ]
 
