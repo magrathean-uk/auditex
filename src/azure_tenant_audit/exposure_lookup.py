@@ -30,6 +30,10 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.poolmanager import ProxyManager
 
 from .dns_lookup import safe_resolver_diagnostic
 
@@ -61,7 +65,7 @@ class HttpsFetcher(Protocol):
 class RequestsHttpsFetcher:
     """Minimal HTTPS GET helper: no redirects, no credentials, capped body."""
 
-    session: Any = field(default_factory=requests.Session)
+    session: Any = field(default_factory=lambda: _watched_session())
     timeout: float = DEFAULT_TIMEOUT_SECONDS
     deadline: float = DEFAULT_FETCH_DEADLINE_SECONDS
     clock: Callable[[], float] = time.monotonic
@@ -96,6 +100,7 @@ class RequestsHttpsFetcher:
     def _attempt(self, request: Callable[[], Any], start: float, attempt: _FetchAttempt) -> None:
         response = None
         close = False
+        _WATCH.attempt = attempt
         try:
             response = request()
             if not attempt.adopt(response):
@@ -113,6 +118,8 @@ class RequestsHttpsFetcher:
             close = attempt.abandoned.is_set()
             attempt.finish((None, "", f"{type(exc).__name__}: {exc}"[:300]))
         finally:
+            _WATCH.attempt = None
+            attempt.release()
             if close and response is not None:
                 _close_quietly(response)
 
@@ -148,6 +155,28 @@ class _FetchAttempt:
     lock: threading.Lock = field(default_factory=threading.Lock)
     response: Any = None
     result: tuple[int | None, str, str | None] | None = None
+    sockets: list[Any] = field(default_factory=list)  # connection sockets this fetch used, shut down on abandon
+    owned: list[Any] = field(default_factory=list)  # duplicates of new sockets, closed when the fetch thread ends
+
+    def watch(self, sock: Any, owned: bool = False) -> None:
+        """Track a socket the request is using; shut it down at once when the caller has already given up."""
+        with self.lock:
+            self.sockets.append(sock)
+            if owned:
+                self.owned.append(sock)
+            abandoned = self.abandoned.is_set()
+        if abandoned:
+            _shutdown_quietly(sock)
+
+    def release(self) -> None:
+        """The fetch thread is done: close the duplicates it made and stop tracking its sockets."""
+        with self.lock:
+            owned, self.owned, self.sockets = self.owned, [], []
+        for sock in owned:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
     def adopt(self, response: Any) -> bool:
         """Record the response; False when the caller has already given up, so the thread closes it at once."""
@@ -163,8 +192,94 @@ class _FetchAttempt:
         with self.lock:
             self.abandoned.set()
             response = self.response
+            sockets = list(self.sockets)
+        for sock in sockets:  # a connect, TLS handshake or header read still in progress
+            _shutdown_quietly(sock)
         if response is not None:
             _interrupt_read(response)
+
+
+# The fetch thread's attempt, so the connections below can report their sockets to it. Before the response exists
+# (connect, TLS handshake, status and header lines) no socket is reachable from the caller, and http.client reads
+# 100 Continue status lines in a loop with no end, so the request itself can outlive the deadline (review of PR #186).
+_WATCH = threading.local()
+
+
+def _watch_socket(sock: Any, new: bool = False) -> None:
+    attempt = getattr(_WATCH, "attempt", None)
+    if attempt is None or sock is None:
+        return
+    if new:
+        # A TLS wrap detaches the plain socket object before the handshake, so track a duplicate: shutting it down
+        # ends the connection whatever object urllib3 holds by then. The fetch thread closes it when it ends.
+        try:
+            attempt.watch(sock.dup(), owned=True)
+        except OSError:
+            pass
+    else:
+        attempt.watch(sock)
+
+
+class _WatchedConnectionMixin:
+    def _new_conn(self) -> Any:
+        sock = super()._new_conn()  # type: ignore[misc]
+        _watch_socket(sock, new=True)
+        return sock
+
+    def getresponse(self, *args: Any, **kwargs: Any) -> Any:
+        _watch_socket(getattr(self, "sock", None))  # a pooled connection reused by this fetch
+        return super().getresponse(*args, **kwargs)  # type: ignore[misc]
+
+
+class _WatchedHTTPConnection(_WatchedConnectionMixin, HTTPConnection):
+    pass
+
+
+class _WatchedHTTPSConnection(_WatchedConnectionMixin, HTTPSConnection):
+    pass
+
+
+class _WatchedHTTPConnectionPool(HTTPConnectionPool):
+    ConnectionCls = _WatchedHTTPConnection
+
+
+class _WatchedHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = _WatchedHTTPSConnection
+
+
+_WATCHED_POOLS = {"http": _WatchedHTTPConnectionPool, "https": _WatchedHTTPSConnectionPool}
+
+
+class _WatchedAdapter(HTTPAdapter):
+    """An adapter whose connections report their sockets to the running fetch, direct or through an HTTP proxy. A SOCKS
+    proxy keeps its own pools, so there the fetch can only be cut short once the response exists."""
+
+    def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
+        super().init_poolmanager(*args, **kwargs)
+        self.poolmanager.pool_classes_by_scheme = dict(_WATCHED_POOLS)
+
+    def proxy_manager_for(self, proxy: str, **proxy_kwargs: Any) -> Any:
+        manager = super().proxy_manager_for(proxy, **proxy_kwargs)
+        if type(manager) is ProxyManager:
+            manager.pool_classes_by_scheme = dict(_WATCHED_POOLS)
+        return manager
+
+
+def _watched_session() -> requests.Session:
+    session = requests.Session()
+    adapter = _WatchedAdapter()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+def _shutdown_quietly(sock: Any) -> None:
+    shutdown = getattr(sock, "shutdown", None)
+    if callable(shutdown):
+        try:
+            shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
 
 def _response_socket(response: Any) -> Any:
@@ -177,13 +292,7 @@ def _response_socket(response: Any) -> Any:
 
 def _interrupt_read(response: Any) -> None:
     """End a read that blocks on the response socket; the fetch thread sees an error and closes the response."""
-    sock = _response_socket(response)
-    shutdown = getattr(sock, "shutdown", None)
-    if callable(shutdown):
-        try:
-            shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
+    _shutdown_quietly(_response_socket(response))
 
 
 def _close_quietly(response: Any) -> None:

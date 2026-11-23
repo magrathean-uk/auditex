@@ -321,3 +321,69 @@ def test_raw_deflate_body_whose_first_bytes_look_like_a_zlib_header_still_decode
     raw = bytes([0x08]) + (91).to_bytes(2, "little") + (0xFFFF ^ 91).to_bytes(2, "little") + body + b"\x03\x00"
     assert raw[:2] == b"\x08\x5b" and zlib.decompress(raw, -15) == body
     assert exposure_lookup._decode_body(raw, "deflate") == body
+
+
+def test_deadline_ends_a_real_endless_run_of_100_continue_lines():
+    """A real socket and the real requests/urllib3 stack: the host never sends final headers, so the request itself
+    blocks inside http.client; the abandoned fetch must still drop the connection at the deadline."""
+    import socket as socket_module
+
+    server = socket_module.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    disconnected = threading.Event()
+
+    def serve():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(65536)
+            try:
+                for _ in range(200):
+                    conn.sendall(b"HTTP/1.1 100 Continue\r\n\r\n")
+                    time.sleep(0.05)
+            except OSError:
+                disconnected.set()
+
+    threading.Thread(target=serve, daemon=True).start()
+    url = f"http://127.0.0.1:{server.getsockname()[1]}/.well-known/mta-sts.txt"
+    fetcher = exposure_lookup.RequestsHttpsFetcher(deadline=0.5, timeout=5.0)
+    started = time.monotonic()
+    try:
+        result = fetcher._fetch_within_deadline(lambda: fetcher.session.get(url, stream=True, timeout=5.0), started)
+        assert result == (None, "", "fetch_deadline_exceeded")
+        assert time.monotonic() - started < 2.0
+        assert disconnected.wait(5.0), "the abandoned fetch drops the connection before any headers arrive"
+    finally:
+        server.close()
+
+
+def test_deadline_ends_a_real_stalled_tls_handshake():
+    """The real HTTPS path: the host takes the ClientHello and never answers, so the TLS handshake itself blocks."""
+    import socket as socket_module
+
+    server = socket_module.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    disconnected = threading.Event()
+
+    def serve():
+        conn, _ = server.accept()
+        with conn:
+            conn.settimeout(8.0)
+            try:
+                while conn.recv(65536):
+                    pass
+                disconnected.set()
+            except OSError:
+                disconnected.set()
+
+    threading.Thread(target=serve, daemon=True).start()
+    fetcher = exposure_lookup.RequestsHttpsFetcher(deadline=0.5, timeout=10.0)
+    started = time.monotonic()
+    try:
+        result = fetcher.get_text(f"https://127.0.0.1:{server.getsockname()[1]}/.well-known/mta-sts.txt")
+        assert result == (None, "", "fetch_deadline_exceeded")
+        assert time.monotonic() - started < 2.0
+        assert disconnected.wait(3.0), "the abandoned fetch drops the connection during the TLS handshake"
+    finally:
+        server.close()
