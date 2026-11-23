@@ -531,7 +531,8 @@ def parse_spf(record: str) -> dict[str, Any] | None:
 
 def parse_dmarc(record: str) -> dict[str, Any] | None:
     text = record.strip()
-    if "v=dmarc1" not in text.lower():
+    # RFC 7489 section 6.4 allows whitespace around the "=" of a tag, so "v = DMARC1" is a version tag too.
+    if not _DMARC_VERSION_TAG.search(text):
         return None
     tags = _split_semicolon_tags(text)
     pct_raw = tags.get("pct")
@@ -727,6 +728,7 @@ def _summarize_spf(records: list[str]) -> dict[str, Any]:
     }
 
 
+_DMARC_VERSION_TAG = re.compile(r"\bv\s*=\s*dmarc1\b", re.IGNORECASE)
 _DMARC_RECORD_START = re.compile(r"^\s*v\s*=\s*DMARC1\s*(?:;|$)", re.IGNORECASE)
 
 
