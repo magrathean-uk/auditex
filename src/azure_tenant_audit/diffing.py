@@ -7,9 +7,18 @@ from typing import Any
 
 from .citations import build_citation_summary, dedupe_citations
 from .guarded_io import UnsafeRunFileError
-from .run_files import read_run_file
+from .run_files import hash_run_file, read_run_file
 from .tenant_identity import canonical_tenant_uuid
 from .waivers import accepted_risk_summary, is_accepted_status
+
+
+class MalformedRunEvidence(ValueError):
+    """A regular, admitted normalised artifact that is not a JSON object; the comparison cannot read it."""
+
+    def __init__(self, run_dir: Path, relative: str) -> None:
+        super().__init__(f"normalised artifact {relative} is not a JSON object")
+        self.run_dir = run_dir
+        self.relative = relative
 
 
 def _load_json(run_dir: Path, relative: str) -> dict[str, Any]:
@@ -142,14 +151,15 @@ def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
     # R054: a finding is resolved only when the later run's collector for it completed. When the later run records
     # its collector coverage and the finding's collector did not complete there (or did not run), the finding was not
     # reassessed. ``auditex compare`` refines this with the rule inputs and the bundle and tenant checks.
+    # A later run that recorded no coverage at all completed no collector, so a removed finding that names one was
+    # not reassessed either; a finding that names no collector gives no evidence either way and stays resolved.
     later_coverage = _collector_coverage(right)
     not_reassessed_keys: list[str] = []
-    if later_coverage:
-        for key in list(resolved_keys):
-            collector = str(before[key].get("collector") or "")
-            if collector and not later_coverage.get(collector, False):
-                not_reassessed_keys.append(key)
-        resolved_keys = [key for key in resolved_keys if key not in set(not_reassessed_keys)]
+    still_resolved: list[str] = []
+    for key in resolved_keys:
+        collector = str(before[key].get("collector") or "")
+        (not_reassessed_keys if collector and not later_coverage.get(collector, False) else still_resolved).append(key)
+    resolved_keys = still_resolved
     worsened: list[str] = []
     improved: list[str] = []
     state_transitions: list[dict[str, Any]] = []
@@ -217,9 +227,9 @@ def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
 
 def _filter_changed_rows(
     kind: str,
-    shared_keys: list[str],
-    before_index: dict[str, dict[str, Any]],
-    after_index: dict[str, dict[str, Any]],
+    shared_keys: list[RowKey],
+    before_index: dict[RowKey, dict[str, Any]],
+    after_index: dict[RowKey, dict[str, Any]],
     *,
     classic: bool,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -234,7 +244,7 @@ def _filter_changed_rows(
         if not classic and changed_paths and all(_is_volatile_path(path, kind=kind) for path in changed_paths):
             suppressed.append(
                 {
-                    "key": key,
+                    "key": key[1],
                     "before": before,
                     "after": after,
                     "reason": "volatile_fields_only",
@@ -243,12 +253,19 @@ def _filter_changed_rows(
                 }
             )
             continue
-        changed.append({"key": key, "before": before, "after": after})
+        changed.append({"key": key[1], "before": before, "after": after})
     return changed, suppressed
 
 
 def _load_records(run_dir: Path, path: Path) -> tuple[str, list[dict[str, Any]]]:
-    payload = json.loads(read_run_file(run_dir, path.relative_to(run_dir)).decode("utf-8"))
+    relative = path.relative_to(run_dir)
+    data = read_run_file(run_dir, relative)
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except ValueError:
+        raise MalformedRunEvidence(run_dir, relative.as_posix()) from None
+    if not isinstance(payload, dict):
+        raise MalformedRunEvidence(run_dir, relative.as_posix())
     kind = str(payload.get("kind") or path.stem)
     records = payload.get("records", [])
     if not isinstance(records, list):
@@ -256,41 +273,138 @@ def _load_records(run_dir: Path, path: Path) -> tuple[str, list[dict[str, Any]]]
     return kind, [item for item in records if isinstance(item, dict)]
 
 
-def _record_key(record: dict[str, Any], kind: str, index: int) -> str:
+# A row's comparison key: whether it is positional (the row carries no identity field), then its readable text. Keeping
+# the two kinds apart stops an anonymous row at position 0 pairing with a row whose id is 0: both read ``kind:0``.
+RowKey = tuple[bool, str]
+
+
+def _record_key(record: dict[str, Any], kind: str, index: int) -> RowKey:
     """The row's identity, in the order the evidence index and the validator use (R053)."""
     for field in ("key", "id", "display_name", "name", "collector", "surface"):
         value = record.get(field)
         if value is not None and str(value).strip():
-            return str(value) if field == "key" else f"{kind}:{value}"
-    return f"{kind}:{index}"
+            return (False, str(value) if field == "key" else f"{kind}:{value}")
+    return (True, f"{kind}:{index}")
 
 
-def _record_index(
-    records: list[dict[str, Any]], kind: str, reserved: frozenset[str] = frozenset()
-) -> tuple[dict[str, dict[str, Any]], list[str]]:
-    """Rows by key, and the keys more than one row carries.
+def _rows_match(before: dict[str, Any], after: dict[str, Any], kind: str, *, classic: bool) -> bool:
+    """Whether two rows differ in volatile fields at most (or not at all, for a classic diff)."""
+    if before == after:
+        return True
+    if classic:
+        return False
+    paths = _collect_changed_paths(before, after)
+    return bool(paths) and all(_is_volatile_path(path, kind=kind) for path in paths)
 
-    A repeated key is reported, not overwritten: its later rows get ``#2``, ``#3`` suffixes so every row is compared.
-    A suffix that is also a real key, in this run or in ``reserved`` (the other run's real keys), is skipped, so a
-    generated key never replaces or pairs with a real one.
+
+def _pair_duplicates(
+    before: list[dict[str, Any]], after: list[dict[str, Any]], kind: str, *, classic: bool
+) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+    """Pair the rows of one repeated key: equal rows first, then rows differing only in volatile fields, then the
+    rest in order. Returns the (before, after) position pairs and the unpaired positions on each side."""
+    free_after = list(range(len(after)))
+    pairs: list[tuple[int, int]] = []
+    unpaired_before: list[int] = []
+    for exact in (True, False):
+        waiting: list[int] = []
+        for left in (unpaired_before if not exact else range(len(before))):
+            match = next(
+                (
+                    right
+                    for right in free_after
+                    if (before[left] == after[right] if exact else _rows_match(before[left], after[right], kind, classic=classic))
+                ),
+                None,
+            )
+            if match is None:
+                waiting.append(left)
+            else:
+                free_after.remove(match)
+                pairs.append((left, match))
+        unpaired_before = waiting
+    leftover = min(len(unpaired_before), len(free_after))
+    pairs.extend(zip(unpaired_before[:leftover], free_after[:leftover], strict=True))
+    pairs.sort()
+    return pairs, unpaired_before[leftover:], free_after[leftover:]
+
+
+def _suffixed_keys(key: RowKey, count: int, taken: set[RowKey]) -> list[RowKey]:
+    """``key`` then ``key#2``, ``key#3``... (``count`` keys), skipping a suffix that is already taken."""
+    keys = [key]
+    suffix = 2
+    while len(keys) < count:
+        generated = (key[0], f"{key[1]}#{suffix}")
+        suffix += 1
+        if generated not in taken:
+            taken.add(generated)
+            keys.append(generated)
+    return keys[:count]
+
+
+def _paired_record_indexes(
+    before_rows: list[dict[str, Any]], after_rows: list[dict[str, Any]], kind: str, *, classic: bool
+) -> tuple[dict[RowKey, dict[str, Any]], dict[RowKey, dict[str, Any]], list[str]]:
+    """Both runs' rows by key, and the keys more than one row of a run carries.
+
+    A repeated key is reported, not overwritten. Its rows are paired across the runs (equal rows first, so a reordered
+    but unchanged set reads unchanged) and every pair after the first, and every unpaired row, gets a ``#2``, ``#3``
+    suffix so every row is compared. A suffix that is also a real key in either run is skipped, so a generated key
+    never replaces or pairs with a real one.
     """
-    keys = [_record_key(record, kind, position) for position, record in enumerate(records)]
-    taken = set(keys) | reserved
-    index: dict[str, dict[str, Any]] = {}
+    before_keys = [_record_key(record, kind, position) for position, record in enumerate(before_rows)]
+    after_keys = [_record_key(record, kind, position) for position, record in enumerate(after_rows)]
+    taken = set(before_keys) | set(after_keys)
+    before_groups: dict[RowKey, list[int]] = {}
+    after_groups: dict[RowKey, list[int]] = {}
+    for groups, keys in ((before_groups, before_keys), (after_groups, after_keys)):
+        for position, key in enumerate(keys):
+            groups.setdefault(key, []).append(position)
+    before_index: dict[RowKey, dict[str, Any]] = {}
+    after_index: dict[RowKey, dict[str, Any]] = {}
     duplicates: list[str] = []
-    seen: Counter[str] = Counter()
-    for key, record in zip(keys, records, strict=True):
-        seen[key] += 1
-        if seen[key] > 1:
-            if seen[key] == 2:
-                duplicates.append(key)
-            suffix = seen[key]
-            while f"{key}#{suffix}" in taken:
-                suffix += 1
-            key = f"{key}#{suffix}"
-            taken.add(key)
-        index[key] = record
-    return index, duplicates
+    for key in dict.fromkeys([*before_keys, *after_keys]):
+        lefts, rights = before_groups.get(key, []), after_groups.get(key, [])
+        if len(lefts) <= 1 and len(rights) <= 1:
+            if lefts:
+                before_index[key] = before_rows[lefts[0]]
+            if rights:
+                after_index[key] = after_rows[rights[0]]
+            continue
+        duplicates.append(key[1])
+        pairs, only_before, only_after = _pair_duplicates(
+            [before_rows[position] for position in lefts], [after_rows[position] for position in rights], kind, classic=classic
+        )
+        row_keys = iter(_suffixed_keys(key, len(pairs) + len(only_before) + len(only_after), taken))
+        for left, right in pairs:
+            row_key = next(row_keys)
+            before_index[row_key] = before_rows[lefts[left]]
+            after_index[row_key] = after_rows[rights[right]]
+        for left in only_before:
+            before_index[next(row_keys)] = before_rows[lefts[left]]
+        for right in only_after:
+            after_index[next(row_keys)] = after_rows[rights[right]]
+    return before_index, after_index, duplicates
+
+
+def admit_run_files(run_dir: str | Path) -> None:
+    """Open every file ``diff_run_directories`` reads through its guarded loaders, without comparing anything.
+
+    An unsafe file (a link, a private key, an oversize artifact) raises ``UnsafeRunFileError`` here, before a compare
+    gate could block the pair unread. Malformed content is left to the comparison, which blocks the pair.
+    """
+    run = Path(run_dir)
+    for relative in (
+        "run-manifest.json",
+        "normalized/snapshot.json",
+        "normalized/coverage_ledger.json",
+        "summary.json",
+        "reports/report-pack.json",
+    ):
+        _load_json(run, relative)
+    normalized = run / "normalized"
+    if normalized.exists():
+        for path in sorted(normalized.glob("*.json")):
+            hash_run_file(run, path.relative_to(run))
 
 
 def _records_for_run(run_dir: Path) -> tuple[dict[str, str], dict[str, list[dict[str, Any]]]]:
@@ -417,11 +531,7 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path, *, classic: bool 
 
     for kind in sorted(set(left_records) | set(right_records)):
         before_rows, after_rows = left_records.get(kind, []), right_records.get(kind, [])
-        real_keys = frozenset(
-            _record_key(record, kind, position) for rows in (before_rows, after_rows) for position, record in enumerate(rows)
-        )
-        before_index, before_duplicates = _record_index(before_rows, kind, real_keys)
-        after_index, after_duplicates = _record_index(after_rows, kind, real_keys)
+        before_index, after_index, duplicate_keys = _paired_record_indexes(before_rows, after_rows, kind, classic=classic)
         added_keys = sorted(set(after_index) - set(before_index))
         removed_keys = sorted(set(before_index) - set(after_index))
         shared_keys = sorted(set(before_index) & set(after_index))
@@ -431,9 +541,8 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path, *, classic: bool 
             "removed": [before_index[key] for key in removed_keys],
             "changed": changed,
         }
-        duplicate_keys = sorted(set(before_duplicates) | set(after_duplicates))
         if duplicate_keys:
-            changes[kind]["duplicate_keys"] = duplicate_keys
+            changes[kind]["duplicate_keys"] = sorted(duplicate_keys)
         if suppressed:
             changes[kind]["suppressed"] = suppressed
             suppressed_changes[kind] = suppressed
