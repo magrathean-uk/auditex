@@ -30,8 +30,16 @@ ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / "tests/fixtures/explainer"
 PIN = FIX / "renderer/catalogue-v391-fixture.json.gz"
 CAT = json.loads(gzip.decompress(PIN.read_bytes()))
-# The pin with review lane rules-followup's documented SS 7.x Built-In deviation (explainer_checks/review_overlay.py).
-REVIEWED = review_catalogue(CAT)
+SHIPPED = ROOT / "configs/scuba-value-rules.json"
+
+
+def reviewed_pin():
+    """The independent expectations: the pin with review lane rules-followup's documented SS 7.x Built-In deviation
+    (explainer_checks/review_overlay.py). Nothing here may read the shipped catalogue (bot review wave 2, item 62)."""
+    return review_catalogue(CAT)
+
+
+REVIEWED = reviewed_pin()
 T = textkit.expand_template(json.loads((ROOT / "configs/explainer-template.json").read_text()))
 
 
@@ -241,25 +249,48 @@ def test_residual_differences_are_only_the_documented_classes():
 
 
 def test_product_catalogue_is_v391_and_agrees_with_the_independent_pin_on_every_decision():
-    _assert_agrees_with_the_reviewed_pin(json.loads((ROOT / "configs/scuba-value-rules.json").read_text()))
+    _assert_agrees_with_the_reviewed_pin(json.loads(SHIPPED.read_text()), REVIEWED)
+
+
+def _ship(monkeypatch, product):
+    """Every read of the shipped catalogue file returns ``product``, as if it were changed on disk."""
+    import builtins
+    import io
+    import os
+
+    text, shipped = json.dumps(product), SHIPPED.resolve()
+    read_text, read_bytes, real_open = Path.read_text, Path.read_bytes, builtins.open
+
+    def is_shipped(file):
+        return isinstance(file, (str, os.PathLike)) and Path(file).resolve() == shipped
+
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: text if is_shipped(self) else read_text(self, *a, **k))
+    monkeypatch.setattr(Path, "read_bytes", lambda self: text.encode() if is_shipped(self) else read_bytes(self))
+    monkeypatch.setattr(builtins, "open", lambda file, mode="r", *a, **k: (
+        (io.BytesIO(text.encode()) if "b" in mode else io.StringIO(text)) if is_shipped(file) and "r" in mode
+        else real_open(file, mode, *a, **k)))
 
 
 @pytest.mark.parametrize("pid", R003_POLICIES)
 @pytest.mark.parametrize("cell", R003_ADDED)
-def test_a_changed_added_cell_disagrees_with_the_reviewed_pin(pid, cell):
+def test_a_changed_added_cell_disagrees_with_the_reviewed_pin(monkeypatch, pid, cell):
     # Bot review wave 2, item 62: the overlay once copied the shipped added cells, so a changed verdict still agreed.
-    product = json.loads((ROOT / "configs/scuba-value-rules.json").read_text())
+    # The shipped file itself reads as changed while the expectations are built, so expectations taken from it agree.
+    product = json.loads(SHIPPED.read_text())
     entry = product["policies"][pid]["cells"][cell]
     entry["verdict"] = "met" if entry["verdict"] != "met" else "not_met"
+    _ship(monkeypatch, product)
+    assert json.loads(SHIPPED.read_text()) == product
+    expected = reviewed_pin()
     with pytest.raises(AssertionError):
-        _assert_agrees_with_the_reviewed_pin(product)
+        _assert_agrees_with_the_reviewed_pin(product, expected)
 
 
-def _assert_agrees_with_the_reviewed_pin(product):
+def _assert_agrees_with_the_reviewed_pin(product, reviewed):
     assert product["spec_version"] == "v3.9.1"
     assert set(product["policies"]) == set(CAT)
     assert "rule_failure" not in product and "cell_contracts" not in product
-    for pid, pin in REVIEWED.items():
+    for pid, pin in reviewed.items():
         row = product["policies"][pid]
         assert row["sections"] == pin["sections"]
         assert set(row["cells"]) == set(pin["cells"])
