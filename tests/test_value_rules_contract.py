@@ -14,7 +14,7 @@ from auditex.rule_assessment import (
     policy_catalogue,
     precheck_case,
 )
-from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.scuba_assessment import _LATE_EVIDENCE, validate_assessment
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import as_pack_response, assess
 from azure_tenant_audit.value_rules import catalogue as loader
@@ -54,7 +54,10 @@ def assessment_for(template, record, *, legacy=False):
               "section": record["cited_sections"], "field": None, "value": None,
               **{k: record[k] for k in ("cell", "reason_code", "reason_text")}}
     result["policies"][0].update(policy_id=policy, rule_precheck=detail)
-    result["policies"][0].update(precheck_response(detail, item["policy_item"], item["sections"], legacy=legacy))
+    # Like the writer (rule_assessment.precheck_case): from 2026-11-22 a late rule section has its own evidence id.
+    late = result["schema_version"] in _LATE_EVIDENCE
+    result["policies"][0].update(precheck_response(detail, item["policy_item"], item["sections"], legacy=legacy,
+                                                   late_evidence=late))
     return result
 
 
