@@ -295,7 +295,7 @@ def test_r164_disclosure_names_the_resolver_in_use():
     assert dns_lookup.doh_resolver_disclosure(dns_lookup.DEFAULT_DOH_ENDPOINT) == (
         "the public Cloudflare DNS-over-HTTPS resolver (https://cloudflare-dns.com/dns-query)")
     assert dns_lookup.doh_resolver_disclosure("https://dns.example.net/dns-query") == (
-        "the configured DNS-over-HTTPS resolver (https://dns.example.net/dns-query)")
+        "the configured DNS-over-HTTPS resolver at dns.example.net")
 
 
 # ---- R101 / R103: anti-phish precedence with an orphan rule, a missing preset policy or a decisive custom policy ----

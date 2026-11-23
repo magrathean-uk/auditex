@@ -267,7 +267,7 @@ def build_coverage_ledger(
         if collector in NON_FATAL_COLLECTORS and actual_status and actual_status != "ok":
             issues = diagnostics_by_collector.get(collector, [])
             reasons = list(dict.fromkeys(
-                collector_gap_reason(collector, item.get("error_class"), item.get("error"))
+                collector_gap_reason(collector, item.get("error_class"), doh_endpoint=item.get("doh_endpoint"))
                 for item in issues or [result]
             ))
             message = " ".join(reason for reason in reasons if reason)

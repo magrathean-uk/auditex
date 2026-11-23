@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from azure_tenant_audit.collectors.ediscovery import EDiscoveryCollector
 from azure_tenant_audit.collectors.purview import PurviewCollector
 
@@ -586,3 +588,170 @@ def test_r108_graph_cases_and_searches_are_normalised() -> None:
     assert case["id"] == "case-1" and case["display_name"] == "Board matter" and case["status"] == "active"
     (search,) = snapshot["ediscovery_searches"]["records"]
     assert search["id"] == "search-1" and search["case_id"] == "case-1"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("c1", "c2"), ("c:a", "c_a"), ("Case-A", "case-a")],
+)
+def test_each_case_streams_its_searches_to_its_own_chunk_files(tmp_path, first: str, second: str) -> None:
+    """Bot review of PR #148: two cases must not share, and overwrite, one searches or operations chunk file.
+
+    Case ids that sanitise to the same file name, or differ only in case, still get their own files.
+    """
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    base = "/security/cases/ediscoveryCases"
+    client = _PagedGraphClient(
+        responses={
+            base: [{"id": first, "displayName": "One"}, {"id": second, "displayName": "Two"}],
+            f"{base}/{first}/searches": [{"id": "s1", "displayName": "First"}],
+            f"{base}/{second}/searches": [{"id": "s2", "displayName": "Second"}],
+            f"{base}/{first}/operations": [{"id": "o1", "action": "estimateStatistics"}],
+            f"{base}/{second}/operations": [{"id": "o2", "action": "estimateStatistics"}],
+        }
+    )
+    result = EDiscoveryCollector().run(
+        {
+            "client": client,
+            "top": None,
+            "page_size": 100,
+            "plane": "inventory",
+            "audit_logger": None,
+            "chunk_writer": _chunk_writer(tmp_path),
+            "run_dir": tmp_path,
+        }
+    )
+    for key in ("searches", "operations"):
+        files = [result.payload[f"case_{case}"][key].get("chunk_files") for case in (first, second)]
+        assert files[0] and files[1], key
+        assert {name.lower() for name in files[0]}.isdisjoint(name.lower() for name in files[1]), (key, files)
+
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": result.payload}, run_dir=tmp_path
+    )
+    searches = sorted((row["case_id"], row["id"]) for row in snapshot["ediscovery_searches"]["records"])
+    assert searches == sorted([(first, "s1"), (second, "s2")])
+
+
+def test_a_search_in_both_the_retired_search_list_and_a_graph_case_is_one_record() -> None:
+    """Review of the fix above: a mixed bundle must not give one search two records with the same key."""
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payload = {
+        "caseOverview": {"value": [{"id": "c1", "name": "Board matter"}]},
+        "searchList": {"value": [{"id": "s1", "name": "Mailboxes"}]},
+        "cases": {"value": [{"id": "c1", "displayName": "Board matter"}]},
+        "case_c1": {"searches": {"value": [{"id": "s1", "displayName": "Mailboxes"}]}, "operations": {"value": []}},
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": payload})
+
+    records = snapshot["ediscovery_searches"]["records"]
+    assert [row["key"] for row in records] == ["ediscovery_search:s1"]
+    assert records[0]["case_id"] == "c1"  # the Graph read names the case the retired list left out
+
+
+@pytest.mark.parametrize(
+    ("graph_fields", "expected_status"),
+    [({}, "completed"), ({"status": None}, "completed"), ({"status": ""}, "completed"), ({"status": "running"}, "running")],
+    ids=["missing", "null", "empty", "populated"],
+)
+def test_a_mixed_search_keeps_legacy_status_when_graph_has_no_value(graph_fields, expected_status) -> None:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    payload = {
+        "searchList": {"value": [{"id": "s1", "status": "completed"}]},
+        "cases": {"value": [{"id": "c1"}]},
+        "case_c1": {"searches": {"value": [{"id": "s1", **graph_fields}]}},
+    }
+    snapshot = build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads={"ediscovery": payload})
+
+    (search,) = snapshot["ediscovery_searches"]["records"]
+    assert search.get("status") == expected_status
+    assert search["case_id"] == "c1"
+
+
+def test_a_search_in_a_shared_historical_chunk_has_no_known_case(tmp_path) -> None:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, "acme", "historical")
+    chunk = writer.write_chunk_records("ediscovery", "searches", 1, [{"id": "s2"}])
+    shared_searches = {"chunk_files": [chunk.relative_to(writer.run_dir).as_posix()], "item_count": 1}
+    payload = {
+        "cases": {"value": [{"id": "c1"}, {"id": "c2"}]},
+        "case_c1": {"searches": shared_searches},
+        "case_c2": {"searches": shared_searches},
+    }
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="historical", collector_payloads={"ediscovery": payload}, run_dir=writer.run_dir,
+    )
+
+    (search,) = snapshot["ediscovery_searches"]["records"]
+    assert search["id"] == "s2"
+    assert search.get("case_id") is None
+    assert snapshot["snapshot"]["normalization_incomplete_sections"] == [
+        "ediscovery.case_c1.searches", "ediscovery.case_c2.searches",
+    ]
+
+
+@pytest.mark.parametrize("old_chunk_key", ["searches", "case-c1-searches"])
+def test_resume_drops_historical_chunks_when_case_searches_are_withheld(tmp_path, monkeypatch, old_chunk_key) -> None:
+    import json
+
+    from support import FAKE_CERTIFICATE_ARGS, use_fake_certificate
+
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.graph import GRAPH_ROOT, GraphClient
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, "acme", "resume")
+    run_dir = writer.run_dir
+    cases = "/security/cases/ediscoveryCases"
+    search_url = f"{GRAPH_ROOT}{cases}/c1/searches"
+    legacy_chunk = writer.write_chunk_records(
+        "ediscovery", old_chunk_key, 1, [{"id": "old-search"}], {"endpoint": search_url},
+    )
+    legacy_files = {
+        legacy_chunk.relative_to(run_dir).as_posix(),
+        legacy_chunk.with_suffix(".meta.json").relative_to(run_dir).as_posix(),
+    }
+    writer.write_raw("ediscovery", {
+        "cases": {"value": [{"id": "c1"}]},
+        "case_c1": {"searches": {
+            "chunk_files": [legacy_chunk.relative_to(run_dir).as_posix()],
+            "item_count": 1,
+            "error_class": "graph_transient",
+        }},
+    })
+    writer.write_checkpoint("ediscovery", {"status": "partial"})
+    writer.write_bundle({"mode": "live", "collectors": ["ediscovery"]})
+
+    def get_json(self, url, **kwargs):
+        if url == f"{GRAPH_ROOT}{cases}":
+            return {"value": [{"id": "c1"}]}
+        if url == search_url:
+            return {"value": [{"id": "retry-search"}], "@odata.nextLink": search_url}
+        if url == f"{GRAPH_ROOT}{cases}/c1/operations":
+            return {"value": [{"id": "retry-operation"}]}
+        return {"value": []}
+
+    use_fake_certificate(monkeypatch)
+    monkeypatch.setattr(GraphClient, "get_json", get_json)
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "constructed-tenant",
+        "--client-id", "constructed-app", *FAKE_CERTIFICATE_ARGS,
+        "--collectors", "ediscovery", "--resume-from", str(run_dir),
+    ])
+    assert cli.run_live(args) == 1
+
+    raw = json.loads((run_dir / "raw" / "ediscovery.json").read_text(encoding="utf-8"))
+    assert raw["case_c1"]["searches"]["error_class"] == "incomplete_evidence"
+    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    seal = json.loads((run_dir / "bundle-hashes.json").read_text(encoding="utf-8"))
+    sealed_paths = {row["path"] for row in seal["artifacts"]}
+    assert legacy_files.isdisjoint(manifest["artifacts"])
+    assert legacy_files.isdisjoint(sealed_paths)
+    assert not list((run_dir / "chunks" / "ediscovery").glob("*searches-*"))
+    (operation_chunk,) = raw["case_c1"]["operations"]["chunk_files"]
+    assert operation_chunk in sealed_paths

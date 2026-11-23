@@ -578,6 +578,8 @@ def test_reset_roles_do_not_reach_members_of_role_assignable_groups() -> None:
     assert "user:u-plain" in reset_targets
     assert "user:u-alice" not in reset_targets
     assert "user:u-nested" not in reset_targets
+    # Entra protects the owners of a role-assignable group from these resets too.
+    assert "user:u-grpowner" not in reset_targets
     analysis = analyze_attack_graph(_snapshot(payloads))
     reset_hops = [hop for path in analysis["paths"] for hop in path["hops"] if hop["edge"] == "can_reset"]
-    assert not [hop for hop in reset_hops if hop["to_id"] in {"user:u-alice", "user:u-nested"}]
+    assert not [hop for hop in reset_hops if hop["to_id"] in {"user:u-alice", "user:u-nested", "user:u-grpowner"}]

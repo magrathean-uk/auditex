@@ -300,7 +300,7 @@ def build_coverage_gap_summary(
             for row in rows_by_collector.get(collector, [])
             if row.get("status") not in {"ok", "complete_exact_scope", "complete_effective_role", "complete_equivalent_scope"}
             and not (row.get("status") == "skipped" and row.get("section_scoped"))
-            and (reason := collector_gap_reason(collector, row.get("error_class"), row.get("error")))
+            and (reason := collector_gap_reason(collector, row.get("error_class"), doh_endpoint=row.get("doh_endpoint")))
         })
         if customer_reasons:
             message += "; " + " ".join(customer_reasons)

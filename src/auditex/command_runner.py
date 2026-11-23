@@ -31,6 +31,8 @@ SENSITIVE_ARGS = {
     "--token-file",
     "--env",
     "--break-glass-accounts",
+    # A DoH resolver URL path can carry an account token.
+    "--doh-endpoint",
 }
 OPERATOR_ARGS = {
     "--tenant-name", "--tenant-id", "--out", "--run-name",
