@@ -24,6 +24,28 @@ class _TxtResolver:
         return list(self.answers.get(name, []))
 
 
+# ---- An inherited DMARC record needs a valid p= before its sp= counts (RFC 7489 6.6.3) ----
+
+@pytest.mark.parametrize("parent,cell", [
+    ("v=DMARC1; sp=reject", "domain_noncompliant.p_absent"),
+    ("v=DMARC1; p=bogus; sp=reject", "domain_noncompliant.p_invalid"),
+    ("v=DMARC1; p=none; p=reject; sp=reject", "domain_unusable.tag_duplicated"),
+])
+def test_inherited_dmarc_record_without_a_valid_p_is_not_reject(parent, cell):
+    entry = dns_lookup.scuba_dmarc_record("mail.contoso.example", _TxtResolver({"_dmarc.contoso.example": [parent]}))
+    assert entry["rdata"] == [parent]
+    record = assess("MS.EXO.4.2v1", {"dmarc_records": [entry]})
+    assert record["verdict"] != "met"
+    assert record["cell"] == cell
+
+
+def test_inherited_dmarc_record_with_p_none_and_sp_reject_still_passes():
+    parent = "v=DMARC1; p=none; sp=reject"
+    entry = dns_lookup.scuba_dmarc_record("mail.contoso.example", _TxtResolver({"_dmarc.contoso.example": [parent]}))
+    record = assess("MS.EXO.4.2v1", {"dmarc_records": [entry]})
+    assert (record["verdict"], record["cell"]) == ("met", "all_compliant")
+
+
 # ---- The posture DMARC parser accepts spaces around v = DMARC1 (RFC 7489 6.4 allows whitespace) ----
 
 def test_spaced_dmarc_version_tag_is_a_record():
