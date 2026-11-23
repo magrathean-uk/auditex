@@ -246,6 +246,9 @@ Collected evidence and raw inputs to parsers and error classifiers retain their
 original values. This is a boundary for command diagnostics, not a guarantee that
 all other exception messages or API logs are anonymised.
 
+Run bundles hold no absolute path of the operator's machine: the run folder, sample, waiver and credential files
+are recorded by name or described (output-contract.md, "Required root artifacts").
+
 Customer packs contain no absolute path of the operator's machine and no file their manifest does not list
 (`verify-pack` reports `unexpected_file`); a symbolic link, or an unlisted file where the product reads, is an
 integrity mismatch and the pack is refused. The effective boundary against a mistake in any of these is the

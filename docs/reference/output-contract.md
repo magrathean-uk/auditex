@@ -352,6 +352,8 @@ Finalization also writes `bundle-hashes.json`, the SHA-256 of each non-excluded 
 
 Current bundles may also stamp `provider_adapter_version` and `api_inventory_recorder_version`. These are internal conformance markers for the shared provider finalization path, not customer-facing contract breaks.
 
+No file in a run bundle (Microsoft 365 or Google Workspace; live, offline, probe, blocked or failed) holds an absolute path of the operator's machine. `run_dir` in `run-manifest.json`, `checkpoints/checkpoint-state.json` and the SQLite `run_meta` table is the run folder's name, not where it sits. `waiver_path` and the `sample` of an offline run's `run.started` event are file names, and `command_line` keeps only the file name of an absolute path. A credential file that is missing or unreadable is described (for example `oauth_client_missing: the configured OAuth client file was not found.`) and a file error keeps only its reason, never the path. Console output to the operator may still name a path. Bundles written by earlier versions recorded the absolute run folder in `run_dir` and the full `waiver_path`; the customer pack still reduces both.
+
 Tenant identity is mirrored in the manifest, summary, report summary, AI-context
 run metadata and SQLite `run_meta`. `tenant_id_requested` preserves the operator's
 input; `tenant_id` contains the canonical observed UUID for Microsoft 365.
@@ -1656,7 +1658,7 @@ The delegated-admin flag also moves `google.admin_2sv_not_enforced`, `google.adm
 
 **One collector issue per surface.** A per-object failure no longer raises a finding per object. Every `google.collector_issue` for a surface (`group-members`, `aliases`, `oauth-grants`, `group-settings`, `calendar-acls`, `mailbox-settings`, a Gmail setting such as `delegates`, or a whole list such as `users`) is one finding with the id `google.collector_issue:<collector>:<surface>`. Its `returned_value` carries `surface`, `object_count`, up to 50 `objects` (`objects_truncated` when more), `error_classes` and the three most common `errors` with their counts; a failure with no object keeps the error text as its `returned_value`. The severity is `high` when any failure is a permission error. The per-object rows stay in `blockers/blockers.json` and the `google_*_errors` sections. A finding id built from a per-object failure changes from `google.collector_issue:<object-id>` to the surface id, so a waiver written for the old id must name the new one or the rule.
 
-**Waivers.** `auditex google run --waiver-file` takes the file the Microsoft 365 run takes (`azure_tenant_audit.waivers`): every populated field must match (AND), a waiver names a `finding_id` or `rule_id` (`collector` and `category` only narrow it), an expired waiver never matches, and a file that is missing, unreadable or invalid stops the run with exit status 2 before any API call or output. A matched finding becomes `accepted_risk` with its `waiver`; the manifest records `waiver_path`.
+**Waivers.** `auditex google run --waiver-file` takes the file the Microsoft 365 run takes (`azure_tenant_audit.waivers`): every populated field must match (AND), a waiver names a `finding_id` or `rule_id` (`collector` and `category` only narrow it), an expired waiver never matches, and a file that is missing, unreadable or invalid stops the run with exit status 2 before any API call or output. A matched finding becomes `accepted_risk` with its `waiver`; the manifest records the waiver file's name as `waiver_path`.
 
 ## MCP contract surface
 

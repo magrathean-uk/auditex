@@ -314,35 +314,14 @@ def test_the_local_answer_reasons_give_the_installed_package_command() -> None:
 def _files_holding(run_dir: Path, needle: str) -> list[str]:
     """Every file under run_dir (text, JSON, SQLite or any other bytes) whose content holds needle.
 
-    The one exception is the documented ``run_dir`` field (output-contract.md: ``run-manifest.json`` records where the
-    operator ran the audit and the customer pack reduces it to the run folder name), in the manifest and in the copy the
-    SQLite index keeps under ``run_meta``. Every other value is swept.
+    No value is exempt: ``run_dir`` in the manifest and in the SQLite ``run_meta`` table is the run folder name.
     """
     import json
-    import sqlite3
 
-    hits = []
-    for path in sorted(run_dir.rglob("*")):
-        if not path.is_file():
-            continue
-        if path.name == "run-manifest.json":
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-            assert manifest.pop("run_dir") == str(run_dir)
-            content = json.dumps(manifest).encode("utf-8")
-        elif path.suffix == ".sqlite":
-            conn = sqlite3.connect(path)
-            try:
-                tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
-                values = [repr(row) for table in tables for row in conn.execute(f'SELECT * FROM "{table}"')
-                          if not (table == "run_meta" and row[0] == "run_dir")]
-            finally:
-                conn.close()
-            content = "\n".join(values).encode("utf-8")
-        else:
-            content = path.read_bytes()
-        if needle.encode("utf-8") in content:
-            hits.append(str(path.relative_to(run_dir)))
-    return hits
+    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["run_dir"] == run_dir.name
+    return [str(path.relative_to(run_dir)) for path in sorted(run_dir.rglob("*"))
+            if path.is_file() and needle.encode("utf-8") in path.read_bytes()]
 
 
 # Review blockers 1 and 2: a blocked Google probe (libraries missing) run with an absolute --out and an absolute,

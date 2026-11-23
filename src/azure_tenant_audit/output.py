@@ -676,7 +676,7 @@ class AuditWriter:
             "operations": operations,
         }
         checkpoint_payload = {
-            "run_dir": str(self.run_dir),
+            "run_dir": self.run_dir.name,
             "run_id": self.run_id,
             "collectors": collectors,
             "operations": operations,
@@ -700,7 +700,7 @@ class AuditWriter:
             collectors[str(collector_name)].update(since=payload.get("since"), until=payload.get("until"))
         self._checkpoint_state = {"collectors": collectors, "operations": operations}
         checkpoint_payload = {
-            "run_dir": str(self.run_dir),
+            "run_dir": self.run_dir.name,
             "run_id": self.run_id,
             "collectors": collectors,
             "operations": operations,
@@ -961,7 +961,11 @@ class AuditWriter:
             value = metadata.get(key)
             if value is not None:
                 self._manifest[key] = value
-        self._manifest["run_dir"] = str(self.run_dir)
+        if self._manifest.get("waiver_path"):
+            # The waiver file sits elsewhere on the operator's machine: the bundle keeps only its name.
+            self._manifest["waiver_path"] = Path(str(self._manifest["waiver_path"])).name
+        # The run folder's name, never where it sits: no file in the bundle holds an absolute local path.
+        self._manifest["run_dir"] = self.run_dir.name
         self._manifest["audit_log_path"] = "audit-log.jsonl"
         self._manifest["debug_log_path"] = "audit-debug.log"
         if self.audit.command_log_path.exists() and self.audit.command_log_path.stat().st_size > 0:

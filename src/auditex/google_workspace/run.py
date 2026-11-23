@@ -1167,6 +1167,9 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
         )
     except Exception as exc:  # noqa: BLE001
         error_class, message = classify_google_error(exc)
+        if isinstance(exc, OSError):
+            # A file error names its path; the bundle keeps only the reason (the console may still show the path).
+            message = exc.strerror or type(exc).__name__
         payload["preflight"] = [
             {
                 "collector": name,
@@ -1179,7 +1182,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
             }
             for name in selected
         ]
-        payload["preflight_error"] = {"error": "google_probe_failed", "message": str(exc)}
+        payload["preflight_error"] = {"error": "google_probe_failed", "message": message}
         payload["capability_matrix"] = build_google_capability_rows(
             selected,
             auth_mode=config.auth,
