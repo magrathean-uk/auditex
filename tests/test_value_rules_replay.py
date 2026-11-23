@@ -163,9 +163,11 @@ def review_relabel(vector: dict) -> tuple[dict, str | None, int]:
         assert len(cell["reason_texts"]) == 1, v["vector_id"]
         text = cell["reason_texts"][0]
     assert text in cell["reason_texts"], v["vector_id"]
+    # A cell that cites every section the policy reads is labelled with no cited list, as the engine answers it.
+    cited = list(cell["cited"])
     was = v["rule_verdict"] == v.get("gold_verdict")
     v.update(rule_verdict=cell["verdict"], rule_cell=now_cell, rule_reason_code=cell["reason_code"],
-             rule_reason_text=text, rule_cited_sections=list(cell["cited"]))
+             rule_reason_text=text, rule_cited_sections=None if cited == list(row_for(policy)["sections"]) else cited)
     now = cell["verdict"] == v.get("gold_verdict")
     if now:
         v["disagreement"] = None
@@ -541,3 +543,21 @@ def test_review_relabel_w59_takes_the_reviewed_reason_text(monkeypatch):
     assert (relabelled["rule_verdict"], relabelled["rule_cell"], relabelled["rule_reason_code"],
             relabelled["rule_reason_text"], relabelled["rule_cited_sections"], relabelled["divergence_id"]) == (
         "not_assessed", "rule_unusable", spec["reason_code"], REVIEW_W59_TEXT, spec["cited"], "D24")
+
+
+def test_review_relabel_cites_as_the_engine_does():
+    """A relabelled row whose reviewed cell cites every section the policy reads carries no cited list (None), as the
+    engine answers and the kit labels it, so a check that compares cited sections exactly (s7) agrees; a cell that
+    cites fewer sections keeps its own list."""
+    from test_value_rules_aad_review import MFA, ca, ca_sections
+
+    policy = "MS.AAD.1.1v1"
+    sections = ca_sections(ca(MFA, users={"ExcludeRoles": ["synthetic-role-a"]}),
+                           ca(MFA, users={"ExcludeRoles": ["synthetic-role-a"]}))
+    vector = _kit_label(f"constructed:{policy}:two_partial_no_role_excl", policy, "union_possible", sections)
+    relabelled, label, _ = review_relabel({**vector, "gold_verdict": "not_met"})
+    assert (label, relabelled["rule_cell"], relabelled["rule_cited_sections"]) == ("R027", "no_policy_meets", None)
+    ss7 = "MS.SECURITYSUITE.7.1v1"
+    relabelled, label, _ = review_relabel(_kit_label(f"constructed:{ss7}:v37_partial_bad_priority_absent_covering_ok",
+                                                     ss7, "policy_flags_ok", {}))
+    assert (label, relabelled["rule_cited_sections"]) == ("W59", ["safe_links_rules"])
