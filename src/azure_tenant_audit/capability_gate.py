@@ -196,6 +196,14 @@ def classify_capability_blocker(row: Mapping[str, Any] | None) -> dict[str, Any]
             "blocker_reason": reason or "tenant policy blocks this audit client",
             "next_step": "Review tenant app consent, DWD, or Conditional Access policy for the audit client.",
         }
+    if not missing and status != "blocked_by_scope" and row.get("scopes_proven") is True:
+        # A completed read on the same token proved its scopes, so a refusal beside it is the admin's role or
+        # privileges, not a missing OAuth scope.
+        return {
+            "blocker_kind": "admin_role",
+            "blocker_reason": reason or "the audit token holds the scopes but the admin cannot read this surface",
+            "next_step": "Give the admin subject a role or privilege that can read this surface, then rerun doctor/probe.",
+        }
     if missing or status == "blocked_by_scope" or "invalid_scope" in text or "insufficient_permissions" in text:
         return {
             "blocker_kind": "auth_scope",

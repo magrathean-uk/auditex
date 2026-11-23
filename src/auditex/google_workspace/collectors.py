@@ -156,6 +156,9 @@ def _call(
         error=error,
         subject_scoped=subject_scoped,
     )
+    if status != "failed":
+        # The read completed on the collector's token: evidence of its scopes, independent of the row count.
+        row["authenticated_read"] = True
     if result_limit:
         row["result_limit"] = result_limit
     if page_error is not None:
