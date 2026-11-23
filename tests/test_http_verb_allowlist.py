@@ -186,7 +186,7 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "A24", "cached OAuth user credentials; google-auth refreshes them lazily inside execute()"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "credentials.refresh", TOKEN_POST, 1, 2, "A21",
             "explicit refresh of the cached OAuth user token, to read the scopes Google grants it"),
-    Allowed(_GOOGLE_AUTH, "build_google_credentials", "InstalledAppFlow.from_client_secrets_file", TOKEN_POST, 1,
+    Allowed(_GOOGLE_AUTH, "_oauth_client_flow", "flow_class.from_client_secrets_file", TOKEN_POST, 1,
             2, "A23, A24", "OAuth first sign-in flow; the credentials it yields refresh lazily inside execute()"),
     Allowed(_GOOGLE_AUTH, "build_google_credentials", "flow.run_local_server", TOKEN_POST, 1, 2, "A23",
             "first OAuth sign-in code exchange"),
