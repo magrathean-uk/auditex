@@ -234,8 +234,8 @@ def test_entry_swapped_after_the_write_is_neither_chmodded_nor_installed(tmp_pat
     os.chmod(victim, 0o644)
     real_fdopen = os.fdopen
 
-    class _SwapOnClose:
-        """Closes the descriptor, then puts a link where the temporary file was (another principal's move)."""
+    class _SwapOnFlush:
+        """After the write is flushed, puts a link where the temporary file was (another principal's move)."""
 
         def __init__(self, handle) -> None:
             self.handle = handle
@@ -248,11 +248,14 @@ def test_entry_swapped_after_the_write_is_neither_chmodded_nor_installed(tmp_pat
 
         def __exit__(self, *exc) -> None:
             self.handle.close()
+
+        def flush(self) -> None:
+            self.handle.flush()
             (temporary,) = [path for path in folder.iterdir() if path.name.endswith(".tmp")]
             temporary.unlink()
             temporary.symlink_to(victim)
 
-    monkeypatch.setattr(os, "fdopen", lambda *a, **k: _SwapOnClose(real_fdopen(*a, **k)))
+    monkeypatch.setattr(os, "fdopen", lambda *a, **k: _SwapOnFlush(real_fdopen(*a, **k)))
     with pytest.raises(PermissionError, match="secret_folder_refused"):
         secure_write_text(folder / "token.json", "secret")
     assert _write_mode(victim) == 0o644 and victim.read_text(encoding="utf-8") == "keep"
@@ -413,3 +416,33 @@ def test_item26_a_vanished_cache_folder_is_not_judged_by_the_volume_above_it() -
     gone = Path("/private/var/auditex-missing-volume-check") / "auditex"
     assert not gone.parent.exists()
     assert secret_hygiene.ownership_enforced(gone / "token.json") is False
+
+
+@_posix_owner
+def test_regular_file_swapped_in_after_the_write_is_not_installed(tmp_path, monkeypatch) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    real_fdopen = os.fdopen
+
+    class _ReplaceOnFlush:
+        """After the flush, replaces the temporary entry with another regular file holding other content."""
+
+        def __init__(self, handle) -> None:
+            self.handle = handle
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+        def flush(self) -> None:
+            self.handle.flush()
+            (temporary,) = [path for path in folder.iterdir() if path.name.endswith(".tmp")]
+            temporary.unlink()
+            temporary.write_text("planted", encoding="utf-8")
+
+        def close(self) -> None:
+            self.handle.close()
+
+    monkeypatch.setattr(os, "fdopen", lambda *a, **k: _ReplaceOnFlush(real_fdopen(*a, **k)))
+    with pytest.raises(PermissionError, match="secret_folder_refused"):
+        secure_write_text(folder / "token.json", "secret")
+    assert not (folder / "token.json").exists()
