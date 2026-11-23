@@ -928,3 +928,12 @@ def test_parts_only_directory_records_mask_parts_and_associated_narrative(parts:
 @pytest.mark.parametrize("parts", [{"given_name": "Neral"}, {"surname": "Vosk"}])
 def test_incomplete_name_parts_do_not_invent_a_directory_identity(parts: dict) -> None:
     assert redaction._person({redaction._norm(k): v for k, v in parts.items()}) is None
+
+
+@pytest.mark.parametrize("profile", SHAREABLE_PROFILES)
+def test_eligible_other_role_ids_field_is_kept_when_a_person_has_that_name(profile: str) -> None:
+    context = _people("Eligible Other Role Ids")
+    row = {"principal_id": "u-1", "eligible_other_role_ids": ["role-reader"], "other_role_ids": None}
+    out = redact_output({"records": [row]}, context=context, profile=profile)
+    assert set(out["records"][0]) == set(row)
+    assert out["records"][0]["eligible_other_role_ids"] == ["role-reader"]

@@ -121,6 +121,8 @@ def build_diagnostics(
                 "top": item.get("top"),
                 "command_type": item.get("type"),
             }
+            if item.get("doh_endpoint"):
+                failure["doh_endpoint"] = item["doh_endpoint"]
             if item.get("type") == "command":
                 failure["commands_required"] = optional_commands or [str(item.get("command"))] if item.get("command") else []
                 failure["recommendations"] = {
@@ -144,7 +146,8 @@ def build_diagnostics(
             failures.append(failure)
 
     for failure in failures:
-        reason = collector_gap_reason(str(failure.get("collector")), failure.get("error_class"), failure.get("error"))
+        reason = collector_gap_reason(str(failure.get("collector")), failure.get("error_class"),
+                                     doh_endpoint=failure.get("doh_endpoint"))
         if reason:
             failure["customer_reason"] = reason
     return failures

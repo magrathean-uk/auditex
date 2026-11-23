@@ -1087,7 +1087,7 @@ def test_an_unchunked_read_keeps_its_prefix_and_marks_the_failed_page() -> None:
     ("exchange_policy", "module_not_found", "ExchangeOnlineManagement"),
     ("exchange_policy", "session_not_connected", "session failed"),
     ("exchange_policy", "command_not_authenticated", "admin consent"),
-    ("dns_posture", "dns_resolver_error", "Cloudflare"),
+    ("dns_posture", "dns_resolver_error", "endpoint unknown"),
     ("dns_posture", "public_lookup_error", "HTTPS read failed"),
     ("exchange_policy", "license_required", "licence"),
 ])

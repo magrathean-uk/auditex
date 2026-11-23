@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -157,7 +158,7 @@ def test_audit_deps_resolves_every_declared_extra(tmp_path: Path) -> None:
     fake_bin.mkdir()
     (fake_bin / "uv").write_text(
         "#!/usr/bin/env bash\n"
-        f"printf '%s\\n' \"$*\" >> {log}\n"
+        f"printf '%s\\n' \"$*\" >> {_quote(str(log))}\n"
         "if [[ \"$1 $2\" == 'pip compile' ]]; then\n"
         "  while [[ $# -gt 0 ]]; do if [[ \"$1\" == -o ]]; then : > \"$2\"; fi; shift; done\n"
         "elif [[ \"$1\" == venv ]]; then\n"
@@ -187,7 +188,7 @@ def test_audit_full_uses_the_selected_python(tmp_path: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     for name in ("python3", "selected-python"):
-        (fake_bin / name).write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' \"{name} $*\" >> {log}\n", encoding="utf-8")
+        (fake_bin / name).write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' \"{name} $*\" >> {_quote(str(log))}\n", encoding="utf-8")
         (fake_bin / name).chmod(0o755)
     env = _env(PATH=f"{fake_bin}:{os.environ['PATH']}")
     run = _make("audit-full", f"PYTHON={fake_bin / 'selected-python'}", "TENANT_ID=contoso.onmicrosoft.com",
@@ -227,3 +228,32 @@ def test_release_check_refuses_untracked_files(tmp_path: Path) -> None:
 
     assert run.returncode == 2, (run.returncode, run.stderr[-2000:])
     assert "uncommitted" in run.stderr
+
+
+def _smoke_resource_check() -> str:
+    script = (ROOT / "scripts" / "release-smoke.sh").read_text(encoding="utf-8")
+    blocks = re.findall(r"<<'PY'\n(.*?)\nPY\n", script, flags=re.S)
+    return next(block for block in blocks if "_resource_adapters" in block)
+
+
+# PR #151 review (coderabbit): an older Auditex data tree under the base interpreter (sys.base_prefix/auditex) is also
+# an "installed" adapter, so a wheel missing a shipped directory would pass on the base copy. The smoke check must
+# accept only the tree of the environment under test.
+def test_release_smoke_accepts_only_the_tested_environment_data_tree(monkeypatch) -> None:
+    import sysconfig
+
+    from auditex import bootstrap
+    from azure_tenant_audit import resources
+
+    own = Path(sysconfig.get_paths()["data"]) / "auditex"
+    monkeypatch.setattr(bootstrap, "build_doctor_report", lambda: {"readiness": {"core_ready": True}})
+    check = _smoke_resource_check()
+
+    monkeypatch.setattr(resources, "_resource_adapters", lambda: [resources.ResourceAdapter("installed", own)])
+    exec(compile(check, "release-smoke", "exec"), {})
+
+    foreign = Path("/opt/base-python/auditex")
+    monkeypatch.setattr(resources, "_resource_adapters", lambda: [
+        resources.ResourceAdapter("installed", own), resources.ResourceAdapter("installed", foreign)])
+    with pytest.raises(AssertionError):
+        exec(compile(check, "release-smoke", "exec"), {})

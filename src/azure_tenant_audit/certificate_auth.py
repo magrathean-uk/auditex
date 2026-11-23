@@ -284,12 +284,20 @@ def refuse_sources_in_output(
 
 def certificate_authority(authority: str, tenant_id: str) -> str:
     """The msal authority URL for a certificate run; only HTTPS Entra hosts and a plain tenant segment."""
-    parsed = urlparse(str(authority or ""))
     tenant = str(tenant_id or "")
+    try:
+        # urllib raises ValueError, with the authority's own text, for a malformed port or bracket; that is the
+        # same fixed refusal as any other authority outside the allowlist, raised outside this handler so no
+        # library diagnostic is chained to it.
+        parsed = urlparse(str(authority or ""))
+        port = parsed.port
+    except ValueError:
+        parsed, port = None, None
     if (
-        parsed.scheme != "https"
+        parsed is None
+        or parsed.scheme != "https"
         or parsed.hostname not in CERTIFICATE_AUTHORITY_HOSTS
-        or parsed.port is not None
+        or port is not None
         or parsed.username is not None
         or parsed.query
         or parsed.fragment

@@ -6,8 +6,15 @@ order; the model only chooses which prepared sentences and values to show for ea
 
 ## Start
 
-1. Install the optional runtime once, in the Auditex folder. It builds `llama-cpp-python` (llama.cpp) from source, so it
-   needs CMake and a C and C++ compiler; on a Mac it is built with Metal.
+1. Install the optional runtime once. It builds `llama-cpp-python` (llama.cpp) from source, so it needs CMake and a C
+   and C++ compiler; on a Mac it is built with Metal. For a pipx install (see the [install guide](install-guide.md)),
+   list every extra you want to keep inside the brackets:
+
+   ```bash
+   pipx install --force "auditex[local-answer]"
+   ```
+
+   In a source checkout, run this in the Auditex folder instead:
 
    ```bash
    python -m pip install -e '.[local-answer]'
@@ -45,7 +52,10 @@ why the model did not run. The audit is never lost.
 The first use of a model downloads one file from the Hugging Face site (`huggingface.co` and its download servers), at
 the revision Auditex pins, into the user cache: `~/Library/Caches/auditex/models` on macOS, `%LOCALAPPDATA%\auditex\models` on Windows, and
 `$XDG_CACHE_HOME/auditex/models` (or `~/.cache/auditex/models`) elsewhere. Set `AUDITEX_MODEL_DIR` to keep the files
-somewhere else. The command prints the size before it starts and shows progress; an interrupted download resumes.
+somewhere else. Before it starts, the command prints the size, the repository and revision, and names the model's licence;
+it then shows progress, and an interrupted download resumes. `local_answer.json` records the licence with the model
+(choice, repository, revision, file, size and SHA-256); an answer saved before the licence was recorded is refused as made
+by another Auditex version, so run `auditex explain` again.
 
 Auditex checks the file's size and SHA-256 against the pinned values before it is used, and checks the SHA-256 again
 before every load. A file that does not match is deleted and not used. After the download the answer runs offline. Keep

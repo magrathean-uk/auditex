@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 import time
 from collections import Counter, OrderedDict
 from collections.abc import Callable
@@ -115,11 +117,38 @@ class GoogleWorkspaceError(RuntimeError):
         self.surface = surface
 
 
+# Structured reasons on an HTTP 403 that mean a per-user or per-project rate limit, not a refusal: they are retried.
+# Daily quota (``quotaExceeded``, ``dailyLimitExceeded``) is left out, since waiting seconds cannot clear it.
+_RATE_LIMIT_403_REASONS = frozenset({"rateLimitExceeded", "userRateLimitExceeded", "RATE_LIMIT_EXCEEDED"})
+
+
+def _error_reasons(exc: Exception) -> set[str]:
+    """The structured ``reason`` values of a Google API error (``errors[]`` and ``details[]`` of its JSON body)."""
+    entries: list[Any] = []
+    details = getattr(exc, "error_details", None)
+    if isinstance(details, list):
+        entries.extend(details)
+    content = getattr(exc, "content", None)
+    if isinstance(content, (bytes, str)):
+        try:
+            body = json.loads(content)
+        except (ValueError, TypeError):
+            body = None
+        error = body.get("error") if isinstance(body, dict) else None
+        if isinstance(error, dict):
+            for key in ("errors", "details"):
+                if isinstance(error.get(key), list):
+                    entries.extend(error[key])
+    return {str(entry["reason"]) for entry in entries if isinstance(entry, dict) and entry.get("reason")}
+
+
 def classify_google_error(exc: Exception) -> tuple[str, str]:
     status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
     message = str(exc)
-    if "unauthorized_client" in message or "invalid_scope" in message or "not authorized for any of the scopes" in message:
+    if is_token_refusal(message):
         return "insufficient_permissions", message
+    if status == 403 and _error_reasons(exc) & _RATE_LIMIT_403_REASONS:
+        return "rate_limited", message
     if status in {401, 403}:
         return "insufficient_permissions" if status == 403 else "unauthenticated", message
     if status == 404:
@@ -133,12 +162,15 @@ def classify_google_error(exc: Exception) -> tuple[str, str]:
 
 # Token-exchange refusals: domain-wide delegation was not granted one of the scopes the token asked for.
 _TOKEN_REFUSAL_MARKERS = ("unauthorized_client", "invalid_scope", "not authorized for any of the scopes")
+# The token endpoint's ``access_denied`` error, as google-auth words a refused exchange ("access_denied: <description>",
+# alone or as the first item of the RefreshError's arguments). An API answer never starts this way.
+_TOKEN_ACCESS_DENIED = re.compile(r"^\(?['\"]?access_denied:")
 
 
 def is_token_refusal(error: str | None) -> bool:
     """Whether an error text is a refused token exchange (a scope missing from the delegation), not an API answer."""
     text = str(error or "")
-    return any(marker in text for marker in _TOKEN_REFUSAL_MARKERS)
+    return any(marker in text for marker in _TOKEN_REFUSAL_MARKERS) or bool(_TOKEN_ACCESS_DENIED.match(text))
 
 
 def _token_request() -> Any:

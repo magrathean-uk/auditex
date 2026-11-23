@@ -361,22 +361,34 @@ can pass `public_lookups: False` in the collector
 context to skip the HTTPS reads.
 
 The DNS-over-HTTPS resolver is `https://cloudflare-dns.com/dns-query` unless
-`--doh-endpoint URL` (on `auditex run`, `azure-tenant-audit` and
-`auditex guided-run`) or the environment variable `AUDITEX_DOH_ENDPOINT` names
+`--doh-endpoint URL` (on `auditex run`, `azure-tenant-audit`,
+`auditex guided-run` and `auditex google run`) or the environment variable `AUDITEX_DOH_ENDPOINT` names
 another; the option wins over the variable, and a blank variable means the
 default. Only a plain `https://host[:port]/path` is accepted: no credentials,
-query string or fragment, and a refused value is never repeated in messages
+query string or fragment, no character outside a URL's set (a backslash, a space,
+a non-ASCII letter) and a host that is a DNS name or an IP address, so the host
+shown is the host asked; a refused value is never repeated in messages
 because it may carry a token. The resolver must speak the DoH JSON API
 (`application/dns-json`, `name` and `type` parameters). The console notice,
-`data-handling.json` and the handoff name the resolver in use, and
-`data-handling.json` records its host as `dns_resolver`.
+`data-handling.json` and the handoff name the resolver in use, a configured
+one by its host alone (its path may carry a token), and `data-handling.json`
+records that host as `dns_resolver`. A failed lookup is described by the
+resolver's `https://host` (an IPv6 address in brackets, a port only when it is
+not 443), the record asked for and the HTTP status or error
+class only. Both providers scrub URLs in live and replayed DNS diagnostics to
+their origins and withhold standalone request targets. A DNS coverage gap names
+the resolver from the configured endpoint and reports it as unknown when that
+endpoint is unavailable, including older samples without endpoint metadata. While a DoH
+request runs, the `urllib3` and `requests` loggers record nothing, so a
+DEBUG log never holds the resolver's path or query.
 
 Google Workspace runs with the `google_dns_posture` collector (in the
 `core-security`, `mail` and `everything` presets) send each verified domain
 name to the same resolver: SPF, DMARC, MTA-STS, TLS-RPT and BIMI TXT lookups
 and up to six DKIM selector names. Only domain names are sent, and a Google run
-makes no HTTPS read of the domains. A Google run reads the resolver only from
-`AUDITEX_DOH_ENDPOINT`; it has no `--doh-endpoint` option. Deselect the
+makes no HTTPS read of the domains. A Google run takes the resolver from
+`--doh-endpoint URL`, else `AUDITEX_DOH_ENDPOINT`, and names only its host in
+the notice and `data-handling.json`. Deselect the
 collector with `--exclude google_dns_posture`; the `identity` and
 `collaboration` presets omit it. The run prints the notice on stderr before
 collection and writes it to `data-handling.json` and the report.
@@ -945,7 +957,28 @@ local Git-excluded path. Do not place those paths in repository defaults.
 No command or MCP tool accepts a bearer token: Microsoft 365 tokens are minted in memory from the reader app's certificate.
 
 The Google OAuth token cache is written owner-only (0600); a folder Auditex creates for it is 0700, and an existing
-folder keeps its mode. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
+folder keeps its mode. The cache is replaced in one step: the new copy is written to a file beside it, which then takes
+its place. Its folder must therefore let you create and replace files there, be owned by you (or root) and not let other
+accounts replace entries (no group or world write unless the sticky bit is set, as on `/tmp`). On macOS the folder must
+also carry no ACL entry that allows anything: an allow entry can let another account replace files in a `0700` folder,
+or pass read access on to the cache written into it. Deny-only entries, such as the one on `~/Desktop`, are accepted.
+The ACL is read with the C library's ACL calls through Python's standard `ctypes`; Linux needs no separate check because
+a POSIX ACL shows in the mode's group bits. A folder that fails any of this, or a missing folder that cannot be created,
+is refused with `secret_folder_refused`, which never names the path. Point `--token-cache` at a file in an
+owner-controlled writable folder; the default `.secrets/` folder is created `0700`. The cache is read through the same
+folder check, and only when it is a regular file (not a link) you own with no group or world write and no allowing ACL;
+otherwise the run stops with `secret_file_refused`, so a cache another account could have planted is never used. The
+cache is refreshed every run and saved only after a successful refresh or a fresh consent, together with the scopes
+Google actually granted (`auditex_verified_scopes`). A fresh consent that grants fewer scopes than the run needs is
+neither used nor saved; the run stops and names the missing scopes. When Google's token endpoint is down, a cached
+token still in date is used without rewriting the cache, and only when its recorded grant covers the run; an older
+cache that records no grant, or one whose grant is narrower, stops the run with "run again later". This outage
+fallback is off where the owner check proves nothing: on a macOS volume with "Ignore ownership on this volume" set
+(mounted `noowners`, read from the volume's mount flags), when those flags cannot be read, and on Windows; there an
+outage always stops the run with "run again later". Only the token endpoint's own grant errors (`invalid_grant`,
+`invalid_scope`, `invalid_client`, `unauthorized_client`) or a cache missing a field a refresh needs (checked on the
+cached credentials before any refresh, never from an error's text, and including a cache saved from a consent that
+returned no refresh token) start a new consent. A Google service-account key must be an owner-only JSON file (`chmod 600 key.json`): a key file
 others can read, or a link, is refused with `service_account_key_refused`.
 
 `--verbose` raises Auditex's own logging to DEBUG but keeps `urllib3` and `msal` at WARNING, because their request

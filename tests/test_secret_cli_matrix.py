@@ -17,11 +17,11 @@ CANARY = "constructed-canary-r2-" * 18
 # dropping a flag from a set must fail its regression case.
 _ENGINE_FLAGS = (
     "--client-secret", "--access-token", "--sensitive-users", "--partner-domains",
-    "--env", "--break-glass-accounts",
+    "--env", "--break-glass-accounts", "--doh-endpoint",
 )
 _GOOGLE_FLAGS = (
     "--service-account-key", "--oauth-client", "--token-cache",
-    "--sensitive-users", "--partner-domains",
+    "--sensitive-users", "--partner-domains", "--doh-endpoint",
 )
 _PRODUCT_FLAGS = (
     *_ENGINE_FLAGS, "--token", "--token-file", "--command-override", "--adapter-override",

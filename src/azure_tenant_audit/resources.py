@@ -5,7 +5,7 @@ import os
 import sys
 import sysconfig
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .shipped_content import SHIPPED_CONTENT_AREAS, shipped_directories
@@ -102,17 +102,29 @@ def resolve_resource_path(path: str | Path) -> Path:
             return candidate
 
     # Not a resource any root holds: an operator's own relative path (a sample, a config) means the cwd. A path
-    # shaped like shipped content never does, so a wheel missing a shipped file cannot pick up a same-named file.
+    # shaped like shipped content never does, so a wheel missing a shipped file cannot pick up a same-named file,
+    # and neither does a shipped directory or a parent of one, so a wheel missing a whole directory cannot list one.
     in_cwd = Path.cwd() / target
-    if not _matches_shipped_pattern(target) and in_cwd.exists():
+    if not _matches_shipped_pattern(target) and not _is_shipped_directory(target) and in_cwd.exists():
         return in_cwd
     return _repo_root() / target
 
 
+def _full_match(relative: Path, pattern: str) -> bool:
+    """Match the whole root-relative path; Path.match alone matches from the right, so x/configs/a.json would pass."""
+    return len(relative.parts) == len(PurePosixPath(pattern).parts) and relative.match(pattern)
+
+
 def _matches_shipped_pattern(relative: Path) -> bool:
     return ".." not in relative.parts and any(
-        relative.match(pattern) for area in SHIPPED_CONTENT_AREAS for pattern in area.package_patterns
+        _full_match(relative, pattern) for area in SHIPPED_CONTENT_AREAS for pattern in area.package_patterns
     )
+
+
+def _is_shipped_directory(relative: Path) -> bool:
+    """A shipped directory itself, or a parent of one (skills holds skills/auditex-operator)."""
+    parts = PurePosixPath(relative.as_posix()).parts
+    return bool(parts) and any(PurePosixPath(directory).parts[: len(parts)] == parts for directory in shipped_directories())
 
 
 def read_selected_resource(path: str | Path, *, default: str, field: str) -> bytes:
@@ -136,8 +148,7 @@ def is_shipped_resource(path: str | Path) -> bool:
             relative = target.relative_to(adapter.root) if target.is_absolute() else target
         except ValueError:
             continue
-        if ".." not in relative.parts and any(relative.match(pattern) for area in SHIPPED_CONTENT_AREAS
-                                                for pattern in area.package_patterns):
+        if _matches_shipped_pattern(relative):
             return True
     return False
 

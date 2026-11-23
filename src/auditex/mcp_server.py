@@ -1019,7 +1019,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError:
-        print("Install Auditex with the MCP extra: pip install -e '.[mcp]'", file=sys.stderr)
+        from .bootstrap import extra_install_command
+
+        print(f"Install Auditex with the MCP extra: {extra_install_command('mcp')}", file=sys.stderr)
         return 2
 
     server = FastMCP("auditex")

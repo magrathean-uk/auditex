@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.assurance import build_live_readiness_summary
@@ -19,10 +18,10 @@ from azure_tenant_audit.collector_runner import (
     CollectorRunner,
 )
 from azure_tenant_audit.dns_lookup import (
-    DEFAULT_DOH_ENDPOINT,
     DOH_ENDPOINT_ENV,
     doh_resolver_disclosure,
     resolve_doh_endpoint,
+    sanitise_resolver_fields,
 )
 from azure_tenant_audit.offline_replay import (
     absent_section_rows,
@@ -91,7 +90,9 @@ def _merged_fixture_provenance(
             else:
                 merged[key] = value
     return merged or None
-_SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache"}
+# --doh-endpoint: a DoH resolver URL path can carry an account token.
+_SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache",
+                            "--doh-endpoint"}
 
 
 @dataclass(frozen=True)
@@ -120,10 +121,16 @@ class GoogleRunConfig:
     waiver_file: Path | None = None
     stale_user_days: int = DEFAULT_STALE_USER_DAYS
     stale_device_days: int = DEFAULT_STALE_DEVICE_DAYS
+    # The DNS-over-HTTPS resolver for google_dns_posture: this option, else AUDITEX_DOH_ENDPOINT, else Cloudflare.
+    doh_endpoint: str | None = None
 
 
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
-    return redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)
+    """The command line as the run bundle records it: secret-bearing values redacted and every absolute path of the
+    operator's machine (``--out /home/...``) reduced to ``<local-path>/<name>``."""
+    from ..reporting import local_path_argument
+
+    return [local_path_argument(item) for item in redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)]
 
 
 def _selected_collectors(config: GoogleRunConfig) -> list[str]:
@@ -177,6 +184,18 @@ def build_google_auth_context_payload(config: GoogleRunConfig, auth_config: Goog
     }
 
 
+def _authenticated_google_read(row: dict[str, Any]) -> bool:
+    """Whether a coverage row is a Google read that completed on the collector's token, whatever its row count.
+
+    Every collector reads through one token asking for all of its scopes (see ``_collector_client``), so a completed
+    read proves that token carries them. A DNS lookup uses no Google token, and a row with no read behind it (a
+    skipped-mailbox note) proves nothing. Rows recorded before the explicit marker count only when they hold data.
+    """
+    if str(row.get("type") or "google") != "google" or row.get("status") not in {"ok", "partial"}:
+        return False
+    return bool(row.get("authenticated_read")) or int(row.get("item_count") or 0) > 0
+
+
 def build_google_capability_rows(
     selected: list[str],
     *,
@@ -207,21 +226,15 @@ def build_google_capability_rows(
         row_status = status
         row_reason = reason
         missing_permissions: list[str] = []
-        if not failures and seen_by_collector.get(name) and status == "supported":
+        scopes_proven = any(_authenticated_google_read(item) for item in seen_by_collector.get(name, []))
+        if not failures and scopes_proven and status == "supported":
             row_status = "supported_exact_scope"
             row_reason = "runtime_preflight_ok"
         elif failures:
             # Only a read refused outright is a scope block; a read that partly succeeded proves the scopes work.
             classes = {str(item.get("error_class") or "") for item in failures if item.get("status") == "failed"}
-            # A Google read of this collector that returned data proves its token carries the collector's scopes
-            # (one token per collector), so another read refused beside it is a role limit, not a missing scope. A
-            # DNS lookup uses no Google token and proves nothing.
-            scopes_proven = any(
-                str(item.get("type") or "google") == "google"
-                and item.get("status") in {"ok", "partial"}
-                and int(item.get("item_count") or 0) > 0
-                for item in seen_by_collector.get(name, [])
-            )
+            # A completed Google read of this collector, even an empty one, proves its token carries the collector's
+            # scopes, so another read refused beside it is a role limit, not a missing scope.
             if classes & {"insufficient_permissions", "unauthenticated"} and not scopes_proven:
                 row_status = "blocked_by_scope"
                 row_reason = "runtime_permission_block"
@@ -240,6 +253,10 @@ def build_google_capability_rows(
                     if classes & {"insufficient_permissions", "unauthenticated"}
                     else "runtime_endpoint_block"
                 )
+        seen = seen_by_collector.get(name, [])
+        if seen and not failures and all(item.get("live_read") is False for item in seen):
+            # Only a DNS readiness note: nothing was looked up and no Google request was made.
+            row_reason = "dns_only_not_verified"
         if auth_mode == "offline" and not failures:
             # A replay observed nothing on a tenant: it is an offline sample, not an exact-scope read.
             row_status = "offline_sample"
@@ -253,6 +270,7 @@ def build_google_capability_rows(
             "observed_permissions": [],
             "delegated_roles": [],
             "minimum_role_hints": ["Google Workspace super admin or delegated admin"],
+            "scopes_proven": scopes_proven,
             "notes": f"Google Workspace {auth_mode} auth.",
             "endpoint_statuses": [
                 {
@@ -377,8 +395,9 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
         status = "partial"
         error_class = max(set(classes), key=classes.count)
         error = f"Sharing of {len(permission_errors)} Drive files could not be read ({', '.join(sorted(set(classes)))})."
-    return {
+    row = {
         "collector": collector,
+        "type": "google",
         "name": name,
         "status": status,
         "item_count": len(rows) if isinstance(rows, list) else 1,
@@ -386,6 +405,9 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
         "error_class": error_class,
         "error": error,
     }
+    if status != "failed":
+        row["authenticated_read"] = True
+    return row
 
 
 def _gmail_preflight_status(row: dict[str, Any], check: Any) -> dict[str, Any]:
@@ -447,7 +469,9 @@ def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None
     elif collector == "google_devices":
         rows.append(_preflight_call(collector, "mobileDevices", lambda: client.list_devices("mobile", top=top)))
     elif collector == "google_dns_posture":
-        rows.append({"collector": collector, "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None})
+        # Only the run's resolver is ready to look the domain up; no Google token is used, so no Google scope is proven.
+        # The row is a readiness note with no lookup behind it (``live_read`` false): it verifies nothing.
+        rows.append({"collector": collector, "type": "dns", "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None, "live_read": False})
     elif collector == "google_drive_posture":
         rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
         rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
@@ -482,6 +506,7 @@ def _write_google_bundle(
     replay: dict[str, Any] | None = None,
     as_of: datetime | None = None,
     data_handling_notices: list[str] | None = None,
+    doh_endpoint: str | None = None,
 ) -> int:
     normalized_snapshot = build_google_normalized_snapshot(
         tenant_name=config.tenant_name,
@@ -586,6 +611,7 @@ def _write_google_bundle(
                 "data_handling_notices": list(data_handling_notices or []),
             },
             as_of=as_of,
+            doh_endpoint=doh_endpoint,
         ),
     )
     return 1 if overall_status == "partial" else 0
@@ -652,6 +678,9 @@ def run_google_offline(
     if not isinstance(sample, dict):
         LOG.error("Google sample bundle must be a JSON object.")
         return 2
+    # Resolver diagnostics in the sample are untrusted (a full resolver URL may carry user info, a path token or a
+    # query): every copy below (raw payloads, coverage, diagnostics, normalised records) sees only the safe form.
+    sample = sanitise_resolver_fields(sample)
     fixture_provenance = _merged_fixture_provenance(
         sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
         fixture_provenance_override,
@@ -740,9 +769,7 @@ def run_google_offline(
 
 def _resolver_label(doh_endpoint: str) -> str:
     """The resolver as the notice and run log name it: a configured one by host only, since a path can hold a profile id."""
-    if doh_endpoint == DEFAULT_DOH_ENDPOINT:
-        return doh_resolver_disclosure(doh_endpoint)
-    return f"the configured DNS-over-HTTPS resolver at {urlsplit(doh_endpoint).netloc}"
+    return doh_resolver_disclosure(doh_endpoint)
 
 
 def google_dns_notice(doh_endpoint: str) -> str:
@@ -751,7 +778,7 @@ def google_dns_notice(doh_endpoint: str) -> str:
         "Selected Google DNS posture collection sends the customer's verified domain names to "
         f"{_resolver_label(doh_endpoint)}. Only domain names, no user data, are sent to the resolver. "
         "Deselect it with --exclude google_dns_posture (the identity and collaboration presets omit it); "
-        f"set {DOH_ENDPOINT_ENV} to use another DNS-over-HTTPS resolver."
+        f"use --doh-endpoint or set {DOH_ENDPOINT_ENV} to use another DNS-over-HTTPS resolver."
     )
 
 
@@ -785,7 +812,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     doh_endpoint: str | None = None
     if "google_dns_posture" in selected:
         try:
-            doh_endpoint = resolve_doh_endpoint()
+            doh_endpoint = resolve_doh_endpoint(config.doh_endpoint)
         except ValueError as exc:
             print(json.dumps({"error": "invalid_doh_endpoint", "message": str(exc)}, indent=2), file=sys.stderr)
             return 2
@@ -866,6 +893,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         command_line=command_line,
         waiver_rows=waiver_rows,
         data_handling_notices=[google_dns_notice(doh_endpoint)] if doh_endpoint is not None else [],
+        doh_endpoint=doh_endpoint,
     )
 
 
@@ -912,15 +940,21 @@ def _google_probe_summary_rows(selected: list[str], preflight_rows: list[dict[st
         rows = rows_by_collector.get(collector, [])
         failures = [row for row in rows if row.get("status") != "ok"]
         item_count = sum(int(row.get("item_count") or 0) for row in rows)
-        summary_rows.append(
-            {
-                "name": collector,
-                "status": "failed" if failures else "ok",
-                "item_count": item_count,
-                "message": "preflight ok" if not failures else "preflight blocked",
-                "coverage_rows": len(rows),
-            }
-        )
+        summary = {
+            "name": collector,
+            "status": "failed" if failures else "ok",
+            "item_count": item_count,
+            "message": "preflight ok" if not failures else "preflight blocked",
+            "coverage_rows": len(rows),
+        }
+        if rows and not failures and all(row.get("live_read") is False for row in rows):
+            # Only a readiness note, no lookup or Google request: the probe verified nothing for this collector.
+            summary.update({
+                "live_read": False,
+                "reason": "dns_only_not_verified",
+                "message": "DNS-only readiness; nothing was looked up or verified",
+            })
+        summary_rows.append(summary)
     return summary_rows
 
 

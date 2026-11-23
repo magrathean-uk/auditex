@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -214,6 +215,7 @@ def resolve_accounts(
     role_definitions: Sequence[Mapping[str, Any]],
     admin_rows: Sequence[Mapping[str, Any]] = (),
     membership_edges: Sequence[Mapping[str, Any]] = (),
+    read_member_groups: Iterable[str] | None = None,
 ) -> BreakGlassAccounts:
     """Resolve the operator's list against the collected identity data, or infer the accounts.
 
@@ -226,6 +228,8 @@ def resolve_accounts(
     ``admin_rows`` (the effective administrator set's rows) and ``role_assignments`` give the roles each
     user holds, so a role-targeted policy is judged only when it can reach an account. ``membership_edges``
     (members of role-assignable groups) let a group the policy excludes cover the accounts in it.
+    ``read_member_groups`` names the groups whose member read succeeded, empty or not (by default the groups with
+    membership edges); any other collected group's membership is unknown, so excluding it is unverified.
     """
     user_by_key: dict[str, Mapping[str, Any]] = {}
     for user in users:
@@ -247,6 +251,10 @@ def resolve_accounts(
     global_admin_role_ids = {
         str(role["id"]).lower() for role in role_definitions if str(role.get("displayName") or "").lower() == _GLOBAL_ADMINISTRATOR
     }
+    group_members: dict[str, set[str]] = {}
+    for edge in membership_edges:
+        if edge.get("relationship") == "member" and edge.get("group_id") and edge.get("member_id"):
+            group_members.setdefault(str(edge["group_id"]).lower(), set()).add(str(edge["member_id"]).lower())
     roles_by_principal: dict[str, set[str]] = {}
     active_by_principal: dict[str, set[str]] = {}
     for assignment in role_assignments:
@@ -254,6 +262,17 @@ def resolve_accounts(
         if isinstance(principal, str) and principal and role_id:
             roles_by_principal.setdefault(principal.lower(), set()).add(str(role_id).lower())
             active_by_principal.setdefault(principal.lower(), set()).add(str(role_id).lower())
+    # Raw role assignments are active: a group's active role reaches its members, and the members of nested groups.
+    for group in [key for key in active_by_principal if key in group_members]:
+        group_roles = set(active_by_principal[group])
+        seen, pending = {group}, deque([group])
+        while pending:
+            for member in group_members.get(pending.popleft(), ()):
+                if member not in seen:
+                    seen.add(member)
+                    roles_by_principal.setdefault(member, set()).update(group_roles)
+                    active_by_principal.setdefault(member, set()).update(group_roles)
+                    pending.append(member)
     for row in admin_rows:
         principal = row.get("principal_id")
         if not principal:
@@ -267,17 +286,12 @@ def resolve_accounts(
                     )
             if role.get("global_administrator") and role.get("role_definition_id"):
                 global_admin_role_ids.add(str(role["role_definition_id"]).lower())
-    group_members: dict[str, set[str]] = {}
-    for edge in membership_edges:
-        if edge.get("relationship") == "member" and edge.get("group_id") and edge.get("member_id"):
-            group_members.setdefault(str(edge["group_id"]).lower(), set()).add(str(edge["member_id"]).lower())
-    # The run expands role-assignable groups only; any other collected group's members are unknown.
+    # Only groups whose member read succeeded have known membership; a failed, skipped or unexpanded read is unknown.
+    read_groups = set(group_members) if read_member_groups is None else {str(group).lower() for group in read_member_groups}
     unread_groups = {
         str(group["id"]).lower(): str(group.get("displayName") or group["id"])
         for group in groups
-        if group.get("id")
-        and group.get("isAssignableToRole") is not True
-        and str(group["id"]).lower() not in group_members
+        if group.get("id") and str(group["id"]).lower() not in read_groups
     }
 
     def role_view(label_of: Mapping[str, str]) -> tuple[dict[str, set[str]], bool]:

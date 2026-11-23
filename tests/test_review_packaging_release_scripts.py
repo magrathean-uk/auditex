@@ -119,3 +119,40 @@ def test_a_shipped_path_missing_from_every_root_never_falls_back_to_the_cwd(tmp_
     planted.write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     assert resources.resolve_resource_path("configs/missing-from-the-wheel.json") != planted
+
+
+# PR #151 review (greptile, coderabbit): a whole shipped directory that no resource root holds (a broken wheel) must
+# never be listed from the operator's folder, nor any parent of one.
+def test_a_shipped_directory_missing_from_every_root_is_never_listed_from_the_cwd(tmp_path, monkeypatch):
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    monkeypatch.setattr(resources, "_resource_adapters", lambda: [])
+    for relative in ("schemas/evil.schema.json", "profiles/planted.md", "skills/auditex-operator/SKILL.md"):
+        planted = tmp_path / relative
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    listed = resources.list_resource_files("schemas", "*.schema.json") + resources.list_resource_files("profiles", "*.md")
+    assert not [path for path in listed if path.is_relative_to(tmp_path)], listed
+    for directory in ("schemas", "profiles", "skills", "skills/auditex-operator"):
+        assert resources.resolve_resource_path(directory) != tmp_path / directory, directory
+    shipped = resources.shipped_resource_manifest()["resources"]
+    assert not [name for name in shipped if "evil" in name or "planted" in name], shipped
+
+
+# PR #151 review (coderabbit): a shipped pattern matches the whole root-relative path, not its tail, so an operator's
+# customer/configs/input.json is the operator's file and never counts as shipped content.
+def test_an_operator_path_ending_like_shipped_content_is_not_shipped(tmp_path, monkeypatch):
+    monkeypatch.delenv(resources.RESOURCE_ROOT_ENV, raising=False)
+    for relative in ("customer/configs/input.json", "x/docs/notes.md", "x/assets/logo.svg"):
+        own = tmp_path / relative
+        own.parent.mkdir(parents=True, exist_ok=True)
+        own.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    for relative in ("customer/configs/input.json", "x/docs/notes.md", "x/assets/logo.svg"):
+        assert resources.resolve_resource_path(relative) == tmp_path / relative, relative
+
+    monkeypatch.setenv(resources.RESOURCE_ROOT_ENV, str(tmp_path))
+    assert not resources.is_shipped_resource("customer/configs/input.json")
+    assert not resources.is_shipped_resource(tmp_path / "customer" / "configs" / "input.json")
