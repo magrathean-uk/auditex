@@ -281,9 +281,10 @@ class MailboxForwardingCollector(Collector):
     def _resolve_hide_folders(self, client: GraphClient | None, user_id: str) -> tuple[set[str] | None, dict[str, Any]]:
         """IDs of the user's hide-from-user folders, or None when they could not be read.
 
-        Folder metadata only (``$select=id,displayName`` on the top-level list and ``$select=id`` on the well-known
-        folders); no message is read. The reads go in one ``$batch``, so a refused folder read never counts toward the
-        per-family permission stop that guards the user's other reads.
+        Folder metadata only (``$select=id,displayName`` on the top-level list, with ``includeHiddenFolders`` so a
+        hidden RSS Feeds folder is listed, and ``$select=id`` on the well-known folders); no message is read. The
+        reads go in one ``$batch``, so a refused folder read never counts toward the per-family permission stop that
+        guards the user's other reads.
         """
         start = time.perf_counter()
         path = f"/users/{user_id}/mailFolders"
@@ -294,7 +295,7 @@ class MailboxForwardingCollector(Collector):
             if client is None or not hasattr(client, "get_batch"):
                 raise GraphError("graph client unavailable", request=path)
             answers = client.get_batch(
-                [{"path": path, "params": {"$select": "id,displayName", "$top": "100"}}]
+                [{"path": path, "params": {"$select": "id,displayName", "$top": "100", "includeHiddenFolders": "true"}}]
                 + [{"path": f"{path}/{name}", "params": {"$select": "id"}} for name in _HIDE_FROM_USER_WELL_KNOWN]
             )
             if not isinstance(answers, list) or len(answers) != 1 + len(_HIDE_FROM_USER_WELL_KNOWN):
@@ -302,15 +303,16 @@ class MailboxForwardingCollector(Collector):
             for index, answer in enumerate(answers):
                 status = answer.get("status") if isinstance(answer, dict) else None
                 body = answer.get("body") if isinstance(answer, dict) else None
-                if status == 200 and isinstance(body, dict) and index == 0:
-                    folders = body.get("value") if isinstance(body.get("value"), list) else []
+                if status == 200 and isinstance(body, dict) and index == 0 and isinstance(body.get("value"), list):
+                    # A first page without a value list is not an empty folder list: it falls through to the failure.
+                    folders = body["value"]
                     next_link = body.get("@odata.nextLink")
                     if isinstance(next_link, str) and next_link:
                         folders = folders + list(client.iter_items(next_link))
                     for folder in folders:
                         if isinstance(folder, dict) and str(folder.get("displayName") or "").strip().lower() in _HIDE_FROM_USER_FOLDERS:
                             ids.add(str(folder.get("id") or ""))
-                elif status == 200 and isinstance(body, dict) and body.get("id"):
+                elif status == 200 and isinstance(body, dict) and index > 0 and body.get("id"):
                     ids.add(str(body["id"]))
                 elif not (status == 404 and index > 0):  # 404: the mailbox has no such folder (an archive is optional)
                     raise GraphError(

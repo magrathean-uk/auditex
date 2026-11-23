@@ -1274,8 +1274,10 @@ coverage gap, never a silent pass:
   rules that read it report `not_assessed` with `collector_not_complete:<collector>`
   instead of `pass`. Findings that name the collector issue are raised from the row.
 - `normalized/collection_gaps.json` has one record per cut list: `collector`, `list`,
-  `rows_collected`, `reason`, and `result_limit` and `endpoint` where known, keyed
-  `collection_gap:<collector>.<list>`. The file exists only when a list was cut.
+  `rows_collected`, `reason`, and `result_limit` and `endpoint` where known, with
+  `source` `<collector>.<list>`, keyed `collection_gap:<collector>.<list>`, or
+  `collection_gap:<collector>.<list>:<endpoint>` when the endpoint is known, so two
+  cut reads of one list stay distinct. The file exists only when a list was cut.
   `normalized/snapshot.json` carries `collection_gap_count`; the Google snapshot
   also lists the cut lists in `truncated_sections` (`<collector>.<list>`) with
   `sample_truncated`.

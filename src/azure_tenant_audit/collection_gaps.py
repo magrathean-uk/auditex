@@ -475,15 +475,21 @@ def truncations_from_payloads(
 
 
 def collection_gap_records(truncations: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Normalized ``collection_gaps`` records, keyed by ``collector.list``."""
+    """Normalized ``collection_gaps`` records, sourced from ``collector.list``.
+
+    A gap that names its endpoint (one object's cut fan-out read) adds it to the id and key, so two cut reads of the
+    same list stay two records; ``source`` stays ``collector.list`` for the rules and baselines that match on it.
+    """
     records: list[dict[str, Any]] = []
     for item in truncations:
         source = f"{item['collector']}.{item['list']}"
+        endpoint = item.get("endpoint")
+        identity = f"{source}:{endpoint}" if isinstance(endpoint, str) and endpoint else source
         record = {
             "kind": "collection_gap",
             "source": source,
-            "id": source,
-            "key": f"collection_gap:{source}",
+            "id": identity,
+            "key": f"collection_gap:{identity}",
             **{key: value for key, value in item.items() if value not in (None, "")},
         }
         records.append(record)
