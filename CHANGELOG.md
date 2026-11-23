@@ -7,31 +7,188 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
-### Added
+## [2.0.0] - 2026-11-23
 
-- **PyPI install route (#145).** Auditex installs from PyPI with `pipx install auditex`; extras are named in brackets
-  (`pipx install --force "auditex[google,mcp]"` adds them to an existing install). The new [install guide](docs/guides/install-guide.md) walks an
-  administrator through Linux, macOS and WSL2 step by step: Python and pipx, install, `auditex --version`,
-  `auditex doctor`, a first offline run, where run folders go, upgrade, uninstall and troubleshooting. The package
-  metadata carries the project links, keywords and Linux and macOS classifiers, `make dist-check` runs `twine check`
-  on the built wheel and sdist, and a test installs the built wheel into a fresh environment and runs
-  `auditex --version` and `auditex doctor --json` outside the source tree.
+Auditex now installs from PyPI, and this release carries the fixes from the November review of the 1.x code, each
+with a test. Most fixes make Auditex more careful: data it could not read is
+reported as unknown instead of as a pass, a fail or zero, and less local or private detail reaches the files you
+share. The major version marks the changes an integrator must know (see "Output contract changes" below). The
+run-bundle `CONTRACT_VERSION` stays `2026-11-11`, and bundles from 1.x releases still load.
 
-### Fixed
+### Install from PyPI
 
+- **`pipx install auditex` (#145, #176).** Auditex installs from PyPI. Optional parts are extras in brackets:
+  `pipx install "auditex[google]"` for Google Workspace, `auditex[mcp]` for the MCP server, `auditex[local-answer]`
+  for the local answer; `pipx install --force "auditex[google,mcp]"` adds them to an existing install. The new
+  [install guide](docs/guides/install-guide.md) walks an administrator through Linux, macOS and Windows through WSL2
+  step by step: Python and pipx, install, `auditex --version`, `auditex doctor`, a first offline run, where run
+  folders go, upgrade, uninstall and troubleshooting. Native Windows (PowerShell or Command Prompt without WSL2) is
+  not supported: Auditex says so and stops, and the guide shows how to run it inside WSL2.
 - **Install hints match how Auditex was installed.** `auditex setup`, the Google dependency check and `auditex-mcp`
   name `pipx install --force "auditex[...]"` (keeping the extras already installed) for a pipx install, the running
-  interpreter's `pip` for another environment (quoted, so a path with a space pastes cleanly), the downloaded wheel
-  again for an install from a wheel, and the editable install only in a source checkout. What a run bundle records
-  (the Google dependency status in a blocked probe) names no local path.
-- **A blocked or failed Google probe writes no absolute local path.** An unreadable service-account key is recorded by
-  its reason only, not the OS message that names the file, and the recorded command line reduces absolute paths
-  (`--out /home/...`) to `<local-path>/<name>`, as the customer pack already does. The manifest's documented `run_dir`
-  is unchanged.
-- **Shipped resources never come from the current folder or another installation (PR #151 review).** A shipped
-  directory missing from the package is no longer listed from the current folder, shipped-file patterns match the whole
-  path (so an operator file such as `customer/configs/input.json` is not mistaken for shipped content), and the release
-  smoke check accepts resources only from the tested environment's data tree.
+  interpreter's `pip` for another environment, the downloaded wheel again for an install from a wheel, and the
+  editable install only in a source checkout. Guided runs no longer install tools without asking, and recheck the
+  tools after setup.
+- **Shipped files come only from the installed package.** Configuration, profiles and schemas are never picked up
+  from the current folder or from another installation, so running Auditex inside a folder that happens to hold a
+  `configs/` folder cannot change an audit.
+
+### Identity and administrator roles
+
+- An eligible (not yet activated) role no longer counts as held: it does not satisfy a role-scoped MFA policy, and an
+  eligible administrator is not treated as an ordinary user's foothold in the attack graph.
+- Emergency-access (break-glass) checks follow a group's active roles to its members, count an account excluded
+  through a role it holds as excluded, and report an exclusion through a group Auditex could not read as unverified,
+  not missing.
+- MFA verdicts judge every role an administrator holds, need one policy with no unsanctioned exclusions for a
+  single-policy pass, treat a guest status Auditex could not resolve as unknown, and raise the split MFA finding when
+  exclusions differ between policies.
+- Attack paths no longer offer a Helpdesk-style password reset onto members or owners of role-assignable groups,
+  which Entra blocks.
+- Privilege-change findings cover role changes and tier-0 app permission grants, graded by the role, including a
+  PIM role assignment logged outside the RoleManagement category. Risky sign-ins already remediated, dismissed or
+  confirmed safe are dropped.
+- App consent and app credentials: owners Auditex could not read are unknown, never zero owners; expired credentials
+  are rated low and expiring ones are reported on their own; a failed owner or federated-credential read is a
+  recorded gap.
+- Cross-tenant access reads partner settings inherited from the default policy.
+
+### eDiscovery
+
+- Each case's searches and operations are kept in their own files, so with several cases no search is lost or
+  credited to the wrong case, and a rerun discards only that case's superseded files.
+- Every case of a long case list is read, with a recorded gap past the limit; cases and searches from older bundles
+  (the retired case overview and search list) are still read, and a search listed in both places is one record.
+- Retired command-line operations are recorded as named skips, not as failures.
+
+### Email security: DNS, MTA-STS and DMARC
+
+- DMARC: a record must start with its version tag (spaces around `=` are accepted); several DMARC records are reported
+  as their own finding and count as no effective record; an inherited record needs a valid `p=` before its `sp=reject`
+  counts.
+- SPF is judged on the first `all` qualifier, not on any text that contains one.
+- MTA-STS: a policy with a bad mode, `max_age` or `mx` host is reported invalid; compressed policies are decoded
+  whatever their window size; a repeated field takes its first value; and a fetch stops at a 15 second wall-clock
+  deadline however slowly the server answers.
+- The DNS-over-HTTPS resolver is configurable with `--doh-endpoint URL` (or `AUDITEX_DOH_ENDPOINT`) on `auditex run`
+  and the Google run; Cloudflare stays the default. The resolver is named by host only in the console notice,
+  `data-handling.json` and gap reasons.
+
+### Safe Links and Conditional Access rule answers
+
+- Safe Links (MS.SECURITYSUITE.7.1v1 to 7.3v1) resolve preset policies, rules of unknown order and Built-In
+  Protection exclusions together. A rule's scope is all its conditions minus its exceptions; a rule that matches no
+  one never decides; and an unreadable setting makes the answer not assessed instead of met. Anti-phish policies that
+  were not exported shadow the Default policy as they do in the tenant.
+- Conditional Access: terms of use and custom controls are read as alternatives in the grant, so a policy that can be
+  satisfied without MFA does not meet an MFA requirement; an unknown grant control keeps its name and makes the answer
+  not assessed; a role excluded by every control-carrying policy is not met; and a disabled or report-only policy
+  never withholds an answer.
+- MFA and SPF rules map to the current SCuBA ids, MS.AAD.3.2v2 and MS.EXO.2.2v3. Per-item sharing and inbox-rule
+  findings no longer decide tenant-setting controls.
+
+### Google Workspace reads and sign-in
+
+- Reads retry rate limits and server errors and keep the rows read before a failed later page; Drive files whose
+  permissions were left out of the list are read one by one, and unreadable ones are recorded as gaps.
+- Gmail settings: a failed read marks the mailbox and the probe as failed or partial; POP with
+  `accessWindowUnspecified` is read as not set; the delegates list, which OAuth cannot read, is recorded as not read,
+  not as no delegates.
+- Each collector reads with a token narrowed to its own scopes, and a blocked collector names only the scopes it was
+  refused. Full Gmail, read, send, compose, insert and basic-settings grants are flagged as high-risk OAuth scopes.
+- Sign-in: a cached OAuth token is refreshed every run and trusted only for the grant it records; Auditex signs in
+  again when the cache lacks a scope the run needs or cannot refresh, and keeps the sign-in through a temporary
+  token-endpoint failure. A domain-wide delegation key must be an owner-only regular file.
+- Directory users are read through a field mask that leaves out recovery contacts, phone numbers and addresses.
+  Closed and deleted Alert Center alerts are skipped. A users list cut short does not prove a single super admin.
+- `auditex google probe` refuses `--offline` and `--sample` instead of ignoring them, and a DNS-only probe says so.
+
+### Microsoft 365 collection
+
+- Transient Graph failures (timeouts, dropped connections, a download redirect hop) are retried within a bound; a
+  licence-coded 403 is reported as `license_required` and no longer stops the permission family. Power Platform
+  retries 429 and 503 answers.
+- A failed later page of a fan-out read (app consent, Intune, SharePoint) is a recorded, truncated gap, not a crash,
+  and each cut read has its own gap id.
+- Mailbox forwarding: moves to hidden folders are resolved with the optional `Mail.ReadBasic.All` folder read, and are
+  unknown when unread; guests are skipped and users without a mailbox are recorded as skipped, not failed.
+- Endpoint and Intune end-of-life checks cover more operating systems and cite the Long-Term Servicing end date.
+- Whole-tenant Exchange mailbox reads get a longer timeout with a named timeout gap.
+
+### Credential cache safety
+
+- Token caches and secrets are written through a new owner-only file in a checked folder, with the mode set before
+  any data is written, and a swapped or blocked folder is refused with a fixed message. On Linux, where a freed file
+  number is reused at once, a temporary file swapped during the write is refused too.
+- Quoted and single-token secret values are masked in recorded command lines, and `--verbose` no longer logs signed
+  queries through the HTTP and MSAL libraries.
+
+### MCP server shutdown and limits
+
+- Stopping the MCP server stops every Auditex command it started, with its whole process group, and ends on the first
+  signal. A command that runs past its limit (four hours by default; `AUDITEX_MCP_COMMAND_TIMEOUT_SECONDS` changes it)
+  is stopped the same way, and a certificate audit names its partial run folder to resume.
+- `auditex_summarize_run` stays under 48,000 bytes: a larger summary drops its heaviest sections first and lists what
+  it left out and which tool returns it.
+- An empty run, pack or output path is refused instead of meaning the working folder.
+
+### Compare and drift
+
+- `auditex diff` and `auditex_diff_runs` go through the same gates as `auditex compare`: runs from different tenants
+  or platforms, or runs that fail their bundle check, are blocked (exit status 1).
+- A finding whose collector did not complete in the later run is not reassessed, not resolved. A baseline with no
+  recorded coverage assessed nothing, so later findings are newly assessed. Evidence or findings that cannot be read
+  block the pair instead of reading as removed.
+- A run without a creation time cannot be placed in time, so any pair that includes it is blocked, whatever the
+  argument order.
+- Tenant-controlled names are shown literally in compare Markdown.
+
+### Reports, exports and shareable outputs
+
+- Shareable, customer-pack and explainer SARIF and OSCAL exports withhold the free-text waiver reason: an accepted
+  finding says "Accepted risk under a waiver" with its expiry date. The local report keeps the reason.
+- With `AUDITEX_EXPORT_FINGERPRINT_KEY` set (at least 16 characters of private random text), shareable SARIF and OSCAL
+  ids stay the same for the same finding across runs, so code-scanning tools do not open new alerts on each upload.
+  Unset, shareable ids stay per run.
+- Every Markdown report line escapes tenant-controlled text. `report render` and `export run` refuse an unknown
+  section name with exit status 2. A CSV says when it falls back to action-plan rows.
+- Reports, the pack README, handoff and explorer carry a short scope note: the output is evidence, not a certificate.
+- Shareable output masks Google customer ids, PEM key blocks, and lists and numbers under credential keys.
+- Notification sinks report errors by class, never the webhook URL, and deduplicate against open GitHub issues and
+  Jira searches.
+
+### No local paths in run bundles; resolver secrets in diagnostics
+
+- Files Auditex writes in a run bundle name no absolute local path: `run_dir` is the run folder's name, recorded
+  command lines and waiver paths show `<local-path>/<file name>`, and PowerShell, module and credential-file errors
+  name a file, not its path. Tenant evidence is kept exactly as read. The customer pack also reduces these paths when
+  packaging an older bundle.
+- A DNS-over-HTTPS resolver URL, which can carry a token, is shown by host only in live and offline replay output,
+  logs and gap reasons; a resolver URL in a replayed sample is treated as untrusted.
+
+### Output contract changes
+
+What an integrator reading the bundle must know:
+
+- **Model assessment schema `2026-11-22`.** `model_assessment.json` is written at schema version `2026-11-22`, which
+  adds the optional `rule_view` and `rule_view_omitted_fields` fields and has its own version-named `$id`. Files at
+  `2026-11-05` and earlier still validate against their own schema files. Auditex 1.x rejects a `2026-11-22` file.
+- **Diff.** `auditex diff` exits 1 for a blocked pair and 2 for a run file it refuses; a blocked result has a
+  `reason` and no changes.
+- **Compare.** Runs are ordered by `created_utc`; a pair with an undated run is `blocked` with
+  `run_created_utc_missing`.
+- **Collection gaps.** A cut read with a known endpoint is keyed `collection_gap:<collector>.<list>:<endpoint>` and
+  carries `source`.
+- **Local answer.** A saved answer records the model's licence; one saved by an earlier version is refused and made
+  again.
+- **Shareable SARIF and OSCAL.** The waiver reason is replaced by the fixed text above; ids follow
+  `AUDITEX_EXPORT_FINGERPRINT_KEY` when it is set.
+- **Paths.** `run_dir` and `waiver_path` hold a folder or file name, not an absolute path.
+
+### Tenant-bootstrap (lab kit)
+
+- The lab seeding scripts verify the named lab tenant before every write, keep tokens out of command lines and keep
+  their secret files owner-only. They remain lab-only and are never part of an audit.
 
 ## [1.8.0] - 2026-11-20
 
@@ -1839,7 +1996,13 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/magrathean-uk/auditex/compare/v1.8.0...v2.0.0
+[1.8.0]: https://github.com/magrathean-uk/auditex/compare/v1.7.0...v1.8.0
+[1.7.0]: https://github.com/magrathean-uk/auditex/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/magrathean-uk/auditex/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/magrathean-uk/auditex/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/magrathean-uk/auditex/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/magrathean-uk/auditex/compare/v1.2.4...v1.3.0
 [1.2.4]: https://github.com/magrathean-uk/auditex/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/magrathean-uk/auditex/compare/v1.2.2...v1.2.3
