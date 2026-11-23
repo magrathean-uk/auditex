@@ -394,3 +394,73 @@ def test_extract_smtp_helper_normalises_inputs() -> None:
     assert _extract_smtp("not-an-email") == ""
     assert _extract_smtp(None) == ""
     assert _extract_smtp("") == ""
+
+
+_HIDDEN_RSS_ID = "AAMkADhmHIDDENRSS000AAA="
+
+
+class _FolderClient(_FakeClient):
+    """Folder metadata reads by ``$batch``; the top-level list follows Graph and leaves out hidden folders unless asked."""
+
+    def __init__(self, rules: dict[str, Any], *, top_level_body: Any = None) -> None:
+        super().__init__(
+            [{"id": "u1", "userPrincipalName": "alice@contoso.com", "mail": "alice@contoso.com", "accountEnabled": True}],
+            [{"id": "contoso.com", "isVerified": True, "isDefault": True}],
+            rules,
+        )
+        self._top_level_body = top_level_body
+        self.batches: list[list[dict[str, Any]]] = []
+
+    def get_batch(self, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self.batches.append(requests)
+        answers: list[dict[str, Any]] = []
+        for spec in requests:
+            if spec["path"].endswith("/mailFolders"):
+                if self._top_level_body is not None:
+                    answers.append({"status": 200, "body": self._top_level_body})
+                    continue
+                folders = [{"id": "AAMkADhmINBOX", "displayName": "Inbox"}]
+                if spec["params"].get("includeHiddenFolders") == "true":
+                    folders.append({"id": _HIDDEN_RSS_ID, "displayName": "RSS Feeds", "isHidden": True})
+                answers.append({"status": 200, "body": {"value": folders}})
+            else:
+                answers.append({"status": 404, "body": {"error": {"code": "ErrorItemNotFound"}}})
+        return answers
+
+
+def _move_rule(folder_id: str) -> dict[str, Any]:
+    return {"id": "r-move", "displayName": ".", "isEnabled": True, "conditions": {},
+            "actions": {"moveToFolder": folder_id, "markAsRead": True}}
+
+
+def test_a_move_to_a_hidden_rss_folder_hides_from_user() -> None:
+    client = _FolderClient({"u1": [_move_rule(_HIDDEN_RSS_ID)]})
+    result = MailboxForwardingCollector().run({"client": client, "top": 100})
+
+    rule = result.payload["messageRules"]["value"][0]
+    assert rule["hide_from_user"] is True
+    top_level = client.batches[0][0]
+    assert top_level["params"]["$select"] == "id,displayName"
+    assert not any("/messages" in spec["path"] for batch in client.batches for spec in batch)
+
+
+def test_a_malformed_top_level_folder_answer_leaves_the_move_rule_unknown() -> None:
+    for body in ({"value": None}, {}):
+        client = _FolderClient({"u1": [_move_rule(_HIDDEN_RSS_ID)]}, top_level_body=body)
+        result = MailboxForwardingCollector().run({"client": client, "top": 100})
+
+        rule = result.payload["messageRules"]["value"][0]
+        assert rule["hide_from_user"] is None, body
+        assert rule["hide_from_user_state"] == "unknown", body
+        folders = [row for row in result.coverage if row["name"] == "mailFolders:u1"]
+        assert folders and folders[0]["status"] == "failed", body
+        assert result.status == "partial", body
+
+
+def test_an_empty_top_level_folder_list_still_resolves_the_move_rule() -> None:
+    client = _FolderClient({"u1": [_move_rule(_HIDDEN_RSS_ID)]}, top_level_body={"value": []})
+    result = MailboxForwardingCollector().run({"client": client, "top": 100})
+
+    rule = result.payload["messageRules"]["value"][0]
+    assert rule["hide_from_user"] is False
+    assert rule["hide_from_user_state"] == "resolved"
