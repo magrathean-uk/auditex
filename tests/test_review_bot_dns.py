@@ -298,3 +298,18 @@ def test_host_name_outside_ascii_ldh_is_not_safe(host):
 def test_mta_sts_mx_host_outside_ascii_ldh_is_invalid(host):
     policy = _policy(mx=("mail.contoso.example", host))
     assert policy["fetch_status"] == "invalid_policy" and policy["invalid_reasons"] == ["mx_invalid"]
+
+
+@pytest.mark.parametrize("ages,expected", [(("86400", "+86400"), 86400), (("+86400", "86400"), None)])
+def test_mta_sts_duplicate_max_age_uses_the_first(ages, expected):
+    """RFC 8461 3.2: a parser uses the first occurrence of a repeated field, whatever the later one says."""
+    body = "version: STSv1\nmode: enforce\nmx: mail.contoso.example\n" + "".join(f"max_age: {a}\n" for a in ages)
+    assert exposure_lookup.parse_mta_sts_policy(body)["max_age"] == expected
+    policy = exposure_lookup.fetch_mta_sts_policy("contoso.example", _BodyFetcher(body))
+    assert policy["fetch_status"] == ("ok" if expected is not None else "invalid_policy")
+
+
+def test_mta_sts_duplicate_mode_and_version_use_the_first():
+    body = "version: STSv1\nversion: STSv2\nmode: enforce\nmode: bogus\nmx: mail.contoso.example\nmax_age: 86400\n"
+    parsed = exposure_lookup.parse_mta_sts_policy(body)
+    assert parsed is not None and parsed["mode"] == "enforce" and parsed["mode_valid"] is True

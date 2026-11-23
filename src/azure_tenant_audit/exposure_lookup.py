@@ -252,7 +252,7 @@ def parse_mta_sts_policy(text: str) -> dict[str, Any] | None:
         if key == "mx":
             fields["mx"].append(value)
         elif key in {"version", "mode", "max_age"}:
-            fields[key] = value
+            fields.setdefault(key, value)  # RFC 8461 section 3.2: a repeated field takes its first value
     if str(fields.get("version") or "").lower() != "stsv1":
         return None
     mode = str(fields.get("mode") or "").strip().lower() or None
