@@ -54,6 +54,21 @@ def test_r099_pre_lane_rule_fault_row_still_validates(tmp_path, monkeypatch):
         validate_assessment(_current(payload))                         # a current file cites what the current rule reads
 
 
+def test_r099_output_contract_states_the_safe_links_exception_kept_to_2026_11_05():
+    # Bot review wave 2 (51): the contract must say which older Safe Links answers only a 2026-11-05 file accepts.
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "docs/reference/output-contract.md").read_text(encoding="utf-8")
+    paragraph = text[text.index("Its schema is `schemas/model_assessment.schema.json`"):]
+    paragraph = " ".join(paragraph[:paragraph.index("\n\n")].split())
+    exception = re.search(r"one exception kept to `2026-11-05`: (.+?)A `2026-11-22` file rejects both", paragraph)
+    assert exception, "the contract no longer states the Safe Links exception kept to 2026-11-05"
+    exception = exception.group(1)
+    assert "SS 7.1 to 7.3" in exception and "`no_rules_configured`" in exception
+    assert re.findall(r"`([a-z_]+)`", exception[exception.index("("):exception.index(")")]) == sorted(LEGACY_SECTIONS)
+
+
 def test_r099_retired_answers_are_rejected_in_a_current_file(tmp_path):
     from azure_tenant_audit.scuba_assessment import validate_assessment
     payload = _assessment(tmp_path, [{"Identity": "x rule", "Name": "x rule", "State": "Disabled", "Priority": 0,
