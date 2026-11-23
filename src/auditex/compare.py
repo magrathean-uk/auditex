@@ -18,7 +18,12 @@ from azure_tenant_audit.bundle_integrity import (
     normalize_digest,
 )
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
-from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.diffing import (
+    MalformedRunEvidence,
+    diff_run_directories,
+    finding_status,
+    shared_finding_drift,
+)
 from azure_tenant_audit.rule_parameters import (
     recorded_rule_parameters,
     rule_parameter_gap,
@@ -208,8 +213,22 @@ def _compare_pair(
         if problem:
             # A run whose hash manifest or recorded contract fails is not the bundle that was finalized.
             return _blocked_diff(left_run, right_run, f"run_unverified:{side}:{problem}")
-    diff = diff_run_directories(left_run["path"], right_run["path"], classic=classic)
-    diff["drift_summary"] = _reassessed_drift_summary(diff.get("drift_summary") or {}, build_finding_delta(left_run, right_run))
+    try:
+        diff = diff_run_directories(left_run["path"], right_run["path"], classic=classic)
+    except MalformedRunEvidence as exc:
+        # A regular normalised artifact that is not a JSON object cannot be compared; the pair is blocked, as an edited
+        # sealed bundle is, rather than the comparison failing.
+        side = "baseline" if os.path.realpath(exc.run_dir) == os.path.realpath(left_run["path"]) else "current"
+        return _blocked_diff(left_run, right_run, f"run_evidence_malformed:{side}")
+    for side, run in (("baseline", left_run), ("current", right_run)):
+        # A finding artifact that cannot be read holds unknown findings, not none: reading it as empty would call every
+        # baseline finding resolved (or every later one new), so the pair is blocked and says which run it was.
+        if RunBundle(Path(str(run["path"]))).unreadable_finding_source():
+            return _blocked_diff(left_run, right_run, f"run_evidence_malformed:{side}")
+    delta, shared = _finding_delta_and_drift(left_run, right_run)
+    diff["drift_summary"] = _reassessed_drift_summary({**(diff.get("drift_summary") or {}), **shared}, delta)
+    # The markdown renders this snapshot, so it gives the same answer as the JSON even if the evidence changes later.
+    diff["finding_delta"] = delta
     diff["left_run"] = _public_run(left_run)
     diff["right_run"] = _public_run(right_run)
     diff["status"] = "ok"
@@ -589,9 +608,19 @@ def run_verification(bundle: RunBundle, expected_digest: str | None = None) -> d
 def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
     """Summarise findings that are new, resolved, not reassessed, or changed between two runs.
 
+    See ``_finding_delta_and_drift``.
+    """
+    return _finding_delta_and_drift(left_run, right_run)[0]
+
+
+def _finding_delta_and_drift(left_run: dict[str, Any], right_run: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The finding delta, and the drift of the findings both runs raised, from one reading of the findings.
+
     A finding that is absent from the later run is ``resolved`` only if its collector
     completed there, its rule's inputs were known and it was judged with the same or a stricter
-    window; otherwise it is ``not_reassessed`` with a ``reason``. When either run fails
+    window; otherwise it is ``not_reassessed`` with a ``reason``. A finding only the later run has is
+    ``new`` only if the baseline could have raised it: its collector completed there, its inputs were
+    known and the baseline's window was no larger; otherwise it is ``newly_assessed``. When either run fails
     ``run_verification`` (its hash manifest or recorded contract), no finding is called resolved.
     """
     left_bundle = RunBundle(Path(str(left_run.get("path")))) if left_run.get("path") else None
@@ -635,7 +664,9 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
         # R133: a finding the baseline could not have raised (its collector or its rule's inputs were missing there)
         # is newly assessed, not a regression. A baseline that recorded no coverage at all assessed nothing, as a later
         # run without coverage reassesses nothing on the resolved side.
-        gap = reassessment_gap(right[key], left_coverage, left_sections)
+        # The later run is the reference here: a baseline that judged the rule with a larger window (or a window
+        # either run did not record) could not have raised a finding the later, stricter window did.
+        gap = reassessment_gap(right[key], left_coverage, left_sections, parameters=(parameters[1], parameters[0]))
         # A finding that names no collector gives no evidence either way about the baseline; it stays new.
         if gap is None or gap == "collector_unknown":
             new.append(_summary(right[key]))
@@ -649,10 +680,13 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
             resolved.append(_summary(left[key]))
         else:
             not_reassessed.append({**_summary(left[key]), "reason": gap})
+    # The changed findings and the drift summary's worsened, improved and status transitions are one classification
+    # of the same rows, so the JSON, MCP and markdown agree whichever artifact (report pack or legacy findings) held them.
+    shared = shared_finding_drift(left, right, severity_of=_severity)
     changed: list[dict[str, Any]] = []
     for key in sorted(set(left) & set(right)):
         before, after = left[key], right[key]
-        if _severity(before) != _severity(after) or str(before.get("status") or "") != str(after.get("status") or ""):
+        if _severity(before) != _severity(after) or finding_status(before) != finding_status(after):
             changed.append(
                 {
                     **_summary(after),
@@ -660,7 +694,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
                     "status_before": before.get("status"),
                 }
             )
-    return {
+    delta = {
         "new": new,
         "newly_assessed": newly_assessed,
         "resolved": resolved,
@@ -670,6 +704,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
         "risk_before": _risk_snapshot(left_run, left_rows),
         "risk_after": _risk_snapshot(right_run, right_rows),
     }
+    return delta, shared
 
 
 def _md(value: Any) -> str:
@@ -773,7 +808,8 @@ def render_compare_markdown(result: dict[str, Any]) -> str:
     if baseline.get("status") == "blocked":
         lines += [f"- Status: blocked ({_md(baseline.get('reason'))})", ""]
         return "\n".join(lines)
-    delta = build_finding_delta(before, after)
+    stored = baseline.get("finding_delta")
+    delta = stored if isinstance(stored, dict) else build_finding_delta(before, after)
     risk_before, risk_after = delta["risk_before"], delta["risk_after"]
     grade_before, grade_after = risk_before.get("grade") or "unknown", risk_after.get("grade") or "unknown"
     # The arrow is Auditex's own text: escape only the grades, so the terminal shows '->' and not '-&gt;'.

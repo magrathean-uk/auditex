@@ -336,6 +336,30 @@ class RunBundle:
         _, payload = self.findings()
         return _dict_rows(payload)
 
+    def unreadable_finding_source(self) -> str | None:
+        """The finding artifact ``finding_rows`` would read that is present but not JSON of its shape, else ``None``.
+
+        ``finding_rows`` reads such an artifact as holding no findings, which a comparison would take for findings
+        that were resolved; a caller that judges drift checks this first and treats the run's findings as unknown.
+        """
+        unreadable = object()
+        pack_path = self._artifact_path("report_pack_path", "reports/report-pack.json")
+        if _present(pack_path):
+            pack = _read_json(self.run_dir, pack_path, unreadable, field="report_pack_path")
+            if not isinstance(pack, Mapping) or not isinstance(pack.get("findings", []), list):
+                return _relative_to_run(self.run_dir, pack_path).as_posix()
+            if _dict_rows(pack.get("findings")):
+                return None
+        findings_path = self._artifact_path("findings_path", "findings/findings.json")
+        if _present(findings_path):
+            payload = _read_json(self.run_dir, findings_path, unreadable, field="findings_path")
+            readable = isinstance(payload, list) or (
+                isinstance(payload, Mapping) and isinstance(payload.get("findings", []), list)
+            )
+            if not readable:
+                return _relative_to_run(self.run_dir, findings_path).as_posix()
+        return None
+
     def action_plan_rows(self) -> list[dict[str, Any]]:
         _, report_pack = self.report_pack()
         rows = _action_rows(_mapping(report_pack).get("action_plan"))

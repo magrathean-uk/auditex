@@ -15,7 +15,6 @@ from azure_tenant_audit.cli import AS_OF_HELP, parse_as_of
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.cli_guard import RunArgumentRefusal, guarded_cli, parse_guarded
 from azure_tenant_audit.config import CERTIFICATE_WAY
-from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.guarded_io import guard_session, open_private_output
 from azure_tenant_audit.output_redaction import (
     PROFILE_LOCAL,
@@ -1471,12 +1470,16 @@ def main(argv: list[str] | None = None) -> int:
         context = current_context()
         context.bind_run(argv[1])
         context.bind_run(argv[2])
+        from azure_tenant_audit.diffing import admit_run_files
+
         from .compare import diff_two_runs
 
-        # The engine diff's guarded loaders refuse an unsafe run file (exit 2) before verification could turn it into
-        # a blocked pair; the printed diff then goes through compare's tenant gate, bundle verification and
-        # reassessment check (R054), and a blocked pair exits 1.
-        diff_run_directories(argv[1], argv[2])
+        # The engine diff's guarded loaders open every file it reads and refuse an unsafe one (exit 2) before a gate
+        # could block the pair unread; nothing is compared there. The printed diff then goes through compare's tenant
+        # gate, bundle verification and reassessment check (R054), comparing the pair once; a blocked pair, including
+        # one whose regular evidence is malformed, exits 1.
+        for run_dir in argv[1:3]:
+            admit_run_files(run_dir)
         result = diff_two_runs(argv[1], argv[2])
         print(json.dumps(result, indent=2))
         return 1 if result.get("status") == "blocked" else 0
