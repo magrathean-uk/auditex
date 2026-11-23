@@ -9,7 +9,8 @@ import json
 import os
 import re
 from collections.abc import Iterable, Mapping
-from datetime import UTC
+from dataclasses import replace
+from datetime import UTC, date
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,7 @@ from azure_tenant_audit.output_redaction import (
     RedactionContext,
     assert_snapshot_stable,
     context_for_run,
+    google_customer_id,
     read_normalized_sections,
     redact_output,
     run_path_roots,
@@ -65,6 +67,7 @@ from azure_tenant_audit.run_files import (
     hash_run_file,
     read_run_file,
 )
+from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 from azure_tenant_audit.waivers import (
     accepted_risk_summary,
     has_expired_waiver,
@@ -3736,8 +3739,47 @@ def _export_disposition(finding: Mapping[str, Any]) -> str:
     return claimed
 
 
-def _waiver_justification(finding: Mapping[str, Any]) -> str:
+def _disposition_at(finding: Mapping[str, Any], position: int, dispositions: list[str] | None) -> str:
+    """The disposition worked out before redaction (``dispositions``, aligned with the findings) or, without one,
+    from the row itself. Masking can make two ids equal, so a shareable export never matches waivers on its own
+    redacted rows."""
+    if dispositions is not None and position < len(dispositions):
+        return dispositions[position]
+    return _export_disposition(finding)
+
+
+def export_tenant_scope(manifest: Mapping[str, Any]) -> str | None:
+    """Review R066: the tenant a shareable export's dedup ids are scoped to, or ``None`` when the run names none.
+
+    Microsoft 365: the Entra tenant UUID. Google Workspace: a value shaped like a customer id (``C03az79cb``), never
+    the ``my_customer`` alias (it means "the signed-in customer", so every tenant has it), a domain, the default tenant
+    label or a placeholder such as ``unknown``, which every tenant could carry. ``None`` makes the caller scope the
+    ids to the run instead."""
+    platform = _text(manifest.get("platform")).strip().lower() or "m365"
+    if platform == "m365":
+        return canonical_tenant_uuid(manifest.get("tenant_id"))
+    for value in (manifest.get("customer_id"), manifest.get("tenant_id")):
+        customer = google_customer_id(value)
+        if customer is not None:
+            return customer
+    return None
+
+
+_WITHHELD_WAIVER_REASON = "the waiver reason is withheld from shareable output"
+
+
+def _waiver_justification(finding: Mapping[str, Any], *, withhold_reason: bool = False) -> str:
+    """Why an accepted finding is accepted. A shareable export withholds the operator's free-text reason (it can name
+    a customer id or person in any spelling, which pattern matching cannot be trusted to find) and keeps only the
+    structured facts: that a waiver applies and the date it expires."""
     waiver = finding.get("waiver") if isinstance(finding.get("waiver"), Mapping) else {}
+    if withhold_reason:
+        expires = _text(waiver.get("expires_on")).strip()
+        try:
+            expiry = f", expires {date.fromisoformat(expires).isoformat()}" if expires else ""
+        except ValueError:
+            expiry = ""
+        return f"Accepted risk under a waiver{expiry}; {_WITHHELD_WAIVER_REASON}"
     reason = _text(waiver.get("reason") or waiver.get("comment")).strip()
     return reason or f"Accepted risk (status {_text(finding.get('status'))})"
 
@@ -3748,9 +3790,12 @@ def render_sarif(
     summary: Mapping[str, Any] | None,
     manifest: Mapping[str, Any] | None,
     stable_keys: list[dict[str, Any]] | None = None,
+    dispositions: list[str] | None = None,
+    withhold_waiver_reason: bool = False,
 ) -> dict[str, Any]:
     """SARIF 2.1.0 for the findings of a run. ``stable_keys`` (``stable_export_keys``, aligned with ``findings``)
-    replace the fingerprints a shareable export would otherwise take from pseudonymised ids."""
+    replace the fingerprints a shareable export would otherwise take from pseudonymised ids; ``dispositions``
+    (aligned too) are the waiver outcomes worked out on the unredacted rows."""
     findings_rows = [dict(item) for item in (findings or []) if isinstance(item, Mapping)]
     summary_dict = _mapping(summary)
     manifest_dict = _mapping(manifest)
@@ -3802,7 +3847,7 @@ def render_sarif(
         rule_id = _text(finding.get("rule_id") or finding.get("id"))
         if not rule_id:
             continue
-        disposition = _export_disposition(finding)
+        disposition = _disposition_at(finding, position, dispositions)
         if disposition == "closed":
             continue
         stable = stable_keys[position] if stable_keys is not None and position < len(stable_keys) else None
@@ -3851,7 +3896,11 @@ def render_sarif(
             result_entry["partialFingerprints"] = partial_fingerprints
         if disposition == "accepted":
             result_entry["suppressions"] = [
-                {"kind": "external", "status": "accepted", "justification": _waiver_justification(finding)}
+                {
+                    "kind": "external",
+                    "status": "accepted",
+                    "justification": _waiver_justification(finding, withhold_reason=withhold_waiver_reason),
+                }
             ]
         confidence = _text(finding.get("confidence"))
         if confidence:
@@ -3960,11 +4009,14 @@ def render_oscal(
     summary: Mapping[str, Any] | None,
     manifest: Mapping[str, Any] | None,
     stable_keys: list[dict[str, Any]] | None = None,
+    dispositions: list[str] | None = None,
+    withhold_waiver_reason: bool = False,
 ) -> dict[str, Any]:
     """OSCAL Assessment Results 1.1.2 for the findings of a run.
 
     ``stable_keys`` (``stable_export_keys``, aligned with ``findings``) name the observation, finding and subject
-    UUIDs of a shareable export, whose ids are pseudonymised per run. An accepted risk keeps the documented
+    UUIDs of a shareable export, whose ids are pseudonymised per run; ``dispositions`` (aligned too) are the waiver
+    outcomes worked out on the unredacted rows. An accepted risk keeps the documented
     not-satisfied target (the control is still not met) with an ``auditex.status`` property and a remark.
 
     The collection time is the run manifest's ``created_utc`` (an observation takes the earliest
@@ -3998,6 +4050,7 @@ def render_oscal(
     findings_oscal: list[dict[str, Any]] = []
     for position, finding in enumerate(findings_rows):
         finding_key = _text(finding.get("id")) or _text(finding.get("rule_id"))
+        disposition = _disposition_at(finding, position, dispositions)
         stable = stable_keys[position] if stable_keys is not None and position < len(stable_keys) else None
         uuid_name = f"stable/{stable['finding']}" if stable else _text(finding.get("id"))
         observation_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/observation/{uuid_name}"))
@@ -4065,7 +4118,7 @@ def render_oscal(
                     ("auditex.finding_id", _text(finding.get("id"))),
                     ("auditex.severity", _text(finding.get("severity"))),
                     ("auditex.rule_id", _text(finding.get("rule_id"))),
-                    ("auditex.status", _export_disposition(finding)),
+                    ("auditex.status", disposition),
                 ),
                 *control_props,
             ],
@@ -4082,9 +4135,10 @@ def render_oscal(
         remediation = _text(finding.get("remediation")).strip()
         if remediation:
             finding_entry["remarks"] = remediation
-        if _export_disposition(finding) == "accepted":
+        if disposition == "accepted":
             finding_entry["target"]["status"]["remarks"] = (
-                f"Accepted risk: {_waiver_justification(finding)}. The control stays not satisfied."
+                f"Accepted risk: {_waiver_justification(finding, withhold_reason=withhold_waiver_reason)}. "
+                "The control stays not satisfied."
             )
         findings_oscal.append(finding_entry)
 
@@ -4129,18 +4183,34 @@ def render_oscal(
     }
 
 
-def _render_sarif(selected_sections: dict[str, Any], stable_keys: list[dict[str, Any]] | None = None) -> str:
+def _render_sarif(
+    selected_sections: dict[str, Any],
+    stable_keys: list[dict[str, Any]] | None = None,
+    dispositions: list[str] | None = None,
+    withhold_waiver_reason: bool = False,
+) -> str:
     findings = _dict_rows(selected_sections.get("findings"))
     summary = _mapping(selected_sections.get("summary"))
     manifest = _mapping(selected_sections.get("manifest"))
-    return _json(render_sarif(findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys))
+    return _json(render_sarif(
+        findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys, dispositions=dispositions,
+        withhold_waiver_reason=withhold_waiver_reason,
+    ))
 
 
-def _render_oscal(selected_sections: dict[str, Any], stable_keys: list[dict[str, Any]] | None = None) -> str:
+def _render_oscal(
+    selected_sections: dict[str, Any],
+    stable_keys: list[dict[str, Any]] | None = None,
+    dispositions: list[str] | None = None,
+    withhold_waiver_reason: bool = False,
+) -> str:
     findings = _dict_rows(selected_sections.get("findings"))
     summary = _mapping(selected_sections.get("summary"))
     manifest = _mapping(selected_sections.get("manifest"))
-    return _json(render_oscal(findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys))
+    return _json(render_oscal(
+        findings=findings, summary=summary, manifest=manifest, stable_keys=stable_keys, dispositions=dispositions,
+        withhold_waiver_reason=withhold_waiver_reason,
+    ))
 
 
 _STRUCTURED_FORMATS = frozenset({"json", "sarif", "oscal"})
@@ -4253,19 +4323,35 @@ def preview_report(
     # rules such as privileged-user names apply in every format) and the rendered text is passed through the
     # same function again (idempotent) as the last step. Citations above were built from the real paths.
     redaction = context_for_run(run_path)
+    # The run's Google customer id is masked wherever it appears, also in free text of an export
+    # that leaves the manifest section out.
+    manifest = RunBundle(run_path).manifest()
+    customer_ids = {
+        value for value in (google_customer_id(manifest.get(key)) for key in ("customer_id", "tenant_id")) if value
+    }
+    if customer_ids:
+        redaction = replace(redaction, protected_ids=redaction.protected_ids | customer_ids)
     render = renderers[format_name]
     if format_name in {"sarif", "oscal"}:
-        # Review R066: with the operator's private key, dedup keys come from the unredacted findings, before
-        # redaction, so they are the same in every run of the tenant and reveal nothing to a recipient.
+        # Review R066: dedup keys and waiver dispositions come from the unredacted findings, before redaction
+        # (masking can make two ids, and so a waiver and the wrong finding, equal). With the operator's private key
+        # the keys are scoped to the tenant, so they are the same in every run of it and reveal nothing to a
+        # recipient. Without the key, or when the run names no tenant (a Google run with no customer id or the
+        # my_customer alias), they are scoped to the run under a secret derived from the run's own pseudonym key:
+        # private and never shared with another run.
+        rows = _dict_rows(selected.get("findings"))
+        run_secret = hmac.new(redaction.key, b"auditex|export-ids", hashlib.sha256).digest()
         secret = export_fingerprint_key()
-        if secret is not None:
-            manifest = RunBundle(run_path).manifest()
-            tenant_id = _text(
-                manifest.get("tenant_id") or manifest.get("customer_id") or manifest.get("tenant_name")
-                or _mapping(selected.get("summary")).get("tenant_name")
-            ).strip()
-            stable_keys = stable_export_keys(_dict_rows(selected.get("findings")), tenant_id, secret)
-            render = functools.partial(renderers[format_name], stable_keys=stable_keys)
+        tenant_scope = export_tenant_scope(manifest) if secret is not None else None
+        if secret is None or tenant_scope is None:
+            tenant_scope = f"run/{hmac.new(run_secret, b'scope', hashlib.sha256).hexdigest()}"
+        stable_keys = stable_export_keys(rows, tenant_scope, secret if secret is not None else run_secret)
+        render = functools.partial(
+            renderers[format_name],
+            stable_keys=stable_keys,
+            dispositions=[_export_disposition(row) for row in rows],
+            withhold_waiver_reason=True,
+        )
     # Masking can make two citations equal: every nested citation list, count and summary is re-derived after
     # redaction, before any format renders the sections.
     safe_sections = _settle_citations(redact_output(selected, profile=profile, context=redaction))

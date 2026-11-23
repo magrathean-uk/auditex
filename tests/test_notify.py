@@ -254,3 +254,59 @@ def test_send_notification_webhook_error_reply_keeps_only_a_short_code(tmp_path:
     assert "SECRETPART" not in json.dumps(first) and first["response_text"] == "HTTP 403"
     second = send_notification(run_dir=str(run_dir), sink="slack", dry_run=False)
     assert second["response_text"] == "invalid_token"
+
+
+# Dedup search replies (bot review, PR 168) ----------------------------------------------------------------------------
+
+class _SearchReply:
+    def __init__(self, body: object) -> None:
+        self.status_code = 200
+        self._body = body
+
+    def json(self) -> object:
+        return self._body
+
+
+def _search_with(monkeypatch, body: object) -> None:
+    import auditex.notify as notify
+
+    monkeypatch.setattr(notify.requests, "get", lambda *args, **kwargs: _SearchReply(body))
+
+
+def test_jira_dedup_search_reports_a_malformed_first_hit_as_failed(monkeypatch) -> None:
+    """A 200 reply whose first hit is not a usable issue is not a clean miss: dedup must show as skipped."""
+    from auditex.notify import _SEARCH_FAILED, _jira_search_existing
+
+    for issues in ([None], [{}], [{"key": ""}], [{"key": 7}], [{"key": "not a key"}], [{"key": "SEC-0"}], [{"key": "SEC"}]):
+        _search_with(monkeypatch, {"issues": issues})
+        assert _jira_search_existing("https://jira.example", "SEC", "label", ("u", "t")) == (None, _SEARCH_FAILED)
+
+
+def test_jira_dedup_search_keeps_an_empty_result_and_a_real_hit(monkeypatch) -> None:
+    from auditex.notify import _jira_search_existing
+
+    for body in ({"issues": []}, {}):
+        _search_with(monkeypatch, body)
+        assert _jira_search_existing("https://jira.example", "SEC", "label", ("u", "t")) == (None, None)
+    _search_with(monkeypatch, {"issues": [{"key": "SEC-12"}]})
+    assert _jira_search_existing("https://jira.example", "SEC", "label", ("u", "t")) == ("SEC-12", None)
+
+
+def test_github_dedup_search_reports_a_malformed_first_hit_as_failed(monkeypatch) -> None:
+    from auditex.notify import _SEARCH_FAILED, _github_search_existing_issue
+
+    for items in ([None], ["x"], [{}], [{"number": 0}], [{"number": -1}], [{"number": True}]):
+        _search_with(monkeypatch, {"items": items})
+        assert _github_search_existing_issue("https://api.github.example", "o/r", "fp", "t") == (None, None, _SEARCH_FAILED)
+
+
+def test_github_dedup_search_keeps_an_empty_result_and_a_real_hit(monkeypatch) -> None:
+    from auditex.notify import _github_search_existing_issue
+
+    for body in ({"items": []}, {}):
+        _search_with(monkeypatch, body)
+        assert _github_search_existing_issue("https://api.github.example", "o/r", "fp", "t") == (None, None, None)
+    _search_with(monkeypatch, {"items": [{"number": 4, "html_url": "https://github.example/o/r/issues/4"}]})
+    assert _github_search_existing_issue("https://api.github.example", "o/r", "fp", "t") == (
+        4, "https://github.example/o/r/issues/4", None
+    )

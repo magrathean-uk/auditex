@@ -165,9 +165,17 @@ def _jira_search_existing(
         issues = []
     if not isinstance(issues, list):
         return None, _SEARCH_FAILED
-    first = issues[0] if issues else None
-    key = first.get("key") if isinstance(first, dict) else None
-    return (str(key) if key else None), None
+    if not issues:
+        return None, None
+    # A hit that is not an issue with a usable key is a malformed reply, not a miss: dedup is reported as skipped.
+    key = issues[0].get("key") if isinstance(issues[0], dict) else None
+    if not isinstance(key, str) or not _JIRA_ISSUE_KEY_RE.fullmatch(key):
+        return None, _SEARCH_FAILED
+    return key, None
+
+
+# A Jira issue key: the project key (a letter, then letters, digits or underscores) and a positive issue number.
+_JIRA_ISSUE_KEY_RE = re.compile(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*")
 
 
 def _dedup_fields(failure: int | str | None) -> dict[str, Any]:
@@ -574,12 +582,14 @@ def _github_search_existing_issue(
         items = []
     if not isinstance(items, list):
         return None, None, _SEARCH_FAILED
-    first = items[0] if items else None
-    if not isinstance(first, dict):
+    if not items:
         return None, None, None
+    first = items[0]
+    if not isinstance(first, dict):
+        return None, None, _SEARCH_FAILED
     number = first.get("number")
     html_url = first.get("html_url")
-    if not isinstance(number, int) or isinstance(number, bool):
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
         return None, None, _SEARCH_FAILED
     return number, (str(html_url) if html_url else None), None
 
