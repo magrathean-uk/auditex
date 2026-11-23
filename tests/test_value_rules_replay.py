@@ -87,10 +87,36 @@ REVIEW_R027_POLICIES = frozenset({"MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1"
                                   "MS.AAD.3.6v1", "MS.AAD.3.7v1", "MS.AAD.3.8v1", "MS.AAD.3.9v1"})
 REVIEW_BI_ROW = {"ExceptIfRecipientDomainIs": None, "ExceptIfSentTo": None, "ExceptIfSentToMemberOf": None,
                  "Identity": "ATP Built-In Protection Rule", "RecipientDomainIs": None, "SentTo": None, "SentToMemberOf": None}
-REVIEW_R099_CELLS = frozenset({"policy_flags_ok", "policy_flag_off", "policy_flag_unusable", "policy_not_in_export",
-                               "policy_duplicated"})
 REVIEW_D24 = ("expected: D24 Safe Links resolution cannot be established from the export (domain-scoped or excepted "
               "rule, tie, unexported or duplicated policy, null flag)")
+REVIEW_SS7 = ("MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1")
+# The kit vectors whose labels the review rulings moved, as independently reviewed fixed overrides: (class, policies,
+# vector name, the kit's cell, the reviewed cell). The new answer comes from this table and the spec's cell catalogue,
+# never from the engine under test, so a product change on any of these vectors fails the replay.
+_REVIEW_RELABELS = (
+    ("R027", sorted(REVIEW_R027_POLICIES), "two_partial_no_role_excl", "union_possible", "no_policy_meets"),
+    ("R100", REVIEW_SS7, "v37_partial_bad_policy_not_exported", "policy_flags_ok", "policy_not_in_export"),
+    ("R100", REVIEW_SS7, "v37_partial_bad_policy_name_absent", "policy_flags_ok", "policy_not_in_export"),
+    ("R100", REVIEW_SS7, "v37_partial_bad_policy_duplicated", "policy_flags_ok", "policy_duplicated"),
+    ("R100", REVIEW_SS7, "v37_partial_flag_null_policy", "policy_flags_ok", "policy_flag_unusable"),
+    ("R099", REVIEW_SS7, "nopreset_builtin_duplicated", "no_rules_configured", "policy_duplicated"),
+    ("R099", REVIEW_SS7, "nopreset_builtin_flag_absent", "no_rules_configured", "policy_flag_unusable"),
+    ("R099", REVIEW_SS7, "nopreset_builtin_flag_null", "no_rules_configured", "policy_flag_unusable"),
+    ("R099", REVIEW_SS7, "nopreset_builtin_flag_string", "no_rules_configured", "policy_flag_unusable"),
+    ("R099", REVIEW_SS7, "nopreset_builtin_missing_from_export", "no_rules_configured", "policy_not_in_export"),
+    ("R099", REVIEW_SS7, "nopreset_policies_empty", "no_rules_configured", "policy_not_in_export"),
+    ("R099", REVIEW_SS7, "nopreset_builtin_off", "no_rules_configured", "policy_flag_off"),
+    ("R099", REVIEW_SS7[:2], "nopreset_builtin_one_off_one_null", "no_rules_configured", "policy_flag_off"),
+    ("R099", REVIEW_SS7[2:], "nopreset_builtin_one_off_one_null", "no_rules_configured", "policy_flag_unusable"),
+    ("R099", REVIEW_SS7, "v37_eop_empty_atp_ok_builtin_off", "no_rules_configured", "policy_flag_off"),
+    ("R099", REVIEW_SS7, "nopreset_builtin_ok", "no_rules_configured", "policy_flags_ok"),
+    ("R099", REVIEW_SS7, "nopreset_builtin_ok_junk_policy_elements", "no_rules_configured", "policy_flags_ok"),
+    ("R099", REVIEW_SS7, "rules_both_empty_with_accepted_domains", "no_rules_configured", "policy_flags_ok"),
+    ("R099", REVIEW_SS7, "v37_eop_empty_atp_ok_builtin_ok", "no_rules_configured", "policy_flags_ok"),
+    ("R099", REVIEW_SS7, "v37_licence_true_rules_empty_all", "no_rules_configured", "policy_flags_ok"),
+)
+REVIEW_RELABELS = {f"constructed:{policy}:{name}": (label, was, now)
+                   for label, policies, name, was, now in _REVIEW_RELABELS for policy in policies}
 
 
 def review_relabel(vector: dict) -> tuple[dict, str | None, int]:
@@ -99,12 +125,14 @@ def review_relabel(vector: dict) -> tuple[dict, str | None, int]:
 
     R003: SS 7.x rows read built_in_protection_rules; a row without it gains a Built-In rule that excludes no one (what
     every v3.9.1 vector assumed), and its pack gold, which predates the section, is not compared (as licensed twins).
-    R099: a no_rules_configured label follows the Built-In policy. R100: a met label where a partly scoped rule with an
-    unreadable policy applies first is not assessed. R027: union_possible where every policy excludes the same role is
-    no_policy_meets. Any other difference is left for the caller's own assertion to name."""
+    R099 (a no_rules_configured label follows the Built-In policy), R100 (a met label where a partly scoped rule with an
+    unreadable policy applies first is not assessed) and R027 (union_possible where every policy excludes the same role
+    is no_policy_meets) move exactly the vectors in ``REVIEW_RELABELS``, each only from its original kit label (a row
+    that already carries the reviewed label, as the shipped sample does, is left as it is; any other label is an
+    error). Every other vector keeps the kit's label, so any product difference fails the caller's own assertion."""
     policy = vector["policy"]
-    if policy not in REVIEW_BI_POLICIES and not (policy in REVIEW_R027_POLICIES
-                                                 and vector.get("rule_cell") == "union_possible"):
+    override = REVIEW_RELABELS.get(vector["vector_id"])
+    if policy not in REVIEW_BI_POLICIES and override is None:
         return vector, None, 0
     v, label = deepcopy(vector), None
     if policy in REVIEW_BI_POLICIES and "built_in_protection_rules" not in v["sections"]:
@@ -112,27 +140,24 @@ def review_relabel(vector: dict) -> tuple[dict, str | None, int]:
         v.pop("pack_response_matches", None)
         v["flags"] = sorted({*v.get("flags", []), "built_in_section_added"})
         label = "R003"
-    record = assess(policy, v["sections"])
-    if record["cell"] == v["rule_cell"]:
+    if override is None:
         return v, label, 0
-    if policy in REVIEW_BI_POLICIES and v["rule_cell"] == "no_rules_configured" and record["cell"] in REVIEW_R099_CELLS:
-        label = "R099"
-    elif (policy in REVIEW_BI_POLICIES and v["rule_cell"] == "policy_flags_ok" and record["verdict"] == "not_assessed"
-          and record["detail"].get("partial_scope")):
-        label = "R100"
-    elif policy in REVIEW_R027_POLICIES and v["rule_cell"] == "union_possible" and record["cell"] == "no_policy_meets":
-        label = "R027"
-    else:
-        return v, label, 0
+    label, was_cell, now_cell = override
+    if v["rule_cell"] == now_cell:
+        return v, None, 0
+    if v["rule_cell"] != was_cell:
+        raise ValueError(f"review relabel precondition mismatch for {v['vector_id']}: {v['rule_cell']}")
+    cell = row_for(policy)["cells"][now_cell]
+    assert len(cell["reason_texts"]) == 1, v["vector_id"]
     was = v["rule_verdict"] == v.get("gold_verdict")
-    v.update(rule_verdict=record["verdict"], rule_cell=record["cell"], rule_reason_code=record["reason_code"],
-             rule_reason_text=record["reason_text"], rule_cited_sections=record["cited_sections"])
-    now = record["verdict"] == v.get("gold_verdict")
+    v.update(rule_verdict=cell["verdict"], rule_cell=now_cell, rule_reason_code=cell["reason_code"],
+             rule_reason_text=cell["reason_texts"][0], rule_cited_sections=list(cell["cited"]))
+    now = cell["verdict"] == v.get("gold_verdict")
     if now:
         v["disagreement"] = None
         v.pop("divergence_id", None)
     else:
-        assert record["verdict"] == "not_assessed", v["vector_id"]
+        assert cell["verdict"] == "not_assessed", v["vector_id"]
         v["disagreement"], v["divergence_id"] = REVIEW_D24, "D24"
     return v, label, int(now) - int(was)
 
@@ -433,3 +458,56 @@ def test_full_v391_replay_acceptance():
     assert tally["d4_dkim_empty_equals_gold"] == 1
     assert tally["a2_override_applied"] == 190
     print("replay tally", json.dumps(dict(sorted(tally.items())), sort_keys=True))
+
+
+# ---- Wave 2 bot review (items 49, 64): the relabel never copies the engine's answer ----
+
+def _kit_label(vector_id, policy, cell, sections):
+    spec = row_for(policy)["cells"][cell]
+    return {"vector_id": vector_id, "policy": policy, "sections": sections, "rule_verdict": spec["verdict"],
+            "rule_cell": cell, "rule_reason_code": spec["reason_code"], "rule_reason_text": spec["reason_texts"][0],
+            "rule_cited_sections": list(spec["cited"]), "gold_verdict": spec["verdict"], "disagreement": None,
+            "origin": "constructed", "source_kind": "constructed"}
+
+
+def test_review_relabel_does_not_follow_a_wrong_shared_role_gap(monkeypatch):
+    """A union_possible vector with different role exclusions keeps its kit label when the engine wrongly finds a
+    shared-role gap, so the replay fails instead of accepting the engine's no_policy_meets."""
+    from test_value_rules_aad_review import MFA, ca, ca_sections
+
+    import azure_tenant_audit.value_rules.conditional_access as ca_rules
+    sections = ca_sections(ca(MFA, users={"ExcludeRoles": ["synthetic-role-a"]}),
+                           ca(MFA, users={"ExcludeRoles": ["synthetic-role-b"]}))
+    vector = _kit_label("constructed:MS.AAD.3.2v2:synthetic_different_roles", "MS.AAD.3.2v2", "union_possible", sections)
+    replay_one(review_relabel(vector)[0], None, Counter(), set())
+    monkeypatch.setattr(ca_rules, "_shared_gap", lambda *args: "role")
+    relabelled, label, delta = review_relabel(vector)
+    assert (relabelled["rule_cell"], label, delta) == ("union_possible", None, 0)
+    with pytest.raises(AssertionError):
+        replay_one(relabelled, None, Counter(), set())
+
+
+def test_review_relabel_takes_the_reviewed_cell_not_the_engine_cell(monkeypatch):
+    """A listed R100 vector moves to its reviewed cell (policy_duplicated) even when the engine answers another
+    not-assessed cell with the same verdict (policy_not_in_export), so that engine fault fails the replay."""
+    policy = "MS.SECURITYSUITE.7.1v1"
+    vector = _kit_label(f"constructed:{policy}:v37_partial_bad_policy_duplicated", policy, "policy_flags_ok",
+                        {"built_in_protection_rules": [dict(REVIEW_BI_ROW)]})
+    wrong = {**assess(policy, {}), "verdict": "not_assessed", "cell": "policy_not_in_export", "detail": {"partial_scope": True}}
+    monkeypatch.setitem(globals(), "assess", lambda *args: wrong)
+    relabelled, label, _ = review_relabel(vector)
+    spec = row_for(policy)["cells"]["policy_duplicated"]
+    assert label == "R100"
+    assert (relabelled["rule_verdict"], relabelled["rule_cell"], relabelled["rule_reason_code"], relabelled["rule_reason_text"],
+            relabelled["rule_cited_sections"]) == (spec["verdict"], "policy_duplicated", spec["reason_code"],
+                                                   spec["reason_texts"][0], spec["cited"])
+
+
+def test_review_relabel_checks_the_original_label():
+    policy = "MS.SECURITYSUITE.7.1v1"
+    vid = f"constructed:{policy}:v37_partial_bad_policy_duplicated"
+    sections = {"built_in_protection_rules": [dict(REVIEW_BI_ROW)]}
+    already = _kit_label(vid, policy, "policy_duplicated", sections)
+    assert review_relabel(already) == (already, None, 0)
+    with pytest.raises(ValueError, match="review relabel precondition mismatch"):
+        review_relabel(_kit_label(vid, policy, "policy_flag_off", sections))
