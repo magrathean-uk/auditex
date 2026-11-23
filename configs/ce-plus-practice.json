@@ -420,38 +420,21 @@
       "conflict_ids": []
     },
     {
-      "id": "ce.act.uac.resolve_mfa_policy_m365",
-      "title": "Require MFA for every user in Conditional Access",
-      "proof_to_gather": "Change Conditional Access or security defaults so every user signing in to Microsoft 365 must use MFA, with exclusions limited to the named emergency access accounts.",
+      "id": "ce.act.uac.resolve_mfa_gap_m365",
+      "title": "Require MFA for every user and administrator in Conditional Access",
+      "proof_to_gather": "Change Conditional Access or security defaults so every user and every administrator role must use MFA, with exclusions limited to the named emergency access accounts, then re-run the audit.",
       "kind": "resolve_gap",
       "effort": "quick",
       "platforms": [
         "m365"
       ],
       "requirement_ids": [
-        "ce.uac.mfa_cloud_services"
-      ],
-      "trigger": "rule_gap",
-      "rule_ids": [
-        "ca.mfa_not_enforced"
-      ],
-      "states": [],
-      "conflict_ids": []
-    },
-    {
-      "id": "ce.act.uac.resolve_admin_mfa_policy_m365",
-      "title": "Require MFA for every administrator role",
-      "proof_to_gather": "Change Conditional Access so every administrator role must use MFA, and remove any administrator left outside the policy.",
-      "kind": "resolve_gap",
-      "effort": "quick",
-      "platforms": [
-        "m365"
-      ],
-      "requirement_ids": [
+        "ce.uac.mfa_cloud_services",
         "ce.uac.mfa_admin_accounts"
       ],
       "trigger": "rule_gap",
       "rule_ids": [
+        "ca.mfa_not_enforced",
         "ca.admin_mfa_not_enforced",
         "attack_path.no_mfa_to_tier0"
       ],
