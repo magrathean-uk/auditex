@@ -104,7 +104,7 @@ def test_an_offline_google_run_with_a_waiver_writes_no_absolute_local_path(opera
     run_dir = out / "G-offline"
     _assert_clean(run_dir, operator_root)
     manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["waiver_path"] == "waivers.json"
+    assert manifest["waiver_path"] == "<local-path>/waivers.json"
 
 
 @pytest.mark.parametrize("auth", ["oauth", "domain-delegation"])

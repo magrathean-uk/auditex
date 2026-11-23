@@ -215,10 +215,10 @@ def _oauth_client_flow(flow_class: Any, client_file: Path, scopes: tuple[str, ..
 
     The library opens the file itself, and its ``OSError`` names the full path, which would reach the probe bundle.
     """
-    if not client_file.exists():
-        raise ValueError("oauth_client_missing: the configured OAuth client file was not found.")
     try:
         return flow_class.from_client_secrets_file(str(client_file), list(scopes))
+    except FileNotFoundError:
+        raise ValueError("oauth_client_missing: the configured OAuth client file was not found.") from None
     except OSError as exc:
         raise ValueError(
             "oauth_client_unreadable: the configured OAuth client file could not be read "

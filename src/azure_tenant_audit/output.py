@@ -961,9 +961,11 @@ class AuditWriter:
             value = metadata.get(key)
             if value is not None:
                 self._manifest[key] = value
-        if self._manifest.get("waiver_path"):
-            # The waiver file sits elsewhere on the operator's machine: the bundle keeps only its name.
-            self._manifest["waiver_path"] = Path(str(self._manifest["waiver_path"])).name
+        waiver_path = self._manifest.get("waiver_path")
+        if waiver_path and Path(str(waiver_path)).is_absolute():
+            # An absolute waiver path names the operator's machine: the bundle keeps only the file name, labelled as
+            # the customer pack and the Google command line label it. A relative path is kept as given.
+            self._manifest["waiver_path"] = f"<local-path>/{Path(str(waiver_path)).name}"
         # The run folder's name, never where it sits: no file in the bundle holds an absolute local path.
         self._manifest["run_dir"] = self.run_dir.name
         self._manifest["audit_log_path"] = "audit-log.jsonl"
