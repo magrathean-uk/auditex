@@ -1,0 +1,1480 @@
+{
+  "_documentation": "Auditex CE+ practice run action catalogue. For each Cyber Essentials requirement it lists the proof actions a practice run can name, the conflicts it checks between policy and state rules, and the five CE+ assessor tests. Ranking weights are Auditex product defaults, not scheme rules. Contains public sector information from the NCSC Cyber Essentials: Requirements for IT Infrastructure v3.3, licensed under the Open Government Licence v3.0 (https://www.ncsc.gov.uk/sites/default/files/documents/cyber-essentials-requirements-for-it-infrastructure-v3-3.pdf). The wording is Auditex's own and copies no self-assessment question text.",
+  "catalogue_version": "2026-11-23.1",
+  "requirements_version": "v3.3",
+  "test_specification_version": "v3.2",
+  "verified_on": "2026-11-22",
+  "stale_after_days": 14,
+  "conflict_weight": 1,
+  "source": {
+    "document_title": "Cyber Essentials: Requirements for IT Infrastructure v3.3",
+    "document_url": "https://www.ncsc.gov.uk/sites/default/files/documents/cyber-essentials-requirements-for-it-infrastructure-v3-3.pdf",
+    "licence": "Open Government Licence v3.0"
+  },
+  "effort_bands": [
+    {
+      "id": "quick",
+      "weight": 1
+    },
+    {
+      "id": "moderate",
+      "weight": 2
+    },
+    {
+      "id": "extended",
+      "weight": 4
+    }
+  ],
+  "state_weights": [
+    {
+      "state": "gap_observed",
+      "weight": 3
+    },
+    {
+      "state": "evidence_unknown",
+      "weight": 2
+    },
+    {
+      "state": "gap_accepted",
+      "weight": 1
+    },
+    {
+      "state": "supporting_only",
+      "weight": 1
+    },
+    {
+      "state": "evidence_observed_partial",
+      "weight": 1
+    },
+    {
+      "state": "outside_tenant_evidence",
+      "weight": 1
+    }
+  ],
+  "requirement_notes": [
+    {
+      "requirement_id": "ce.fw.device_firewall",
+      "evidence_limits": "Device and boundary firewalls sit outside the cloud tenant, so tenant data shows nothing here."
+    },
+    {
+      "requirement_id": "ce.fw.admin_interface",
+      "evidence_limits": "Firewall admin interfaces and their passwords are outside the cloud tenant."
+    },
+    {
+      "requirement_id": "ce.fw.inbound_rules",
+      "evidence_limits": "Inbound firewall rules and their approval records are outside the cloud tenant."
+    },
+    {
+      "requirement_id": "ce.fw.internet_exposure",
+      "evidence_limits": "The assessor checks internet exposure with a remote scan; tenant data is not an exposure scan."
+    },
+    {
+      "requirement_id": "ce.fw.saas_provider",
+      "evidence_limits": "For the cloud service the provider runs the firewall; the proof is your contract or the provider's assurance statement."
+    },
+    {
+      "requirement_id": "ce.sc.unnecessary_accounts",
+      "evidence_limits": "Covers accounts in the audited tenant only, judged against Auditex inactivity thresholds rather than your own policy. Accounts on devices and other services need other proof."
+    },
+    {
+      "requirement_id": "ce.sc.default_passwords",
+      "evidence_limits": "Default passwords on devices, software and services are not visible in tenant data."
+    },
+    {
+      "requirement_id": "ce.sc.unnecessary_software",
+      "evidence_limits": "Installed software and network services on devices are not visible in tenant data."
+    },
+    {
+      "requirement_id": "ce.sc.autorun_disabled",
+      "evidence_limits": "Auto-run settings on devices are not read by this audit."
+    },
+    {
+      "requirement_id": "ce.sc.user_authentication",
+      "evidence_limits": "Public sharing settings are clues only; they do not show how users authenticate to every service."
+    },
+    {
+      "requirement_id": "ce.sc.device_unlocking",
+      "evidence_limits": "Device lock settings are not read by this audit."
+    },
+    {
+      "requirement_id": "ce.sc.saas_configuration",
+      "evidence_limits": "Covers a few settings of the audited tenant only; every other cloud service needs its own proof."
+    },
+    {
+      "requirement_id": "ce.sum.supported_software",
+      "evidence_limits": "Covers the operating system of managed devices only. Applications, firmware, servers and unmanaged devices need other proof."
+    },
+    {
+      "requirement_id": "ce.sum.automatic_updates",
+      "evidence_limits": "Covers update ring assignment for managed Windows devices only; other software and devices need other proof."
+    },
+    {
+      "requirement_id": "ce.sum.vulnerability_fixes_14_days",
+      "evidence_limits": "Update policy and device state are clues, not proof of when a fix was installed; the assessor checks this by scanning sample devices."
+    },
+    {
+      "requirement_id": "ce.sum.saas_provider",
+      "evidence_limits": "For the cloud service the provider installs updates; the proof is your contract or the provider's assurance statement."
+    },
+    {
+      "requirement_id": "ce.uac.account_approval",
+      "evidence_limits": "Account approval is a process record, not a tenant setting."
+    },
+    {
+      "requirement_id": "ce.uac.unique_credentials",
+      "evidence_limits": "Whether each person has their own sign-in is not settled by tenant data."
+    },
+    {
+      "requirement_id": "ce.uac.remove_unused_accounts",
+      "evidence_limits": "Covers accounts in the audited tenant only, judged against Auditex inactivity thresholds; other systems need other proof."
+    },
+    {
+      "requirement_id": "ce.uac.mfa_cloud_services",
+      "evidence_limits": "Covers the audited tenant only. Policy, registration and enrolment are different facts, and per-user legacy MFA is not read. Every other cloud service needs its own proof."
+    },
+    {
+      "requirement_id": "ce.uac.mfa_admin_accounts",
+      "evidence_limits": "Covers administrators of the audited tenant only; administrator accounts elsewhere need other proof."
+    },
+    {
+      "requirement_id": "ce.uac.separate_admin_accounts",
+      "evidence_limits": "Role and licence data are clues only; the assessor checks account separation on sample devices."
+    },
+    {
+      "requirement_id": "ce.uac.special_access_privileges",
+      "evidence_limits": "Covers privileged roles in the audited tenant only; rights on other systems need other proof."
+    },
+    {
+      "requirement_id": "ce.uac.password_brute_force",
+      "evidence_limits": "Guessing limits on every service are not read by this audit."
+    },
+    {
+      "requirement_id": "ce.uac.password_quality",
+      "evidence_limits": "Password rules on every service are not read by this audit."
+    },
+    {
+      "requirement_id": "ce.uac.password_guidance",
+      "evidence_limits": "Guidance given to users is a process record, not a tenant setting."
+    },
+    {
+      "requirement_id": "ce.uac.third_party_accounts",
+      "evidence_limits": "Supplier and service provider accounts need a list and process record beyond tenant data."
+    },
+    {
+      "requirement_id": "ce.mp.antimalware",
+      "evidence_limits": "Covers Defender state on managed Windows devices only; the mail malware filter concerns mail flow and is no proof of endpoint protection."
+    },
+    {
+      "requirement_id": "ce.mp.app_allow_listing",
+      "evidence_limits": "Application allow-listing is not read by this audit."
+    },
+    {
+      "requirement_id": "ce.mp.saas_provider",
+      "evidence_limits": "For the cloud service the provider runs malware protection; the proof is your contract or the provider's assurance statement."
+    }
+  ],
+  "actions": [
+    {
+      "id": "ce.act.run.recollect_missing_evidence",
+      "title": "Re-run the audit with the missing permission, licence or collector",
+      "proof_to_gather": "Grant the read permission or licence the unknown rules name, turn on the collector they need, then run the audit again and use the new bundle.",
+      "kind": "recollect",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.fw.device_firewall",
+        "ce.fw.admin_interface",
+        "ce.fw.inbound_rules",
+        "ce.fw.internet_exposure",
+        "ce.fw.saas_provider",
+        "ce.sc.unnecessary_accounts",
+        "ce.sc.default_passwords",
+        "ce.sc.unnecessary_software",
+        "ce.sc.autorun_disabled",
+        "ce.sc.user_authentication",
+        "ce.sc.device_unlocking",
+        "ce.sc.saas_configuration",
+        "ce.sum.supported_software",
+        "ce.sum.automatic_updates",
+        "ce.sum.vulnerability_fixes_14_days",
+        "ce.sum.saas_provider",
+        "ce.uac.account_approval",
+        "ce.uac.unique_credentials",
+        "ce.uac.remove_unused_accounts",
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts",
+        "ce.uac.separate_admin_accounts",
+        "ce.uac.special_access_privileges",
+        "ce.uac.password_brute_force",
+        "ce.uac.password_quality",
+        "ce.uac.password_guidance",
+        "ce.uac.third_party_accounts",
+        "ce.mp.antimalware",
+        "ce.mp.app_allow_listing",
+        "ce.mp.saas_provider"
+      ],
+      "trigger": "rule_not_evaluated",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.run.recollect_stale_evidence",
+      "title": "Run the audit again to refresh old evidence",
+      "proof_to_gather": "Run a fresh audit so the evidence an assessor sees is recent; this bundle is older than the catalogue allows.",
+      "kind": "recollect",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.unnecessary_accounts",
+        "ce.sc.saas_configuration",
+        "ce.sum.supported_software",
+        "ce.sum.automatic_updates",
+        "ce.sum.vulnerability_fixes_14_days",
+        "ce.uac.remove_unused_accounts",
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts",
+        "ce.uac.special_access_privileges",
+        "ce.mp.antimalware"
+      ],
+      "trigger": "stale_evidence",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.run.record_accepted_gap",
+      "title": "Record the reason behind an accepted gap",
+      "proof_to_gather": "Write down who accepted the gap, why, until when and what reduces the risk meanwhile. An Auditex waiver is your own record, not a scheme exemption, so the gap still needs closing or the assessor's view.",
+      "kind": "gather_proof",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.unnecessary_accounts",
+        "ce.sc.saas_configuration",
+        "ce.sum.supported_software",
+        "ce.sum.automatic_updates",
+        "ce.sum.vulnerability_fixes_14_days",
+        "ce.uac.remove_unused_accounts",
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts",
+        "ce.uac.special_access_privileges",
+        "ce.mp.antimalware"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_accepted"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.saas.provider_assurance",
+      "title": "Keep the cloud provider's contract or assurance statement",
+      "proof_to_gather": "Keep the part of the provider's contract, terms or published assurance statement that commits them to run firewalls, security updates and malware protection for the service.",
+      "kind": "provider_assurance",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.fw.saas_provider",
+        "ce.sum.saas_provider",
+        "ce.mp.saas_provider"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.resolve_stale_accounts_m365",
+      "title": "Disable or remove the stale Microsoft 365 accounts",
+      "proof_to_gather": "Disable or delete each enabled account, guest or privileged account the audit found unused, or record why it is still needed, then re-run the audit.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.sc.unnecessary_accounts",
+        "ce.uac.remove_unused_accounts",
+        "ce.uac.special_access_privileges"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "identity.stale_enabled_account",
+        "identity.privileged_stale_account",
+        "identity.stale_guest"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.resolve_legacy_auth_m365",
+      "title": "Block legacy authentication and tenant-wide SMTP AUTH",
+      "proof_to_gather": "Block legacy authentication with Conditional Access and turn off SMTP AUTH for the whole organisation, allowing it only on the mailboxes that need it.",
+      "kind": "resolve_gap",
+      "effort": "quick",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.sc.saas_configuration",
+        "ce.uac.mfa_cloud_services"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "ca.legacy_auth_not_blocked",
+        "exchange.smtp_auth_enabled_tenant_wide"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.resolve_user_consent_m365",
+      "title": "Restrict user consent to applications",
+      "proof_to_gather": "Limit user consent to verified publishers with low-risk permissions, or turn it off and use the admin consent workflow.",
+      "kind": "resolve_gap",
+      "effort": "quick",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.sc.saas_configuration"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "consent_policy.user_consent_unrestricted"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sum.resolve_unsupported_os_m365",
+      "title": "Upgrade or retire devices on an unsupported operating system",
+      "proof_to_gather": "Upgrade each managed device whose operating system is out of support, or take it out of scope, and keep the list of what changed.",
+      "kind": "resolve_gap",
+      "effort": "extended",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.sum.supported_software",
+        "ce.sum.vulnerability_fixes_14_days"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "intune.device_os_end_of_life"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sum.resolve_update_rings_m365",
+      "title": "Assign update rings and shorten long deferrals",
+      "proof_to_gather": "Assign a Windows update ring to every managed device group and keep quality update deferral short enough to install fixes within 14 days.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.sum.automatic_updates",
+        "ce.sum.vulnerability_fixes_14_days"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "intune_depth.update_ring_not_assigned",
+        "intune_depth.update_ring_deferral_excessive"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sum.resolve_stale_device_sync_m365",
+      "title": "Bring stale managed devices back into sync",
+      "proof_to_gather": "Find the managed devices that have not checked in recently, bring them back online or retire them, so their update state is current.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.sum.vulnerability_fixes_14_days"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "intune.device_stale_sync"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.resolve_mfa_policy_m365",
+      "title": "Require MFA for every user in Conditional Access",
+      "proof_to_gather": "Change Conditional Access or security defaults so every user signing in to Microsoft 365 must use MFA, with exclusions limited to the named emergency access accounts.",
+      "kind": "resolve_gap",
+      "effort": "quick",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "ca.mfa_not_enforced"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.resolve_admin_mfa_policy_m365",
+      "title": "Require MFA for every administrator role",
+      "proof_to_gather": "Change Conditional Access so every administrator role must use MFA, and remove any administrator left outside the policy.",
+      "kind": "resolve_gap",
+      "effort": "quick",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "ca.admin_mfa_not_enforced",
+        "attack_path.no_mfa_to_tier0"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.resolve_mfa_registration_m365",
+      "title": "Register an MFA method for every listed account",
+      "proof_to_gather": "Have each user and administrator the audit lists register an MFA method, then re-run the audit to show the registration.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "identity.user_mfa_not_registered",
+        "identity.global_admin_mfa_not_registered",
+        "identity.privileged_mfa_not_registered"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.mp.resolve_defender_state_m365",
+      "title": "Turn on Defender protection and update signatures",
+      "proof_to_gather": "Turn on antivirus and real-time protection and bring signatures up to date on each managed Windows device the audit lists.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.mp.antimalware"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "intune.defender_av_off",
+        "intune.defender_realtime_protection_off",
+        "intune.defender_signatures_stale"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.mp.resolve_mail_malware_filter_m365",
+      "title": "Restore the mail malware filter",
+      "proof_to_gather": "Restore the Exchange Online malware filter settings the audit flagged. This covers mail flow only and is no proof of endpoint protection.",
+      "kind": "resolve_gap",
+      "effort": "quick",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.mp.antimalware"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "exchange.malware_filter_weakened"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.resolve_stale_accounts_google",
+      "title": "Suspend or remove the stale Google Workspace accounts",
+      "proof_to_gather": "Suspend or delete each user or administrator the audit found unused or never signed in, or record why it is still needed, then re-run the audit.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "google_workspace"
+      ],
+      "requirement_ids": [
+        "ce.sc.unnecessary_accounts",
+        "ce.uac.remove_unused_accounts",
+        "ce.uac.special_access_privileges"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "google.stale_user",
+        "google.never_logged_in_user",
+        "google.admin_stale_login"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sum.resolve_chromeos_past_aue_google",
+      "title": "Replace ChromeOS devices past auto-update expiry",
+      "proof_to_gather": "Replace or retire each ChromeOS device past its auto-update expiry, and keep the list of what changed.",
+      "kind": "resolve_gap",
+      "effort": "extended",
+      "platforms": [
+        "google_workspace"
+      ],
+      "requirement_ids": [
+        "ce.sum.supported_software",
+        "ce.sum.vulnerability_fixes_14_days"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "google.chromeos_device_past_aue"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.resolve_2sv_enforcement_google",
+      "title": "Enforce 2-step verification for every user and administrator",
+      "proof_to_gather": "Turn on 2-step verification enforcement for every organisational unit and group that holds users or administrators.",
+      "kind": "resolve_gap",
+      "effort": "quick",
+      "platforms": [
+        "google_workspace"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "google.user_2sv_not_enforced",
+        "google.admin_2sv_not_enforced",
+        "google.org_2sv_policy_not_enforced"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.resolve_2sv_enrolment_google",
+      "title": "Enrol every listed account in 2-step verification",
+      "proof_to_gather": "Have each user and administrator the audit lists enrol in 2-step verification, then re-run the audit to show the enrolment.",
+      "kind": "resolve_gap",
+      "effort": "quick",
+      "platforms": [
+        "google_workspace"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "trigger": "rule_gap",
+      "rule_ids": [
+        "google.user_2sv_not_enrolled",
+        "google.admin_2sv_not_enrolled"
+      ],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.reconcile_mfa_registration_m365",
+      "title": "Explain why accounts under an MFA policy have no method registered",
+      "proof_to_gather": "The policy requires MFA yet some accounts have no method registered. Find out whether they are new, unused or excluded, then register or disable them.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "trigger": "conflict",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": [
+        "ce.conflict.mfa_policy_vs_registration_m365",
+        "ce.conflict.admin_mfa_policy_vs_registration_m365"
+      ]
+    },
+    {
+      "id": "ce.act.uac.reconcile_2sv_enrolment_google",
+      "title": "Explain why accounts under enforced 2-step verification are not enrolled",
+      "proof_to_gather": "Enforcement is on yet some accounts are not enrolled. Find out whether they are new, in a grace period or not signing in, then enrol or suspend them.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "google_workspace"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "trigger": "conflict",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": [
+        "ce.conflict.2sv_policy_vs_enrolment_google",
+        "ce.conflict.admin_2sv_policy_vs_enrolment_google"
+      ]
+    },
+    {
+      "id": "ce.act.sum.reconcile_update_ring_devices_m365",
+      "title": "Explain why devices with an update ring are out of date",
+      "proof_to_gather": "Update rings are assigned yet devices run an unsupported system or have not synced. Check each listed device, then update, reconnect or retire it.",
+      "kind": "resolve_gap",
+      "effort": "moderate",
+      "platforms": [
+        "m365"
+      ],
+      "requirement_ids": [
+        "ce.sum.vulnerability_fixes_14_days"
+      ],
+      "trigger": "conflict",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": [
+        "ce.conflict.update_ring_vs_device_state_m365"
+      ]
+    },
+    {
+      "id": "ce.act.sc.gather_unnecessary_accounts",
+      "title": "Show unused accounts are removed outside this tenant",
+      "proof_to_gather": "Keep a list of accounts on devices, other cloud services and network equipment, with the date each unused one was removed or disabled.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.unnecessary_accounts"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.gather_saas_configuration",
+      "title": "Show every other cloud service is configured securely",
+      "proof_to_gather": "List the other cloud services in scope and keep a record of the settings that limit each to the services required.",
+      "kind": "gather_proof",
+      "effort": "extended",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.saas_configuration"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sum.gather_supported_software",
+      "title": "Keep an inventory of supported software",
+      "proof_to_gather": "Keep a software and device inventory that shows each item is licensed and supported, including devices no management tool sees.",
+      "kind": "gather_proof",
+      "effort": "extended",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sum.supported_software"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sum.gather_automatic_updates",
+      "title": "Show automatic updates are on beyond managed devices",
+      "proof_to_gather": "Record that automatic updates are turned on for software and devices the tenant does not manage, or how they are updated instead.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sum.automatic_updates"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sum.gather_vulnerability_fixes",
+      "title": "Keep per-device evidence of fixes installed within 14 days",
+      "proof_to_gather": "Keep a patch report per device that shows when each high or critical fix was released and installed. Update policy alone does not show fix age.",
+      "kind": "gather_proof",
+      "effort": "extended",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sum.vulnerability_fixes_14_days"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_remove_unused_accounts",
+      "title": "Keep the leaver and inactivity procedure",
+      "proof_to_gather": "Keep the procedure that disables accounts when people leave or after a set period of inactivity, with recent examples from other systems.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.remove_unused_accounts"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_mfa_cloud_services",
+      "title": "List MFA for every other cloud service",
+      "proof_to_gather": "List every other cloud service in scope with how MFA is turned on for it, or the record that it offers no MFA option.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_mfa_admin_accounts",
+      "title": "List MFA on administrator accounts outside this tenant",
+      "proof_to_gather": "List administrator accounts on other services and devices reachable from the internet, with how MFA protects each.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_special_access_privileges",
+      "title": "Keep the review of special access rights",
+      "proof_to_gather": "Keep the latest review of administrator and other special rights across systems, with the rights removed since.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.special_access_privileges"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.mp.gather_antimalware",
+      "title": "Show malware protection on every in-scope device",
+      "proof_to_gather": "List every in-scope device with its malware protection product, its status and its last update, including devices no management tool sees.",
+      "kind": "gather_proof",
+      "effort": "extended",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.mp.antimalware"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "gap_observed",
+        "gap_accepted",
+        "evidence_unknown",
+        "evidence_observed_partial",
+        "supporting_only"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.fw.gather_device_firewall",
+      "title": "Show a firewall protects every in-scope device",
+      "proof_to_gather": "Record the firewall on each device type and network boundary, with its settings, for devices and networks the tenant cannot see.",
+      "kind": "gather_proof",
+      "effort": "extended",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.fw.device_firewall"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.fw.gather_admin_interface",
+      "title": "Show firewall admin interfaces are protected",
+      "proof_to_gather": "Record that default firewall passwords were changed and that each admin interface is closed to the internet or protected by MFA or an address allow list.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.fw.admin_interface"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.fw.gather_inbound_rules",
+      "title": "Keep the approved inbound firewall rules",
+      "proof_to_gather": "Export the inbound firewall rules with who approved each and why, and remove rules no longer needed.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.fw.inbound_rules"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.fw.gather_internet_exposure",
+      "title": "List the services reachable from the internet",
+      "proof_to_gather": "List public addresses and the services on each, with why each is needed, ready for the assessor's remote scan.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.fw.internet_exposure"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.gather_default_passwords",
+      "title": "Show default passwords were changed",
+      "proof_to_gather": "Record that default or guessable passwords were changed on devices, software and services when they were set up.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.default_passwords"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.gather_unnecessary_software",
+      "title": "Show unneeded software and services are removed",
+      "proof_to_gather": "Keep the device build standard or a recent review that shows unneeded software, utilities and network services were removed or turned off.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.unnecessary_software"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.gather_autorun_disabled",
+      "title": "Show auto-run is turned off",
+      "proof_to_gather": "Record the device setting that stops files running automatically without the user agreeing.",
+      "kind": "gather_proof",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.autorun_disabled"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.gather_user_authentication",
+      "title": "Show users sign in before reaching data or services",
+      "proof_to_gather": "Record how users authenticate before reaching organisational data or services, including shared and public links.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.user_authentication"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.sc.gather_device_unlocking",
+      "title": "Show device unlock settings",
+      "proof_to_gather": "Record the device lock setting: a PIN or password of at least 6 characters, or biometrics, with protection against guessing.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sc.device_unlocking"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_account_approval",
+      "title": "Keep the account approval process",
+      "proof_to_gather": "Keep the process for creating and approving user accounts, with recent approvals as examples.",
+      "kind": "gather_proof",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.account_approval"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_unique_credentials",
+      "title": "Show users have their own credentials",
+      "proof_to_gather": "Record that each person signs in with their own account and that shared accounts are not used.",
+      "kind": "gather_proof",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.unique_credentials"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_separate_admin_accounts",
+      "title": "Show administrators use separate admin accounts",
+      "proof_to_gather": "List each administrator with their everyday account and separate admin account, ready for the assessor to check on sample devices.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.separate_admin_accounts"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_password_brute_force",
+      "title": "Show password guessing is limited",
+      "proof_to_gather": "Record how each service limits password guessing: MFA, throttling, or lock-out after no more than 10 guesses in 5 minutes.",
+      "kind": "gather_proof",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.password_brute_force"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_password_quality",
+      "title": "Show how password quality is enforced",
+      "proof_to_gather": "Record how password quality is enforced on each service: MFA, a 12-character minimum, or 8 characters with a deny list.",
+      "kind": "gather_proof",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.password_quality"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_password_guidance",
+      "title": "Keep the password guidance given to users",
+      "proof_to_gather": "Keep the guidance users receive on choosing unique passwords and the process for changing a password that may be compromised.",
+      "kind": "gather_proof",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.password_guidance"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.uac.gather_third_party_accounts",
+      "title": "List supplier and service provider accounts",
+      "proof_to_gather": "List accounts used by suppliers and managed service providers, with how each is approved, protected by MFA and removed.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.third_party_accounts"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.mp.gather_app_allow_listing",
+      "title": "Show only approved applications can run",
+      "proof_to_gather": "If you rely on allow-listing instead of anti-malware, record the list of approved, code-signed applications and how it is enforced.",
+      "kind": "gather_proof",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.mp.app_allow_listing"
+      ],
+      "trigger": "requirement_state",
+      "rule_ids": [],
+      "states": [
+        "outside_tenant_evidence",
+        "evidence_unknown"
+      ],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.plus.prepare_test_1_exposure",
+      "title": "Prepare the address and service list for the remote scan",
+      "proof_to_gather": "Give the assessor the public addresses and services in scope, and keep a place for their scan results. Tenant data is not an exposure scan.",
+      "kind": "prepare_assessor_test",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.fw.internet_exposure"
+      ],
+      "trigger": "assessor_test",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.plus.prepare_test_2_patching",
+      "title": "Prepare the device sample and update evidence for the patch scan",
+      "proof_to_gather": "Give the assessor the device inventory to sample from and the update evidence you hold. The assessor runs the authenticated scan.",
+      "kind": "prepare_assessor_test",
+      "effort": "extended",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.sum.vulnerability_fixes_14_days"
+      ],
+      "trigger": "assessor_test",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.plus.prepare_test_3_malware",
+      "title": "Prepare the per-device malware protection view",
+      "proof_to_gather": "Give the assessor the managed-device protection evidence and a checklist for devices and products outside it.",
+      "kind": "prepare_assessor_test",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.mp.antimalware"
+      ],
+      "trigger": "assessor_test",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.plus.prepare_test_4_mfa",
+      "title": "Prepare sample accounts for the witnessed MFA sign-in",
+      "proof_to_gather": "Give the assessor the MFA policy and enrolment evidence and a sample of user and administrator accounts to sign in with in front of them.",
+      "kind": "prepare_assessor_test",
+      "effort": "moderate",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "trigger": "assessor_test",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": []
+    },
+    {
+      "id": "ce.act.plus.prepare_test_5_separation",
+      "title": "Prepare the list of administrator accounts for the separation check",
+      "proof_to_gather": "Give the assessor the administrator role list and the matching everyday accounts. A productivity licence on an admin account is only a clue.",
+      "kind": "prepare_assessor_test",
+      "effort": "quick",
+      "platforms": [
+        "any"
+      ],
+      "requirement_ids": [
+        "ce.uac.separate_admin_accounts"
+      ],
+      "trigger": "assessor_test",
+      "rule_ids": [],
+      "states": [],
+      "conflict_ids": []
+    }
+  ],
+  "conflicts": [
+    {
+      "id": "ce.conflict.mfa_policy_vs_registration_m365",
+      "requirement_id": "ce.uac.mfa_cloud_services",
+      "platforms": [
+        "m365"
+      ],
+      "note": "The MFA policy shows no gap, yet users have no MFA method registered.",
+      "policy_rule_ids": [
+        "ca.mfa_not_enforced"
+      ],
+      "state_rule_ids": [
+        "identity.user_mfa_not_registered"
+      ]
+    },
+    {
+      "id": "ce.conflict.admin_mfa_policy_vs_registration_m365",
+      "requirement_id": "ce.uac.mfa_admin_accounts",
+      "platforms": [
+        "m365"
+      ],
+      "note": "The administrator MFA policy shows no gap, yet administrators have no MFA method registered.",
+      "policy_rule_ids": [
+        "ca.admin_mfa_not_enforced"
+      ],
+      "state_rule_ids": [
+        "identity.global_admin_mfa_not_registered",
+        "identity.privileged_mfa_not_registered"
+      ]
+    },
+    {
+      "id": "ce.conflict.2sv_policy_vs_enrolment_google",
+      "requirement_id": "ce.uac.mfa_cloud_services",
+      "platforms": [
+        "google_workspace"
+      ],
+      "note": "2-step verification enforcement shows no gap, yet users are not enrolled.",
+      "policy_rule_ids": [
+        "google.user_2sv_not_enforced",
+        "google.org_2sv_policy_not_enforced"
+      ],
+      "state_rule_ids": [
+        "google.user_2sv_not_enrolled"
+      ]
+    },
+    {
+      "id": "ce.conflict.admin_2sv_policy_vs_enrolment_google",
+      "requirement_id": "ce.uac.mfa_admin_accounts",
+      "platforms": [
+        "google_workspace"
+      ],
+      "note": "2-step verification enforcement for administrators shows no gap, yet administrators are not enrolled.",
+      "policy_rule_ids": [
+        "google.admin_2sv_not_enforced",
+        "google.org_2sv_policy_not_enforced"
+      ],
+      "state_rule_ids": [
+        "google.admin_2sv_not_enrolled"
+      ]
+    },
+    {
+      "id": "ce.conflict.update_ring_vs_device_state_m365",
+      "requirement_id": "ce.sum.vulnerability_fixes_14_days",
+      "platforms": [
+        "m365"
+      ],
+      "note": "Update rings are assigned, yet devices run an unsupported system or have not synced recently.",
+      "policy_rule_ids": [
+        "intune_depth.update_ring_not_assigned"
+      ],
+      "state_rule_ids": [
+        "intune.device_os_end_of_life",
+        "intune.device_stale_sync"
+      ]
+    }
+  ],
+  "assessor_tests": [
+    {
+      "id": "ce_plus.test_1",
+      "number": 1,
+      "title": "Remote exposure",
+      "framework_label": "Test case 1: Remote vulnerability assessment",
+      "requirement_ids": [
+        "ce.fw.internet_exposure"
+      ],
+      "auditex_prepares": "A customer-owned list of public addresses and services, and a place to attach the assessor's results. Tenant data is not an exposure scan.",
+      "assessor_witnesses": "The assessor finds the in-scope public addresses and checks which services can be reached from the internet.",
+      "prepare_action_ids": [
+        "ce.act.plus.prepare_test_1_exposure",
+        "ce.act.fw.gather_internet_exposure"
+      ]
+    },
+    {
+      "id": "ce_plus.test_2",
+      "number": 2,
+      "title": "Vulnerability and patching",
+      "framework_label": "Test case 2: Check patching, by authenticated vulnerability scan of devices",
+      "requirement_ids": [
+        "ce.sum.vulnerability_fixes_14_days"
+      ],
+      "auditex_prepares": "A device inventory to sample from and the device update evidence the tenant holds. It cannot reproduce the scan or tell fix age from an update policy.",
+      "assessor_witnesses": "The assessor runs an authenticated scan of sample devices and checks for high or critical fixes released more than 14 days earlier.",
+      "prepare_action_ids": [
+        "ce.act.plus.prepare_test_2_patching",
+        "ce.act.sum.gather_vulnerability_fixes"
+      ]
+    },
+    {
+      "id": "ce_plus.test_3",
+      "number": 3,
+      "title": "Malware protection",
+      "framework_label": "Test case 3: Check malware protection",
+      "requirement_ids": [
+        "ce.mp.antimalware"
+      ],
+      "auditex_prepares": "A per-device view of managed-device protection evidence and a checklist for products and devices outside it.",
+      "assessor_witnesses": "The assessor checks malware protection directly on sample devices.",
+      "prepare_action_ids": [
+        "ce.act.plus.prepare_test_3_malware",
+        "ce.act.mp.gather_antimalware"
+      ]
+    },
+    {
+      "id": "ce_plus.test_4",
+      "number": 4,
+      "title": "Multi-factor authentication",
+      "framework_label": "Test case 4: Check multi-factor authentication configuration",
+      "requirement_ids": [
+        "ce.uac.mfa_cloud_services",
+        "ce.uac.mfa_admin_accounts"
+      ],
+      "auditex_prepares": "Tenant policy and enrolment evidence, a sample of user and administrator accounts and a place to record the witnessed sign-in. Logs and settings do not replace the witnessed sign-in.",
+      "assessor_witnesses": "The assessor watches sample users and administrators sign in to each cloud service from a private or untrusted browser and sees MFA requested.",
+      "prepare_action_ids": [
+        "ce.act.plus.prepare_test_4_mfa"
+      ]
+    },
+    {
+      "id": "ce_plus.test_5",
+      "number": 5,
+      "title": "Account separation",
+      "framework_label": "Test case 5: Check account separation",
+      "requirement_ids": [
+        "ce.uac.separate_admin_accounts"
+      ],
+      "auditex_prepares": "Role and account clues and a request for the assessor's witnessed check. A productivity licence on an admin account is only a clue.",
+      "assessor_witnesses": "The assessor checks on sample devices and cloud services that administrators use separate accounts for admin work.",
+      "prepare_action_ids": [
+        "ce.act.plus.prepare_test_5_separation",
+        "ce.act.uac.gather_separate_admin_accounts"
+      ]
+    }
+  ]
+}
