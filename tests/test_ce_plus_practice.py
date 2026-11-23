@@ -1081,3 +1081,107 @@ def test_previous_generated_ce_plus_files_ignore_malformed_entries(entry: Any) -
 
     manifest = {"generated_files": [{"path": entry}, {"path": "./ce-plus-practice.json"}, "x", None]}
     assert _previous_generated_ce_plus_files(manifest) == {"ce-plus-practice.json"}
+
+
+# -- round 4: the CE+ restorer never puts back a value with a bundle-supplied part -----------------------------------
+
+PROTECTED_NUMBER = "8364197251"
+PSEUDONYM = re.compile(r"Id [0-9a-f]{16}")
+
+
+def _with_immutable_id(run: Path, immutable_id: str) -> None:
+    """One directory person whose immutable id is ``immutable_id``, hashes recalculated."""
+    from gate_support import rehash
+
+    records = [{"kind": "user", "display_name": "Person One", "principal_name": "person1@example.invalid",
+                "user_type": "Member", "immutable_id": immutable_id}]
+    (run / "normalized" / "users.json").write_text(json.dumps({"kind": "users", "records": records}), encoding="utf-8")
+    rehash(run)
+
+
+def _json_outputs(run: Path, tmp_path: Path, capsys: pytest.CaptureFixture) -> dict[str, str]:
+    rc, printed, _ = _report(["report", "ce-plus", str(run), "--format", "json", "--as-of", _as_of(run)], capsys)
+    assert rc == 0
+    pack = tmp_path / "pack"
+    assert _report(["report", "customer-pack", str(run), "--output-dir", str(pack)], capsys)[0] == 0
+    return {"json": printed, "ce-plus-practice.json": (pack / "ce-plus-practice.json").read_text(encoding="utf-8")}
+
+
+def _partial_row(text: str) -> dict[str, Any]:
+    payload = json.loads(text)
+    jsonschema.validate(payload, SCHEMA)
+    return next(item for item in payload["requirements"] if item["requirement_id"] == PARTIAL)
+
+
+def test_a_protected_number_in_a_registration_code_finding_id_stays_masked(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    def change(section: dict[str, Any]) -> None:
+        row = next(item for item in section["controls"] if item["control_id"] == PARTIAL)
+        row["finding_ids"] = ["registration_report_incomplete:8364197251"]
+
+    run = _offline_run(tmp_path, "practice-label", change)
+    _with_immutable_id(run, PROTECTED_NUMBER)
+    outputs = _json_outputs(run, tmp_path, capsys)
+
+    for name, text in outputs.items():
+        assert PROTECTED_NUMBER not in text, name
+        [finding_id] = _partial_row(text)["evidence_observed"]["finding_ids"]
+        code, _, detail = finding_id.partition(":")
+        assert (code, PSEUDONYM.fullmatch(detail) is not None) == ("registration_report_incomplete", True), name
+
+
+def test_a_counted_reason_that_is_a_protected_id_stays_masked(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def change(section: dict[str, Any]) -> None:
+        row = next(item for item in section["controls"] if item["control_id"] == PARTIAL)
+        row.update({"status": "not_assessed", "reason": "rules_not_evaluated", "rule_statuses": [
+            {"rule_id": "intune.device_os_end_of_life", "status": "not_assessed", "evaluated": False,
+             "confidence": "full", "reason": "os_lifecycle_unknown_for_7_devices"},
+        ]})
+
+    run = _offline_run(tmp_path, "practice-label", change)
+    _with_immutable_id(run, "os_lifecycle_unknown_for_7_devices")
+    outputs = _json_outputs(run, tmp_path, capsys)
+
+    for name, text in outputs.items():
+        assert "os_lifecycle_unknown_for_7_devices" not in text, name
+        [reason] = _partial_row(text)["unknown_reasons"]
+        assert PSEUDONYM.fullmatch(reason) is not None, name
+
+
+def test_counted_codes_with_no_collision_render_verbatim_beside_a_protected_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    def change(section: dict[str, Any]) -> None:
+        row = next(item for item in section["controls"] if item["control_id"] == PARTIAL)
+        row.update({"status": "not_assessed", "reason": "rules_not_evaluated", "finding_ids": [
+            "registration_report_incomplete:3"
+        ], "rule_statuses": [
+            {"rule_id": "intune.device_os_end_of_life", "status": "not_assessed", "evaluated": False,
+             "confidence": "full", "reason": "os_lifecycle_unknown_for_2_devices"},
+        ]})
+
+    run = _offline_run(tmp_path, "practice-label", change)
+    _with_immutable_id(run, PROTECTED_NUMBER)
+    outputs = _json_outputs(run, tmp_path, capsys)
+
+    for name, text in outputs.items():
+        row = _partial_row(text)
+        assert (row["unknown_reasons"], row["evidence_observed"]["finding_ids"]) == (
+            ["os_lifecycle_unknown_for_2_devices"], ["registration_report_incomplete:3"]
+        ), name
+
+
+def test_the_restorer_puts_back_only_fixed_vocabulary() -> None:
+    from auditex.ce_plus import restore_fixed_fields
+
+    original = {"unknown_reasons": ["reported_by", "os_lifecycle_unknown_for_7_devices",
+                                    "registration_report_incomplete:8364197251", "collector_not_complete:auth_methods",
+                                    "evidence_unknown", "ce.uac.mfa_cloud_services"]}
+    redacted = {"unknown_reasons": ["Person a", "Id b", "registration_report_incomplete:Id c",
+                                    "collector_not_complete:Person d", "Person e", "Person f"]}
+
+    assert restore_fixed_fields(original, redacted) == {"unknown_reasons": [
+        "reported_by", "Id b", "registration_report_incomplete:Id c", "collector_not_complete:Person d",
+        "evidence_unknown", "ce.uac.mfa_cloud_services",
+    ]}

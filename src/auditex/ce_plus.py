@@ -182,7 +182,8 @@ def field_names() -> frozenset[str]:
 @cache
 def _fixed_values() -> frozenset[str]:
     """The closed-set strings a payload carries as values: the schema's enum and const values and the shipped
-    catalogue's ids (requirements, actions, assessor tests, conflicts). Reason codes are checked by ``_is_reason_code``."""
+    catalogue's ids (requirements, actions, assessor tests, conflicts). Reason codes are checked by
+    ``_is_fixed_reason_code``."""
     values: set[str] = set()
 
     def walk(node: Any) -> None:
@@ -204,17 +205,18 @@ def _fixed_values() -> frozenset[str]:
     return frozenset(values)
 
 
-def _is_reason_code(value: str) -> bool:
-    """A reason code the builder writes with no detail: the engine's closed sets, a counted reason, a bare prefixed
-    code, a registration count, or one of the practice run's own codes."""
-    if value in _KNOWN_RULE_REASONS or value in _SOURCE_RULE_REASONS or value in _PREFIXED_RULE_REASONS:
-        return True
-    if value in _ROW_REASONS or value in (REASON_STATUS_UNREADABLE, REASON_UNRECOGNISED):
-        return True
-    code, separator, detail = value.partition(":")
-    if separator:
-        return code == "registration_report_incomplete" and detail.isascii() and detail.isdigit()
-    return _COUNTED_RULE_REASON.fullmatch(value) is not None
+def _is_fixed_reason_code(value: str) -> bool:
+    """A reason code from the closed constant sets, with no bundle-supplied part: the engine's fixed codes, a bare
+    prefixed code or one of the practice run's own codes. A code with a variable part (a counted reason such as
+    ``os_lifecycle_unknown_for_<n>_devices``, ``registration_report_incomplete:<n>`` or any other ``code:detail``) is
+    never one: its detail comes from the bundle and may carry a protected value."""
+    return (
+        value in _KNOWN_RULE_REASONS
+        or value in _SOURCE_RULE_REASONS
+        or value in _PREFIXED_RULE_REASONS
+        or value in _ROW_REASONS
+        or value in (REASON_STATUS_UNREADABLE, REASON_UNRECOGNISED)
+    )
 
 
 def restore_fixed_fields(original: Any, redacted: Any) -> Any:
@@ -225,7 +227,8 @@ def restore_fixed_fields(original: Any, redacted: Any) -> Any:
     This is the CE+ payload's exemption, and it covers only that payload's fixed field paths, walked in step with
     the redacted copy: a mapping key is restored only in a mapping of the same size at the same position (a mapping
     in another order is left as redacted) and only when the original key is a schema property name (``field_names``); a string value only when the original is a
-    schema enum or const value, a shipped catalogue id or a reason code (``_is_reason_code``). Every other value
+    schema enum or const value, a shipped catalogue id or a fixed reason code (``_is_fixed_reason_code``). A value with
+    a bundle-supplied part (a counted reason, ``code:detail``, a finding id) is never put back. Every other value
     stays as redacted, and the shared redaction's rules (its product field-name exemption included) are untouched,
     so a mapping key anywhere else is masked exactly as before."""
     if isinstance(original, Mapping) and isinstance(redacted, Mapping):
@@ -241,7 +244,7 @@ def restore_fixed_fields(original: Any, redacted: Any) -> Any:
     if isinstance(original, list) and isinstance(redacted, list) and len(original) == len(redacted):
         return [restore_fixed_fields(value, new_value) for value, new_value in zip(original, redacted, strict=True)]
     if isinstance(original, str) and isinstance(redacted, str) and original != redacted:
-        if original in _fixed_values() or _is_reason_code(original):
+        if original in _fixed_values() or _is_fixed_reason_code(original):
             return original
     return redacted
 
