@@ -131,13 +131,18 @@ def _selected_collectors(args: argparse.Namespace) -> set[str]:
     return set(get_profile(args.auditor_profile).default_collectors)
 
 
-def _ensure_local_tools(args: argparse.Namespace, readiness: dict[str, Any]) -> int:
-    """Check the local tools this run needs; install them only on an explicit request (prompt or --install-tools)."""
-    needs_exchange = bool(_selected_collectors(args) & POWERSHELL_COLLECTORS)
+def _missing_tools(readiness: dict[str, Any], *, needs_exchange: bool) -> list[str]:
     missing = [*(readiness.get("core_missing") or ([] if readiness.get("core_ready") else ["core"]))]
     if needs_exchange and not readiness.get("exchange_ready"):
         missing.extend(name for name in (readiness.get("exchange_missing") or ["exchange_online_module"])
                        if name not in missing)
+    return missing
+
+
+def _ensure_local_tools(args: argparse.Namespace, readiness: dict[str, Any]) -> int:
+    """Check the local tools this run needs; install them only on an explicit request (prompt or --install-tools)."""
+    needs_exchange = bool(_selected_collectors(args) & POWERSHELL_COLLECTORS)
+    missing = _missing_tools(readiness, needs_exchange=needs_exchange)
     if not missing:
         return 0
     print(f"Local tools missing: {', '.join(missing)}")
@@ -155,7 +160,17 @@ def _ensure_local_tools(args: argparse.Namespace, readiness: dict[str, Any]) -> 
     if needs_exchange and not readiness.get("exchange_ready"):
         setup_kwargs["with_exchange"] = True
         setup_kwargs["with_pwsh"] = True
-    return run_setup(**setup_kwargs)
+    rc = run_setup(**setup_kwargs)
+    if rc != 0:
+        return rc
+    # Setup can succeed without installing anything (an installed package only prints the manual steps), so check
+    # again and never start the engine without the tools this run needs.
+    still_missing = _missing_tools(build_doctor_report().get("readiness") or {}, needs_exchange=needs_exchange)
+    if still_missing:
+        print(f"Local tools still missing after setup: {', '.join(still_missing)}. Install them and run auditex doctor, "
+              "or pass --skip-tool-check to run without them.")
+        return 2
+    return 0
 
 
 def _run_folder_marks(base: Path) -> dict[str, tuple[Path, tuple[int, ...]]]:

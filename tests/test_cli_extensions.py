@@ -377,10 +377,13 @@ def test_guided_run_prompts_for_the_reader_app_values(monkeypatch, tmp_path) -> 
 
 def test_guided_run_installs_exchange_tooling_when_it_is_missing(monkeypatch, tmp_path) -> None:  # noqa: ANN001
     seen = _capture_engine(monkeypatch)
-    monkeypatch.setattr(guided, "build_doctor_report", lambda: {
-        "system": {"os": "Darwin", "machine": "arm64"},
-        "readiness": {"core_ready": True, "exchange_ready": False, "pwsh_ready": False},
-    })
+    reports = iter([
+        {"system": {"os": "Darwin", "machine": "arm64"},
+         "readiness": {"core_ready": True, "exchange_ready": False, "pwsh_ready": False}},
+        {"system": {"os": "Darwin", "machine": "arm64"},
+         "readiness": {"core_ready": True, "exchange_ready": True, "pwsh_ready": True}},
+    ])
+    monkeypatch.setattr(guided, "build_doctor_report", lambda: next(reports))
     setup: dict[str, object] = {}
     monkeypatch.setattr(guided, "run_setup", lambda **kwargs: setup.update(kwargs) or 0)
 

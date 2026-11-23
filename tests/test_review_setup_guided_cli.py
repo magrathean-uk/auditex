@@ -89,6 +89,8 @@ def test_r061_guided_run_does_not_need_exchange_tools_without_an_exchange_collec
 
 def test_r061_install_tools_flag_runs_setup_without_a_prompt(monkeypatch, tmp_path) -> None:  # noqa: ANN001
     setup_calls = _setup_spy(monkeypatch, _doctor(exchange=False))
+    reports = iter([_doctor(exchange=False), _doctor()])
+    monkeypatch.setattr(guided, "build_doctor_report", lambda: next(reports))
     _engine_spy(monkeypatch)
 
     rc = guided.run_guided(build_guided_parser().parse_args(
@@ -97,6 +99,40 @@ def test_r061_install_tools_flag_runs_setup_without_a_prompt(monkeypatch, tmp_pa
 
     assert rc == 0
     assert setup_calls == [{"with_mcp": False, "with_exchange": True, "with_pwsh": True}]
+
+
+# Wave-2 bot review (PR #169): a setup that exits 0 but leaves the tools missing (an installed package prints manual
+# steps) stops guided run before the engine instead of auditing without them.
+def test_guided_run_rechecks_readiness_after_setup_and_stops_when_tools_are_still_missing(  # noqa: ANN201
+        monkeypatch, tmp_path, capsys) -> None:  # noqa: ANN001
+    setup_calls = _setup_spy(monkeypatch, _doctor(exchange=False))
+    seen = _engine_spy(monkeypatch)
+
+    rc = guided.run_guided(build_guided_parser().parse_args(
+        [*_guided_args(tmp_path, "--collectors", "exchange_policy"), "--non-interactive", "--install-tools"]
+    ))
+
+    assert setup_calls == [{"with_mcp": False, "with_exchange": True, "with_pwsh": True}]
+    assert rc == 2
+    assert "argv" not in seen
+    out = capsys.readouterr().out
+    assert "still missing" in out and "exchange_online_module" in out and "--skip-tool-check" in out
+
+
+def test_guided_run_after_setup_needs_only_the_tools_the_run_uses(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    # Core tools were missing and setup fixed them; Exchange is still missing but no Exchange collector is selected.
+    setup_calls = _setup_spy(monkeypatch, _doctor(core=False, exchange=False))
+    reports = iter([_doctor(core=False, exchange=False), _doctor(exchange=False)])
+    monkeypatch.setattr(guided, "build_doctor_report", lambda: next(reports))
+    seen = _engine_spy(monkeypatch)
+
+    rc = guided.run_guided(build_guided_parser().parse_args(
+        [*_guided_args(tmp_path, "--collectors", "identity"), "--non-interactive", "--install-tools"]
+    ))
+
+    assert setup_calls == [{"with_mcp": False}]
+    assert rc == 0
+    assert "argv" in seen
 
 
 # R062: the report is rendered into the run folder this run wrote, and only when the run wrote a bundle.
