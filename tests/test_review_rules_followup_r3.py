@@ -194,7 +194,7 @@ def test_r106_rule_view_key_is_kept_when_a_person_is_named_rule_view():
 
 def _ca_unreadable_narrow(**users):
     from test_value_rules_aad_review import ca
-    return ca({"BuiltInControls": "unreadable", "Operator": "OR"}, users={"IncludeUsers": [], **users})
+    return ca({"BuiltInControls": "unreadable", "Operator": "OR"}, users={"IncludeUsers": [], "IncludeGroups": [], **users})
 
 
 def test_r027_unreadable_control_including_the_shared_role_keeps_the_union_possible():
@@ -219,3 +219,23 @@ def test_r027_unreadable_control_without_the_shared_exclusion_keeps_the_union_po
     one = ca(MFA, users={"ExcludeUsers": ["synthetic-principal"]})
     narrow = _ca_unreadable_narrow(IncludeUsers=["synthetic-principal"])
     assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), narrow)) == ("not_assessed", "union_possible")
+
+
+def test_r027_unreadable_control_on_a_different_app_keeps_the_shared_app_gap():
+    from test_value_rules_aad_review import MFA, ca, ca_sections, cell
+    one = ca(MFA, apps={"ExcludeApplications": ["synthetic-app-b"]})
+    other_app = ca({"BuiltInControls": "unreadable", "Operator": "OR"}, apps={"IncludeApplications": ["synthetic-app-a"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), other_app)) == ("not_met", "near_miss_exclusions")
+    same_app = ca({"BuiltInControls": "unreadable", "Operator": "OR"}, apps={"IncludeApplications": ["synthetic-app-b"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), same_app)) == ("not_assessed", "union_possible")
+    office = ca({"BuiltInControls": "unreadable", "Operator": "OR"}, apps={"IncludeApplications": ["Office365"]})
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), office)) == ("not_assessed", "union_possible")
+
+
+def test_r027_unreadable_control_on_a_different_role_keeps_the_shared_role_gap():
+    from test_value_rules_aad_review import MFA, ca, ca_sections, cell
+    one = ca(MFA, users={"ExcludeRoles": ["synthetic-role"]})
+    other_role = _ca_unreadable_narrow(IncludeRoles=["synthetic-other"])
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), other_role)) == ("not_met", "no_policy_meets")
+    with_user = _ca_unreadable_narrow(IncludeRoles=["synthetic-other"], IncludeUsers=["synthetic-principal"])
+    assert cell("MS.AAD.3.2v2", ca_sections(one, json.loads(json.dumps(one)), with_user)) == ("not_assessed", "union_possible")
