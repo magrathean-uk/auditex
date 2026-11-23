@@ -313,3 +313,11 @@ def test_mta_sts_duplicate_mode_and_version_use_the_first():
     body = "version: STSv1\nversion: STSv2\nmode: enforce\nmode: bogus\nmx: mail.contoso.example\nmax_age: 86400\n"
     parsed = exposure_lookup.parse_mta_sts_policy(body)
     assert parsed is not None and parsed["mode"] == "enforce" and parsed["mode_valid"] is True
+
+
+def test_raw_deflate_body_whose_first_bytes_look_like_a_zlib_header_still_decodes():
+    """A raw stored block starting 08 5b passes the RFC 1950 header check (0x085b is a multiple of 31) but is raw."""
+    body = (BODY + b"x" * 91)[:91]
+    raw = bytes([0x08]) + (91).to_bytes(2, "little") + (0xFFFF ^ 91).to_bytes(2, "little") + body + b"\x03\x00"
+    assert raw[:2] == b"\x08\x5b" and zlib.decompress(raw, -15) == body
+    assert exposure_lookup._decode_body(raw, "deflate") == body

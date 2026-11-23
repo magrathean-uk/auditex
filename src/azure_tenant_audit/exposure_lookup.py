@@ -206,27 +206,38 @@ def _drop_redirect_body(response: Any, *args: Any, **kwargs: Any) -> Any:
     return response
 
 
-def _zlib_wrapped(raw: bytes) -> bool:
-    """True when the body starts with a zlib header (RFC 1950 section 2.2): method 8, a window of at most 32 KiB and a
-    check value that makes the first two bytes a multiple of 31. Smaller windows start with 0x08 to 0x68, not only 0x78."""
-    return len(raw) >= 2 and raw[0] & 0x0F == 8 and raw[0] >> 4 <= 7 and ((raw[0] << 8) | raw[1]) % 31 == 0
+def _inflate(raw: bytes, wbits: int) -> tuple[bytes, bool]:
+    """Decompress one deflate stream, never past MAX_POLICY_BYTES + 1 bytes of output; True when the stream ended
+    cleanly (for zlib, with a matching checksum) or the output already passes the cap."""
+    decoder = zlib.decompressobj(wbits)
+    try:
+        out = decoder.decompress(raw, MAX_POLICY_BYTES + 1)
+    except zlib.error:
+        return b"", False
+    return out, decoder.eof or len(out) > MAX_POLICY_BYTES
 
 
 def _decode_body(raw: bytes, encoding: Any) -> bytes:
     """Decode a gzip or deflate body after the bounded raw read, never past MAX_POLICY_BYTES + 1 bytes of output."""
     name = str(encoding or "").strip().lower()
-    if name in {"gzip", "x-gzip"}:
-        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    elif name == "deflate":
-        decoder = zlib.decompressobj(zlib.MAX_WBITS if _zlib_wrapped(raw) else -zlib.MAX_WBITS)
-    else:
+    if name == "deflate":
+        # HTTP deflate is meant to be zlib-wrapped (RFC 9110 section 8.4.1.2) but servers also send raw deflate, and a
+        # raw stream can begin with bytes that pass the zlib header check (a stored block starting 08 5b). Try the
+        # wrapper first, any window size, and fall back to raw deflate when it does not decode to a whole stream.
+        wrapped, ok = _inflate(raw, zlib.MAX_WBITS)
+        if ok:
+            return wrapped
+        bare, ok = _inflate(raw, -zlib.MAX_WBITS)
+        return bare if ok or not wrapped else wrapped
+    if name not in {"gzip", "x-gzip"}:
         return raw
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
     out = b""
     try:
         while True:
             out += decoder.decompress(raw, MAX_POLICY_BYTES + 1 - len(out))
             # gzip allows several members back to back (RFC 1952 section 2.2); read each, never past the cap
-            if len(out) > MAX_POLICY_BYTES or not decoder.eof or not decoder.unused_data or name == "deflate":
+            if len(out) > MAX_POLICY_BYTES or not decoder.eof or not decoder.unused_data:
                 return out
             raw = decoder.unused_data
             decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
