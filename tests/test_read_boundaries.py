@@ -111,7 +111,7 @@ _UNRESOLVED_RUNNER_INPUTS: dict[tuple[str, str], str] = {
     ("src/auditex/auth_runtime.py", "exchange_module_status"): _RUNTIME_ARGV,
     ("src/auditex/bootstrap.py", "_run_json_command"): _CALLER_ARGV,
     ("src/auditex/bootstrap.py", "run_setup"): _CALLER_ARGV,
-    ("src/auditex/command_runner.py", "_run_process"): _CALLER_ARGV,
+    ("src/auditex/command_runner.py", "_start_process"): _CALLER_ARGV,
     ("src/azure_tenant_audit/adapters/m365dsc.py", "M365DSCAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "PowerShellGraphAdapter.run"): _ADAPTER_ENTRY,
     ("src/azure_tenant_audit/adapters/powershell_graph.py", "_run_bounded"): _ADAPTER_ENTRY,

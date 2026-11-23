@@ -115,6 +115,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("auditex.explorer:write_explorer", "private", "operator's local interactive run explorer"),
     SinkEntry("auditex.google_workspace.run:run_google_*", "private", "operator terminal output of live Google runs"),
     SinkEntry("auditex.guided:*", "private", "operator terminal prompts and the operator's own setup file"),
+    SinkEntry("auditex.command_runner:install_signal_stop.handle", "private", "writes the received signal number (one byte) to the stop thread's self-pipe; no run data"),
     SinkEntry("auditex.mcp_server:main", "private", "server start-up text on the operator's terminal; tool responses are inventoried in MCP_TOOL_INVENTORY"),
     SinkEntry("auditex.rule_assessment:assess_run", "private", "model assessment file; projected view is redacted by the projection input gate"),
     SinkEntry("auditex.rule_assessment:assess_scubagear_export", "private", "model assessment file for an imported export; as assess_run"),
