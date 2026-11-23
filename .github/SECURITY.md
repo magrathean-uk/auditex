@@ -19,8 +19,8 @@ or deployment.
 
 | Version | Security fixes |
 | --- | --- |
-| 1.8.x | Yes |
-| Earlier than 1.8.0 | No; upgrade to the latest 1.8.x release |
+| 2.0.x | Yes |
+| Earlier than 2.0.0 | No; upgrade to the latest 2.0.x release |
 
 Only the latest minor release is supported.
 
