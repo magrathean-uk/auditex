@@ -251,6 +251,7 @@ def _filter_changed_rows(
     after_index: dict[RowKey, dict[str, Any]],
     *,
     classic: bool,
+    names: dict[RowKey, str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     changed: list[dict[str, Any]] = []
     suppressed: list[dict[str, Any]] = []
@@ -263,7 +264,7 @@ def _filter_changed_rows(
         if not classic and changed_paths and all(_is_volatile_path(path, kind=kind) for path in changed_paths):
             suppressed.append(
                 {
-                    "key": key[1],
+                    "key": names[key],
                     "before": before,
                     "after": after,
                     "reason": "volatile_fields_only",
@@ -272,7 +273,7 @@ def _filter_changed_rows(
                 }
             )
             continue
-        changed.append({"key": key[1], "before": before, "after": after})
+        changed.append({"key": names[key], "before": before, "after": after})
     return changed, suppressed
 
 
@@ -345,6 +346,31 @@ def _pair_duplicates(
     pairs.extend(zip(unpaired_before[:leftover], free_after[:leftover], strict=True))
     pairs.sort()
     return pairs, unpaired_before[leftover:], free_after[leftover:]
+
+
+def _row_key_names(keys: set[RowKey]) -> tuple[dict[RowKey, str], list[str]]:
+    """The readable key each row is reported under, unique within the kind, and the texts two kinds of key shared.
+
+    An identity key keeps its text. A positional key whose text an identity key also reads (an anonymous row at
+    position 0 and a row whose id is 0 both read ``kind:0``) is reported as ``kind:0#2`` (the next free suffix), so
+    a consumer indexing the changed rows by key keeps both.
+    """
+    texts = {key[1] for key in keys}
+    identity_texts = {text for positional, text in keys if not positional}
+    names: dict[RowKey, str] = {}
+    shared: list[str] = []
+    for key in sorted(keys):
+        positional, text = key
+        if not positional or text not in identity_texts:
+            names[key] = text
+            continue
+        shared.append(text)
+        suffix = 2
+        while f"{text}#{suffix}" in texts:
+            suffix += 1
+        names[key] = f"{text}#{suffix}"
+        texts.add(names[key])
+    return names, shared
 
 
 def _suffixed_keys(key: RowKey, count: int, taken: set[RowKey]) -> list[RowKey]:
@@ -554,7 +580,11 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path, *, classic: bool 
         added_keys = sorted(set(after_index) - set(before_index))
         removed_keys = sorted(set(before_index) - set(after_index))
         shared_keys = sorted(set(before_index) & set(after_index))
-        changed, suppressed = _filter_changed_rows(kind, shared_keys, before_index, after_index, classic=classic)
+        names, shared_texts = _row_key_names(set(before_index) | set(after_index))
+        duplicate_keys = [*duplicate_keys, *(text for text in shared_texts if text not in duplicate_keys)]
+        changed, suppressed = _filter_changed_rows(
+            kind, shared_keys, before_index, after_index, classic=classic, names=names
+        )
         changes[kind] = {
             "added": [after_index[key] for key in added_keys],
             "removed": [before_index[key] for key in removed_keys],

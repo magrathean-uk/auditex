@@ -636,3 +636,16 @@ def test_compare_drift_summary_classifies_legacy_findings_as_the_finding_delta_d
     assert drift["state_transition_count"] == 1
     assert drift["reactivated_accepted_risk_count"] == 1
     assert drift["notification_recommended"] is True
+
+
+def test_diff_gives_an_anonymous_row_and_a_row_whose_id_matches_its_position_different_keys(tmp_path: Path) -> None:
+    before = [{"v": "anonymous"}, {"id": 0, "v": "explicit"}]
+    after = [{"v": "anonymous changed"}, {"id": 0, "v": "explicit changed"}]
+
+    things = _things_pair(tmp_path, before, after)["changes"]["things"]
+
+    keys = [row["key"] for row in things["changed"]]
+    assert len(keys) == 2 and len(set(keys)) == 2
+    by_key = {row["key"]: row["after"]["v"] for row in things["changed"]}
+    assert by_key["things:0"] == "explicit changed"
+    assert things["duplicate_keys"] == ["things:0"]
