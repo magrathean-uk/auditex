@@ -4,7 +4,7 @@ This guide installs Auditex from PyPI with pipx, step by step, on Linux, macOS o
 written for an IT administrator: you do not need to know Python. Every command is shown; type it into a terminal
 and press Enter. Lines that start with `#` in the boxes below are comments, not commands.
 
-The short version, for a computer that already has Python 3.11 or newer and pipx:
+The short version, for a computer that already has Python 3.11, 3.12, 3.13 or 3.14 and pipx:
 
 ```bash
 pipx install auditex
@@ -52,7 +52,7 @@ First check whether you already have a recent Python:
 python3 --version
 ```
 
-You should see `Python 3.11` or newer (for example `Python 3.12.3`). If you see an older version or
+You should see `Python 3.11`, `3.12`, `3.13` or `3.14` (for example `Python 3.12.3`). If you see an older version or
 `command not found`, the commands below for your system install a suitable Python together with pipx.
 
 ### macOS
