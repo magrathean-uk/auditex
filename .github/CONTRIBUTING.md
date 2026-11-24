@@ -4,7 +4,7 @@ Start with a focused change and describe the operator problem it solves. For a b
 
 ## Development environment
 
-Use Python 3.11 or newer from a source checkout:
+Use Python 3.11, 3.12, 3.13 or 3.14 from a source checkout:
 
 ```bash
 python3 -m venv .venv

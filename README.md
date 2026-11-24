@@ -31,7 +31,7 @@ The public audit surface does not write to production tenants. It also does not 
 - Mapping of findings to CIS Microsoft 365 Foundations v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, the Microsoft cloud security benchmark, and the NCSC Cyber Essentials requirements (v3.3). A mapping shows which control a finding relates to; it is not an assessment against that framework. For Cyber Essentials, device-side requirements show as manual or assessor-tested, the ones Intune and Exchange Online evidence in part (updates, anti-malware) show as partial, and tenant-backed ones never read pass. See [framework mappings](https://github.com/magrathean-uk/auditex/blob/main/docs/reference/framework-mappings.md).
 - `auditex demo`, a guided walkthrough on a fictional company, and `auditex report explorer`, a self-contained interactive HTML view of any run.
 
-The package is Python 3.11 or newer. Its required runtime dependencies are `requests` and `msal`. Google Workspace and MCP support are optional extras.
+The package needs Python 3.11, 3.12, 3.13 or 3.14. Its required runtime dependencies are `requests`, `msal` and `cryptography`. Google Workspace, MCP support and the local answer are optional extras.
 
 ## Evidence, not a certificate
 
@@ -41,7 +41,7 @@ Run Auditex only against a tenant you own or have the owner's written authorisat
 
 ## Install
 
-Auditex runs on Linux, macOS and Windows through WSL2, with Python 3.11 or newer. Native Windows is not supported;
+Auditex runs on Linux, macOS and Windows through WSL2, with Python 3.11, 3.12, 3.13 or 3.14. Native Windows is not supported;
 use WSL2. Install it from PyPI with [pipx](https://pipx.pypa.io/):
 
 ```bash
