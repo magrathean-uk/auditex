@@ -97,6 +97,7 @@ These dependencies are declared in `pyproject.toml`. They are not vendored in th
 | --- | --- | --- | --- |
 | `requests` | HTTP transport for Microsoft Graph and related endpoints | Apache-2.0 | Keep license notice when redistributing the package or bundled wheels. |
 | `msal` | Microsoft identity token acquisition | MIT | Keep copyright and MIT notice when redistributing the package or bundled wheels. |
+| `cryptography` | Loads the reader app's certificate and key for Microsoft 365 sign-in | Apache-2.0 OR BSD-3-Clause | Keep the licence notice of the chosen licence when redistributing the package or bundled wheels. |
 | `mcp` | Optional MCP server integration | MIT | Keep copyright and MIT notice when redistributing the optional dependency or bundled wheels. |
 | `google-auth` | Optional `google` group: Google Workspace authentication | Apache-2.0 | Keep license notice when redistributing the optional dependency or bundled wheels. |
 | `google-auth-oauthlib` | Optional `google` group: OAuth flow for Google Workspace | Apache-2.0 | Keep license notice when redistributing the optional dependency or bundled wheels. |
@@ -105,7 +106,7 @@ These dependencies are declared in `pyproject.toml`. They are not vendored in th
 | `jsonschema` | Optional `test` group: validates the SARIF and OSCAL exports against the official schemas in tests | MIT | Development and test use only; not needed to run Auditex. |
 
 The licences recorded are those stated in PyPI metadata for the minimum declared
-versions: `requests` 2.34.2, `msal` 1.39.0, `mcp` 1.30.0, `google-auth` 2.58.1,
+versions: `requests` 2.34.2, `msal` 1.39.0, `cryptography` 42.0.0, `mcp` 1.30.0, `google-auth` 2.58.1,
 `google-auth-oauthlib` 1.4.1 and `google-api-python-client` 2.200.0. Check the exact
 versions actually distributed.
 
