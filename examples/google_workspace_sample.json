@@ -269,7 +269,7 @@
           "name": "policies/two-step-enforcement-root",
           "customer": "customers/C123",
           "policyQuery": {
-            "query": "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root'))",
+            "query": "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root-ou'))",
             "orgUnit": "orgUnits/root-ou",
             "sortOrder": 1
           },
@@ -299,7 +299,7 @@
           "name": "policies/two-step-enrollment-root",
           "customer": "customers/C123",
           "policyQuery": {
-            "query": "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root'))",
+            "query": "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root-ou'))",
             "orgUnit": "orgUnits/root-ou",
             "sortOrder": 1
           },

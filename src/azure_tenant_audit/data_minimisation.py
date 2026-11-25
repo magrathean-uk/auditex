@@ -36,6 +36,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .collection_gaps import REASON_UNKNOWN, TRUNCATION_REASONS, section_was_cut
+
 VACATION_TEXT_FIELDS = ("responseSubject", "responseBodyPlainText", "responseBodyHtml")
 SEND_AS_TEXT_FIELDS = ("signature",)
 AUTO_REPLY_TEXT_FIELDS = ("internalReplyMessage", "externalReplyMessage")
@@ -166,9 +168,22 @@ def _scrub_addresses(value: Any) -> Any:
         return _address_list_summary(value, keep_siblings=True)
     result: dict[str, Any] = {}
     for index, (key, item) in enumerate(value.items()):
-        name = f"{REDACTED_ADDRESS}:{index}" if isinstance(key, str) and _ADDRESS.search(key) else key
-        result[name] = _scrub_addresses(item)
+        result[_scrub_key(key, index)] = _scrub_addresses(item)
     return result
+
+
+def _scrub_key(key: Any, index: int) -> Any:
+    """A mapping key that holds an address or a local path, replaced by a constant numbered by its position."""
+    if not isinstance(key, str):
+        return key
+    if _ADDRESS.search(key):
+        return f"{REDACTED_ADDRESS}:{index}"
+    return f"{REDACTED_PATH}:{index}" if _LOCAL_PATH.search(key) else key
+
+
+def _clean_list_id(value: Any) -> bool:
+    """A list id that can be kept as it is: a non-blank string with no address or local path in it."""
+    return isinstance(value, str) and bool(value.strip()) and _scrub_addresses(value) == value
 
 
 def _address_entries(container: Any) -> list[str] | None:
@@ -200,15 +215,15 @@ def _address_list_summary(entry: dict[str, Any], *, keep_siblings: bool = False)
     ``gmail.email_address_lists``; the list's name is dropped either way.
     """
     list_id = entry.get("id")
-    id_readable = isinstance(list_id, str) and bool(list_id.strip()) and not _ADDRESS.search(list_id)
-    summary: dict[str, Any] = {"id": _scrub_addresses(list_id) if isinstance(list_id, (str, int)) else None}
+    id_readable = _clean_list_id(list_id)
+    summary: dict[str, Any] = {"id": list_id if id_readable else None}
     if keep_siblings:
         for index, (key, item) in enumerate(entry.items()):
             if key not in _SUMMARY_FIELDS:
-                name = f"{REDACTED_ADDRESS}:{index}" if isinstance(key, str) and _ADDRESS.search(key) else key
-                summary[name] = _scrub_addresses(item)
-    elif not id_readable:
-        # A list of ``gmail.email_address_lists`` is referenced by its id: without one its counts mean nothing.
+                summary[_scrub_key(key, index)] = _scrub_addresses(item)
+    if not id_readable and (not keep_siblings or "id" in entry):
+        # A list is referenced by its id: with no id, or one that had to be redacted (which could no longer tell two
+        # lists apart), its counts mean nothing, so they are unknown.
         summary.update(id=None, entry_count=None, domain_entry_count=None)
         return summary
     if "entry_count" in entry and not any(key in entry for key in POLICY_ADDRESS_LIST_KEYS):
@@ -257,6 +272,44 @@ def minimise_policy_value(setting_type: Any, value: Any) -> Any:
     if setting_type in POLICY_DESCRIBED_LIST_TYPES:
         value = _drop_descriptions(value)
     return _scrub_addresses(value)
+
+
+# What a Google policies section may carry besides its rows: the outcome markers of the read, with fixed values only.
+POLICY_ERROR_CLASSES = (
+    "client_error",
+    "insufficient_permissions",
+    "unauthenticated",
+    "resource_not_found",
+    "rate_limited",
+    "google_transient",
+    "malformed_response",
+)
+
+
+def minimise_policy_section(name: str, section: dict[str, Any]) -> dict[str, Any]:
+    """One Google policies section (``policySettings`` or ``twoStepVerificationPolicies``) with fixed markers only.
+
+    The rows are minimised. An error marker keeps its class when it is a known one (else ``client_error``) and gets a
+    fixed text, so a sample or an earlier writer cannot carry a customer id, a path or other free text through it. A
+    cut marker keeps a known reason (else ``unknown``) and whole counts. Any other key is dropped.
+    """
+    result: dict[str, Any] = {}
+    if "value" in section:
+        result["value"] = minimise_policy_settings(section["value"])
+    if section.get("error") or section.get("error_class"):
+        error_class = section.get("error_class")
+        error_class = error_class if error_class in POLICY_ERROR_CLASSES else "client_error"
+        result["error_class"] = error_class
+        result["error"] = f"{name}: the Cloud Identity policies read failed ({error_class})."
+    if section_was_cut(section):
+        result["collection_truncated"] = True
+        reason = section.get("truncation_reason")
+        result["truncation_reason"] = reason if reason in TRUNCATION_REASONS else REASON_UNKNOWN
+    for key in ("item_count", "result_limit"):
+        count = section.get(key)
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            result[key] = count
+    return result
 
 
 def _minimise_policy(policy: dict[str, Any]) -> dict[str, Any]:
@@ -348,9 +401,10 @@ def minimise_user_text(value: Any) -> Any:
         # no address or local path is kept.
         (result,) = minimise_policy_settings([result])
     for key in POLICY_SECTION_KEYS:
-        if isinstance(result.get(key), dict) and "value" in result[key]:
-            # The Google policies payloads, replayed or written: every row, even one that cannot be read, minimised.
-            result[key] = {**result[key], "value": minimise_policy_settings(result[key]["value"])}
+        if isinstance(result.get(key), dict) and ("value" in result[key] or result[key].get("error") or result[key].get("error_class")):
+            # The Google policies payloads, replayed or written: every row, even one that cannot be read, minimised,
+            # and only fixed values in the read's outcome markers.
+            result[key] = minimise_policy_section(key, result[key])
     if isinstance(result.get("criteria"), dict) and isinstance(result.get("action"), dict):
         # A Gmail filter: its search terms are the owner's; the forward target and labels are what is judged.
         result["criteria"] = strip_text_fields(result["criteria"], GMAIL_FILTER_TEXT_FIELDS, keep_presence=False)

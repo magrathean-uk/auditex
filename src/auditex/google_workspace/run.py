@@ -66,6 +66,7 @@ from .collectors import (
     SUBJECT_SCOPE_USER,
     SUBJECT_SCOPED_COLLECTORS,
     policy_replay_rows,
+    replay_policy_payload,
 )
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
@@ -714,7 +715,7 @@ def run_google_offline(
     # ``null``, a list or an empty object under a collector's name is a collector that delivered nothing, not one that is
     # absent from the sample: it stays in the run, with every section it should have carried recorded as absent.
     sample_collectors = {
-        str(key): value for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS
+        str(key): replay_policy_payload(str(key), value) for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS
     }
     collector_payloads = {name: value for name, value in sample_collectors.items() if isinstance(value, dict)}
     result_rows: list[dict[str, Any]] = []
