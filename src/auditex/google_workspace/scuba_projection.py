@@ -37,6 +37,7 @@ from typing import Any
 
 from azure_tenant_audit.collection_gaps import section_was_cut
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.data_minimisation import policy_unit_id
 from azure_tenant_audit.guarded_io import guarded_operation
 from azure_tenant_audit.output_redaction import PSEUDONYM_STRATEGY, pseudonym
 
@@ -48,6 +49,7 @@ from ..scuba_projection import (
     Bundle,
     Unavailable,
     _collector_error,
+    _json,
     _oversize,
     _projection_key,
     _require,
@@ -61,8 +63,6 @@ SECTIONS = ("gws_tenant", "gws_policies", "gws_setting_events", "gws_dns", "gws_
 # bounds are ``project_run``'s.
 DEFAULT_MAX_ITEMS = 300_000
 DEFAULT_MAX_CHARS = 128 * 1024 * 1024
-# A unit id as ``value_rules.gws.reduce`` accepts it: printable ASCII without space or "/".
-_ID = re.compile(r"[\x21-\x2e\x30-\x7e]+")
 _DIRECTORY = "google_directory"
 
 
@@ -87,7 +87,9 @@ def _dkim_selectors() -> tuple[str, ...]:
 
 
 def _bare(value: Any) -> bool:
-    return isinstance(value, str) and _ID.fullmatch(value) is not None
+    """An OU or group id as the normaliser admits one (``policy_unit_id``: never a customer-id-shaped string); a
+    subset of the unit grammar ``value_rules.gws.reduce`` accepts."""
+    return policy_unit_id(value)
 
 
 def _text(value: Any) -> str | None:
@@ -101,10 +103,11 @@ def _strings(value: Any) -> list[str] | None:
 def _as_of(manifest: dict[str, Any]) -> str | None:
     """The run's collection end: ``created_utc`` plus ``duration_seconds``, in UTC; None when either is unusable."""
     created, duration = manifest.get("created_utc"), manifest.get("duration_seconds")
-    if (not isinstance(created, str) or isinstance(duration, bool) or not isinstance(duration, (int, float))
-            or not math.isfinite(duration) or duration < 0):
+    if not isinstance(created, str) or isinstance(duration, bool) or not isinstance(duration, (int, float)):
         return None
     try:
+        if not math.isfinite(duration) or duration < 0:
+            return None
         start = datetime.fromisoformat(created)
         if start.tzinfo is None:
             return None
@@ -163,7 +166,9 @@ class _Context:
 
     def records(self, name: str, *, required: bool = True) -> list[dict[str, Any]] | None:
         """A normalised section's records; None when an optional one is absent. A wrong envelope withholds."""
-        data = self.read(f"normalized/{name}.json") if required else self.optional(f"normalized/{name}.json")
+        relative = f"normalized/{name}.json"
+        fresh = relative not in self.sources
+        data = self.read(relative) if required else self.optional(relative)
         if data is None:
             return None
         _require(isinstance(data, dict), kind="invalid_type")
@@ -173,7 +178,7 @@ class _Context:
         records = data.get("records")
         _require(isinstance(records, list), "records", "invalid_type")
         _require(all(isinstance(row, dict) for row in records), "records", "invalid_type")
-        self.rows += len(records)
+        self.rows += len(records) if fresh else 0
         if self.rows > self.bundle.scan_max_rows:
             raise _scan_bound("scan_max_rows")
         return records
@@ -183,8 +188,13 @@ class _Context:
         return "user:" + pseudonym(self.key, "user:" + user_id)
 
     def group(self, group_id: str) -> str:
-        self.groups.add(group_id)
+        self.groups.add("group:" + group_id)
         return "group:" + pseudonym(self.key, "group:" + group_id)
+
+    def group_address(self, address: str) -> str:
+        """A group the Directory list does not hold, known only by its address (events of a deleted group)."""
+        self.groups.add("group-email:" + address.lower())
+        return "group:" + pseudonym(self.key, "group-email:" + address.lower())
 
     # --- shared Directory evidence ---------------------------------------------------------------------------------
 
@@ -244,15 +254,12 @@ class _Context:
         return self._index
 
     def ou_by_name(self, name: Any) -> str | None:
-        """An event's ``ORG_UNIT_NAME`` as its unit. A name no unit of a complete list holds is a deleted or renamed
-        unit, which ScubaGoggles drops (``FilterEventsOU``, SG:scubagoggles/rego/Utils.rego:423-438): it becomes a
-        unit key outside the topology, which the events kind skips. An ambiguous name or an incomplete list: None."""
+        """An event's ``ORG_UNIT_NAME`` as its unit; None (an event the kind treats as ambiguous) for a name two units
+        share, an incomplete unit list, or a name no current unit holds. ScubaGoggles drops the last as a deleted unit
+        (``FilterEventsOU``, SG:scubagoggles/rego/Utils.rego:423-438), but a renamed unit's events carry its old name
+        too, so the name is unknown, not proof that the unit is gone."""
         _, by_name, ok = self.ou_index()
-        if not isinstance(name, str) or not name or not ok:
-            return None
-        if name in by_name:
-            return by_name[name]
-        return "ou:~deleted~" + pseudonym(self.key, "ou-name:" + name)
+        return by_name.get(name) if isinstance(name, str) and name and ok else None
 
     def group_index(self) -> tuple[dict[str, str], bool]:
         """Group email (lower case) or id to group id, and whether the group memberships were read in full."""
@@ -350,17 +357,15 @@ def _events(ctx: _Context) -> dict[str, Any]:
             # A group event (``GROUP_EMAIL`` set) is the group's, whatever OU it names (SG:scubagoggles/rego/Utils.rego:276).
             group_id = _group_id(groups, group)
             unit = ctx.group(group_id) if group_id is not None else (
-                "group:" + pseudonym(ctx.key, "group-email:" + group.lower()) if isinstance(group, str) and group
-                else None)
+                ctx.group_address(group) if isinstance(group, str) and group else None)
         else:
             unit = ctx.ou_by_name(org_unit) if org_unit is not None else None
         events.append({"time": _text(row.get("time")), "event": name, "setting": _text(row.get("setting")),
                        "new_value": _text(row.get("new_value")), "unit": unit,
                        "application": _text(row.get("application"))})
-    # The read sets no start time, so its window opens at the start of the log; it closes at the collection end.
-    start, end = state.get("window_start"), state.get("window_end")
-    return {"complete": complete, "window_start": start if isinstance(start, str) else "1970-01-01T00:00:00Z",
-            "window_end": end if isinstance(end, str) else ctx.as_of, "events": events}
+    # The log window is the read's own record; without one it is null and the events kind concludes nothing.
+    return {"complete": complete, "window_start": _text(state.get("window_start")),
+            "window_end": _text(state.get("window_end")), "events": events}
 
 
 def _dns(ctx: _Context) -> dict[str, Any]:
@@ -424,17 +429,20 @@ def _roles(raw: dict[str, Any] | None) -> dict[str, bool | None] | None:
         role_id = role.get("roleId") if isinstance(role, dict) else None
         if not isinstance(role_id, (str, int)) or isinstance(role_id, bool) or str(role_id) == "":
             return None
-        super_admin, name, privileges = (role.get("isSuperAdminRole", False), role.get("roleName"),
-                                         role.get("rolePrivileges", []))
+        # ``isSuperAdminRole`` absent is false, as ScubaGoggles reads it; the privilege list must be read unless the
+        # flag or the name already makes the role privileged.
+        super_admin, name, privileges = role.get("isSuperAdminRole", False), role.get("roleName"), role.get(
+            "rolePrivileges")
         verdict: bool | None
-        if (type(super_admin) is not bool or name is not None and not isinstance(name, str)
-                or not isinstance(privileges, list)
-                or any(not isinstance(item, dict) or not isinstance(item.get("privilegeName"), str)
-                       for item in privileges)):
+        if type(super_admin) is not bool or name is not None and not isinstance(name, str):
+            verdict = None
+        elif super_admin or isinstance(name, str) and name.upper() in _privileged_role_names():
+            verdict = True
+        elif not isinstance(privileges, list) or any(
+                not isinstance(item, dict) or not isinstance(item.get("privilegeName"), str) for item in privileges):
             verdict = None
         else:
-            verdict = (super_admin or isinstance(name, str) and name.upper() in _privileged_role_names()
-                       or any(item["privilegeName"] in _privileged_privileges() for item in privileges))
+            verdict = any(item["privilegeName"] in _privileged_privileges() for item in privileges)
         key = str(role_id)
         roles[key] = verdict if key not in roles or roles[key] == verdict else None
     return roles
@@ -458,6 +466,10 @@ def _admins(ctx: _Context) -> dict[str, Any]:
             complete = False  # an assignment to a role that cannot be read may make its holder privileged
         elif verdict:
             assigned.add(assignee)
+    # ScubaGoggles counts user assignees only (provider.py:804-809). A privileged role held by anything else (a group)
+    # makes accounts privileged that no user row shows, so the privileged list is not the whole.
+    if assigned - {row.get("id") for row in users}:
+        complete = False
     by_path, _, placed = ctx.ou_index()
     if not placed:
         by_path = {}
@@ -466,7 +478,8 @@ def _admins(ctx: _Context) -> dict[str, Any]:
     for row in ctx.records("google_group_members", required=False) or []:
         group, email = row.get("group_email"), row.get("email")
         group_id = _group_id(groups, group)
-        if group_id is None or not isinstance(email, str) or not email:
+        # A nested group or an all-users (CUSTOMER) member makes members no user row lists: not resolved here.
+        if group_id is None or not isinstance(email, str) or not email or row.get("type") != "USER":
             memberships_complete = False
             continue
         member_of.setdefault(email.lower(), set()).add(ctx.group(group_id))
@@ -571,6 +584,10 @@ def project_gws_run(run_dir: str | Path, *,
             if failure is not None or ctx is None:
                 raise failure or Unavailable()
             value = _mask(_BUILDERS[section](ctx), counts) if section != "gws_dns" else _BUILDERS[section](ctx)
+            try:
+                _json(value).encode()  # a lone surrogate or a non-finite number is not interchange data
+            except (ValueError, UnicodeError, TypeError, RecursionError):
+                raise Unavailable() from None
             if _oversize(value, max_items, max_chars):
                 raise Unavailable("oversize")
         except (Unavailable, ValueError, TypeError, KeyError, OverflowError) as exc:

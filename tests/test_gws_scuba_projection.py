@@ -16,7 +16,6 @@ KEY = bytes(range(32))
 # HMAC-SHA256 under KEY, first 16 hex digits, worked out independently of the code under test.
 U100, U200, U300, U500 = "user:a3da8ecfe18ba66b", "user:3cd262199099fc36", "user:c53758839d880a20", "user:95072140579b78b2"
 G1, G2 = "group:1f28b0e409ce3330", "group:3b8c6f8c6686cfef"
-GONE = "ou:~deleted~21cdd3c0abefedfc"
 G9_EMAIL = "group:f89b76e9cadfed92"
 CUSTOMER = "C0synth9x"
 DMARC = "v=DMARC1; p=reject; rua=mailto:reports@dmarc.cyber.dhs.gov"
@@ -97,8 +96,8 @@ def bundle(tmp_path: Path) -> Path:
     normalised(root, "google_groups", [{"kind": "google_group", "id": "g1grp01", "email": "g1@example.com"},
                                        {"kind": "google_group", "id": "g2grp02", "email": "g2@example.org"}])
     normalised(root, "google_group_members", [
-        {"kind": "google_group_member", "group_email": "g1@example.com", "email": "Ada.Admin@example.com"},
-        {"kind": "google_group_member", "group_email": "G2@example.org", "email": "ada.admin@example.com"}])
+        {"kind": "google_group_member", "group_email": "g1@example.com", "email": "Ada.Admin@example.com", "type": "USER"},
+        {"kind": "google_group_member", "group_email": "G2@example.org", "email": "ada.admin@example.com", "type": "USER"}])
     normalised(root, "google_org_units", [
         {"kind": "google_org_unit", "id": "ou0a1", "parent_id": "root01", "is_root": False},
         {"kind": "google_org_unit", "id": "root01", "parent_id": None, "is_root": True},
@@ -121,7 +120,7 @@ def bundle(tmp_path: Path) -> Path:
          "setting": "SettingB", "new_value": "false", "org_unit_name": "Sales", "group_email": "G1@example.com"},
         {"kind": "google_setting_event", "time": "2026-10-05T10:00:00Z", "event": "CHANGE_APPLICATION_SETTING",
          "setting": "SettingB", "new_value": "1", "group_email": "g9@example.com"},
-        state("google_setting_events", 5)])
+        state("google_setting_events", 5, window_start="2026-05-25T00:00:00Z", window_end="2026-11-20T10:01:30Z")])
     normalised(root, "google_sso_assignments", [
         {"kind": "google_sso_assignment", "target_org_unit": "orgUnits/ou0a1", "sso_mode": "SSO_OFF"},
         {"kind": "google_sso_assignment", "target_group": "groups/g1grp01", "sso_mode": "SAML_SSO"},
@@ -150,14 +149,14 @@ EXPECTED = {
          "value": {"enableAutoForwarding": False}},
         {"unit": f"ou:root01/{G1}", "unit_kind": "group", "section": "drive_and_docs_external_sharing", "sort_order": 2.5,
          "value": {"externalSharingMode": "DISALLOWED", "note": "owner ***@example.com"}}]},
-    "gws_setting_events": {"complete": True, "window_start": "1970-01-01T00:00:00Z",
-                           "window_end": "2026-11-20T10:01:30.500000Z", "events": [
+    "gws_setting_events": {"complete": True, "window_start": "2026-05-25T00:00:00Z",
+                           "window_end": "2026-11-20T10:01:30Z", "events": [
         {"time": "2026-10-01T10:00:00.123456789Z", "event": "CHANGE_APPLICATION_SETTING", "setting": "SettingA",
          "new_value": "true", "unit": "ou:ou0a1", "application": "Gmail"},
         {"time": "2026-10-02T10:00:00Z", "event": "TOGGLE_CAA_ENABLEMENT", "setting": None, "new_value": "ENABLED",
          "unit": "ou:root01", "application": None},
         {"time": "2026-10-03T10:00:00Z", "event": "DELETE_APPLICATION_SETTING", "setting": "SettingA",
-         "new_value": None, "unit": GONE, "application": None},
+         "new_value": None, "unit": None, "application": None},
         {"time": "2026-10-04T10:00:00Z", "event": "CHANGE_APPLICATION_SETTING", "setting": "SettingB",
          "new_value": "false", "unit": G1, "application": None},
         {"time": "2026-10-05T10:00:00Z", "event": "CHANGE_APPLICATION_SETTING", "setting": "SettingB",
@@ -189,7 +188,7 @@ def test_each_section_from_a_synthetic_bundle(bundle: Path) -> None:
         "raw/google_directory.json", "coverage.json", "normalized/google_groups.json",
         "normalized/google_group_members.json"]
     assert projection.report["redaction"] == {"enabled": True, "strategy": "keyed-hmac-sha256-v1", "user_ids": 4,
-                                              "group_ids": 2, "email_addresses": 1}
+                                              "group_ids": 3, "email_addresses": 1}
     assert projection.report["schema_version"] == "2026-11-25"
 
 
@@ -323,13 +322,12 @@ def test_no_root_withholds_the_tenant(bundle: Path) -> None:
 
 
 @pytest.mark.parametrize("manifest", [{"created_utc": None}, {"duration_seconds": -1}, {"duration_seconds": True},
+                                      {"duration_seconds": 10 ** 400}, {"duration_seconds": 10 ** 12},
                                       {"created_utc": "2026-11-20T10:00:00"}, {"created_utc": "soon"}])
 def test_unusable_collection_end_gives_no_as_of(bundle: Path, manifest) -> None:
     data = json.loads((bundle / "run-manifest.json").read_text())
     write(bundle, "run-manifest.json", {**data, **manifest})
-    projection = project_gws_run(bundle)
-    assert projection["gws_tenant"]["as_of"] is None
-    assert projection["gws_setting_events"]["window_end"] is None
+    assert project_gws_run(bundle)["gws_tenant"]["as_of"] is None
 
 
 @pytest.mark.parametrize("payload", [[], {"records": "x"}, {"records": [1]}, {"records": [], "error": "denied"},
@@ -429,7 +427,7 @@ def test_a_shared_unit_name_is_ambiguous(bundle: Path) -> None:
     raw["orgUnits"]["value"].append({"orgUnitId": "id:ou0b2", "orgUnitPath": "/Region/Sales", "name": "Sales"})
     write(bundle, "raw/google_directory.json", raw)
     events = project_gws_run(bundle)["gws_setting_events"]["events"]
-    assert [event["unit"] for event in events] == [None, "ou:root01", GONE, G1, G9_EMAIL]
+    assert [event["unit"] for event in events] == [None, "ou:root01", None, G1, G9_EMAIL]
 
 
 @pytest.mark.parametrize("change", [{"event": None}, {"event": ""}, {"event": 4}])
@@ -481,3 +479,62 @@ def test_dns_fields_of_the_wrong_type_pass_as_null(bundle: Path, change, field, 
     rows[0].update(change)
     normalised(bundle, "google_dns_posture", rows)
     assert project_gws_run(bundle)["gws_dns"]["domains"][0][field] == expected
+
+
+def test_event_window_comes_only_from_the_read(bundle: Path) -> None:
+    rows = json.loads((bundle / "normalized/google_setting_events.json").read_text())["records"]
+    rows[-1] = state("google_setting_events", 5, window_start=7)
+    normalised(bundle, "google_setting_events", rows)
+    section = project_gws_run(bundle)["gws_setting_events"]
+    assert (section["window_start"], section["window_end"]) == (None, None)
+
+
+def test_group_member_rows_count_once_against_the_row_bound(bundle: Path) -> None:
+    # gws_admins reads 5 users, 4 assignments, 2 groups and 2 members: 13 rows, though members are read twice.
+    assert project_gws_run(bundle, scan_max_rows=13).report["sections"]["gws_admins"]["reason"] is None
+    assert project_gws_run(bundle, scan_max_rows=12).report["sections"]["gws_admins"]["reason"] == "oversize"
+
+
+@pytest.mark.parametrize("member_type", ["GROUP", "CUSTOMER", None])
+def test_a_member_that_is_not_a_user_leaves_memberships_unresolved(bundle: Path, member_type) -> None:
+    rows = json.loads((bundle / "normalized/google_group_members.json").read_text())["records"]
+    rows[1]["type"] = member_type
+    normalised(bundle, "google_group_members", rows)
+    assert project_gws_run(bundle)["gws_admins"]["memberships_complete"] is False
+
+
+def test_a_privileged_role_held_by_a_group_makes_admins_incomplete(bundle: Path) -> None:
+    rows = json.loads((bundle / "normalized/google_role_assignments.json").read_text())["records"]
+    rows[3]["assigned_to"] = "g1grp01"
+    normalised(bundle, "google_role_assignments", rows)
+    admins = project_gws_run(bundle)["gws_admins"]
+    assert admins["complete"] is False and [entry["user"] for entry in admins["privileged"]] == [U100, U200, U300]
+
+
+@pytest.mark.parametrize("role,privileged", [({"roleId": 5}, None), ({"roleId": 5, "rolePrivileges": []}, False),
+                                             ({"roleId": 5, "roleName": "Services Admin"}, True),
+                                             ({"roleId": 5, "isSuperAdminRole": True}, True)])
+def test_a_role_without_its_privilege_list_is_unknown(bundle: Path, role, privileged) -> None:
+    raw = json.loads((bundle / "raw/google_directory.json").read_text())
+    raw["roles"]["value"][3] = role
+    write(bundle, "raw/google_directory.json", raw)
+    admins = project_gws_run(bundle)["gws_admins"]
+    assert admins["complete"] is (privileged is not None)
+    assert (U500 in [entry["user"] for entry in admins["privileged"]]) is bool(privileged)
+
+
+def test_customer_id_shaped_unit_ids_are_not_placed(bundle: Path) -> None:
+    raw = json.loads((bundle / "raw/google_directory.json").read_text())
+    raw["orgUnits"]["value"][1]["orgUnitId"] = "id:" + CUSTOMER
+    write(bundle, "raw/google_directory.json", raw)
+    projection = project_gws_run(bundle)
+    assert CUSTOMER not in json.dumps(dict(projection))
+    assert projection["gws_admins"]["privileged"][1]["org_unit"] is None
+
+
+def test_a_lone_surrogate_withholds_the_section(bundle: Path) -> None:
+    path = bundle / "normalized/google_setting_events.json"
+    path.write_text(path.read_text().replace('"new_value": "true"', '"new_value": "\\ud800"'))
+    projection = project_gws_run(bundle)
+    assert projection["gws_setting_events"] == NOT_COLLECTED
+    assert projection.report["sections"]["gws_setting_events"]["reason"] == "incomplete_shape"
