@@ -1,0 +1,149 @@
+{
+  "MetaData": {
+    "TenantId": "SENTINEL-TENANT-ID",
+    "DisplayName": "SENTINEL-DISPLAY-NAME",
+    "DomainName": "example.com",
+    "ProductSuite": "Google Workspace",
+    "Tool": "ScubaGoggles",
+    "ToolVersion": "1.1.0",
+    "ReportUUID": "00000000-0000-4000-8000-000000000002"
+  },
+  "Summary": {},
+  "Results": {
+    "gmail": [
+      {
+        "GroupName": "Synthetic",
+        "GroupNumber": "7",
+        "GroupReferenceURL": "https://example.com/gmail",
+        "Controls": [
+          {
+            "Control ID": "GWS.GMAIL.7.5v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "Pass",
+            "Criticality": "Shall",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "Pass"
+          }
+        ]
+      }
+    ],
+    "commoncontrols": [
+      {
+        "GroupName": "Synthetic",
+        "GroupNumber": "1",
+        "GroupReferenceURL": "https://example.com/cc",
+        "Controls": [
+          {
+            "Control ID": "GWS.COMMONCONTROLS.1.4v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "Pass",
+            "Criticality": "Shall",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "Pass"
+          }
+        ]
+      }
+    ],
+    "chat": [
+      {
+        "GroupName": "Synthetic",
+        "GroupNumber": "5",
+        "GroupReferenceURL": "https://example.com/chat",
+        "Controls": [
+          {
+            "Control ID": "GWS.CHAT.5.1v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "No events found",
+            "Criticality": "Shall",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "No events found"
+          }
+        ]
+      }
+    ],
+    "calendar": [
+      {
+        "GroupName": "Synthetic",
+        "GroupNumber": "1",
+        "GroupReferenceURL": "https://example.com/cal",
+        "Controls": [
+          {
+            "Control ID": "GWS.CALENDAR.1.1v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "No events found",
+            "Criticality": "Should",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "No events found"
+          }
+        ]
+      }
+    ],
+    "meet": [
+      {
+        "GroupName": "Synthetic",
+        "GroupNumber": "1",
+        "GroupReferenceURL": "https://example.com/meet",
+        "Controls": [
+          {
+            "Control ID": "GWS.MEET.1.1v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "Pass",
+            "Criticality": "Should",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "Pass"
+          },
+          {
+            "Control ID": "GWS.MEET.1.1v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "Warning",
+            "Criticality": "Should",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "Warning"
+          }
+        ]
+      }
+    ],
+    "drivedocs": [
+      {
+        "GroupName": "Synthetic",
+        "GroupNumber": "1",
+        "GroupReferenceURL": "https://example.com/drive",
+        "Controls": [
+          {
+            "Control ID": "GWS.DRIVEDOCS.1.1v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "Warning",
+            "Criticality": "Should",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "Warning"
+          }
+        ]
+      }
+    ],
+    "assuredcontrols": [
+      {
+        "GroupName": "Synthetic",
+        "GroupNumber": "1",
+        "GroupReferenceURL": "https://example.com/ac",
+        "Controls": [
+          {
+            "Control ID": "GWS.ASSUREDCONTROLS.1.1v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "Pass",
+            "Criticality": "Should",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "Pass"
+          },
+          {
+            "Control ID": "GWS.ASSUREDCONTROLS.1.2v1",
+            "Requirement": "Synthetic requirement",
+            "Result": "Pass",
+            "Criticality": "Should",
+            "Details": "SENTINEL-DETAILS-TEXT for admin@example.com",
+            "OriginalResult": "Pass"
+          }
+        ]
+      }
+    ]
+  }
+}
