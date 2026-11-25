@@ -1,0 +1,966 @@
+{
+  "kinds": {
+    "admin_sso": {
+      "admin_uses_external_sso": {
+        "reason_texts": [
+          "Requirement not met: at least one privileged account is assigned to sign in through an external identity provider."
+        ],
+        "remediation_steps": "In the Admin console, move each privileged account that uses an external identity provider to sign in with Google."
+      },
+      "admins_use_google_sign_in": {
+        "reason_texts": [
+          "Requirement met: every privileged account signs in with Google, not through an external identity provider."
+        ],
+        "remediation_steps": "Check the SSO profile assignments again after any change."
+      },
+      "assignment_unusable": {
+        "reason_texts": [
+          "Data unusable: an inbound SSO assignment that applies to a privileged account has an unknown mode, or one target holds disagreeing assignments; the policy was not assessed."
+        ],
+        "remediation_steps": "Check the inbound SSO profile assignments in the Admin console for an unknown mode or two that disagree for one target, then collect again."
+      },
+      "lineage_unresolved": {
+        "reason_texts": [
+          "Data unavailable: the organisational unit read is incomplete or inconsistent, so the nearest SSO assignment of a privileged account cannot be found; the policy was not assessed.",
+          "Data unavailable: the organisational unit read is incomplete or inconsistent; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again so the organisational unit read completes, then check the SSO assignments of privileged accounts."
+      },
+      "membership_incomplete": {
+        "reason_texts": [
+          "Data unavailable: an inbound SSO assignment targets a group and the group membership read is incomplete; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again so the group membership read completes, then check the groups that hold an SSO assignment."
+      },
+      "section_not_collected": {
+        "reason_texts": [],
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
+      },
+      "section_shape_unusable": {
+        "reason_texts": [
+          "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
+      },
+      "sso_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: an inbound SSO assignment that applies to a privileged account uses the domain-wide SAML provider only if one is enabled, and the read does not show whether it is; the policy was not assessed.",
+          "Data unavailable: the inbound SSO assignment read is incomplete; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again so the inbound SSO assignment read completes, then check how privileged accounts sign in."
+      },
+      "user_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again so the user and admin role read completes."
+      }
+    },
+    "gws_dns": {
+      "dns_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the DNS read was cut or incomplete, so domains may be missing."
+        ],
+        "remediation_steps": "Run the collection again so every domain's DNS lookup completes; the records live at the domain's DNS host, not in the Admin console."
+      },
+      "domain_record_unusable": {
+        "reason_texts": [
+          "Data unusable: a domain's DNS evidence is not in the expected shape, so it cannot be checked."
+        ],
+        "remediation_steps": "Check the domain's SPF TXT, DKIM selector or DMARC TXT (at _dmarc) record at its DNS host for a malformed entry, then collect again."
+      },
+      "domain_violates": {
+        "reason_texts": [
+          "Requirement not met: at least one domain the policy covers does not meet it."
+        ],
+        "remediation_steps": "Correct the failing domain's SPF TXT, DKIM selector or DMARC TXT (at _dmarc) record at its DNS host; generate DKIM keys in the Admin console, then publish them in DNS."
+      },
+      "no_domain_violates": {
+        "reason_texts": [
+          "Requirement met: every domain the policy covers meets it."
+        ],
+        "remediation_steps": "Check the domain DNS records again after any change at the DNS host."
+      },
+      "no_domains": {
+        "reason_texts": [
+          "Data unavailable: no domain the policy covers was collected."
+        ],
+        "remediation_steps": "Check the tenant's domains are collected, then run the collection again; the records are read from each domain's DNS host."
+      },
+      "resolver_error": {
+        "reason_texts": [
+          "Data unavailable: a DNS resolver error left at least one domain unchecked."
+        ],
+        "remediation_steps": "Run the collection again; if a lookup keeps failing, check the SPF TXT, DKIM selector or DMARC TXT (at _dmarc) record answers at the domain's DNS host."
+      },
+      "section_not_collected": {
+        "reason_texts": [],
+        "remediation_steps": "Run the collection again so the DNS lookups run; the records are read from each domain's DNS host, not the Admin console."
+      },
+      "section_shape_unusable": {
+        "reason_texts": [
+          "Data unusable: the DNS evidence section is not in the expected shape."
+        ],
+        "remediation_steps": "Run the collection again; if the DNS evidence is still malformed, report it as an Auditex problem."
+      }
+    },
+    "gws_list_settings": {
+      "no_unit_violates": {
+        "reason_texts": [
+          "Requirement met: no org unit or group holds a value this policy forbids."
+        ],
+        "remediation_steps": "Check the setting again after any change in the Admin console."
+      },
+      "policy_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the Google Workspace policy or org unit read was incomplete, so an unset value cannot be told from an unread one."
+        ],
+        "remediation_steps": "Run the collection again so the policy and organisational unit read completes."
+      },
+      "section_not_collected": {
+        "reason_texts": [],
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
+      },
+      "section_shape_unusable": {
+        "reason_texts": [
+          "Data unusable: the Google Workspace policy or org unit evidence has the wrong shape for this check."
+        ],
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
+      },
+      "service_off_everywhere": {
+        "reason_texts": [
+          "Not applicable: the service this policy covers is read as off in every org unit and group."
+        ],
+        "remediation_steps": "Check the service is meant to stay off in every organisational unit."
+      },
+      "service_status_absent": {
+        "reason_texts": [
+          "Data unavailable: the service on or off status could not be read for a unit this policy covers."
+        ],
+        "remediation_steps": "Run the collection again so the service on or off status is read for every unit this policy covers."
+      },
+      "setting_absent": {
+        "reason_texts": [
+          "Data unavailable: the setting this policy reads was not returned and no default is pinned, so compliance is unknown."
+        ],
+        "remediation_steps": "Check in the Admin console that the setting is configured at the top-level organisational unit, then collect again."
+      },
+      "setting_value_unusable": {
+        "reason_texts": [
+          "Data unusable: a setting, list or rule state this policy reads is malformed, unknown or ambiguous."
+        ],
+        "remediation_steps": "Check the setting, list or rule state in the Admin console for an unknown or malformed value, then collect again."
+      },
+      "unit_violates": {
+        "reason_texts": [
+          "Requirement not met: at least one org unit or group holds a value this policy forbids."
+        ],
+        "remediation_steps": "In the Admin console, remove the forbidden value from each organisational unit or group that holds it."
+      }
+    },
+    "manual_only": {
+      "manual_check": {
+        "reason_texts": [
+          "Data unavailable: no read-only Google Workspace API exposes this setting; check it by hand in the Admin console against the baseline text."
+        ],
+        "remediation_steps": "Check the setting by hand in the Admin console against the baseline; no read-only API exposes it."
+      }
+    },
+    "setting": {
+      "no_unit_violates": {
+        "reason_texts": [
+          "Requirement met: no organisational unit or group holds a value that violates the setting."
+        ],
+        "remediation_steps": "Check the setting again after any change in the Admin console."
+      },
+      "policy_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the Google Workspace policy read is incomplete; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again so the policy and organisational unit read completes."
+      },
+      "section_not_collected": {
+        "reason_texts": [],
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
+      },
+      "section_shape_unusable": {
+        "reason_texts": [
+          "Data unusable: the Google Workspace policy evidence has an unexpected shape; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
+      },
+      "service_off_everywhere": {
+        "reason_texts": [
+          "Not applicable: the Google Workspace service this policy covers is turned off in every organisational unit."
+        ],
+        "remediation_steps": "Check the service is meant to stay off in every organisational unit."
+      },
+      "service_status_absent": {
+        "reason_texts": [
+          "Data unavailable: the status of the Google Workspace service this policy covers is absent or unreadable; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again so the service on or off status is read for every unit this policy covers."
+      },
+      "setting_absent": {
+        "reason_texts": [
+          "Data unavailable: the setting is absent from the collected policies and has no pinned default; the policy was not assessed."
+        ],
+        "remediation_steps": "Check in the Admin console that the setting is configured at the top-level organisational unit, then collect again."
+      },
+      "setting_value_unusable": {
+        "reason_texts": [
+          "Data unusable: a unit holds a value for the setting that cannot be read as the expected type; the policy was not assessed."
+        ],
+        "remediation_steps": "Check the setting in the Admin console for an unknown or malformed value, then collect again."
+      },
+      "unit_violates": {
+        "reason_texts": [
+          "Requirement not met: at least one organisational unit or group holds a value that violates the setting."
+        ],
+        "remediation_steps": "In the Admin console, change the setting on each organisational unit or group that holds a value the baseline forbids."
+      }
+    },
+    "setting_event": {
+      "event_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the admin setting-change event read was cut or incomplete, so the last change per unit is not known."
+        ],
+        "remediation_steps": "Run the collection again so the admin log read completes, then check the last change logged for each unit."
+      },
+      "event_value_unusable": {
+        "reason_texts": [
+          "Data unusable: a relevant setting-change event has a missing, unknown or unreadable value, time or unit, or two latest events disagree."
+        ],
+        "remediation_steps": "Check the admin log for a setting-change event with a missing or unknown value, time or unit, or two that conflict, then collect again."
+      },
+      "no_setting_event": {
+        "reason_texts": [
+          "Data unavailable: the admin logs hold no current setting change at the top-level unit for every setting this policy reads; logs are kept about six months, and a reset to the default is not logged as a value."
+        ],
+        "remediation_steps": "Set the setting at the top-level organisational unit in the Admin console so the admin log records a change, then collect again."
+      },
+      "no_unit_violates": {
+        "reason_texts": [
+          "Requirement met: the top-level unit has a logged setting change for every setting this policy reads, and the last change for every unit is compliant."
+        ],
+        "remediation_steps": "Check the setting again after any further change."
+      },
+      "policy_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the policy read was cut or incomplete, so the service status is not known."
+        ],
+        "remediation_steps": "Run the collection again so the policy read completes and the service status is known."
+      },
+      "section_not_collected": {
+        "reason_texts": [],
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
+      },
+      "section_shape_unusable": {
+        "reason_texts": [
+          "Data unusable: the tenant topology is cut, broken or of the wrong shape, or the setting-change events, their log window or the policy section has the wrong shape."
+        ],
+        "remediation_steps": "Run the collection again; if the topology, setting-change events or policy evidence is still malformed, report it as an Auditex problem."
+      },
+      "service_off_everywhere": {
+        "reason_texts": [
+          "Not applicable: the service is off in every unit."
+        ],
+        "remediation_steps": "Check the service is meant to stay off in every unit."
+      },
+      "service_status_absent": {
+        "reason_texts": [
+          "Data unavailable: the top-level unit has no readable service status and no unit has the service explicitly on."
+        ],
+        "remediation_steps": "Run the collection again so the top-level unit's service status is read, or set the service on or off explicitly in the Admin console."
+      },
+      "unit_violates": {
+        "reason_texts": [
+          "Requirement not met: the last logged setting change for at least one unit sets a non-compliant value."
+        ],
+        "remediation_steps": "In the Admin console, change the setting on each unit whose last logged change set a value the baseline forbids."
+      }
+    },
+    "settings_multi": {
+      "no_unit_violates": {
+        "reason_texts": [
+          "Requirement met: no organisational unit or group has a setting combination the baseline does not allow."
+        ],
+        "remediation_steps": "Check the settings again after any change in the Admin console."
+      },
+      "policy_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the Google Workspace policy or organisational unit read is incomplete, so a unit may be missing."
+        ],
+        "remediation_steps": "Run the collection again so the policy and organisational unit read completes."
+      },
+      "section_not_collected": {
+        "reason_texts": [],
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
+      },
+      "section_shape_unusable": {
+        "reason_texts": [
+          "Data unusable: the Google Workspace tenant or policy evidence has the wrong shape, so no unit can be placed."
+        ],
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
+      },
+      "service_off_everywhere": {
+        "reason_texts": [
+          "Not applicable: the service is turned off in every organisational unit and group."
+        ],
+        "remediation_steps": "Check the service is meant to stay off in every organisational unit."
+      },
+      "service_status_absent": {
+        "reason_texts": [
+          "Data unavailable: a service status is absent or unreadable, so it is not known where the settings apply."
+        ],
+        "remediation_steps": "Run the collection again so the service on or off status is read for every unit this policy covers."
+      },
+      "setting_absent": {
+        "reason_texts": [
+          "Data unavailable: a setting the policy reads is absent at the top-level organisational unit and has no pinned default."
+        ],
+        "remediation_steps": "Check in the Admin console that every setting this policy reads is configured at the top-level organisational unit, then collect again."
+      },
+      "setting_value_unusable": {
+        "reason_texts": [
+          "Data unusable: a setting the policy reads has the wrong type or an unknown value."
+        ],
+        "remediation_steps": "Check each setting this policy reads in the Admin console for a wrong type or unknown value, then collect again."
+      },
+      "unit_violates": {
+        "reason_texts": [
+          "Requirement not met: at least one organisational unit or group has a setting combination the baseline does not allow."
+        ],
+        "remediation_steps": "In the Admin console, change the settings on each organisational unit or group whose combination the baseline does not allow."
+      }
+    },
+    "super_admin_count": {
+      "count_in_range": {
+        "reason_texts": [
+          "Requirement met: two to eight super admin accounts are configured."
+        ],
+        "remediation_steps": "Check the super admin count again after adding or removing an account."
+      },
+      "count_out_of_range": {
+        "reason_texts": [
+          "Requirement not met: fewer than two or more than eight super admin accounts are configured."
+        ],
+        "remediation_steps": "In the Admin console, bring the number of super admin accounts to between two and eight."
+      },
+      "count_unusable": {
+        "reason_texts": [
+          "Data unusable: the read reports no super admin, which a Google Workspace tenant cannot have; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again; a tenant always has a super admin, so report it as an Auditex problem if the read keeps showing none."
+      },
+      "section_not_collected": {
+        "reason_texts": [],
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
+      },
+      "section_shape_unusable": {
+        "reason_texts": [
+          "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
+      },
+      "user_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again so the user and admin role read completes."
+      }
+    },
+    "twosv": {
+      "no_unit_violates": {
+        "reason_texts": [
+          "Requirement met: no organisational unit or group has a 2-Step Verification setting that breaks this policy."
+        ],
+        "remediation_steps": "Check the 2-Step Verification settings again after any change in the Admin console."
+      },
+      "policy_read_incomplete": {
+        "reason_texts": [
+          "Data unavailable: the Google Workspace policy read or the organisational unit read is incomplete; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again so the policy and organisational unit read completes."
+      },
+      "section_not_collected": {
+        "reason_texts": [],
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
+      },
+      "section_shape_unusable": {
+        "reason_texts": [
+          "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
+        ],
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
+      },
+      "setting_value_unusable": {
+        "reason_texts": [
+          "Data unusable: a 2-Step Verification setting that applies has an unreadable value, a value of the wrong type or an unknown option; the policy was not assessed."
+        ],
+        "remediation_steps": "Check the 2-Step Verification settings of each organisational unit and group in the Admin console for an unreadable value, then collect again."
+      },
+      "unit_violates": {
+        "reason_texts": [
+          "Requirement not met: at least one organisational unit or group has a 2-Step Verification setting that breaks this policy."
+        ],
+        "remediation_steps": "In the Admin console, change the 2-Step Verification setting on each organisational unit or group that breaks the policy."
+      }
+    }
+  },
+  "policies": {
+    "GWS.ASSUREDCONTROLS.1.1v1": {
+      "baseline_text": "Access Approvals SHOULD be enabled.",
+      "kind": "setting"
+    },
+    "GWS.ASSUREDCONTROLS.1.2v1": {
+      "baseline_text": "Agencies SHOULD restrict support access to U.S.-based Google staff only.",
+      "kind": "setting"
+    },
+    "GWS.ASSUREDCONTROLS.2.1v1": {
+      "baseline_text": "Data processing across multiple regions SHOULD be disabled for all Google Workspace products.",
+      "kind": "setting_event"
+    },
+    "GWS.CALENDAR.1.1v1": {
+      "baseline_text": "External sharing options for primary calendars SHALL be configured to \"Only free/busy information (hide event details).\"",
+      "kind": "setting"
+    },
+    "GWS.CALENDAR.1.2v1": {
+      "baseline_text": "External sharing options for secondary calendars SHALL be configured to \"Only free/busy information (hide event details).\"",
+      "kind": "setting"
+    },
+    "GWS.CALENDAR.2.1v1": {
+      "baseline_text": "External invitations warnings SHALL be enabled to prompt users before sending invitations.",
+      "kind": "setting"
+    },
+    "GWS.CALENDAR.3.1v1": {
+      "baseline_text": "Calendar Interop SHOULD be disabled.",
+      "kind": "setting"
+    },
+    "GWS.CALENDAR.3.2v1": {
+      "baseline_text": "Microsoft 365 (Graph API) SHALL be used instead of basic authentication to establish connectivity between tenants or organizations in cases where Calendar Interop is deemed necessary for agency mission fulfillment.",
+      "kind": "manual_only"
+    },
+    "GWS.CALENDAR.4.1v1": {
+      "baseline_text": "\"Appointment Schedule with Payments\" SHOULD be disabled.",
+      "kind": "setting"
+    },
+    "GWS.CHAT.1.1v1": {
+      "baseline_text": "Chat history SHALL be enabled for information traceability.",
+      "kind": "setting"
+    },
+    "GWS.CHAT.1.2v1": {
+      "baseline_text": "Users SHALL NOT be allowed to change their history setting.",
+      "kind": "setting"
+    },
+    "GWS.CHAT.2.1v1": {
+      "baseline_text": "External file sharing SHALL be disabled to protect sensitive information from unauthorized or accidental sharing.",
+      "kind": "setting"
+    },
+    "GWS.CHAT.3.1v1": {
+      "baseline_text": "Space history SHOULD be enabled for information traceability.",
+      "kind": "setting"
+    },
+    "GWS.CHAT.4.1v1": {
+      "baseline_text": "External chat messaging SHALL be restricted to allowlisted domains only.",
+      "kind": "settings_multi"
+    },
+    "GWS.CHAT.5.1v1": {
+      "baseline_text": "Chat content reporting SHALL be enabled for all conversation types.",
+      "kind": "setting_event"
+    },
+    "GWS.CHAT.5.2v1": {
+      "baseline_text": "All reporting message categories SHOULD be selected.",
+      "kind": "setting_event"
+    },
+    "GWS.CLASSROOM.1.1v1": {
+      "baseline_text": "\"Who can join classes in your domain\" SHOULD be set to \"Users in your domain only.\"",
+      "kind": "setting"
+    },
+    "GWS.CLASSROOM.1.2v1": {
+      "baseline_text": "\"Which classes users in your domain can join\" SHOULD be set to \"Classes in your domain only.\"",
+      "kind": "setting"
+    },
+    "GWS.CLASSROOM.2.1v1": {
+      "baseline_text": "Users SHOULD NOT be able to authorize apps to access their Google Classroom data.",
+      "kind": "setting"
+    },
+    "GWS.CLASSROOM.3.1v1": {
+      "baseline_text": "\"Roster Import\" with Clever SHOULD be turned off.",
+      "kind": "setting"
+    },
+    "GWS.CLASSROOM.4.1v1": {
+      "baseline_text": "Only teachers SHOULD be allowed to unenroll students from classes.",
+      "kind": "setting"
+    },
+    "GWS.CLASSROOM.5.1v1": {
+      "baseline_text": "Class creation SHOULD be restricted to verified teachers only.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.1.1v1": {
+      "baseline_text": "Phishing-Resistant MFA SHALL be required for all users.",
+      "kind": "twosv"
+    },
+    "GWS.COMMONCONTROLS.1.2v1": {
+      "baseline_text": "If phishing-resistant MFA has not been enforced, an alternative MFA method SHALL be enforced for all users.",
+      "kind": "twosv"
+    },
+    "GWS.COMMONCONTROLS.1.3v1": {
+      "baseline_text": "SMS or Voice SHALL NOT be used as the MFA method.",
+      "kind": "twosv"
+    },
+    "GWS.COMMONCONTROLS.1.4v1": {
+      "baseline_text": "The Google 2-Step Verification (2SV) new user enrollment period SHALL be set to at least one day and at most one week.",
+      "kind": "twosv"
+    },
+    "GWS.COMMONCONTROLS.1.5v1": {
+      "baseline_text": "Allow users to trust the device SHALL be disabled.",
+      "kind": "twosv"
+    },
+    "GWS.COMMONCONTROLS.10.1v1": {
+      "baseline_text": "Agencies SHALL use GWS application access control policies to restrict access to all GWS services by third-party applications.",
+      "kind": "gws_list_settings"
+    },
+    "GWS.COMMONCONTROLS.10.2v1": {
+      "baseline_text": "Agencies SHALL NOT allow users to grant consent for access to low-risk scopes.",
+      "kind": "gws_list_settings"
+    },
+    "GWS.COMMONCONTROLS.10.3v1": {
+      "baseline_text": "Agencies SHALL NOT trust unconfigured internal applications.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.10.4v1": {
+      "baseline_text": "Agencies SHALL NOT allow users to access unconfigured third-party applications.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.10.5v1": {
+      "baseline_text": "Access to GWS applications by less secure applications that do not meet security authentication standards SHALL be prevented.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.11.1v1": {
+      "baseline_text": "Only approved Google Workspace (GWS) Marketplace applications SHALL be allowed for installation.",
+      "kind": "settings_multi"
+    },
+    "GWS.COMMONCONTROLS.12.1v1": {
+      "baseline_text": "Google Takeout services SHALL be disabled.",
+      "kind": "settings_multi"
+    },
+    "GWS.COMMONCONTROLS.13.1v1": {
+      "baseline_text": "Required system-defined alerting rules, as listed in the policy group description, SHALL be enabled with alerts.",
+      "kind": "gws_list_settings"
+    },
+    "GWS.COMMONCONTROLS.14.1v1": {
+      "baseline_text": "The following critical logs SHALL be sent to the agency's centralized SIEM.",
+      "kind": "manual_only"
+    },
+    "GWS.COMMONCONTROLS.14.2v1": {
+      "baseline_text": "Audit logs SHALL be retained and searchable for a minimum of 3 months and retrievable for a minimum of 12 months.",
+      "kind": "manual_only"
+    },
+    "GWS.COMMONCONTROLS.15.1v1": {
+      "baseline_text": "The data storage region SHALL be set to be the United States for all users in the agency's GWS environment.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.15.2v1": {
+      "baseline_text": "Data SHALL be processed in the region selected for data at rest.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.16.1v1": {
+      "baseline_text": "Service status for Google services that do not have an individual control SHOULD be set to OFF for everyone.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.16.2v1": {
+      "baseline_text": "User access to Early Access applications SHOULD be disabled.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.16.3v1": {
+      "baseline_text": "Looker Studio Sharing outside org SHOULD be set to OFF.",
+      "kind": "manual_only"
+    },
+    "GWS.COMMONCONTROLS.16.4v1": {
+      "baseline_text": "Pinpoint access to drive SHOULD be set to OFF.",
+      "kind": "manual_only"
+    },
+    "GWS.COMMONCONTROLS.17.1v1": {
+      "baseline_text": "Require multi-party approval for sensitive admin actions SHOULD be enabled.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.18.1v1": {
+      "baseline_text": "A custom policy SHALL be configured for Google Drive, Google Calendar, Google Chat, and Gmail to protect PII and sensitive information as defined by the agency, covering at a minimum: credit card numbers, U.S. Individual Taxpayer Identification Numbers (ITIN), and U.S. Social Security numbers (SSN).",
+      "kind": "manual_only"
+    },
+    "GWS.COMMONCONTROLS.18.2v1": {
+      "baseline_text": "The action for DLP policies SHOULD be set to block.",
+      "kind": "manual_only"
+    },
+    "GWS.COMMONCONTROLS.2.1v1": {
+      "baseline_text": "Policies restricting access to Google Workspace (GWS) based on enterprise device signals SHOULD be implemented.",
+      "kind": "setting_event"
+    },
+    "GWS.COMMONCONTROLS.3.1v1": {
+      "baseline_text": "Post-single sign-on (SSO) verification SHOULD be enabled for users signing in using the organization's SSO profile.",
+      "kind": "setting_event"
+    },
+    "GWS.COMMONCONTROLS.3.2v1": {
+      "baseline_text": "Post-SSO verification SHOULD be enabled for users signing in using other SSO profiles.",
+      "kind": "setting_event"
+    },
+    "GWS.COMMONCONTROLS.4.1v1": {
+      "baseline_text": "Users SHALL be forced to re-authenticate after an established 12-hour GWS login session has expired.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.5.1v1": {
+      "baseline_text": "User password strength SHALL be enforced.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.5.2v1": {
+      "baseline_text": "User password length SHALL be at least 12 characters.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.5.3v1": {
+      "baseline_text": "User password length SHOULD be at least 16 characters.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.5.4v1": {
+      "baseline_text": "Password policy SHALL be enforced at next sign-in.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.5.5v1": {
+      "baseline_text": "User passwords SHALL NOT be reused.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.5.6v1": {
+      "baseline_text": "User passwords SHALL NOT expire.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.6.1v1": {
+      "baseline_text": "All administrative accounts SHALL be provisioned as cloud-only accounts separate from an agency's authoritative on-premises or other federated identity providers.",
+      "kind": "admin_sso"
+    },
+    "GWS.COMMONCONTROLS.6.2v1": {
+      "baseline_text": "A minimum of **two** and a maximum of **eight** separate and distinct super admin users SHALL be configured.",
+      "kind": "super_admin_count"
+    },
+    "GWS.COMMONCONTROLS.7.1v1": {
+      "baseline_text": "Account conflict management SHOULD be configured to replace conflicting unmanaged accounts with managed accounts.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.8.1v1": {
+      "baseline_text": "Account self-recovery for super admins SHALL be disabled.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.8.2v1": {
+      "baseline_text": "Account self-recovery for users and non-super admins SHALL be disabled.",
+      "kind": "setting"
+    },
+    "GWS.COMMONCONTROLS.8.3v1": {
+      "baseline_text": "Ability to add recovery information SHOULD be disabled.",
+      "kind": "manual_only"
+    },
+    "GWS.COMMONCONTROLS.9.1v1": {
+      "baseline_text": "Highly privileged accounts SHALL be enrolled in the Google Workspace (GWS) Advanced Protection Program.",
+      "kind": "manual_only"
+    },
+    "GWS.COMMONCONTROLS.9.2v1": {
+      "baseline_text": "All sensitive user accounts SHOULD be enrolled into the GWS Advanced Protection Program.",
+      "kind": "manual_only"
+    },
+    "GWS.DRIVEDOCS.1.10v1": {
+      "baseline_text": "If external sharing is not allowed, then forms owned by users within the organization SHOULD NOT be able to accept responses from anyone accessing the link from outside the organization.",
+      "kind": "manual_only"
+    },
+    "GWS.DRIVEDOCS.1.11v1": {
+      "baseline_text": "If receiving external files is not allowed, then users in the organization SHOULD NOT be able to submit responses to forms from users or shared drives outside of the organization.",
+      "kind": "manual_only"
+    },
+    "GWS.DRIVEDOCS.1.1v1": {
+      "baseline_text": "External sharing SHALL be restricted to allowlisted domains.",
+      "kind": "setting"
+    },
+    "GWS.DRIVEDOCS.1.2v1": {
+      "baseline_text": "Receiving files from non-allowlisted domains SHOULD be disabled.",
+      "kind": "settings_multi"
+    },
+    "GWS.DRIVEDOCS.1.3v1": {
+      "baseline_text": "Warnings SHALL be enabled when a user is attempting to share with someone in a non-allowlisted domain.",
+      "kind": "settings_multi"
+    },
+    "GWS.DRIVEDOCS.1.4v1": {
+      "baseline_text": "If sharing outside of the organization, agencies SHOULD disable sharing of files with individuals who are not using a Google account.",
+      "kind": "settings_multi"
+    },
+    "GWS.DRIVEDOCS.1.5v1": {
+      "baseline_text": "Any Organizational Units that allow external sharing SHOULD disable content availability to \"anyone with the link.\"",
+      "kind": "settings_multi"
+    },
+    "GWS.DRIVEDOCS.1.6v1": {
+      "baseline_text": "Agencies SHALL set access checking to \"recipients only.\"",
+      "kind": "setting"
+    },
+    "GWS.DRIVEDOCS.1.7v1": {
+      "baseline_text": "Users SHOULD NOT be allowed to upload or move content to shared drives owned by another organization.",
+      "kind": "settings_multi"
+    },
+    "GWS.DRIVEDOCS.1.8v1": {
+      "baseline_text": "\"Private to owner\" SHALL be the default access level for newly created items.",
+      "kind": "setting"
+    },
+    "GWS.DRIVEDOCS.1.9v1": {
+      "baseline_text": "Out-of-Domain file-level warnings SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.DRIVEDOCS.2.1v1": {
+      "baseline_text": "Agencies SHOULD NOT allow members with manager access to override shared Google Drive creation settings.",
+      "kind": "setting"
+    },
+    "GWS.DRIVEDOCS.2.2v1": {
+      "baseline_text": "Agencies SHALL allow users who are not members of a shared Google Drive to be added to files.",
+      "kind": "setting"
+    },
+    "GWS.DRIVEDOCS.3.1v1": {
+      "baseline_text": "Agencies SHALL enable the security update for Google Drive files.",
+      "kind": "settings_multi"
+    },
+    "GWS.DRIVEDOCS.4.1v1": {
+      "baseline_text": "Agencies SHOULD disable Google Drive SDK access.",
+      "kind": "setting"
+    },
+    "GWS.DRIVEDOCS.5.1v1": {
+      "baseline_text": "Google Drive for Desktop SHALL be enabled for authorized devices only.",
+      "kind": "settings_multi"
+    },
+    "GWS.DRIVEDOCS.5.2v1": {
+      "baseline_text": "Monitoring for potential ransomware corruption SHALL be enabled.",
+      "kind": "manual_only"
+    },
+    "GWS.GEMINI.1.1v1": {
+      "baseline_text": "Gemini app user access SHALL be set to OFF for everyone without a license.",
+      "kind": "setting_event"
+    },
+    "GWS.GEMINI.2.1v1": {
+      "baseline_text": "Gemini Beta features SHALL be disabled.",
+      "kind": "setting_event"
+    },
+    "GWS.GEMINI.3.1v1": {
+      "baseline_text": "Gemini conversation history SHALL be enabled.",
+      "kind": "manual_only"
+    },
+    "GWS.GEMINI.3.2v1": {
+      "baseline_text": "Gemini conversation retention SHALL be set to minimum of 18 months.",
+      "kind": "manual_only"
+    },
+    "GWS.GEMINI.4.1v1": {
+      "baseline_text": "Conversation sharing SHALL be set to OFF.",
+      "kind": "manual_only"
+    },
+    "GWS.GMAIL.1.1v1": {
+      "baseline_text": "Mail delegation SHOULD be disabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.10.1v1": {
+      "baseline_text": "Google Workspace Sync SHOULD be disabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.11.1v1": {
+      "baseline_text": "Automatic forwarding SHOULD be disabled, especially to external domains.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.12.1v1": {
+      "baseline_text": "The option to use a per-user outbound gateway that is a mail server other than the Google Workspace (GWS) mail servers SHALL be disabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.13.1v1": {
+      "baseline_text": "Unintended external reply warnings SHALL be enabled.",
+      "kind": "setting_event"
+    },
+    "GWS.GMAIL.14.1v1": {
+      "baseline_text": "An email allowlist SHOULD NOT be implemented.",
+      "kind": "gws_list_settings"
+    },
+    "GWS.GMAIL.15.1v1": {
+      "baseline_text": "Enhanced pre-delivery message scanning SHALL be enabled to prevent phishing.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.16.1v1": {
+      "baseline_text": "Security sandbox SHOULD be enabled to provide additional email protections.",
+      "kind": "setting_event"
+    },
+    "GWS.GMAIL.17.1v1": {
+      "baseline_text": "Comprehensive mail storage SHOULD be enabled to allow information traceability across applications.",
+      "kind": "gws_list_settings"
+    },
+    "GWS.GMAIL.18.1v1": {
+      "baseline_text": "Domains SHALL NOT be added to lists that bypass spam filters.",
+      "kind": "gws_list_settings"
+    },
+    "GWS.GMAIL.18.2v1": {
+      "baseline_text": "Domains SHALL NOT be added to lists that bypass spam filters and hide warnings.",
+      "kind": "gws_list_settings"
+    },
+    "GWS.GMAIL.18.3v1": {
+      "baseline_text": "\"Bypass spam filters\" and \"hide warnings for all messages from internal and external senders\" SHALL NOT be enabled.",
+      "kind": "gws_list_settings"
+    },
+    "GWS.GMAIL.2.1v1": {
+      "baseline_text": "DKIM SHOULD be enabled for all domains.",
+      "kind": "gws_dns"
+    },
+    "GWS.GMAIL.3.1v1": {
+      "baseline_text": "An SPF policy SHALL be published for each domain that fails all non-approved senders.",
+      "kind": "gws_dns"
+    },
+    "GWS.GMAIL.4.1v1": {
+      "baseline_text": "A DMARC policy SHALL be published at the full domain or the second-level domain for all Google Workspace domains, including user alias domains.",
+      "kind": "gws_dns"
+    },
+    "GWS.GMAIL.4.2v1": {
+      "baseline_text": "The DMARC message rejection option SHALL be p=reject.",
+      "kind": "gws_dns"
+    },
+    "GWS.GMAIL.4.3v1": {
+      "baseline_text": "The DMARC point of contact for aggregate reports SHALL include `reports@dmarc.cyber.dhs.gov`.",
+      "kind": "gws_dns"
+    },
+    "GWS.GMAIL.4.4v1": {
+      "baseline_text": "An agency point of contact SHOULD be included for aggregate and failure reports.",
+      "kind": "gws_dns"
+    },
+    "GWS.GMAIL.5.1v1": {
+      "baseline_text": "\"Protect against encrypted attachments from untrusted senders\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.5.2v1": {
+      "baseline_text": "\"Protect against attachments with scripts from untrusted senders\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.5.3v1": {
+      "baseline_text": "\"Protect against anomalous attachment types in emails\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.5.4v1": {
+      "baseline_text": "Google SHOULD be allowed to automatically apply future recommended settings for attachments.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.5.5v1": {
+      "baseline_text": "Emails flagged by SCuBA policies GWS.GMAIL.5.1 through GWS.GMAIL.5.3 SHALL NOT be kept in inbox.",
+      "kind": "settings_multi"
+    },
+    "GWS.GMAIL.6.1v1": {
+      "baseline_text": "\"Identify links behind shortened URLs\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.6.2v1": {
+      "baseline_text": "\"Scan linked images\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.6.3v1": {
+      "baseline_text": "\"Show warning prompt for any click on links to untrusted domains\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.6.4v1": {
+      "baseline_text": "Google SHALL be allowed to automatically apply future recommended settings for links and external images.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.7.1v1": {
+      "baseline_text": "\"Protect against domain spoofing based on similar domain names\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.7.2v1": {
+      "baseline_text": "\"Protect against spoofing of employee names\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.7.3v1": {
+      "baseline_text": "\"Protect against inbound emails spoofing your domain\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.7.4v1": {
+      "baseline_text": "\"Protect against any unauthenticated emails\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.7.5v1": {
+      "baseline_text": "\"Protect your Groups from inbound emails spoofing your domain\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.7.6v1": {
+      "baseline_text": "Emails flagged by SCuBA policies GWS.GMAIL.7.1 through GWS.GMAIL.7.5 SHALL NOT be kept in inbox.",
+      "kind": "settings_multi"
+    },
+    "GWS.GMAIL.7.7v1": {
+      "baseline_text": "Google SHALL be allowed to automatically apply future recommended settings for spoofing and authentication.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.8.1v1": {
+      "baseline_text": "User email uploads SHALL be disabled to protect against unauthorized files being introduced into the secured environment.",
+      "kind": "setting"
+    },
+    "GWS.GMAIL.9.1v1": {
+      "baseline_text": "POP and IMAP access SHALL be disabled to protect sensitive agency or organization emails from being accessed through legacy applications or other third-party mail clients.",
+      "kind": "settings_multi"
+    },
+    "GWS.GROUPS.1.1v1": {
+      "baseline_text": "Group access from outside the organization SHALL be disabled unless explicitly granted by the group owner.",
+      "kind": "setting"
+    },
+    "GWS.GROUPS.1.2v1": {
+      "baseline_text": "Group owners' ability to add external members to groups SHOULD be disabled unless necessary for agency mission fulfillment.",
+      "kind": "setting"
+    },
+    "GWS.GROUPS.1.3v1": {
+      "baseline_text": "Group owners' ability to allow external, non-group members to post in the group SHOULD be disabled unless necessary for agency mission fulfillment.",
+      "kind": "setting"
+    },
+    "GWS.GROUPS.2.1v1": {
+      "baseline_text": "Group creation SHOULD be restricted to administrators within the organization unless alternative creators are necessary for agency mission fulfillment.",
+      "kind": "setting"
+    },
+    "GWS.GROUPS.3.1v1": {
+      "baseline_text": "The default permission to view conversations SHOULD be set to \"All group members.\"",
+      "kind": "setting"
+    },
+    "GWS.GROUPS.4.1v1": {
+      "baseline_text": "The ability for groups to be hidden from the directory SHALL be disabled.",
+      "kind": "settings_multi"
+    },
+    "GWS.MEET.1.1v1": {
+      "baseline_text": "External users who were not explicitly invited to a Google Meet meeting SHALL be required to ask to join.",
+      "kind": "setting"
+    },
+    "GWS.MEET.2.1v1": {
+      "baseline_text": "Meeting access SHALL be disabled for meetings created by users who are not members of any Google Workspace (GWS) tenant or organization.",
+      "kind": "setting"
+    },
+    "GWS.MEET.3.1v1": {
+      "baseline_text": "Host management meeting features SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.MEET.4.1v1": {
+      "baseline_text": "\"Warn for external participants\" SHALL be enabled.",
+      "kind": "setting"
+    },
+    "GWS.MEET.5.1v1": {
+      "baseline_text": "Automatic recordings for Google Meet SHALL be disabled.",
+      "kind": "setting"
+    },
+    "GWS.MEET.5.2v1": {
+      "baseline_text": "Automatic transcripts for Google Meet SHALL be disabled.",
+      "kind": "setting"
+    },
+    "GWS.MEET.6.1v1": {
+      "baseline_text": "Administrators SHOULD NOT be allowed to override the default sharing level for meeting notes set by the organization.",
+      "kind": "setting_event"
+    },
+    "GWS.MEET.6.2v1": {
+      "baseline_text": "Default sharing setting for Google AI notes SHALL be restricted to \"Guests in your organization.\"",
+      "kind": "setting_event"
+    },
+    "GWS.MEET.6.3v1": {
+      "baseline_text": "Screenshots of presented content SHALL only captured in notes when recording is enabled.",
+      "kind": "manual_only"
+    },
+    "GWS.SITES.1.1v1": {
+      "baseline_text": "Sites Service SHOULD be disabled for all users.",
+      "kind": "setting"
+    }
+  },
+  "schema_version": 1,
+  "shared_reasons": "Check the policy and report the assessment problem."
+}

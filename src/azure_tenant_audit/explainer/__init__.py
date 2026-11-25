@@ -35,6 +35,10 @@ def explain(record, redacted_sections, section_order):
     Product must redact the complete result before serialisation or display.
     """
     try:
+        if isinstance(record, dict) and str(record.get("policy_id", "")).startswith("GWS."):
+            from .gws import explain_gws
+
+            return explain_gws(record, redacted_sections, section_order)
         baselines, collection, templates = _resources()
         adapted = adapt_record(record, templates=templates)
         view = build_view(adapted, redacted_sections, section_order,
