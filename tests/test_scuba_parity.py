@@ -6,6 +6,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ FIXED = {
     "platform": "scuba-parity: the CISA result and the Auditex assessment cover different platforms\n",
     "out": "scuba-parity: the output directory must be new or empty and not a link\n",
     "same_input": "scuba-parity: same-input mode needs a ScubaGear result file with its embedded export\n",
+    "write": "scuba-parity: the parity report could not be written\n",
 }
 
 
@@ -109,13 +111,12 @@ def test_tilde_paths_are_not_expanded(tmp_path, capsys):
     assert (code, err) == (2, FIXED["cisa"])
 
 
-def test_unknown_claim_without_limitations_is_not_assessed(tmp_path, capsys):
+def test_a_row_without_limitations_is_refused_not_read_as_unknown(tmp_path, capsys):
     doc = json.loads(M365_ASSESSMENT.read_text(encoding="utf-8"))
     del doc["policies"][4]["limitations"]
     path = tmp_path / "model_assessment.json"
     path.write_text(json.dumps(doc), encoding="utf-8")
-    assert _run([GEAR, path, "--out", tmp_path / "out"], capsys)[0] == 0
-    assert _rows(tmp_path / "out")["MS.AAD.7.5v1"][4] == "not_assessed"
+    assert _run([GEAR, path, "--out", tmp_path / "out"], capsys)[::2] == (2, FIXED["auditex"])
 
 
 def test_scubagear_two_input_every_category(tmp_path, capsys):
@@ -142,10 +143,13 @@ def test_scubagear_two_input_every_category(tmp_path, capsys):
     }
     assert json.loads(stdout)["counts"] == {
         "agree": 5, "auditex_decided": 1, "auditex_not_assessed": 4, "auditex_only": 1, "cisa_only": 1,
-        "disagreement": 1, "documented_divergence": 1, "neither_decided": 2}
+        "disagreement": 1, "documented_divergence": 1, "neither_decided": 2, "release_delta": 0}
     report = json.loads((out / "scuba-parity.json").read_text(encoding="utf-8"))
     assert (report["cisa_tool"], report["cisa_tool_version"], report["version_matches"], report["mode"]) == (
-        "ScubaGear", "1.8.0", True, "two-input")
+        "ScubaGear", "2.0.0", True, "two-input")
+    assert (report["pinned_version"], report["rule_reference"], report["full_parity"]) == (
+        "2.0.0", "cisagov/ScubaGear@2446ad723b7f55031cc02c8aca244d731d468cba", False)
+    assert report["release_delta_policies"] == ["MS.AAD.3.2v2", "MS.AAD.5.5v1", "MS.AAD.9.1v1"]
     markdown = (out / "scuba-parity.md").read_text(encoding="utf-8")
     assert "| MS.AAD.7.2v1 | Fail | fail | met | least_privilege_ok | documented_divergence | D107 |" in markdown
     assert "| disagreement | 1 |" in markdown
@@ -190,10 +194,168 @@ def test_same_input_mode_runs_the_adapter_on_the_embedded_export(tmp_path, capsy
                                                                "MS.AAD.7.3v1", "MS.AAD.7.4v1"}} == {"auditex_only"}
     assert len(rows) == 102
     report = json.loads((out / "scuba-parity.json").read_text(encoding="utf-8"))
-    assert (report["mode"], report["cisa_tool_version"], report["version_matches"]) == ("same-input", "2.0.0", False)
-    assert sorted(p.name for p in (out / "auditex-same-input").iterdir()) == [
-        "model_assessment.json", "scubagear_adapter_report.json"]
+    assert (report["mode"], report["cisa_tool_version"], report["version_matches"]) == ("same-input", "2.0.0", True)
+    assert sorted(p.name for p in out.iterdir()) == ["scuba-parity.json", "scuba-parity.md"]
     assert json.loads(stdout)["mode"] == "same-input"
+
+
+def _private_tmp(tmp_path, monkeypatch) -> Path:
+    scratch = tmp_path / "private-tmp"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    return scratch
+
+
+def test_same_input_mode_writes_nothing_from_the_export(tmp_path, capsys, monkeypatch):
+    scratch = _private_tmp(tmp_path, monkeypatch)
+    doc = json.loads(SAME_INPUT.read_text(encoding="utf-8"))
+    tenant_id = doc["Raw"]["tenant_id"]
+    policy = next(p for p in doc["Raw"]["conditional_access_policies"] if p.get("State") == "enabled")
+    policy["GrantControls"]["BuiltInControls"] = ["mfa"]
+    policy["Conditions"].setdefault("Locations", {})
+    policy["Conditions"]["Locations"] = {"IncludeLocations": ["22222222-2222-4222-8222-222222222222"]}
+    policy["DisplayName"] = tenant_id
+    source = tmp_path / "results.json"
+    source.write_text(json.dumps(doc), encoding="utf-8")
+    out = tmp_path / "out"
+    code, stdout, err = _run([source, "--same-input", "--out", out], capsys)
+    assert (code, err) == (0, "")
+    assert sorted(p.name for p in out.iterdir()) == ["scuba-parity.json", "scuba-parity.md"]
+    for text in [stdout] + [p.read_text(encoding="utf-8") for p in out.iterdir()]:
+        assert tenant_id not in text and "22222222-2222-4222-8222-222222222222" not in text
+        assert str(tmp_path) not in text
+    assert list(scratch.iterdir()) == []
+
+
+def test_same_input_adapter_failure_leaves_no_scratch_and_no_out(tmp_path, capsys, monkeypatch):
+    scratch = _private_tmp(tmp_path, monkeypatch)
+    import auditex.rule_assessment as rule_assessment
+
+    def broken(export_path, output_dir, **_):
+        Path(output_dir).mkdir(parents=True)
+        (Path(output_dir) / "model_assessment.json").write_text("SENTINEL-TENANT-ID", encoding="utf-8")
+        raise RuntimeError("SENTINEL-TENANT-ID")
+    monkeypatch.setattr(rule_assessment, "assess_scubagear_export", broken)
+    code, stdout, err = _run([SAME_INPUT, "--same-input", "--out", tmp_path / "out"], capsys)
+    assert (code, stdout, err) == (
+        2, "", "scuba-parity: Auditex could not assess the export embedded in the ScubaGear result\n")
+    assert list(scratch.iterdir()) == [] and not (tmp_path / "out").exists()
+
+
+def _gear_with(policy_id: str, version: str) -> dict:
+    doc = _gear()
+    doc["MetaData"]["ToolVersion"] = version
+    for control in _controls(doc):
+        if control["Control ID"] == "MS.AAD.7.8v1":
+            control["Control ID"] = policy_id
+    return doc
+
+
+def _assessment_with(policy_id: str) -> dict:
+    doc = _assessment()
+    next(row for row in doc["policies"] if row["policy_id"] == "MS.AAD.7.8v1")["policy_id"] = policy_id
+    return doc
+
+
+@pytest.mark.parametrize(("version", "category", "matches"), [
+    ("2.0.0", "release_delta", True), ("1.8.0", "disagreement", False)])
+def test_policies_changed_after_the_rule_reference_are_labelled(tmp_path, capsys, version, category, matches):
+    source, assessment = tmp_path / "results.json", tmp_path / "model_assessment.json"
+    source.write_text(json.dumps(_gear_with("MS.AAD.5.5v1", version)), encoding="utf-8")
+    assessment.write_text(json.dumps(_assessment_with("MS.AAD.5.5v1")), encoding="utf-8")
+    assert _run([source, assessment, "--out", tmp_path / "out"], capsys)[0] == 0
+    assert _rows(tmp_path / "out")["MS.AAD.5.5v1"][:5] == (category, [], "Fail", "fail", "met")
+    report = json.loads((tmp_path / "out" / "scuba-parity.json").read_text(encoding="utf-8"))
+    assert (report["version_matches"], report["full_parity"]) == (matches, False)
+    markdown = (tmp_path / "out" / "scuba-parity.md").read_text(encoding="utf-8")
+    assert ("not a parity result" in markdown) is (not matches)
+
+
+def test_a_v1_8_report_never_claims_parity_for_security_suite_or_power_bi(tmp_path, capsys):
+    doc = _gear()
+    doc["MetaData"]["ToolVersion"] = "1.8.0"
+    _controls(doc).append({"Control ID": "MS.DEFENDER.1.1v1", "Result": "Pass"})
+    assessment = _assessment()
+    for policy_id in ("MS.SECURITYSUITE.1.1v1", "MS.POWERBI.1.1v1"):
+        assessment["policies"].append({**copy.deepcopy(assessment["policies"][0]), "policy_id": policy_id})
+    source, path = tmp_path / "results.json", tmp_path / "model_assessment.json"
+    source.write_text(json.dumps(doc), encoding="utf-8")
+    path.write_text(json.dumps(assessment), encoding="utf-8")
+    code, stdout, _ = _run([source, path, "--out", tmp_path / "out"], capsys)
+    assert code == 0
+    rows = _rows(tmp_path / "out")
+    assert (rows["MS.DEFENDER.1.1v1"][0], rows["MS.SECURITYSUITE.1.1v1"][0], rows["MS.POWERBI.1.1v1"][0]) == (
+        "cisa_only", "auditex_only", "auditex_only")
+    assert (json.loads(stdout)["version_matches"], json.loads(stdout)["full_parity"]) == (False, False)
+
+
+def _duplicate_accepted_domains(text: str) -> str:
+    doc = json.loads(text)
+    value = json.dumps(doc["Raw"]["accepted_domains"])
+    anchor = '"Raw": {'
+    index = text.index(anchor) + len(anchor)
+    return text[:index] + f'"accepted_domains": {value},' + text[index:]
+
+
+def test_duplicate_accepted_domains_in_the_export_is_accepted_like_the_adapter(tmp_path, capsys):
+    source = tmp_path / "results.json"
+    source.write_text(_duplicate_accepted_domains(SAME_INPUT.read_text(encoding="utf-8")), encoding="utf-8")
+    code, _, err = _run([source, "--same-input", "--out", tmp_path / "out"], capsys)
+    assert (code, err) == (0, "")
+    report = json.loads((tmp_path / "out" / "scuba-parity.json").read_text(encoding="utf-8"))
+    assert report["cisa_input_repaired"] is False
+    assert _rows(tmp_path / "out")["MS.AAD.7.1v1"][:4] == ("agree", [], "Pass", "pass")
+
+
+def test_a_duplicate_outside_the_export_is_refused(tmp_path, capsys):
+    text = SAME_INPUT.read_text(encoding="utf-8")
+    index = text.index('"MetaData": {') + len('"MetaData": {')
+    source = tmp_path / "results.json"
+    source.write_text(text[:index] + '"accepted_domains": [], "accepted_domains": [],' + text[index:],
+                      encoding="utf-8")
+    assert _run([source, "--same-input", "--out", tmp_path / "out"], capsys)[::2] == (2, FIXED["cisa"])
+
+
+def test_a_repaired_file_keeps_its_declared_tool(tmp_path, capsys):
+    doc = json.loads(SAME_INPUT.read_text(encoding="utf-8"))
+    doc["MetaData"]["Tool"] = "ScubaGoggles"
+    source = tmp_path / "results.json"
+    source.write_text(_with_null_array(json.dumps(doc, indent=1), '"Raw": {', "transport_rule"), encoding="utf-8")
+    assert _run([source, M365_ASSESSMENT, "--out", tmp_path / "out"], capsys)[::2] == (2, FIXED["cisa"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_repair_outside_the_export_is_refused(tmp_path, capsys):
+    text = SAME_INPUT.read_text(encoding="utf-8")
+    index = text.index("{") + 1
+    source = tmp_path / "results.json"
+    source.write_text(text[:index] + '"SummaryFromReview": ,' + text[index:], encoding="utf-8")
+    assert _run([source, M365_ASSESSMENT, "--out", tmp_path / "out"], capsys)[::2] == (2, FIXED["cisa"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_scubagoggles_error_is_never_a_documented_divergence(tmp_path, capsys):
+    doc = json.loads(GOGGLES.read_text(encoding="utf-8"))
+    rows = [c for groups in doc["Results"].values() for g in groups for c in g["Controls"]
+            if c["Control ID"] == "GWS.CHAT.5.1v1"]
+    assert rows
+    for control in rows:
+        control["Result"] = "Error"
+    source = tmp_path / "results.json"
+    source.write_text(json.dumps(doc), encoding="utf-8")
+    assert _run([source, GWS_ASSESSMENT, "--out", tmp_path / "out"], capsys)[0] == 0
+    assert _rows(tmp_path / "out")["GWS.CHAT.5.1v1"][:5] == ("auditex_decided", [], "Error", "error", "not_met")
+
+
+def test_a_second_invocation_never_removes_the_first_ones_reports(tmp_path, capsys, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    assert _run([GEAR, M365_ASSESSMENT, "--out", out], capsys)[0] == 0
+    before = {p.name: p.read_bytes() for p in out.iterdir()}
+    # The race the review found: both invocations passed the empty-directory check before either wrote.
+    monkeypatch.setattr(parity, "_prepare_out", lambda _out: None)
+    assert _run([GEAR, M365_ASSESSMENT, "--out", out], capsys)[::2] == (2, FIXED["write"])
+    assert {p.name: p.read_bytes() for p in out.iterdir()} == before
 
 
 @pytest.mark.parametrize(("cisa", "auditex"), [(GEAR, M365_ASSESSMENT), (GOGGLES, GWS_ASSESSMENT)])
@@ -375,9 +537,61 @@ def _auditex_mutations():
     def not_applicable_without_limitations(doc):
         doc["policies"][6]["limitations"] = None
 
+    # Review blocker 1: each of these left MS.AAD.7.1v1 a confirmed met before the repair.
+    def invalid_row(doc):
+        doc["policies"][0]["validation_status"] = "invalid"
+
+    def null_evidence(doc):
+        doc["policies"][0]["claims"][0]["evidence_ids"] = None
+
+    def empty_evidence(doc):
+        doc["policies"][0]["claims"][0]["evidence_ids"] = []
+
+    def absent_section_with_a_verdict(doc):
+        doc["policies"][0]["rule_precheck"].update({"class": "absent_section", "reason_code": "absent_section"})
+
+    def absent_section_not_met(doc):
+        absent_section_with_a_verdict(doc)
+        doc["policies"][0]["claims"][0]["value"] = False
+
+    def null_precheck_class(doc):
+        doc["policies"][0]["rule_precheck"]["class"] = None
+
+    def null_limitations(doc):
+        doc["policies"][0]["limitations"] = None
+
+    def list_schema_version(doc):
+        doc["schema_version"] = ["2026-11-22"]
+
+    def unknown_schema_version(doc):
+        doc["schema_version"] = "2099-01-01"
+
+    def value_rule_in_a_pre_rule_file(doc):
+        doc["schema_version"] = "2026-10-29"
+        for row in doc["policies"]:
+            if "rule_precheck" in row:
+                for key in ("cell", "reason_code", "reason_text"):
+                    row["rule_precheck"].pop(key, None)
+
+    def model_attempts_on_a_rule_row(doc):
+        doc["policies"][0]["attempts"] = 1
+
+    def prompt_hash_on_a_rule_row(doc):
+        doc["policies"][0]["prompt_sha256"] = "0" * 64
+
+    def confirmed_claim_on_an_uncovered_row(doc):
+        doc["policies"][11]["claims"][0].update({"status": "confirmed", "value": True, "evidence_ids": ["e0"]})
+
+    def third_claim(doc):
+        doc["policies"][0]["claims"].append(copy.deepcopy(doc["policies"][0]["claims"][1]))
+
     return [no_policies, duplicate_policy, bad_policy_id, string_claim_value, unknown_with_value,
             inferred_without_limitation, no_requirement_claim, reason_code_free_text, no_rule_precheck,
-            claims_not_list, not_applicable_without_limitations, _drop("policies")]
+            claims_not_list, not_applicable_without_limitations, _drop("policies"), invalid_row, null_evidence,
+            empty_evidence, absent_section_with_a_verdict, absent_section_not_met, null_precheck_class,
+            null_limitations, list_schema_version, unknown_schema_version, _drop("schema_version"),
+            value_rule_in_a_pre_rule_file, model_attempts_on_a_rule_row, prompt_hash_on_a_rule_row,
+            confirmed_claim_on_an_uncovered_row, third_claim]
 
 
 @pytest.mark.parametrize("mutate", _auditex_mutations())
@@ -390,6 +604,36 @@ def test_malformed_auditex_assessment_exits_2_and_writes_nothing(tmp_path, capsy
     code, stdout, err = _run([GEAR, run, "--out", tmp_path / "out"], capsys)
     assert (code, stdout, err) == (2, "", FIXED["auditex"])
     assert not (tmp_path / "out").exists()
+
+
+def test_historical_rule_precheck_rows_still_load(tmp_path, capsys):
+    """A 2026-10-29 file (pre-value-rule contract): a closed gate reads not_applicable, an empty required list
+    not_met and an absent section not_assessed, each with its class as the reason code."""
+    doc = _assessment()
+    doc["schema_version"] = "2026-10-29"
+    base = doc["policies"][0]
+    shapes = {
+        "MS.AAD.7.1v1": ("closed_gate", "inferred", True, ["policy_not_applicable"]),
+        "MS.AAD.7.3v1": ("empty_required_list", "confirmed", False, []),
+        "MS.AAD.7.6v1": ("absent_section", "unknown", None, ["required_evidence_section_not_collected"]),
+    }
+    rows = []
+    for policy_id, (rule_class, status, value, limitations) in shapes.items():
+        row = copy.deepcopy(base)
+        row.update({"policy_id": policy_id, "limitations": limitations,
+                    "rule_precheck": {"class": rule_class, "rule_id": "synthetic", "section": ["synthetic_section"],
+                                      "field": None, "value": None}})
+        row["claims"][0].update({"status": status, "value": value})
+        row["comparison"]["model_status"] = {True: "pass", False: "fail"}.get(value) if status == "confirmed" else None
+        rows.append(row)
+    doc["policies"] = rows
+    path = tmp_path / "model_assessment.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert _run([GEAR, path, "--out", tmp_path / "out"], capsys)[0] == 0
+    got = {pid: row[4:] for pid, row in _rows(tmp_path / "out").items() if pid in shapes}
+    assert got == {"MS.AAD.7.1v1": ("not_applicable", "closed_gate"),
+                   "MS.AAD.7.3v1": ("not_met", "empty_required_list"),
+                   "MS.AAD.7.6v1": ("not_assessed", "absent_section")}
 
 
 def test_run_folder_without_assessment_exits_2(tmp_path, capsys):
@@ -484,6 +728,16 @@ def test_divergence_map_is_valid_and_cites_its_rows():
     {"policy_id": "GWS.GMAIL.7.5v1", "id": "D4", "cite": "gws-design 8.3 D4", "cisa": [], "auditex": ["met"]},
     {"policy_id": "GWS.GMAIL.7.5v1", "id": "D4", "cite": "gws-design 8.3 D4", "cisa": ["pass"], "auditex": ["met"],
      "note": "extra"},
+    # Review low finding: wrong item and container types raised TypeError instead of the fixed error.
+    {"policy_id": "GWS.GMAIL.7.5v1", "id": "D4", "cite": "gws-design 8.3 D4", "cisa": [{}], "auditex": ["met"]},
+    {"policy_id": "GWS.GMAIL.7.5v1", "id": "D4", "cite": "gws-design 8.3 D4", "cisa": ["pass"], "auditex": [[]]},
+    {"policy_id": "GWS.GMAIL.7.5v1", "id": "D4", "cite": "gws-design 8.3 D4", "cisa": ["pass"], "auditex": ["met"],
+     "reason_codes": 1},
+    {"policy_id": "GWS.GMAIL.7.5v1", "id": "D4", "cite": "gws-design 8.3 D4", "cisa": "pass", "auditex": ["met"]},
+    # An undifferentiated "not decided" would let an Error row match a D row.
+    {"policy_id": "GWS.GMAIL.7.5v1", "id": "D4", "cite": "gws-design 8.3 D4", "cisa": ["not_decided"],
+     "auditex": ["met"]},
+    {"policy_id": "GWS.GMAIL.7.5v1", "id": "D4", "cite": "gws-design 8.3 D4", "cisa": ["error"], "auditex": ["met"]},
 ])
 def test_a_tampered_divergence_map_is_refused(tmp_path, bad):
     path = tmp_path / "map.json"

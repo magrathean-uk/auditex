@@ -5,7 +5,7 @@
     "DomainName": "example.com",
     "ProductSuite": "Microsoft 365",
     "Tool": "ScubaGear",
-    "ToolVersion": "1.8.0",
+    "ToolVersion": "2.0.0",
     "ReportUUID": "00000000-0000-4000-8000-000000000001"
   },
   "Summary": {},

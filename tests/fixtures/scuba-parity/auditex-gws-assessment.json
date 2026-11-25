@@ -38,6 +38,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
       }
     },
     {
@@ -75,6 +87,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
       }
     },
     {
@@ -112,6 +136,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
       }
     },
     {
@@ -149,6 +185,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
       }
     },
     {
@@ -186,6 +234,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
       }
     },
     {
@@ -223,6 +283,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
       }
     },
     {
@@ -260,6 +332,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
       }
     },
     {
@@ -297,6 +381,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
       }
     }
   ]

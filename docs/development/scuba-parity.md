@@ -11,24 +11,34 @@ Inputs:
 
 - a CISA result file: ScubaGear `ScubaResults_<uuid>.json` or ScubaGoggles `ScubaResults*.json`. The tool is
   detected from the policy ids (`MS.*` or `GWS.*`, never both) and checked against `MetaData.Tool` when present.
-  The file must be strict JSON of at most 64 MiB, with no duplicate keys or NaN, and the `Results` layout of both
-  tools (product, then groups, then `Controls` rows with `Control ID` and `Result`). The one exception is the
-  export adapter's repair of PowerShell's empty-array defect (`"key": ,`) inside `Raw`; the report then says
-  `cisa_input_repaired: true`, and a repair inside `Results` is refused.
-- an Auditex run folder (its `model_assessment.json`) or the assessment file itself. Only value-rule answers count
-  as decided; a row from the retired model layer reads `not_assessed` with reason `not_a_rule_answer`.
+  The file must be strict JSON of at most 64 MiB, with no NaN, and the `Results` layout of both tools (product,
+  then groups, then `Controls` rows with `Control ID` and `Result`). Two adapter-supported ScubaGear shapes are
+  accepted, each only inside the embedded export `Raw`: a repeated `accepted_domains` key directly in `Raw` (the EXO
+  and Security Suite exporters both write it), and the repair of PowerShell's empty-array defect (`"key": ,`, the
+  report then says `cisa_input_repaired: true`). Any other duplicate key, or a repair in `Results`, `MetaData` or
+  anywhere else, is refused. `MetaData` (with `Tool`) is read from the file itself either way.
+- an Auditex run folder (its `model_assessment.json`) or the assessment file itself. Every policy row is checked
+  against the row schema of the file's own `schema_version` (every version `validate_assessment` supports, so
+  older assessments still load; an unknown or non-string version is refused) and against the writer's provenance
+  rules for a rule answer: `validation_status` valid, no model attempts, latency or hashes, exactly the two claims,
+  every known claim citing `e0`, a value-rule class only in a 2026-11-05 or later file, and a verdict the pre-check
+  class can carry (closed gate: not_applicable; empty required list: not_met; absent section or field:
+  not_assessed). A row that fails is refused (exit 2), never mapped to a verdict. A row from the retired model layer
+  reads `not_assessed` with reason `not_a_rule_answer`. Google Workspace rows use the same row contract with the GWS
+  id pattern until M13 ships its writer.
 - or, for Microsoft 365, `--same-input`: the script runs the internal ScubaGear export adapter
   (`docs/development/scubagear-export-adapter.md`) on the `Raw` export inside the same ScubaResults file and compares
   ScubaGear's verdicts with Auditex's answers on that identical input. Every difference is then a rule or adapter
-  difference, not a collection difference. The adapter's own assessment lands in `<out>/auditex-same-input/`.
+  difference, not a collection difference. The adapter runs in a private temporary directory that is removed
+  before the script returns; its assessment is read in memory and nothing from the export reaches `--out`.
 
 Outputs, in a new or empty `--out` directory (created mode 0700, files mode 0600): `scuba-parity.json` and
-`scuba-parity.md`, one row per policy id in either input with the CISA `Result` literal, the CISA verdict class, the
-Auditex verdict and reason code, the category and any divergence ids. Neither file copies tenant names, ids,
-domains, `Details` text, the report UUID or paths. Stdout gets one JSON line of counts. In same-input mode
-`<out>/auditex-same-input/` also holds the adapter's own `model_assessment.json` and sidecar; like the ScubaResults
-file, they are live evidence (the adapter leaves domains and the tenant id unmasked) and stay on the encrypted
-internal disk.
+`scuba-parity.md` and nothing else, one row per policy id in either input with the CISA `Result` literal, the CISA
+verdict class, the Auditex verdict and reason code, the category and any divergence ids. Neither file copies tenant
+names, ids, domains, `Details` text, the report UUID or paths. Each file is written to a unique temporary name and
+then linked to its final name, which fails rather than replace an existing file; on a failure the script removes
+only the files this invocation created, so a concurrent run into the same directory never loses its reports.
+Stdout gets one JSON line of counts.
 
 Exit codes: 0 compared; 1 compared with `--strict` and at least one `disagreement`; 2 unusable input, with one
 fixed message on stderr that never contains a path or input text.
@@ -75,14 +85,17 @@ checked structurally, not against its schema version, so older assessments still
 | `neither_decided` | neither side decided |
 | `cisa_only`, `auditex_only` | the policy id is in one input only (product subset, version suffix or catalogue gap) |
 
+| `release_delta` | a non-agreement on a policy whose ScubaGear Rego changed between the rule reference and the pinned release |
+
 Order: `agree` first, then `neither_decided` (so a D row never applies when neither side decided), then
-`documented_divergence`, then the rest.
+`documented_divergence`, then `release_delta`, then the rest.
 
 ### Divergence map
 
-`scripts/scuba-parity-divergences.json` maps a policy id to a D id. Each entry names the CISA classes (`pass`,
-`fail`, `not_decided`) and Auditex verdicts it covers, optionally the Auditex reason codes, and cites its source
-row:
+`scripts/scuba-parity-divergences.json` maps a policy id to a D id. Each entry names the CISA classes it covers
+(`pass`, `fail`, `manual` for ScubaGear N/A, `no_events` for ScubaGoggles) and the Auditex verdicts, optionally the
+Auditex reason codes, and cites its source row. `error`, `deleted`, overlay and conflicting rows never match a D
+row: a failed prerequisite is not a documented rule difference.
 
 - `gws-design 8.3 Dn` and `gws-design 8.3a Dn`: the M13 design's divergences from ScubaGoggles v1.1.0, rows D1 to
   D10 and the 25 Nov 2026 addendum rows D11 to D22, with a one-line summary of each under `rows`. Policy scope
@@ -91,8 +104,9 @@ row:
 - `m365-spec Dn`: the value-rules spec v3.9.1 divergences from the pinned ScubaGear Rego. These are derived from
   the spec's replay vectors whose disagreement reads `expected: Dn` (vectors sha256 recorded in the file),
   grouped by policy and D id, with the Rego gold mapped to a CISA class and the rule's verdict and reason codes
-  kept. Gold `not_applicable` maps to both `pass` and `not_decided` because the vectors do not say which ScubaGear
-  shows.
+  kept. Gold `not_applicable` maps to both `pass` and `manual` because the vectors do not say which ScubaGear
+  shows; ScubaGear's only undecided non-error result is N/A.
+- D19 (no top-level event before a child-unit violation) matches `no_events` only, never `Error`.
 
 The file is generated from the owner's records, not by hand; regenerate it when a design D row or the spec
 changes. Limits: a pattern matches the verdict pair and reason code, not the evidence, so a real fault that lands on
@@ -102,10 +116,26 @@ anything, which is harmless.
 
 ### Version pinning
 
-Auditex pins ScubaGear v1.8.0 baselines (spec v3.9.1) and ScubaGoggles v1.1.0. The report records the CISA tool
-version and `version_matches`; a different release is still compared, and its id suffix changes show up as
-`cisa_only` and `auditex_only`. ScubaGear's latest release at the time of writing is v2.0.0 (October 2026), so the
-real run must install v1.8.0 explicitly.
+Two different ScubaGear references exist; parity uses the rule one.
+
+| reference | what it is | used by |
+|---|---|---|
+| ScubaGear Rego at commit `2446ad723b7f55031cc02c8aca244d731d468cba` (module 2.0.0) | the rule oracle the value-rules spec v3.9.1 replays; seven products: AAD, EXO, Security Suite, SharePoint, Teams, Power Platform, Power BI | value rules, the export adapter, parity |
+| ScubaGear v1.8.0 baselines | the framework mapping's catalogue entry (`configs/framework-catalog.json`); its product set has Defender (`MS.DEFENDER.*`) instead of Security Suite, and its `-ProductNames *` leaves out Power BI | framework mappings only |
+
+Parity pins ScubaGear release v2.0.0 (22 October 2026). The rule oracle is an ancestor of tag v2.0.0, eight
+commits behind it, with the same product set and policy ids as the Auditex v3.9.1 catalogue, so `-ProductNames *`
+covers every catalogue product. Three Rego changes landed in those eight commits, and their policies are labelled
+`release_delta` rather than `disagreement` when the two sides differ: MS.AAD.3.2v2 (#2515, exclusions were read under
+the old id), MS.AAD.5.5v1 (#2513, an unconfigured password addition restriction passed) and MS.AAD.9.1v1 (#2522,
+agent exclusions and an N/A when no agent licence exists). Every other v2.0.0 change in that range is report text,
+providers' throttling retries or tooling.
+
+ScubaGoggles is pinned to v1.1.0, the M13 oracle. The report records the CISA tool version, `version_matches`, the
+rule reference, the release-delta policies and `full_parity`, which is true only when the version matches and no id
+sits on one side only. A result from another release is still compared but is never reported as matching: a
+v1.8.0 report shows `MS.DEFENDER.*` as `cisa_only` and `MS.SECURITYSUITE.*` as `auditex_only`, and the Markdown
+says it is not a parity result.
 
 ## Plan for the real runs (not run yet)
 
@@ -116,6 +146,11 @@ evidence and stay on the encrypted internal disk, never in the repo, `outputs/` 
 
 ScubaGear runs only on Windows PowerShell 5.1, so it runs on the internal Windows host through the maintainer's
 `win-run` helper, against the lab tenant the owner named for lab work, read-only.
+
+Open prerequisite: the Windows host's standing scope allows no tenant data or further secrets on it, and this run
+needs a lab certificate in its store and briefly holds the lab results. Before the live run the owner either widens
+that scope for this one run (certificate removed and results deleted after the fetch) or the run moves to a
+disposable Windows VM. Nothing below runs until one of the two is decided.
 
 Non-interactive sign-in (ScubaGear's non-interactive prerequisites page, noninteractive.md): a certificate-based service principal,
 `Invoke-SCuBA -AppID <app-id> -CertificateThumbprint <thumbprint> -Organization <lab-tenant>.onmicrosoft.com`.
@@ -143,9 +178,10 @@ Needs the owner at a keyboard (interactive admin sign-ins that no script can do)
 3. Power BI admin portal setting and the security group.
 
 Then the run, from the Mac through `win-run` (outside 23:00 to 07:30 UK):
-`Install-Module ScubaGear -RequiredVersion 1.8.0 -Scope CurrentUser`, `Initialize-SCuBA` (installs dependencies and
-OPA), `Invoke-SCuBA -ProductNames * <sign-in parameters> -OutPath <work-dir> -Quiet`, fetch `ScubaResults_*.json`
-back with `--get` to the encrypted internal disk, `win-run clean`. Then on the Mac:
+`Install-Module ScubaGear -RequiredVersion 2.0.0 -Scope CurrentUser`, `Initialize-SCuBA` (installs dependencies and
+OPA), `Invoke-SCuBA -ProductNames * <sign-in parameters> -OutPath <work-dir> -Quiet` (in v2.0.0 the wildcard
+expands to all seven catalogue products, Security Suite and Power BI included), fetch `ScubaResults_*.json` back
+with `--get` to the encrypted internal disk, `win-run clean`. Then on the Mac:
 
 1. `scuba-parity.py <ScubaResults> --same-input --out <dir>`: rule and adapter parity on identical input.
 2. An Auditex run of the same tenant within the hour, then `scuba-parity.py <ScubaResults> <run> --out <dir>`:

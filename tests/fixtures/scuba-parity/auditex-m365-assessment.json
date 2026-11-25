@@ -38,6 +38,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
       }
     },
     {
@@ -75,6 +87,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
       }
     },
     {
@@ -112,6 +136,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
       }
     },
     {
@@ -149,6 +185,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
       }
     },
     {
@@ -186,6 +234,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
       }
     },
     {
@@ -223,6 +283,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
       }
     },
     {
@@ -262,6 +334,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
       }
     },
     {
@@ -299,6 +383,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
       }
     },
     {
@@ -336,6 +432,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
       }
     },
     {
@@ -373,6 +481,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
       }
     },
     {
@@ -410,6 +530,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
       }
     },
     {
@@ -426,7 +558,19 @@
       "recommendations": [],
       "validation_status": "unknown",
       "reason": "rule_not_implemented",
-      "reason_text": "Not assessed: Auditex has no rule for this policy yet."
+      "reason_text": "Not assessed: Auditex has no rule for this policy yet.",
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
     },
     {
       "policy_id": "MS.EXO.5.1v1",
@@ -443,7 +587,19 @@
       "limitations": [],
       "recommendations": [],
       "validation_status": "valid",
-      "reason": null
+      "reason": null,
+      "latency_ms": 0,
+      "attempts": 1,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
     },
     {
       "policy_id": "MS.EXO.6.1v1",
@@ -479,6 +635,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
       }
     },
     {
@@ -516,6 +684,18 @@
         "reason_text": "Synthetic.",
         "field": null,
         "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
       }
     }
   ]
