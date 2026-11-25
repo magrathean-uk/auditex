@@ -1,0 +1,170 @@
+"""GWS ``lists`` kind (design M13 8.2, lane L11): Gmail lists and rule states, API controls, system alert rules.
+
+Synthetic data only; every expected value is a literal. The generic replay of ``lists.jsonl`` runs in
+``test_gws_value_rules_replay.py``; this file pins the params transcribed from ScubaGoggles v1.1.0 and the cases the
+lane names.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from azure_tenant_audit.value_rules import gws
+from azure_tenant_audit.value_rules.gws.catalogue import catalogue
+
+ROOT = Path(__file__).resolve().parents[1]
+VECTORS = [json.loads(line) for line in
+           (ROOT / "tests/fixtures/gws-value-rules/lists.jsonl").read_text(encoding="utf-8").splitlines() if line]
+BY_ID = {vector["vector_id"]: vector for vector in VECTORS}
+TENANT = {"as_of": "2026-11-25T12:00:00Z", "top_unit": "ou:root", "org_units": {"ou:root": None}, "complete": True}
+
+CHECKS = {
+    "GWS.GMAIL.14.1v1": "gmail_ip_allowlist",
+    "GWS.GMAIL.17.1v1": "gmail_mail_storage",
+    "GWS.GMAIL.18.1v1": "gmail_bypass_domains",
+    "GWS.GMAIL.18.2v1": "gmail_warning_domains",
+    "GWS.GMAIL.18.3v1": "gmail_hide_warning_all",
+    "GWS.COMMONCONTROLS.10.1v1": "api_services_restricted",
+    "GWS.COMMONCONTROLS.10.2v1": "api_no_high_risk",
+    "GWS.COMMONCONTROLS.13.1v1": "system_alerts_active",
+}
+# SG:scubagoggles/rego/Commoncontrols.rego:1345-1364 at 08a08ce1.
+SERVICE_TO_SCOPE = [
+    ["Drive", ["DRIVE_ALL", "DRIVE_HIGH_RISK"]], ["Gmail", ["GMAIL_ALL", "GMAIL_HIGH_RISK"]],
+    ["Calendar", ["CALENDAR_ALL"]], ["Contacts", ["CONTACTS_ALL"]], ["Google Workspace Admin", ["GSUITE_ADMIN_ALL"]],
+    ["Vault", ["VAULT_ALL"]], ["Cloud Platform", ["CLOUD_PLATFORM"]], ["Cloud Billing", ["CLOUD_BILLING"]],
+    ["Cloud Machine Learning", ["CLOUD_ML"]], ["Apps Script API", ["APPS_SCRIPT_API"]],
+    ["Apps Script Runtime", ["APPS_SCRIPT_RUNTIME"]], ["Classroom", ["CLASSROOM_ALL", "CLASSROOM_HIGH_RISK"]],
+    ["Tasks", ["TASKS"]], ["Groups", ["GROUPS"]], ["Chat", ["CHAT", "CHAT_HIGH_RISK"]], ["Google Sign-in", ["SIGN_IN"]],
+    ["Meet", ["MEET"]], ["Cloud Search", ["CLOUD_SEARCH"]]]
+# SG:scubagoggles/parsers/system_rules_parser.py:16-114 at 08a08ce1.
+ACTIVE_DEFAULTS = [
+    "Account suspension warning", "Device compromised", "Domain data export initiated",
+    "Gmail potential employee spoofing", "Google Operations", "Government-backed attacks", "Leaked password",
+    "Malware message detected post-delivery", "Phishing in inboxes due to bad whitelist",
+    "Phishing message detected post-delivery", "Spike in user-reported spam", "SSO profile added",
+    "SSO profile updated", "Super admin password reset", "Suspicious device activity", "Suspicious login",
+    "Suspicious message reported", "Suspicious programmatic login", "User suspended (Google identity alert)",
+    "User suspended due to suspicious activity", "User suspended for spamming through relay",
+    "User suspended for spamming", "User-reported phishing"]
+INACTIVE_DEFAULTS = [
+    "Calendar settings changed", "Drive settings changed", "Email settings changed", "Mobile settings changed",
+    "Rate limited recipient", "User granted Admin privilege", "User's Admin privilege revoked"]
+
+
+def _row(policy_id: str) -> dict:
+    return catalogue()["policies"][policy_id]
+
+
+def _answer(policy_id: str, sections: dict) -> tuple[str, str]:
+    record = gws.assess(policy_id, sections)
+    return record["verdict"], record["cell"]
+
+
+def test_rows_name_the_kind_and_check():
+    assert {pid: (row["kind"], row["sections"], row["params"]["check"])
+            for pid, row in catalogue()["policies"].items() if row["kind"] == "lists"} == {
+        pid: ("lists", ["gws_tenant", "gws_policies"], check) for pid, check in CHECKS.items()}
+
+
+def test_service_to_scope_mapping_is_pinned_with_its_cite():
+    params = _row("GWS.COMMONCONTROLS.10.1v1")["params"]
+    assert [[entry["name"], entry["scopes"]] for entry in params["values"]] == SERVICE_TO_SCOPE
+    assert params["source"] == ["SG:scubagoggles/rego/Commoncontrols.rego:1343-1400"]
+    high = _row("GWS.COMMONCONTROLS.10.2v1")["params"]
+    assert high["scopes"] == ["DRIVE_HIGH_RISK", "GMAIL_HIGH_RISK", "CLASSROOM_HIGH_RISK", "CHAT_HIGH_RISK"]
+    assert [[entry["name"], entry["scopes"]] for entry in high["values"]] == SERVICE_TO_SCOPE
+    assert high["source"] == ["SG:scubagoggles/rego/Commoncontrols.rego:1407-1436"]
+
+
+def test_thirty_system_alert_rules_are_pinned_with_their_defaults_and_cite():
+    params = _row("GWS.COMMONCONTROLS.13.1v1")["params"]
+    assert [(rule["name"], rule["value"]) for rule in params["rules"]] == (
+        [(name, "ACTIVE") for name in ACTIVE_DEFAULTS] + [(name, "INACTIVE") for name in INACTIVE_DEFAULTS])
+    assert len(params["rules"]) == 30
+    assert params["source"] == ["SG:scubagoggles/rego/Commoncontrols.rego:1706-1741",
+                                "SG:scubagoggles/parsers/system_rules_parser.py:16-114"]
+
+
+@pytest.mark.parametrize(("vector_id", "expected"), [
+    # an enabled versus a disabled override rule
+    ("lists-g181-not-met", ("not_met", "unit_violates")),
+    ("lists-g181-override-disabled", ("met", "no_unit_violates")),
+    ("lists-g183-not-met", ("not_met", "unit_violates")),
+    ("lists-g183-override-disabled", ("met", "no_unit_violates")),
+    # a list with domain entries, enabled and disabled
+    ("lists-g182-not-met", ("not_met", "unit_violates")),
+    ("lists-g181-list-disabled", ("met", "no_unit_violates")),
+    # a missing rule-state entry
+    ("lists-g17-rule-state-missing", ("not_assessed", "setting_value_unusable")),
+    ("lists-g181-override-state-missing", ("not_assessed", "setting_value_unusable")),
+    ("lists-g181-list-state-missing", ("not_assessed", "setting_value_unusable")),
+    # 29 of 30 alerts ACTIVE
+    ("lists-c131-29-of-30", ("not_met", "unit_violates")),
+    # an explicit null flag and an unknown scope group are unknown, never met (lens 2)
+    ("lists-g183-null-flag", ("not_assessed", "setting_value_unusable")),
+    ("lists-c102-unknown-scope-group", ("not_assessed", "setting_value_unusable")),
+    # rule states are the unit's own (lens 3)
+    ("lists-g183-sub-ou-state-not-borrowed", ("not_assessed", "setting_value_unusable")),
+    # an absent section
+    ("lists-g17-absent", ("not_assessed", "setting_absent")),
+    ("lists-g181-absent", ("not_assessed", "setting_absent")),
+    ("lists-c101-absent", ("not_assessed", "setting_absent")),
+    ("lists-c102-absent", ("not_assessed", "setting_absent")),
+    ("lists-c131-absent-section", ("not_met", "unit_violates")),
+])
+def test_named_cases(vector_id, expected):
+    vector = BY_ID[vector_id]
+    assert _answer(vector["policy"], json.loads(json.dumps(vector["sections"]))) == expected
+
+
+def test_every_lists_policy_has_the_l07_vector_set():
+    cells: dict[str, set[str]] = {}
+    for vector in VECTORS:
+        cells.setdefault(vector["policy"], set()).add(vector["cell"])
+    base = {"no_unit_violates", "unit_violates", "section_not_collected", "policy_read_incomplete",
+            "setting_value_unusable"}
+    for policy_id, check in CHECKS.items():
+        need = set(base)
+        if check not in {"gmail_ip_allowlist", "system_alerts_active"}:  # these two have pinned defaults
+            need.add("setting_absent")
+        if check.startswith("gmail_"):
+            need.add("service_off_everywhere")
+        assert need <= cells[policy_id], (policy_id, sorted(need - cells[policy_id]))
+
+
+@pytest.mark.parametrize("vector", [v for v in VECTORS if isinstance(v["sections"].get("gws_policies"), dict)
+                                    and isinstance(v["sections"]["gws_policies"].get("policies"), list)],
+                         ids=lambda vector: vector["vector_id"])
+def test_read_order_never_changes_the_answer(vector):
+    sections = json.loads(json.dumps(vector["sections"]))
+    sections["gws_policies"]["policies"].reverse()
+    assert _answer(vector["policy"], sections) == (vector["verdict"], vector["cell"])
+
+
+def test_only_the_domain_count_is_read_never_an_address():
+    # A list entry carrying an unminimised address payload is judged by its count alone.
+    def sections(count):
+        return {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": [
+            {"unit": "ou:root", "unit_kind": "org_unit", "section": section, "sort_order": 1, "value": value}
+            for section, value in (
+                ("gmail_service_status", {"serviceState": "ENABLED"}),
+                ("gmail_rule_states", {"ruleStates": [{"ruleId": "o1", "enabled": True},
+                                                      {"ruleId": "l1", "enabled": True}]}),
+                ("gmail_email_address_lists", {"emailAddressList": [
+                    {"id": "l1", "entry_count": 1, "domain_entry_count": count,
+                     "addressList": {"address": [{"address": "example.com"}]}}]}),
+                ("gmail_spam_override_lists", {"spamOverride": [
+                    {"ruleId": "o1", "bypassSelectedSenders": True, "bypassSenderAllowlist": ["l1"]}]}))]}}
+    assert _answer("GWS.GMAIL.18.1v1", sections(0)) == ("met", "no_unit_violates")
+    assert _answer("GWS.GMAIL.18.1v1", sections(1)) == ("not_met", "unit_violates")
+
+
+def test_an_unknown_check_is_a_catalogue_fault():
+    from azure_tenant_audit.value_rules.gws import lists
+    row = {**_row("GWS.GMAIL.14.1v1"), "params": {"check": "gmail_unknown"}}
+    with pytest.raises(ValueError, match="Unknown lists check"):
+        lists.lists("GWS.GMAIL.14.1v1", row, {"gws_tenant": TENANT, "gws_policies": {"complete": True,
+                                                                                      "policies": []}})

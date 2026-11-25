@@ -1,1 +1,596 @@
-{"kinds": {}, "policies": {}}
+{
+  "kinds": {
+    "lists": {
+      "cells": {
+        "no_unit_violates": {
+          "reason_code": "no_unit_violates",
+          "reason_texts": [
+            "Requirement met: no org unit or group holds a value this policy forbids."
+          ],
+          "verdict": "met"
+        },
+        "policy_read_incomplete": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_policy_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the Google Workspace policy or org unit read was incomplete, so an unset value cannot be told from an unread one."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "evidence_kind": null,
+          "limitations": [
+            "required_evidence_section_not_collected",
+            "required_evidence_section_not_collected:<section>"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "recommendations": [
+            "collect_missing_evidence_section"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: the Google Workspace policy or org unit evidence has the wrong shape for this check."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "service_off_everywhere": {
+          "reason_code": "service_off_everywhere",
+          "reason_texts": [
+            "Not applicable: the service this policy covers is read as off in every org unit and group."
+          ],
+          "verdict": "not_applicable"
+        },
+        "service_status_absent": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_service_status_absent",
+          "reason_texts": [
+            "Data unavailable: the service on or off status could not be read for a unit this policy covers."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_absent": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_setting_absent",
+          "reason_texts": [
+            "Data unavailable: the setting this policy reads was not returned and no default is pinned, so compliance is unknown."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_value_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_setting_value",
+          "reason_texts": [
+            "Data unusable: a setting, list or rule state this policy reads is malformed, unknown or ambiguous."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "unit_violates": {
+          "reason_code": "unit_violates",
+          "reason_texts": [
+            "Requirement not met: at least one org unit or group holds a value this policy forbids."
+          ],
+          "verdict": "not_met"
+        }
+      }
+    }
+  },
+  "policies": {
+    "GWS.COMMONCONTROLS.10.1v1": {
+      "kind": "lists",
+      "params": {
+        "check": "api_services_restricted",
+        "source": [
+          "SG:scubagoggles/rego/Commoncontrols.rego:1343-1400"
+        ],
+        "values": [
+          {
+            "name": "Drive",
+            "scopes": [
+              "DRIVE_ALL",
+              "DRIVE_HIGH_RISK"
+            ]
+          },
+          {
+            "name": "Gmail",
+            "scopes": [
+              "GMAIL_ALL",
+              "GMAIL_HIGH_RISK"
+            ]
+          },
+          {
+            "name": "Calendar",
+            "scopes": [
+              "CALENDAR_ALL"
+            ]
+          },
+          {
+            "name": "Contacts",
+            "scopes": [
+              "CONTACTS_ALL"
+            ]
+          },
+          {
+            "name": "Google Workspace Admin",
+            "scopes": [
+              "GSUITE_ADMIN_ALL"
+            ]
+          },
+          {
+            "name": "Vault",
+            "scopes": [
+              "VAULT_ALL"
+            ]
+          },
+          {
+            "name": "Cloud Platform",
+            "scopes": [
+              "CLOUD_PLATFORM"
+            ]
+          },
+          {
+            "name": "Cloud Billing",
+            "scopes": [
+              "CLOUD_BILLING"
+            ]
+          },
+          {
+            "name": "Cloud Machine Learning",
+            "scopes": [
+              "CLOUD_ML"
+            ]
+          },
+          {
+            "name": "Apps Script API",
+            "scopes": [
+              "APPS_SCRIPT_API"
+            ]
+          },
+          {
+            "name": "Apps Script Runtime",
+            "scopes": [
+              "APPS_SCRIPT_RUNTIME"
+            ]
+          },
+          {
+            "name": "Classroom",
+            "scopes": [
+              "CLASSROOM_ALL",
+              "CLASSROOM_HIGH_RISK"
+            ]
+          },
+          {
+            "name": "Tasks",
+            "scopes": [
+              "TASKS"
+            ]
+          },
+          {
+            "name": "Groups",
+            "scopes": [
+              "GROUPS"
+            ]
+          },
+          {
+            "name": "Chat",
+            "scopes": [
+              "CHAT",
+              "CHAT_HIGH_RISK"
+            ]
+          },
+          {
+            "name": "Google Sign-in",
+            "scopes": [
+              "SIGN_IN"
+            ]
+          },
+          {
+            "name": "Meet",
+            "scopes": [
+              "MEET"
+            ]
+          },
+          {
+            "name": "Cloud Search",
+            "scopes": [
+              "CLOUD_SEARCH"
+            ]
+          }
+        ]
+      },
+      "rule_id": "GWS.COMMONCONTROLS.10.1v1.lists",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.10.2v1": {
+      "kind": "lists",
+      "params": {
+        "check": "api_no_high_risk",
+        "scopes": [
+          "DRIVE_HIGH_RISK",
+          "GMAIL_HIGH_RISK",
+          "CLASSROOM_HIGH_RISK",
+          "CHAT_HIGH_RISK"
+        ],
+        "source": [
+          "SG:scubagoggles/rego/Commoncontrols.rego:1407-1436"
+        ],
+        "values": [
+          {
+            "name": "Drive",
+            "scopes": [
+              "DRIVE_ALL",
+              "DRIVE_HIGH_RISK"
+            ]
+          },
+          {
+            "name": "Gmail",
+            "scopes": [
+              "GMAIL_ALL",
+              "GMAIL_HIGH_RISK"
+            ]
+          },
+          {
+            "name": "Calendar",
+            "scopes": [
+              "CALENDAR_ALL"
+            ]
+          },
+          {
+            "name": "Contacts",
+            "scopes": [
+              "CONTACTS_ALL"
+            ]
+          },
+          {
+            "name": "Google Workspace Admin",
+            "scopes": [
+              "GSUITE_ADMIN_ALL"
+            ]
+          },
+          {
+            "name": "Vault",
+            "scopes": [
+              "VAULT_ALL"
+            ]
+          },
+          {
+            "name": "Cloud Platform",
+            "scopes": [
+              "CLOUD_PLATFORM"
+            ]
+          },
+          {
+            "name": "Cloud Billing",
+            "scopes": [
+              "CLOUD_BILLING"
+            ]
+          },
+          {
+            "name": "Cloud Machine Learning",
+            "scopes": [
+              "CLOUD_ML"
+            ]
+          },
+          {
+            "name": "Apps Script API",
+            "scopes": [
+              "APPS_SCRIPT_API"
+            ]
+          },
+          {
+            "name": "Apps Script Runtime",
+            "scopes": [
+              "APPS_SCRIPT_RUNTIME"
+            ]
+          },
+          {
+            "name": "Classroom",
+            "scopes": [
+              "CLASSROOM_ALL",
+              "CLASSROOM_HIGH_RISK"
+            ]
+          },
+          {
+            "name": "Tasks",
+            "scopes": [
+              "TASKS"
+            ]
+          },
+          {
+            "name": "Groups",
+            "scopes": [
+              "GROUPS"
+            ]
+          },
+          {
+            "name": "Chat",
+            "scopes": [
+              "CHAT",
+              "CHAT_HIGH_RISK"
+            ]
+          },
+          {
+            "name": "Google Sign-in",
+            "scopes": [
+              "SIGN_IN"
+            ]
+          },
+          {
+            "name": "Meet",
+            "scopes": [
+              "MEET"
+            ]
+          },
+          {
+            "name": "Cloud Search",
+            "scopes": [
+              "CLOUD_SEARCH"
+            ]
+          }
+        ]
+      },
+      "rule_id": "GWS.COMMONCONTROLS.10.2v1.lists",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.13.1v1": {
+      "kind": "lists",
+      "params": {
+        "check": "system_alerts_active",
+        "rules": [
+          {
+            "name": "Account suspension warning",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Device compromised",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Domain data export initiated",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Gmail potential employee spoofing",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Google Operations",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Government-backed attacks",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Leaked password",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Malware message detected post-delivery",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Phishing in inboxes due to bad whitelist",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Phishing message detected post-delivery",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Spike in user-reported spam",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "SSO profile added",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "SSO profile updated",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Super admin password reset",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Suspicious device activity",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Suspicious login",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Suspicious message reported",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Suspicious programmatic login",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "User suspended (Google identity alert)",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "User suspended due to suspicious activity",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "User suspended for spamming through relay",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "User suspended for spamming",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "User-reported phishing",
+            "value": "ACTIVE"
+          },
+          {
+            "name": "Calendar settings changed",
+            "value": "INACTIVE"
+          },
+          {
+            "name": "Drive settings changed",
+            "value": "INACTIVE"
+          },
+          {
+            "name": "Email settings changed",
+            "value": "INACTIVE"
+          },
+          {
+            "name": "Mobile settings changed",
+            "value": "INACTIVE"
+          },
+          {
+            "name": "Rate limited recipient",
+            "value": "INACTIVE"
+          },
+          {
+            "name": "User granted Admin privilege",
+            "value": "INACTIVE"
+          },
+          {
+            "name": "User's Admin privilege revoked",
+            "value": "INACTIVE"
+          }
+        ],
+        "source": [
+          "SG:scubagoggles/rego/Commoncontrols.rego:1706-1741",
+          "SG:scubagoggles/parsers/system_rules_parser.py:16-114"
+        ]
+      },
+      "rule_id": "GWS.COMMONCONTROLS.13.1v1.lists",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.14.1v1": {
+      "kind": "lists",
+      "params": {
+        "check": "gmail_ip_allowlist",
+        "service": "gmail",
+        "source": [
+          "SG:scubagoggles/rego/Gmail.rego:1422-1448"
+        ]
+      },
+      "rule_id": "GWS.GMAIL.14.1v1.lists",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.17.1v1": {
+      "kind": "lists",
+      "params": {
+        "check": "gmail_mail_storage",
+        "service": "gmail",
+        "source": [
+          "SG:scubagoggles/rego/Gmail.rego:1563-1590",
+          "SG:scubagoggles/parsers/gmail_rules_parser.py:44-69"
+        ]
+      },
+      "rule_id": "GWS.GMAIL.17.1v1.lists",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.18.1v1": {
+      "kind": "lists",
+      "params": {
+        "check": "gmail_bypass_domains",
+        "service": "gmail",
+        "source": [
+          "SG:scubagoggles/rego/Gmail.rego:1603-1638",
+          "SG:scubagoggles/parsers/gmail_rules_parser.py:71-274"
+        ]
+      },
+      "rule_id": "GWS.GMAIL.18.1v1.lists",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.18.2v1": {
+      "kind": "lists",
+      "params": {
+        "check": "gmail_warning_domains",
+        "service": "gmail",
+        "source": [
+          "SG:scubagoggles/rego/Gmail.rego:1643-1678",
+          "SG:scubagoggles/parsers/gmail_rules_parser.py:71-274"
+        ]
+      },
+      "rule_id": "GWS.GMAIL.18.2v1.lists",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.18.3v1": {
+      "kind": "lists",
+      "params": {
+        "check": "gmail_hide_warning_all",
+        "service": "gmail",
+        "source": [
+          "SG:scubagoggles/rego/Gmail.rego:1685-1720",
+          "SG:scubagoggles/parsers/gmail_rules_parser.py:71-148"
+        ]
+      },
+      "rule_id": "GWS.GMAIL.18.3v1.lists",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    }
+  }
+}
