@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any
 
 from azure_tenant_audit.collection_gaps import (
@@ -371,6 +372,37 @@ def _policy_read_state(complete: bool, records: int, malformed: int, unusable: s
     }
 
 
+def _policy_values_by_identity(section: str, value: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """The comparable members of a readable, minimised policy value."""
+    match section:
+        case "rule_system_defined_alerts":
+            # The projection pins the names to Google's vocabulary. Older bundles put the rules in a list.
+            return [
+                (rule["displayName"], rule)
+                for rule in value.get("rules", [value])
+                if rule["displayName"] != UNRECOGNISED_SYSTEM_ALERT_NAME
+            ]
+        case "gmail_blocked_sender_lists":
+            field, identity = "blockedSenders", "ruleId"
+        case "gmail_email_address_lists":
+            field, identity = "emailAddressList", "id"
+        case "gmail_rule_states":
+            field, identity = "ruleStates", "ruleId"
+        case "gmail_spam_override_lists":
+            field, identity = "spamOverride", "ruleId"
+        case _:
+            return [("", value)]
+    return [(sha256(rule[identity].encode()).hexdigest(), rule) for rule in value.get(field, [])]
+
+
+def _policy_order_conflicts(policies: list[tuple[int | float | None, dict[str, Any]]]) -> bool:
+    """Different values for one identity need distinct, known orders."""
+    if any(order is None for order, _ in policies):
+        return any(value != policies[0][1] for _, value in policies[1:])
+    ranked: dict[int | float | None, dict[str, Any]] = {}
+    return any(ranked.setdefault(order, value) != value for order, value in policies)
+
+
 def _policy_settings_read(
     payload: dict[str, Any] | None,
     result_rows: list[dict[str, Any]],
@@ -387,7 +419,7 @@ def _policy_settings_read(
     - a policy whose section cannot be told is malformed for the whole read;
     - one whose targets cannot be read makes its section unusable (``unusable_sections``, every record of it left out);
     - one with any other problem, a scope its targets cannot represent (an exception or another unit in its query),
-      or no order against another policy of the same unit and section, makes that unit's setting unusable
+      or conflicting values with no order between policies for the same identity, makes that unit's setting unusable
       (``unusable_scopes``): those records are left out and every other unit's records are kept.
 
     Any of these makes the read incomplete: unknown is never safe. The second value is ``None`` without a
@@ -428,13 +460,13 @@ def _policy_settings_read(
             scopes.add((setting_section, org_unit or "", group or ""))
             continue
         candidates.append((setting_section, org_unit, group, item["policyQuery"].get("sortOrder"), item))
-    by_unit: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
-    for setting_section, org_unit, group, sort_order, _item in candidates:
-        by_unit[(setting_section, org_unit or "", group or "")].append(sort_order)
-    for scope, orders in by_unit.items():
-        if len(orders) > 1 and (any(order is None for order in orders) or len(set(orders)) < len(orders)):
-            # Two policies for one unit and section with no order between them: no reliable winner for that unit.
-            scopes.add(scope)
+    by_identity: dict[tuple[str, str, str, str], list[tuple[int | float | None, dict[str, Any]]]] = defaultdict(list)
+    for setting_section, org_unit, group, sort_order, item in candidates:
+        for identity, value in _policy_values_by_identity(setting_section, item["setting"]["value"]):
+            by_identity[(setting_section, org_unit or "", group or "", identity)].append((sort_order, value))
+    for (setting_section, org_unit, group, _), policies in by_identity.items():
+        if _policy_order_conflicts(policies):
+            scopes.add((setting_section, org_unit, group))
     records: list[dict[str, Any]] = []
     seen: Counter[str] = Counter()
     for setting_section, org_unit, group, sort_order, item in candidates:

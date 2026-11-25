@@ -1655,6 +1655,78 @@ def _policy_setting(section: str, value: dict[str, Any], **query: Any) -> dict[s
     }
 
 
+def test_m13_b1_distinct_system_alert_rules_at_the_same_order_keep_the_read_complete() -> None:
+    # ScubaGoggles 08a08ce1, policyapi_get_policies5.json: keep the rule names, states and order,
+    # and replace the root ID and omit resource names and customer metadata.
+    rows = [_two_step()] + [
+        _policy_setting("rule.system_defined_alerts", {"displayName": name, "state": state}, sortOrder=1) | {"type": "ADMIN"}
+        for name, state in (
+            ("User-reported phishing", "ACTIVE"),
+            ("User suspended for spamming through relay", "ACTIVE"),
+            ("User suspended (Google identity alert)", "ACTIVE"),
+            ("App Maker Cloud SQL setup", "INACTIVE"),
+            ("Suspicious login", "ACTIVE"),
+            ("Super admin password reset", "ACTIVE"),
+            ("Government-backed attacks", "ACTIVE"),
+        )
+    ]
+    result, _ = _collect([{"policies": rows}])
+    assert (result.status, result.item_count) == ("ok", 8)
+    root = {"orgUnits": {"value": [{"orgUnitId": "id:root", "orgUnitPath": "/"}]}}
+    snapshot = _normalise(result.payload, result.status, result.coverage, root)
+    *records, state = snapshot["google_policy_settings"]["records"]
+    assert (state["complete"], state["record_count"], state["malformed_count"], state["unusable_scopes"]) == (True, 7, 0, [])
+    assert [(r["org_unit"], r["sort_order"], r["value"]) for r in records if r["section"] == "rule_system_defined_alerts"] == [
+        ("root", 1, {"displayName": "User-reported phishing", "state": "ACTIVE"}),
+        ("root", 1, {"displayName": "User suspended for spamming through relay", "state": "ACTIVE"}),
+        ("root", 1, {"displayName": "User suspended (Google identity alert)", "state": "ACTIVE"}),
+        ("root", 1, {"displayName": "Suspicious login", "state": "ACTIVE"}),
+        ("root", 1, {"displayName": "Super admin password reset", "state": "ACTIVE"}),
+        ("root", 1, {"displayName": "Government-backed attacks", "state": "ACTIVE"}),
+    ]
+    assert len({r["id"] for r in records}) == 7
+
+
+def test_m13_b1_only_conflicting_alert_values_for_the_same_name_need_precedence() -> None:
+    active = {"displayName": "Suspicious login", "state": "ACTIVE"}
+    inactive = {"displayName": "Suspicious login", "state": "INACTIVE"}
+    scope = {"section": "rule_system_defined_alerts", "org_unit": "root", "group": None}
+    for value, order, expected in (
+        (active, 1, (True, 3, [])),
+        (inactive, 2, (True, 3, [])),
+        (inactive, 1, (False, 1, [scope])),
+        ({"rules": [inactive]}, 1, (False, 1, [scope])),
+    ):
+        rows = [
+            _two_step(),
+            _policy_setting("rule.system_defined_alerts", active),
+            _policy_setting("rule.system_defined_alerts", value, sortOrder=order),
+        ]
+        snapshot = _normalise(_widened(rows), "ok", _OK_COVERAGE, _SALES_DIRECTORY)
+        state = _read_state(snapshot)
+        assert (state["complete"], state["record_count"], state["unusable_scopes"]) == expected
+
+
+def test_m13_b1_gmail_rule_ties_are_checked_by_rule_id() -> None:
+    rows = [
+        _two_step(),
+        _policy_setting("gmail.rule_states", {"ruleStates": [{"ruleId": "rule-1", "enabled": True}]}),
+        _policy_setting("gmail.rule_states", {"ruleStates": [
+            {"ruleId": "rule-2", "enabled": False}, {"ruleId": "rule-1", "enabled": True},
+        ]}),
+    ]
+    snapshot = _normalise(_widened(rows), "ok", _OK_COVERAGE, _SALES_DIRECTORY)
+    state = _read_state(snapshot)
+    assert (state["complete"], state["record_count"], state["unusable_scopes"]) == (True, 3, [])
+
+    rows.append(_policy_setting("gmail.rule_states", {"ruleStates": [{"ruleId": "rule-1", "enabled": False}]}))
+    snapshot = _normalise(_widened(rows), "ok", _OK_COVERAGE, _SALES_DIRECTORY)
+    state = _read_state(snapshot)
+    assert (state["complete"], state["record_count"], state["unusable_scopes"]) == (
+        False, 1, [{"section": "gmail_rule_states", "org_unit": "root", "group": None}],
+    )
+
+
 def test_m13_followup_n1_unlisted_google_alert_keeps_the_policy_read_complete(tmp_path: Path) -> None:
     rows = [
         _two_step(), _two_step("orgUnits/sales", _ENFORCED),
