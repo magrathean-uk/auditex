@@ -814,7 +814,10 @@ the table above.
   collected data and in no schema, config or source literal (a Graph property
   passed through), and a field name the generator misses (a key passed as a call
   keyword, for example in `google_workspace/normalize.py`), is not exempt, so a
-  person with that name has the key renamed. A new product key under `src/`,
+  person with that name has the key renamed. Google Workspace setting and
+  Policy API field names (`region`, `securityUpdate`) are held as values, never
+  as mapping keys or module-level constants, so they are not exempt either
+  (DEC-171). A new product key under `src/`,
   `schemas/` or `configs/` fails the drift test until `_D5_FIELD_NAMES` is
   edited by hand; the failure lists the missing names.
 - Stated limits of the merged matcher (DEC-044 stop rule: limits, not defects to

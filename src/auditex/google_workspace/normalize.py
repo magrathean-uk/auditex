@@ -338,10 +338,30 @@ def _unrecognised_system_alert(setting: Any) -> bool:
     )
 
 
+def org_unit_read_malformed(directory: dict[str, Any] | None) -> bool:
+    """Whether the Directory ``orgUnits`` section is present but unreadable (not a list of sound rows or tree).
+
+    A missing section is not malformed: the read was never attempted (a legacy sample). Explicit error, cut and
+    partial markers are reported by their own coverage rows.
+    """
+    if not isinstance(directory, dict) or "orgUnits" not in directory:
+        return False
+    topology = _org_unit_topology(directory, [])
+    return topology is None or topology[3] > 0
+
+
 def unplaced_policy_count(payloads: dict[str, dict[str, Any]], coverage_rows: list[dict[str, Any]]) -> int:
-    """Count dangling OU targets in the one Policy API read or its legacy subset."""
+    """Count dangling OU targets in the one Policy API read or its legacy subset.
+
+    A target is dangling only against a complete Directory org unit read. Without one (no ``orgUnits`` section, or a
+    partial or malformed one) no target can be placed or called absent: the policies stay unclassified and the 2-step
+    verification status is unknown, which already keeps every placement-dependent verdict unassessed.
+    """
     payload = payloads.get("google_policies", {})
     name = "policySettings" if "policySettings" in payload else "twoStepVerificationPolicies"
+    topology = _org_unit_topology(payloads.get("google_directory"), coverage_rows)
+    if topology is None or not topology[0]:
+        return 0
     roots, units = _policy_unit_tree(payloads.get("google_directory"), coverage_rows)
     known_units = roots | units
     return sum(
@@ -349,10 +369,6 @@ def unplaced_policy_count(payloads: dict[str, dict[str, Any]], coverage_rows: li
         if not _unrecognised_system_alert(policy.get("setting"))
         and (targets := _policy_targets(policy)) is not None and targets[0] is not None and targets[0] not in known_units
     )
-
-
-# Policy sections whose evidence decides the organisation's 2-step verification status.
-_TWO_STEP_SECTION_PREFIX = "security_two_step_verification"
 
 
 def _policy_read_state(complete: bool, records: int, malformed: int, unusable: set[str], scopes: set[tuple[str, str, str]]) -> dict[str, Any]:
@@ -491,7 +507,11 @@ def _policy_settings_read(
     complete = read_complete and malformed == 0 and not unusable and not scopes
     records.append(_policy_read_state(complete, len(records), malformed, unusable, scopes))
     # A policy whose section cannot be told may be a 2-step verification one; others weaken only their own section.
-    two_step_affected = any(name.startswith(_TWO_STEP_SECTION_PREFIX) for name in unusable | {scope[0] for scope in scopes})
+    # Policy sections whose evidence decides the organisation's 2-step verification status. The prefix stays a local
+    # value, not a module-level constant, so it never becomes a product field name (DEC-171).
+    two_step_affected = any(
+        name.startswith("security_two_step_verification") for name in unusable | {scope[0] for scope in scopes}
+    )
     # Transport failures may hide any setting. Row validation failures can be checked against
     # the retained setting and scope, so an unreadable Gmail row need not hide readable 2SV.
     transport_rows = [
