@@ -6,6 +6,7 @@ Synthetic data only; every expectation is a literal.
 """
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -137,7 +138,9 @@ def _sso(mode: str, target: str = "ou:a") -> tuple[str, str]:
     ("", ("met", "admins_use_google_sign_in")),
     ("SAML_SSO", ("not_met", "admin_uses_external_sso")),
     ("OIDC_SSO", ("not_met", "admin_uses_external_sso")),
-    ("DOMAIN_WIDE_SAML_IF_ENABLED", ("not_met", "admin_uses_external_sso")),
+    # Review round 3 B2: the domain-wide provider applies only when one is enabled, and no read shows that it is.
+    ("DOMAIN_WIDE_SAML_IF_ENABLED", ("not_assessed", "sso_read_incomplete")),
+    ("domain_wide_saml_if_enabled", ("not_assessed", "sso_read_incomplete")),
     ("PASSWORDLESS_SSO", ("not_assessed", "assignment_unusable")),
 ])
 @pytest.mark.parametrize("target", ["ou:root", "ou:a", "group:g1"])
@@ -160,3 +163,156 @@ def test_oversized_grace_period_is_unusable_not_an_error():
                      "value": {"enrollmentGracePeriod": "9" * 4301 + "s"}}]}}
     record = gws.assess("GWS.COMMONCONTROLS.1.4v1", sections)
     assert (record["verdict"], record["cell"]) == ("not_assessed", "setting_value_unusable")
+
+
+# --- CC.6.1 input walk (review round 3) -------------------------------------------------------------------------
+# Every input admin_sso reads, set absent, null, to the wrong type, blank, duplicated and contradictory. The base
+# answers met; no mutation of a read value may confirm met or not_met unless the mutated value is itself evidence.
+_DROP = object()
+_P1 = {"user": "p1", "org_unit": "ou:b", "groups": ["group:g1"]}
+
+
+def _cc61_base() -> dict:
+    return {"gws_tenant": {"as_of": "2026-11-25T12:00:00Z", "top_unit": "ou:root", "complete": True,
+                           "org_units": {"ou:root": None, "ou:a": "ou:root", "ou:b": "ou:a"}},
+            "gws_admins": {"complete": True, "super_admin_count": 1, "memberships_complete": True,
+                           "privileged": [dict(_P1)]},
+            "gws_sso": {"complete": True, "assignments": [{"target": "ou:a", "sso_mode": "SSO_OFF"}]}}
+
+
+_SHAPE = ("not_assessed", "section_shape_unusable")
+_NOT_COLLECTED = ("not_assessed", "section_not_collected")
+_USERS = ("not_assessed", "user_read_incomplete")
+_SSO_READ = ("not_assessed", "sso_read_incomplete")
+_LINEAGE = ("not_assessed", "lineage_unresolved")
+_ASSIGNMENT = ("not_assessed", "assignment_unusable")
+_MET = ("met", "admins_use_google_sign_in")
+
+_CC61_WALK = [
+    # gws_tenant
+    ("tenant-absent", ("gws_tenant",), _DROP, _NOT_COLLECTED),
+    ("tenant-null", ("gws_tenant",), None, _SHAPE),
+    ("tenant-wrong-type", ("gws_tenant",), [], _SHAPE),
+    ("top-unit-absent", ("gws_tenant", "top_unit"), _DROP, _SHAPE),
+    ("top-unit-null", ("gws_tenant", "top_unit"), None, _SHAPE),
+    ("top-unit-wrong-type", ("gws_tenant", "top_unit"), 1, _SHAPE),
+    ("top-unit-blank", ("gws_tenant", "top_unit"), "", _SHAPE),
+    ("top-unit-not-the-root", ("gws_tenant", "top_unit"), "ou:a", _SHAPE),
+    ("org-units-absent", ("gws_tenant", "org_units"), _DROP, _SHAPE),
+    ("org-units-null", ("gws_tenant", "org_units"), None, _SHAPE),
+    ("org-units-wrong-type", ("gws_tenant", "org_units"), [], _SHAPE),
+    ("org-units-blank", ("gws_tenant", "org_units"), {}, _SHAPE),
+    ("org-units-two-roots", ("gws_tenant", "org_units"), {"ou:root": None, "ou:a": None, "ou:b": "ou:a"}, _SHAPE),
+    ("org-units-cycle", ("gws_tenant", "org_units"),
+     {"ou:root": None, "ou:a": "ou:b", "ou:b": "ou:a"}, _LINEAGE),
+    ("org-units-dangling", ("gws_tenant", "org_units"), {"ou:root": None, "ou:b": "ou:a"}, _LINEAGE),
+    ("tenant-complete-absent", ("gws_tenant", "complete"), _DROP, _LINEAGE),
+    ("tenant-complete-null", ("gws_tenant", "complete"), None, _LINEAGE),
+    ("tenant-complete-wrong-type", ("gws_tenant", "complete"), "true", _LINEAGE),
+    ("tenant-complete-false", ("gws_tenant", "complete"), False, _LINEAGE),
+    # gws_admins
+    ("admins-absent", ("gws_admins",), _DROP, _NOT_COLLECTED),
+    ("admins-null", ("gws_admins",), None, _SHAPE),
+    ("admins-wrong-type", ("gws_admins",), [], _SHAPE),
+    ("admins-complete-absent", ("gws_admins", "complete"), _DROP, _USERS),
+    ("admins-complete-null", ("gws_admins", "complete"), None, _USERS),
+    ("admins-complete-wrong-type", ("gws_admins", "complete"), "true", _USERS),
+    ("admins-complete-false", ("gws_admins", "complete"), False, _USERS),
+    ("count-absent", ("gws_admins", "super_admin_count"), _DROP, _SHAPE),
+    ("count-null", ("gws_admins", "super_admin_count"), None, _SHAPE),
+    ("count-wrong-type", ("gws_admins", "super_admin_count"), "1", _SHAPE),
+    ("count-bool", ("gws_admins", "super_admin_count"), True, _SHAPE),
+    ("count-float", ("gws_admins", "super_admin_count"), 1.0, _SHAPE),
+    ("count-negative", ("gws_admins", "super_admin_count"), -1, _SHAPE),
+    ("count-zero", ("gws_admins", "super_admin_count"), 0, _USERS),
+    ("count-above-distinct-users", ("gws_admins", "super_admin_count"), 2, _USERS),
+    ("memberships-absent", ("gws_admins", "memberships_complete"), _DROP, _SHAPE),
+    ("memberships-null", ("gws_admins", "memberships_complete"), None, _SHAPE),
+    ("memberships-wrong-type", ("gws_admins", "memberships_complete"), "false", _SHAPE),
+    # No assignment targets a group, so an unseen membership cannot change the answer (design 8.2).
+    ("memberships-false-no-group-target", ("gws_admins", "memberships_complete"), False, _MET),
+    ("privileged-absent", ("gws_admins", "privileged"), _DROP, _SHAPE),
+    ("privileged-null", ("gws_admins", "privileged"), None, _SHAPE),
+    ("privileged-wrong-type", ("gws_admins", "privileged"), {"p1": _P1}, _SHAPE),
+    ("privileged-blank", ("gws_admins", "privileged"), [], _USERS),
+    ("privileged-entry-null", ("gws_admins", "privileged"), [None], _SHAPE),
+    ("privileged-entry-wrong-type", ("gws_admins", "privileged"), ["p1"], _SHAPE),
+    ("privileged-duplicate", ("gws_admins", "privileged"), [_P1, _P1], _USERS),
+    ("privileged-contradictory-groups", ("gws_admins", "privileged"),
+     [_P1, {"user": "p1", "org_unit": "ou:b", "groups": []}], _USERS),
+    ("privileged-contradictory-org-unit", ("gws_admins", "privileged"),
+     [_P1, {"user": "p1", "org_unit": "ou:root", "groups": ["group:g1"]}], _USERS),
+    ("user-absent", ("gws_admins", "privileged", 0, "user"), _DROP, _SHAPE),
+    ("user-null", ("gws_admins", "privileged", 0, "user"), None, _SHAPE),
+    ("user-wrong-type", ("gws_admins", "privileged", 0, "user"), 1, _SHAPE),
+    ("user-blank", ("gws_admins", "privileged", 0, "user"), "", _SHAPE),
+    ("org-unit-absent", ("gws_admins", "privileged", 0, "org_unit"), _DROP, _SHAPE),
+    ("org-unit-null", ("gws_admins", "privileged", 0, "org_unit"), None, _SHAPE),
+    ("org-unit-wrong-type", ("gws_admins", "privileged", 0, "org_unit"), 1, _SHAPE),
+    ("org-unit-blank", ("gws_admins", "privileged", 0, "org_unit"), "", _SHAPE),
+    ("org-unit-a-group", ("gws_admins", "privileged", 0, "org_unit"), "group:g1", _SHAPE),
+    ("org-unit-outside-the-map", ("gws_admins", "privileged", 0, "org_unit"), "ou:zz", _LINEAGE),
+    ("groups-absent", ("gws_admins", "privileged", 0, "groups"), _DROP, _SHAPE),
+    ("groups-null", ("gws_admins", "privileged", 0, "groups"), None, _SHAPE),
+    ("groups-wrong-type", ("gws_admins", "privileged", 0, "groups"), "group:g1", _SHAPE),
+    ("groups-entry-null", ("gws_admins", "privileged", 0, "groups"), [None], _SHAPE),
+    ("groups-entry-blank", ("gws_admins", "privileged", 0, "groups"), [""], _SHAPE),
+    ("groups-entry-an-ou", ("gws_admins", "privileged", 0, "groups"), ["ou:a"], _SHAPE),
+    # A group listed twice is the same membership; the OU assignment still decides.
+    ("groups-duplicate", ("gws_admins", "privileged", 0, "groups"), ["group:g1", "group:g1"], _MET),
+    # gws_sso
+    ("sso-absent", ("gws_sso",), _DROP, _NOT_COLLECTED),
+    ("sso-null", ("gws_sso",), None, _SHAPE),
+    ("sso-wrong-type", ("gws_sso",), [], _SHAPE),
+    ("sso-complete-absent", ("gws_sso", "complete"), _DROP, _SSO_READ),
+    ("sso-complete-null", ("gws_sso", "complete"), None, _SSO_READ),
+    ("sso-complete-wrong-type", ("gws_sso", "complete"), "true", _SSO_READ),
+    ("sso-complete-false", ("gws_sso", "complete"), False, _SSO_READ),
+    ("assignments-absent", ("gws_sso", "assignments"), _DROP, _SHAPE),
+    ("assignments-null", ("gws_sso", "assignments"), None, _SHAPE),
+    ("assignments-wrong-type", ("gws_sso", "assignments"), {"ou:a": "SSO_OFF"}, _SHAPE),
+    # A complete read with no assignment: every account signs in with Google (Commoncontrols.rego:1006).
+    ("assignments-blank", ("gws_sso", "assignments"), [], _MET),
+    ("assignment-entry-null", ("gws_sso", "assignments"), [None], _SHAPE),
+    ("assignment-entry-wrong-type", ("gws_sso", "assignments"), ["ou:a"], _SHAPE),
+    ("assignments-duplicate", ("gws_sso", "assignments"),
+     [{"target": "ou:a", "sso_mode": "SSO_OFF"}, {"target": "ou:a", "sso_mode": "SSO_OFF"}], _MET),
+    ("assignments-contradictory-ou", ("gws_sso", "assignments"),
+     [{"target": "ou:a", "sso_mode": "SSO_OFF"}, {"target": "ou:a", "sso_mode": "SAML_SSO"}], _ASSIGNMENT),
+    ("assignments-contradictory-group", ("gws_sso", "assignments"),
+     [{"target": "group:g1", "sso_mode": "SSO_OFF"}, {"target": "group:g1", "sso_mode": "SAML_SSO"}], _ASSIGNMENT),
+    ("target-absent", ("gws_sso", "assignments", 0, "target"), _DROP, _SHAPE),
+    ("target-null", ("gws_sso", "assignments", 0, "target"), None, _SHAPE),
+    ("target-wrong-type", ("gws_sso", "assignments", 0, "target"), 1, _SHAPE),
+    ("target-blank", ("gws_sso", "assignments", 0, "target"), "", _SHAPE),
+    ("target-unplaceable", ("gws_sso", "assignments", 0, "target"), "customers/x", _SHAPE),
+    ("mode-absent", ("gws_sso", "assignments", 0, "sso_mode"), _DROP, _SHAPE),
+    ("mode-null", ("gws_sso", "assignments", 0, "sso_mode"), None, _SHAPE),
+    ("mode-wrong-type", ("gws_sso", "assignments", 0, "sso_mode"), 0, _SHAPE),
+    # Design 5 (admin_sso row) and Commoncontrols.rego:1031-1044 list "" as Google sign-in.
+    ("mode-blank", ("gws_sso", "assignments", 0, "sso_mode"), "", _MET),
+    ("mode-unknown", ("gws_sso", "assignments", 0, "sso_mode"), "PASSWORDLESS_SSO", _ASSIGNMENT),
+    ("mode-conditional-domain-wide", ("gws_sso", "assignments", 0, "sso_mode"), "DOMAIN_WIDE_SAML_IF_ENABLED",
+     _SSO_READ),
+]
+
+
+@pytest.mark.parametrize(("path", "value", "answer"), [case[1:] for case in _CC61_WALK],
+                         ids=[case[0] for case in _CC61_WALK])
+def test_cc61_input_walk(path, value, answer):
+    sections = copy.deepcopy(_cc61_base())
+    *parents, last = path
+    node = sections
+    for key in parents:
+        node = node[key]
+    if value is _DROP:
+        del node[last]
+    else:
+        node[last] = copy.deepcopy(value)
+    record = gws.assess("GWS.COMMONCONTROLS.6.1v1", sections)
+    assert (record["verdict"], record["cell"]) == answer
+
+
+def test_cc61_walk_base_is_met():
+    record = gws.assess("GWS.COMMONCONTROLS.6.1v1", _cc61_base())
+    assert (record["verdict"], record["cell"]) == _MET

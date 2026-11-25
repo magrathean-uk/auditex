@@ -15,7 +15,8 @@
 
 Unknown is not safe (design 8.4): a malformed value, an unknown enum, a cut read, an unplaceable policy target, a
 present record without its field, a group assignment met with incomplete memberships, an incomplete or broken OU
-read, or a privileged list too short for the super admin count never answers met, and never not_met either: every
+read, a privileged list too short for the super admin count, a zero super admin count, an account read twice, or a
+conditional domain-wide SAML assignment without the provider state never answers met, and never not_met either: every
 completeness check runs before the scan (design 8.2, step 2). Within a complete read a positively read violation
 still wins over unknowns elsewhere (design 8.2, step 4). Texts are constant; no input value enters an answer.
 """
@@ -38,8 +39,9 @@ from .reduce import (
 )
 
 # Outcomes, ordered so the strongest wins under ``max``: a positively read violation wins over any unknown. Ints, not
-# words, so no outcome name becomes a product field name.
-_FINE, _LINEAGE, _UNKNOWN, _VIOLATES = range(4)
+# words, so no outcome name becomes a product field name. ``_PROVIDER``: an SSO assignment that is external only when
+# the domain-wide SAML provider is enabled, which no read shows.
+_FINE, _LINEAGE, _PROVIDER, _UNKNOWN, _VIOLATES = range(5)
 _DAY = 86_400
 _GROUP = re.compile(r"group:[^/\s]+")
 _GROUP_UNIT = re.compile(r"(ou:[^/\s]+)/group:[^/\s]+")
@@ -269,21 +271,25 @@ def super_admin_count(policy_id: str, row: dict, sections: dict) -> dict:
 # --- admin_sso (COMMONCONTROLS.6.1) -------------------------------------------------------------------------------
 
 
-def _sso_modes() -> tuple[frozenset[str], frozenset[str]]:
-    """Google-only modes (``SsoModeRepresentsGoogleAuthOnly``, SG:scubagoggles/rego/Commoncontrols.rego:1031-1044)
-    and the external-SSO modes of the Cloud Identity ``InboundSsoAssignment.SsoMode`` enum (an external SAML or OIDC
-    identity provider, or the domain-wide SAML provider when one is configured; review B3); any other value is
-    unknown (D14)."""
-    return (frozenset(("SSO_OFF", "SSO_MODE_UNSPECIFIED", "")),
-            frozenset(("SAML_SSO", "OIDC_SSO", "DOMAIN_WIDE_SAML_IF_ENABLED")))
+def _sso_modes() -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """Google-only modes (``SsoModeRepresentsGoogleAuthOnly``, SG:scubagoggles/rego/Commoncontrols.rego:1031-1044),
+    the external-SSO modes of the Cloud Identity ``InboundSsoAssignment.SsoMode`` enum (an external SAML or OIDC
+    identity provider; review B3), and the conditional mode: the domain-wide SAML provider if one is configured,
+    else the same as SSO_OFF. No section carries the provider state, so the conditional mode decides nothing (review
+    round 3 B2; ScubaGoggles fails it, D14). Any other value is unknown (D14)."""
+    return (frozenset(("SSO_OFF", "SSO_MODE_UNSPECIFIED", "")), frozenset(("SAML_SSO", "OIDC_SSO")),
+            frozenset(("DOMAIN_WIDE_SAML_IF_ENABLED",)))
 
 
 def _mode(modes: set[str]) -> int:
-    """The modes of the groups a user is in: any external one violates, else any unknown one is unknown."""
-    google, external = _sso_modes()
-    if modes & external:
-        return _VIOLATES
-    return _FINE if modes <= google else _UNKNOWN
+    """The assignments read on one target. A target holds one assignment, so two different modes on it are
+    ambiguous, not a choice (review round 3 B1)."""
+    if len(modes) != 1:
+        return _UNKNOWN
+    google, external, conditional = _sso_modes()
+    mode = next(iter(modes))
+    return (_FINE if mode in google else _VIOLATES if mode in external else _PROVIDER if mode in conditional
+            else _UNKNOWN)
 
 
 def _privileged(admins: Any) -> list[tuple[str, str, frozenset[str]]] | None:
@@ -335,13 +341,13 @@ def _admin_user(org_unit: str, groups: frozenset[str], assigned: dict[str, set[s
     targeted) and the admin read are complete here; a user outside the complete OU map is inconsistent evidence."""
     if org_unit not in org_units:
         return _LINEAGE
-    group_modes = set().union(*(assigned.get(group, set()) for group in groups))
-    if group_modes:
-        return _mode(group_modes)
+    group_outcomes = [_mode(assigned[group]) for group in groups if group in assigned]
+    if group_outcomes:
+        # Any group whose read assignment is external decides; else the least known group does.
+        return max(group_outcomes)
     for unit in _lineage(org_units, org_unit):
         if unit in assigned:
-            # One OU holds one assignment; two different modes on it are ambiguous, not a choice.
-            return _UNKNOWN if len(assigned[unit]) > 1 else _mode(assigned[unit])
+            return _mode(assigned[unit])
     return _FINE
 
 
@@ -360,6 +366,13 @@ def admin_sso(policy_id: str, row: dict, sections: dict) -> dict:
     # never confirms met or not_met (review B1, B2, B6).
     if admins.get("complete") is not True:
         return _user_read_incomplete(policy_id)
+    # The admin read must agree with itself before any account decides (review B6, round 3 B1 and M1). Every super
+    # admin is privileged (design 7), so fewer distinct privileged accounts than super admins means a partial list
+    # whatever its ``complete`` flag says; a tenant always has a super admin, so a zero count is a broken read; and an
+    # account read twice may carry contradictory OUs or groups, so no row of it is trusted.
+    distinct = {user for user, _, _ in users}
+    if count == 0 or len(distinct) != len(users) or count > len(distinct):
+        return _user_read_incomplete(policy_id)
     if sso.get("complete") is not True:
         return _A(policy_id, "data_unavailable_sso_read_incomplete",
                   "Data unavailable: the inbound SSO assignment read is incomplete; the policy was not assessed.",
@@ -369,14 +382,6 @@ def admin_sso(policy_id: str, row: dict, sections: dict) -> dict:
         return _A(policy_id, "data_unavailable_org_unit_lineage",
                   "Data unavailable: the organisational unit read is incomplete or inconsistent; the policy was not "
                   "assessed.", "lineage_unresolved", ["gws_tenant", "gws_admins"])
-    if not users:
-        return _A(policy_id, "data_unusable_no_privileged_users",
-                  "Data unusable: the read reports no privileged account, which a Google Workspace tenant cannot "
-                  "have; the policy was not assessed.", "no_privileged_users", ["gws_admins"])
-    if count > len({user for user, _, _ in users}):
-        # Every super admin is privileged (design 7): fewer distinct privileged accounts than super admins means the
-        # privileged list is partial, whatever its ``complete`` flag says (review B6).
-        return _user_read_incomplete(policy_id)
     if not admins["memberships_complete"] and any(_GROUP.fullmatch(target) for target in assigned):
         # The lane rule is unconditional (review B1): an unseen membership may add an external-SSO group or a
         # Google-only group that overrides the OU, so even a known external-SSO group does not decide here.
@@ -394,6 +399,11 @@ def admin_sso(policy_id: str, row: dict, sections: dict) -> dict:
                   "Data unusable: an inbound SSO assignment that applies to a privileged account has an unknown mode, "
                   "or one target holds disagreeing assignments; the policy was not assessed.", "assignment_unusable",
                   ["gws_sso"])
+    if outcome == _PROVIDER:
+        return _A(policy_id, "data_unavailable_sso_read_incomplete",
+                  "Data unavailable: an inbound SSO assignment that applies to a privileged account uses the "
+                  "domain-wide SAML provider only if one is enabled, and the read does not show whether it is; the "
+                  "policy was not assessed.", "sso_read_incomplete", ["gws_sso"])
     if outcome == _LINEAGE:
         return _A(policy_id, "data_unavailable_org_unit_lineage",
                   "Data unavailable: the organisational unit read is incomplete or inconsistent, so the nearest SSO "

@@ -73,24 +73,6 @@
           ],
           "verdict": "not_assessed"
         },
-        "no_privileged_users": {
-          "cited": [
-            "gws_admins"
-          ],
-          "evidence_kind": "unusable",
-          "limitations": [
-            "evidence_unusable",
-            "evidence_unusable:<section>:unusable"
-          ],
-          "reason_code": "data_unusable_no_privileged_users",
-          "reason_texts": [
-            "Data unusable: the read reports no privileged account, which a Google Workspace tenant cannot have; the policy was not assessed."
-          ],
-          "recommendations": [
-            "recollect_unusable_evidence"
-          ],
-          "verdict": "not_assessed"
-        },
         "section_not_collected": {
           "evidence_kind": null,
           "limitations": [
@@ -129,6 +111,7 @@
           ],
           "reason_code": "data_unavailable_sso_read_incomplete",
           "reason_texts": [
+            "Data unavailable: an inbound SSO assignment that applies to a privileged account uses the domain-wide SAML provider only if one is enabled, and the read does not show whether it is; the policy was not assessed.",
             "Data unavailable: the inbound SSO assignment read is incomplete; the policy was not assessed."
           ],
           "recommendations": [
