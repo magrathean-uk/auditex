@@ -351,10 +351,6 @@ def unplaced_policy_count(payloads: dict[str, dict[str, Any]], coverage_rows: li
     )
 
 
-# Policy sections whose evidence decides the organisation's 2-step verification status.
-_TWO_STEP_SECTION_PREFIX = "security_two_step_verification"
-
-
 def _policy_read_state(complete: bool, records: int, malformed: int, unusable: set[str], scopes: set[tuple[str, str, str]]) -> dict[str, Any]:
     return {
         "kind": "google_policy_settings_read_state",
@@ -491,7 +487,11 @@ def _policy_settings_read(
     complete = read_complete and malformed == 0 and not unusable and not scopes
     records.append(_policy_read_state(complete, len(records), malformed, unusable, scopes))
     # A policy whose section cannot be told may be a 2-step verification one; others weaken only their own section.
-    two_step_affected = any(name.startswith(_TWO_STEP_SECTION_PREFIX) for name in unusable | {scope[0] for scope in scopes})
+    # Policy sections whose evidence decides the organisation's 2-step verification status. The prefix stays a local
+    # value, not a module-level constant, so it never becomes a product field name (DEC-171).
+    two_step_affected = any(
+        name.startswith("security_two_step_verification") for name in unusable | {scope[0] for scope in scopes}
+    )
     # Transport failures may hide any setting. Row validation failures can be checked against
     # the retained setting and scope, so an unreadable Gmail row need not hide readable 2SV.
     transport_rows = [

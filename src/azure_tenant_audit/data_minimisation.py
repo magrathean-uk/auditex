@@ -151,11 +151,24 @@ def minimise_gmail_settings(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _policy_vocabulary() -> tuple[tuple[str, ...], tuple[str, ...], frozenset[str], tuple[str, ...]]:
+    """Google's address-list keys, policy types and system groups, and the product's query scopes. They are returned
+    from a function body rather than written in module-level constants, so none becomes a product field name the
+    shareable redaction keeps (``output_redaction._D5_FIELD_NAMES``, DEC-171); a person or group with that name is
+    still pseudonymised where it is a mapping key."""
+    return (
+        ("addressList", "blockedAddressList"),
+        ("ADMIN", "SYSTEM", "POLICY_TYPE_UNSPECIFIED"),
+        frozenset({"WORKSPACE_ALL_ADMIN_GROUP", "UNCONSENTED_CHILD_GROUP"}),
+        ("targets", "licences", "other", "unreadable"),
+    )
+
+
 # Policy API objects. A policy keeps only what the audit reads, in a fixed shape: its ``type``, its targets and order
 # (``policyQuery.orgUnit``, ``group`` and ``sortOrder``), the scope its CEL ``query`` was parsed into
 # (``policyQuery.query_scope``, never the query text) and its setting's ``type`` and projected ``value``. The tenant's
 # customer id, the policy resource name and every other field are dropped.
-POLICY_ADDRESS_LIST_KEYS = ("addressList", "blockedAddressList")
+POLICY_ADDRESS_LIST_KEYS, POLICY_TYPES, POLICY_SYSTEM_GROUPS, POLICY_QUERY_SCOPES = _policy_vocabulary()
 POLICY_SETTING_TYPE = re.compile(r"settings/[a-z0-9_]+(?:\.[a-z0-9_]+)+")
 # SCuBA's service prefixes and exact setting types, shared by the request and response checks.
 POLICY_TYPE_PATTERN = (
@@ -168,10 +181,7 @@ POLICY_TYPE_ALLOWED = re.compile(POLICY_TYPE_PATTERN)
 TWO_STEP_SETTING_PREFIX = "settings/security.two_step_verification_"
 UNRECOGNISED_POLICY_SETTING = "unrecognised"
 POLICY_UNIT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
-POLICY_TYPES = ("ADMIN", "SYSTEM", "POLICY_TYPE_UNSPECIFIED")
 POLICY_QUERY_MAX = 4_096
-POLICY_SYSTEM_GROUPS = frozenset({"WORKSPACE_ALL_ADMIN_GROUP", "UNCONSENTED_CHILD_GROUP"})
-POLICY_QUERY_SCOPES = ("targets", "licences", "other", "unreadable")
 _DOMAIN_ENTRY = re.compile(r"^[^@]+\.[^@]+$")
 # The names of Google's system-defined alert rules read by ScubaGoggles v1.1.0 (parsers/system_rules_parser.py).
 UNRECOGNISED_SYSTEM_ALERT_NAME = "unrecognised"

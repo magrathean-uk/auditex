@@ -41,10 +41,14 @@ POLICY_PAGE_BUDGET = 1_000
 POLICY_CURSOR_MAX = 4_096
 # Error class of a policies read whose answer could not be read: a malformed page or no policies at all.
 POLICY_MALFORMED_ERROR_CLASS = "malformed_response"
-# Structured API reasons that may be named in a policies read error. Any other reason text is not copied: a reason
-# field is free text as far as this client can tell.
-POLICY_ERROR_REASONS = frozenset(
-    {
+
+
+def _policy_error_reasons() -> frozenset[str]:
+    """Structured API reasons that may be named in a policies read error. Any other reason text is not copied: a
+    reason field is free text as far as this client can tell."""
+    # Google's reason words stay values in a call, not a module-level constant, so none becomes a product field
+    # name the shareable redaction keeps (``output_redaction._D5_FIELD_NAMES``, DEC-171).
+    return frozenset((
         "badRequest",
         "invalid",
         "invalidParameter",
@@ -77,8 +81,10 @@ POLICY_ERROR_REASONS = frozenset(
         "USER_PROJECT_DENIED",
         "BILLING_DISABLED",
         "CONSUMER_INVALID",
-    }
-)
+    ))
+
+
+POLICY_ERROR_REASONS = _policy_error_reasons()
 
 # Fields read from the device lists. Naming them keeps the telemetry the FULL projection also returns
 # (installed apps, recent users, active time ranges, disk and CPU reports) out of the bundle.
