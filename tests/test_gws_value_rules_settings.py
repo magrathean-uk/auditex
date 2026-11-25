@@ -90,6 +90,9 @@ def test_the_38_rows_use_the_setting_kind_and_the_design_parameters():
         row = rows[pid]
         params = dict(row["params"])
         assert params.pop("fields" if isinstance(field, list) else "field") == field, pid
+        # The string vocabularies and case folding are pinned by test_m1_every_shipped_string_row_pins_its_vocabulary.
+        for name in ("known", "source", "case"):
+            params.pop(name, None)
         assert params == {"section": section, "op": op, "value": value, "service": service, "scope": scope}, pid
         assert row["sections"] == ["gws_tenant", "gws_policies"] and row["rule_id"] == f"{pid}.setting"
 
@@ -150,9 +153,11 @@ def test_malformed_parameters_are_a_programming_error(params):
 def test_parameters_default_the_scope_and_accept_the_design_shapes():
     params = _good()
     del params["scope"]
-    assert S._params(params) == ("gmail_mail_delegation", ("enableMailDelegation",), "eq", True, "gmail", ALL)
+    assert S._params(params) == ("gmail_mail_delegation", ("enableMailDelegation",), "eq", True, "gmail", ALL, None,
+                                 False)
     assert S._params({"section": "s", "fields": ["a", "b"], "op": "not_in", "value": ["X"], "service": None,
-                      "scope": EXPLICIT}) == ("s", ("a", "b"), "not_in", ["X"], None, EXPLICIT)
+                      "scope": EXPLICIT, "known": ["X", "Y"], "source": "c"}) == (
+        "s", ("a", "b"), "not_in", ["X"], None, EXPLICIT, frozenset({"X", "Y"}), False)
 
 
 # --- operators ------------------------------------------------------------------------------------------------------
@@ -160,10 +165,10 @@ def test_parameters_default_the_scope_and_accept_the_design_shapes():
 @pytest.mark.parametrize("op, actual, pinned, expected", [
     ("eq", True, True, True), ("eq", False, True, False), ("ne", True, True, False), ("ne", False, True, True),
     ("eq", 1, True, None), ("ne", "true", True, None), ("eq", None, False, None), ("ne", [], False, None),
-    ("eq", "ENABLED", "ENABLED", True), ("eq", "enabled", "ENABLED", True), ("ne", "DISABLED", "ENABLED", True),
+    ("eq", "ENABLED", "ENABLED", True), ("eq", "enabled", "ENABLED", False), ("ne", "DISABLED", "ENABLED", True),
     ("ne", "", "ENABLED", None), ("ne", 5, "STRONG", None), ("ne", True, "STRONG", None),
     ("ne", "ſTRONG", "STRONG", None), ("eq", "dısabled", "DISABLED", None), ("not_in", "uſ", ["US"], None),
-    ("in", "BLOCK_ALL", ["BLOCK_ALL", "X"], True), ("not_in", "block_all", ["BLOCK_ALL"], False),
+    ("in", "BLOCK_ALL", ["BLOCK_ALL", "X"], True), ("not_in", "block_all", ["BLOCK_ALL"], True),
     ("not_in", "ALLOW_ALL", ["BLOCK_ALL", "BLOCK_ALL_SCOPES"], True), ("not_in", 1, ["BLOCK_ALL"], None),
     ("lt", 11, 12, True), ("lt", 12, 12, False), ("lt", 12.0, 12, False), ("lt", 12.5, 12, None),
     ("lt", "11", 12, None), ("lt", True, 12, None), ("lt", float("nan"), 12, None), ("lt", float("inf"), 12, None),
@@ -172,7 +177,7 @@ def test_parameters_default_the_scope_and_accept_the_design_shapes():
     ("duration_gt", "1d", "12h", True), ("duration_gt", "719m", "12h", False), ("duration_gt", "721m", "12h", True),
     ("duration_gt", "43200", "12h", None), ("duration_gt", "-1s", "12h", None), ("duration_gt", 43200, "12h", None),
     ("duration_gt", "3600.5s", "12h", None), ("duration_gt", "", "12h", None), ("duration_gt", "٤s", "12h", None),
-    ("duration_gt", "1" * 40 + "s", "12h", None), ("duration_gt", None, "12h", None),
+    ("duration_gt", "1" * 40 + "s", "12h", True), ("duration_gt", None, "12h", None),
     ("duration_ne", "0s", "0s", False), ("duration_ne", "7776000s", "0s", True), ("duration_ne", "0d", "0s", False),
     ("duration_ne", "0", "0s", None),
 ])
@@ -276,7 +281,7 @@ def test_explicit_only_never_uses_a_default_or_the_top_unit():
                                                             _p("ou:root", section, {"serviceState": "ENABLED"})])) == (
         "not_met", "unit_violates")
     assert _answer("GWS.COMMONCONTROLS.16.2v1", _sections([_p("ou:a", section, {"other": 1})])) == (
-        "not_assessed", "setting_absent")
+        "not_assessed", "setting_value_unusable")
 
 
 def test_a_tie_in_an_unrelated_field_of_the_section_makes_the_unit_unusable_not_compliant():
@@ -288,6 +293,10 @@ def test_answers_hold_no_input_value_and_cite_the_row_sections():
     secret = "ZZ-VALUE-FROM-THE-TENANT"
     sections = _sections([_p("ou:root", "security_password", {"allowedStrength": secret})])
     record = gws.assess("GWS.COMMONCONTROLS.5.1v1", sections)
+    assert (record["verdict"], record["cell"], record["detail"]) == ("not_assessed", "setting_value_unusable", {})
+    assert secret not in repr(record)
+    record = gws.assess("GWS.COMMONCONTROLS.5.1v1", _sections([_p("ou:root", "security_password",
+                                                                   {"allowedStrength": "WEAK"})]))
     assert (record["verdict"], record["cell"], record["detail"]) == ("not_met", "unit_violates", {})
     assert secret not in repr(record) and "ou:" not in record["reason_text"]
     assert record["cited_sections"] == ["gws_tenant", "gws_policies"]
@@ -380,3 +389,153 @@ def test_a_sub_ou_with_the_service_on_inherits_the_pinned_default_when_the_top_v
     off_ok = _sections([OFF_TOP, ON_SUB])
     assert _answer("GWS.GMAIL.1.1v1", off_ok) == ("met", "no_unit_violates")
 
+
+# --- review repair M13-L07-repair (B1 to B4, M1, L1): each fails on 961acdfc ------------------------------------------
+
+UNREADABLE_SUB = _p("ou:a", "gmail_service_status", {"serviceState": None})
+
+
+def test_b1_an_unreadable_sub_unit_service_state_never_confirms_met_through_a_compliant_inherited_value():
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, GOOD, UNREADABLE_SUB])) == (
+        "not_assessed", "service_status_absent")
+
+
+def test_b1_an_absent_top_service_state_never_confirms_met_beside_an_enabled_sub_unit():
+    assert _answer("GWS.GMAIL.5.1v1", _sections([GOOD, ON_SUB])) == ("not_assessed", "service_status_absent")
+
+
+def test_b1_a_violation_in_a_service_on_unit_still_wins_over_an_unknown_state_elsewhere():
+    sections = _sections([ON, _p("ou:root", SE, {FIELD: False}), UNREADABLE_SUB])
+    assert _answer("GWS.GMAIL.5.1v1", sections) == ("not_met", "unit_violates")
+
+
+@pytest.mark.parametrize("policy_id, section, field, value", [
+    ("GWS.COMMONCONTROLS.15.1v1", "data_regions_data_at_rest_region", "region", "us"),
+    ("GWS.COMMONCONTROLS.10.4v1", "api_controls_unconfigured_third_party_apps", "accessLevel", "block_all"),
+    ("GWS.COMMONCONTROLS.10.4v1", "api_controls_unconfigured_third_party_apps", "accessLevel", "Block_All_Scopes"),
+    ("GWS.COMMONCONTROLS.17.1v1", "multi_party_approval_require_approvals", "multiPartyApprovalState", "enabled"),
+    ("GWS.COMMONCONTROLS.7.1v1", "provisioning_conflicting_accounts_management", "option",
+     "replace_conflicting_account"),
+])
+def test_b2_strings_compare_exactly_as_the_rego_does(policy_id, section, field, value):
+    sections = _sections([_p("ou:root", section, {field: value})])
+    assert _answer(policy_id, sections) == ("not_assessed", "setting_value_unusable")
+
+
+def test_b2_the_rego_folds_ascii_case_only_for_cc_5_1_and_the_explicit_service_states():
+    assert _answer("GWS.COMMONCONTROLS.5.1v1", _sections([_p("ou:root", "security_password",
+                                                             {"allowedStrength": "strong"})])) == (
+        "met", "no_unit_violates")
+    assert _answer("GWS.COMMONCONTROLS.5.1v1", _sections([_p("ou:root", "security_password",
+                                                             {"allowedStrength": "weak"})])) == (
+        "not_met", "unit_violates")
+    section = "early_access_apps_service_status"
+    assert _answer("GWS.COMMONCONTROLS.16.2v1", _sections([_p("ou:a", section, {"serviceState": "enabled"})])) == (
+        "not_met", "unit_violates")
+    assert _answer("GWS.COMMONCONTROLS.16.2v1", _sections([_p("ou:a", section, {"serviceState": "disabled"})])) == (
+        "met", "no_unit_violates")
+
+
+def test_b2_a_unicode_folded_service_state_is_unknown_not_disabled():
+    folded = _p("ou:a", "gmail_service_status", {"serviceState": "dıſabled"})
+    sections = _sections([ON, GOOD, folded, _p("ou:a", SE, {FIELD: False})])
+    assert _answer("GWS.GMAIL.5.1v1", sections) == ("not_assessed", "service_status_absent")
+    top = _p("ou:root", "gmail_service_status", {"serviceState": "еNABLED"})
+    assert _answer("GWS.GMAIL.5.1v1", _sections([top, GOOD])) == ("not_assessed", "service_status_absent")
+
+
+@pytest.mark.parametrize("policy_id, section", [
+    ("GWS.COMMONCONTROLS.16.1v1", "enterprise_service_restrictions_service_status"),
+    ("GWS.COMMONCONTROLS.16.2v1", "early_access_apps_service_status")])
+@pytest.mark.parametrize("record", [{}, {"other": 1}])
+def test_b3_a_supplied_status_record_without_a_state_is_unusable_not_absent(policy_id, section, record):
+    good = "DISABLED" if policy_id.endswith("16.2v1") else "ENABLED"
+    sections = _sections([_p("ou:root", section, record), _p("ou:a", section, {"serviceState": good})])
+    assert _answer(policy_id, sections) == ("not_assessed", "setting_value_unusable")
+    assert _answer(policy_id, _sections([_p("ou:a", section, record)])) == ("not_assessed", "setting_value_unusable")
+
+
+@pytest.mark.parametrize("unit, kind", [
+    ("not-an-ou", "org_unit"), ("ou:", "org_unit"), ("ou:a/b", "org_unit"), ("ou:a b", "org_unit"),
+    ("ou:a/group:", "group"), ("ou:/group:g1", "group"), ("ou:a/group:g1/x", "group"), ("x/group:g1", "group"),
+])
+def test_b4_a_policy_record_on_an_unplaceable_unit_is_a_shape_error_never_met(unit, kind):
+    stray = {"unit": unit, "unit_kind": kind, "section": SE, "sort_order": 1, "value": {FIELD: True}}
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, GOOD, stray])) == ("not_assessed", "section_shape_unusable")
+
+
+def test_b4_an_unplaceable_record_in_an_unrelated_section_never_reaches_the_rule():
+    stray = {"unit": "not-an-ou", "unit_kind": "org_unit", "section": "gmail_pop_access", "sort_order": 1,
+             "value": {"enablePopAccess": True}}
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, GOOD, stray])) == ("met", "no_unit_violates")
+
+
+def _region_row(**change):
+    row = copy.deepcopy(catalogue()["policies"]["GWS.COMMONCONTROLS.15.1v1"])
+    row["params"].update(change)
+    return row
+
+
+REGION = "data_regions_data_at_rest_region"
+
+
+@pytest.mark.parametrize("change", [{"op": "eq", "value": "US"}, {"op": "in", "value": ["US"]},
+                                    {"op": "ne", "value": "US"}, {"op": "not_in", "value": ["US"]}])
+def test_m1_a_value_outside_the_pinned_vocabulary_never_answers_met_on_any_string_operator(change):
+    sections = _sections([_p("ou:root", REGION, {"region": "UNKNOWN"})])
+    record = S.setting("GWS.COMMONCONTROLS.15.1v1", _region_row(**change), sections)
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "setting_value_unusable")
+
+
+@pytest.mark.parametrize("change", [{"op": "eq", "value": "US"}, {"op": "in", "value": ["US"]},
+                                    {"op": "ne", "value": "US"}, {"op": "not_in", "value": ["US"]}])
+def test_m1_a_string_row_without_a_vocabulary_is_a_programming_error(change):
+    params = dict(_region_row(**change)["params"])
+    del params["known"], params["source"]
+    with pytest.raises(ValueError, match="Invalid GWS setting parameters"):
+        S._params(params)
+
+
+def test_m1_every_shipped_string_row_pins_its_vocabulary_with_a_cite():
+    vocabularies = {
+        "GWS.COMMONCONTROLS.5.1v1": ["STRONG", "WEAK"],
+        "GWS.COMMONCONTROLS.7.1v1": ["AUTOMATICALLY_SEND_INVITATIONS", "PRESERVE_CONFLICTING_ACCOUNT",
+                                     "REPLACE_CONFLICTING_ACCOUNT"],
+        "GWS.COMMONCONTROLS.10.4v1": ["ACCESS_LEVEL_UNSPECIFIED", "ALLOW_SIGN_IN_ONLY", "ALLOW_SIGN_IN_SCOPES_ONLY",
+                                      "BLOCK_ALL", "BLOCK_ALL_SCOPES", "UNSPECIFIED_UBER_BLOCK"],
+        "GWS.COMMONCONTROLS.15.1v1": ["ANY_REGION", "EUROPE", "REGION_UNSPECIFIED", "US"],
+        "GWS.COMMONCONTROLS.16.1v1": ["DISABLED", "ENABLED"],
+        "GWS.COMMONCONTROLS.16.2v1": ["DISABLED", "ENABLED"],
+        "GWS.COMMONCONTROLS.17.1v1": ["DISABLED", "ENABLED"],
+    }
+    folded = {"GWS.COMMONCONTROLS.5.1v1", "GWS.COMMONCONTROLS.16.1v1", "GWS.COMMONCONTROLS.16.2v1"}
+    rows = {pid: row["params"] for pid, row in catalogue()["policies"].items() if row["kind"] == "setting"}
+    assert {pid for pid, params in rows.items() if "known" in params} == set(vocabularies)
+    for pid, known in vocabularies.items():
+        assert rows[pid]["known"] == known, pid
+        assert rows[pid]["source"].startswith("SG:scubagoggles/"), pid
+        assert rows[pid].get("case", "exact") == ("fold" if pid in folded else "exact"), pid
+
+
+@pytest.mark.parametrize("change", [
+    {"known": ["US"]}, {"known": []}, {"known": "US"}, {"known": ["US", "US"]}, {"known": ["US", 1]},
+    {"known": ["US", ""]}, {"known": ["EUROPE"]}, {"source": None}, {"source": ""}, {"case": True}, {"case": "FOLD"},
+    {"case": "fold"}, {"known": ["US", "еU"]},
+])
+def test_m1_malformed_vocabulary_parameters_are_a_programming_error(change):
+    params = dict(_region_row()["params"])
+    if change.get("known") == ["US"]:
+        params.update(op="eq", value=True, known=["US"])
+    else:
+        params.update(change)
+    if change.get("source", 0) is None:
+        del params["source"]
+    if change.get("case") == "fold":
+        params.update(known=["US", "Europe"], value="US")
+    with pytest.raises(ValueError, match="Invalid GWS setting parameters"):
+        S._params(params)
+
+
+def test_l1_the_duration_grammar_takes_any_digit_count():
+    assert S._violates("duration_gt", "1000000000000000s", "12h") is True
+    assert S._violates("duration_gt", "0000000000000000000043200s", "12h") is False
