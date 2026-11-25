@@ -19,7 +19,6 @@ unknowns elsewhere (design 8.2, step 4). Texts are constant; no input value ente
 """
 from __future__ import annotations
 
-import calendar
 import re
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
@@ -63,7 +62,8 @@ def duration_seconds(value: Any) -> int | None:
 
 def instant_ns(value: Any) -> int | None:
     """An RFC 3339 date and time (``time.parse_ns`` with Go's RFC3339 layout) in nanoseconds since the Unix epoch;
-    None for anything else, including an impossible date."""
+    None for anything else, including an impossible date or offset. The difference from the epoch is taken as a
+    ``timedelta``, so a date at the edge of the calendar never overflows."""
     if not isinstance(value, str):
         return None
     match = _RFC3339.fullmatch(value)
@@ -71,13 +71,15 @@ def instant_ns(value: Any) -> int | None:
         return None
     year, month, day, hour, minute, second = (int(part) for part in match.groups()[:6])
     zone = match.group(8)
+    if zone != "Z" and (int(zone[1:3]) > 23 or int(zone[4:6]) > 59):
+        return None
     try:
         offset = UTC if zone == "Z" else timezone(
             (1 if zone[0] == "+" else -1) * timedelta(hours=int(zone[1:3]), minutes=int(zone[4:6])))
         moment = datetime(year, month, day, hour, minute, second, tzinfo=offset)
     except ValueError:
         return None
-    seconds = calendar.timegm(moment.astimezone(UTC).timetuple())
+    seconds = (moment - datetime(1970, 1, 1, tzinfo=UTC)) // timedelta(seconds=1)
     return seconds * 1_000_000_000 + int((match.group(7) or "").ljust(9, "0"))
 
 
@@ -280,7 +282,9 @@ def _assignments(sso: Any) -> dict[str, set[str]] | None:
         if (not isinstance(target, str) or not (_OU.fullmatch(target) or _GROUP.fullmatch(target))
                 or not isinstance(entry.get("sso_mode"), str)):
             return None
-        out.setdefault(target, set()).add(entry["sso_mode"].upper())
+        # ASCII case only (Rego ``upper``): a non-ASCII spelling that folds onto an enum name stays unknown.
+        mode = entry["sso_mode"]
+        out.setdefault(target, set()).add(mode.upper() if mode.isascii() else mode)
     return out
 
 
@@ -306,6 +310,9 @@ def _admin_user(org_unit: str, groups: frozenset[str], assigned: dict[str, set[s
         return _MEMBERSHIP
     if group_modes:
         return outcome
+    if org_unit in assigned:
+        # The user's own OU is the nearest whatever the chain above it holds, so no lineage is needed.
+        return _UNKNOWN if len(assigned[org_unit]) > 1 else _mode(assigned[org_unit])
     if org_units is None or org_unit not in org_units:
         return _LINEAGE
     for unit in _lineage(org_units, org_unit):
