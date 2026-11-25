@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
+from azure_tenant_audit.collection_gaps import REASON_PAGINATION_NOT_FOLLOWED
 from azure_tenant_audit.data_minimisation import minimise_gmail_settings
 
 from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credentials
@@ -30,6 +31,11 @@ _POLICY_SETTINGS_FILTER = (
     r"enterprise_service_restrictions|early_access_apps|gemini_app|access_approval|access_management)\\..*|"
     r"rule\\.system_defined_alerts)$')"
 )
+
+# The widened policies read takes no operator ``--top``: a SCuBA setting cut off by a row limit would be unknown, and
+# the 2-step verification subset used to finish whatever ``--top`` said. This internal cap only stops a runaway read;
+# a read cut at it comes back marked as cut at the collector's safety cap, and the collector records it as incomplete.
+POLICY_SETTINGS_ROW_CAP = 20_000
 
 # Fields read from the device lists. Naming them keeps the telemetry the FULL projection also returns
 # (installed apps, recent users, active time ranges, disk and CPU reports) out of the bundle.
@@ -229,6 +235,8 @@ class CollectedRows(list):
     result_limit: int | None = None
     page_error: Exception | None = None
     # Drive only: files whose permissions files.list left out and that were read one by one (see list_drive_files).
+    # Why the list was cut when that was not the operator's limit (for example a collector's own safety cap).
+    truncation_reason: str | None = None
     permission_reads: int = 0
     permission_errors: list[dict[str, Any]] | None = None
 
@@ -649,12 +657,13 @@ class GoogleWorkspaceClient:
             limit=top,
         )
 
-    def list_policies(self, *, top: int | None = None) -> list[dict[str, Any]]:
+    def list_policies(self, *, limit: int | None = None) -> list[dict[str, Any]]:
         """Cloud Identity policies for the SCuBA setting types (read-only policies scope).
 
-        One paged read of every allow-listed setting type (``_POLICY_SETTINGS_FILTER``). The operator's ``--top``
-        still bounds it; a read cut there or by a later page error comes back marked, and the collector records it
-        as incomplete.
+        One paged read of every allow-listed setting type (``_POLICY_SETTINGS_FILTER``). The operator's ``--top`` never
+        bounds it; only the preflight probe passes a ``limit``. Otherwise ``POLICY_SETTINGS_ROW_CAP`` stops a runaway
+        read, and a read cut there or by a later page error comes back marked, so the collector records it as
+        incomplete.
         """
         service = self._service("cloudidentity", "v1", scopes=(POLICIES_SCOPE,))
         policies = getattr(service, "policies", None)
@@ -663,13 +672,21 @@ class GoogleWorkspaceClient:
                 "the installed google-api-python-client has no cloudidentity v1 policies resource; upgrade it",
                 surface="policies",
             )
-        page_size = min(self.page_size, top or self.page_size, 100)
+        cap = limit or POLICY_SETTINGS_ROW_CAP
+        page_size = min(self.page_size, cap, 100)
         policy_filter = f'customer == "customers/{self.customer}" && {_POLICY_SETTINGS_FILTER}'
-        return self._collect_pages(
+        rows = self._collect_pages(
             lambda page_token: policies().list(pageSize=page_size, pageToken=page_token, filter=policy_filter),
             "policies",
-            limit=top,
+            limit=cap,
         )
+        if limit is None:
+            if rows.truncated and rows.page_error is None:
+                rows.truncation_reason = REASON_PAGINATION_NOT_FOLLOWED
+            elif not rows.truncated:
+                # A read that ended before the cap reports no limit, as an unbounded read did before.
+                rows.result_limit = None
+        return rows
 
     def list_devices(self, resource: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")

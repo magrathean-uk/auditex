@@ -1265,7 +1265,7 @@ def build_google_findings(
             policy_section, policy_collector, policy_record = "google_two_step_policies", "google_policies", policy_records[0]
         else:
             policy_section, policy_collector = "coverage_ledger", "google_policies"
-            policy_record = {"id": "google_policies:twoStepVerificationPolicies", "key": "coverage_ledger:google_policies"}
+            policy_record = {"id": "google_policies:policySettings", "key": "coverage_ledger:google_policies"}
         enforcing = [
             record
             for record in policy_records

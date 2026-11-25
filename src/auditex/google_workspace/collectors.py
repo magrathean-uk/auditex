@@ -168,7 +168,8 @@ def _call(
         row["bounded_sample"] = True
         row["collection_truncated"] = False
     elif truncated:
-        record_truncation(row, list_name=name, rows=len(rows), limit=result_limit, reason=REASON_OPERATOR_LIMIT)
+        reason = getattr(rows, "truncation_reason", None) or REASON_OPERATOR_LIMIT
+        record_truncation(row, list_name=name, rows=len(rows), limit=result_limit, reason=reason)
     elif status == "ok":
         row["collection_truncated"] = False
     coverage.append(row)
@@ -609,21 +610,21 @@ class GooglePoliciesCollector:
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")
-        top = _context_limit(context)
         log_event: AuditLogger | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         if client is None:
             row = _coverage(self.name, "client", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
             return CollectorResult(self.name, "partial", {}, 0, "Google client unavailable", coverage=[row])
-        # One read of every allow-listed setting type. Its coverage row (``policySettings``) is the completeness
-        # signal for both payloads: an operator ``--top`` cut or a later page error makes it partial.
+        # One read of every allow-listed setting type, never bounded by the operator's ``--top`` (the client's own
+        # safety cap stops a runaway read). Its coverage row (``policySettings``) is the completeness signal for both
+        # payloads: a cut at that cap or a later page error makes it partial.
         policies = _call(
             collector=self.name,
             name="policySettings",
             coverage=coverage,
             log_event=log_event,
             endpoint="cloudidentity.policies.list",
-            func=lambda: client.list_policies(top=top),
+            func=lambda: client.list_policies(),
         )
         # The 2-step verification subset keeps its raw shape, so its records and finding do not change; the
         # SCuBA payload drops the customer id and policy name and reduces Gmail address lists to counts.

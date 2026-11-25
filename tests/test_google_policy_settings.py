@@ -6,14 +6,17 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from auditex.google_workspace import client as client_module
 from auditex.google_workspace.client import GoogleWorkspaceClient
 from auditex.google_workspace.collectors import (
     COLLECTOR_SECTIONS,
     GooglePoliciesCollector,
 )
+from auditex.google_workspace.findings import build_google_findings
 from auditex.google_workspace.normalize import build_google_normalized_snapshot
 from azure_tenant_audit.data_minimisation import (
     minimise_policy_settings,
@@ -314,13 +317,59 @@ def test_an_address_list_whose_entries_cannot_be_read_has_unknown_counts_not_zer
     }
 
 
-def test_an_operator_limit_cut_makes_the_read_partial_and_incomplete() -> None:
+def test_the_operator_top_never_cuts_the_policies_read_so_two_step_matches_the_uncut_read() -> None:
+    # Four SCuBA settings first, then the shipped sample's three 2-step verification policies, read two per page with
+    # ``--top 1``: the read must still finish, and the 2SV records and finding must be those of the uncut read on main.
+    sample = json.loads(Path("examples/google_workspace_sample.json").read_text(encoding="utf-8"))
+    service = _Policies(_rows()[1:] + sample["google_policies"]["twoStepVerificationPolicies"]["value"])
+    result = GooglePoliciesCollector().run({"client": _client(service, page_size=2), "top": 1})
+
+    assert result.status == "ok"
+    (row,) = result.coverage
+    assert (row["name"], row["status"], row["collection_truncated"], row.get("result_limit")) == ("policySettings", "ok", False, None)
+    assert [call["pageSize"] for call in service.calls] == [2, 2, 2, 2]
+    assert len(result.payload["policySettings"]["value"]) == 7
+    normalized = _normalise(result.payload, result.status, result.coverage, directory=sample["google_directory"])
+    assert _read_state(normalized)["complete"] is True
+    assert normalized["snapshot"]["two_step_policy_status"] == "partial"
+    assert [
+        (r["id"], r["policy_scope"], r["org_unit"], r["setting_type"], r.get("enforced_from"), r["source"])
+        for r in normalized["google_two_step_policies"]["records"]
+    ] == [
+        ("policies/two-step-enforcement-root", "organisation", "orgUnits/root-ou", "security.two_step_verification_enforcement", None, "google_policies.twoStepVerificationPolicies"),
+        ("policies/two-step-enforcement-sales", "org_unit", "orgUnits/sales-ou", "security.two_step_verification_enforcement", "2020-01-01T00:00:00Z", "google_policies.twoStepVerificationPolicies"),
+        ("policies/two-step-enrollment-root", "organisation", "orgUnits/root-ou", "security.two_step_verification_enrollment", None, "google_policies.twoStepVerificationPolicies"),
+    ]
+    findings = build_google_findings(normalized, now=datetime(2026, 11, 25, tzinfo=UTC))
+    (finding,) = [item for item in findings if item["rule_id"] == "google.org_2sv_policy_not_enforced"]
+    assert (finding["id"], finding["severity"]) == ("google.org_2sv_policy_not_enforced:organisation", "medium")
+    assert finding["returned_value"] == {
+        "status": "partial",
+        "policies_read": 3,
+        "organisation_level": "not in force",
+        "enforced_scopes": [{"scope": "org_unit", "org_unit": "orgUnits/sales-ou", "enforced_from": "2020-01-01T00:00:00Z"}],
+    }
+    assert [ref["record_key"] for ref in finding["evidence_refs"]] == [
+        "google_two_step_policy:policies/two-step-enforcement-root",
+        "google_two_step_policy:policies/two-step-enforcement-sales",
+    ]
+
+
+def test_a_read_cut_at_the_safety_cap_is_partial_and_incomplete(monkeypatch: Any) -> None:
+    monkeypatch.setattr(client_module, "POLICY_SETTINGS_ROW_CAP", 2)
     service = _Policies(_rows())
-    result = GooglePoliciesCollector().run({"client": _client(service, page_size=2), "top": 2})
+    result = GooglePoliciesCollector().run({"client": _client(service, page_size=100)})
 
     assert result.status == "partial"
     (row,) = result.coverage
-    assert row["status"] == "partial" and row["collection_truncated"] is True and row["result_limit"] == 2
+    assert (row["status"], row["collection_truncated"], row["truncation_reason"], row["result_limit"]) == (
+        "partial",
+        True,
+        "pagination_not_followed",
+        2,
+    )
+    assert row["error"] == "policySettings: collection stopped because the collector's safety cap of 2 rows was hit; the list is incomplete."
+    assert len(result.payload["policySettings"]["value"]) == 2
     normalized = _normalise(result.payload, result.status, result.coverage)
     assert _read_state(normalized)["complete"] is False
     assert normalized["snapshot"]["two_step_policy_status"] == "unknown"
@@ -485,6 +534,9 @@ def test_a_replayed_bundle_holds_no_policy_address_or_list_name_in_any_file(tmp_
     run_dir = tmp_path / "out" / "E-g"
     state = json.loads((run_dir / "normalized" / "google_policy_settings.json").read_text(encoding="utf-8"))["records"][-1]
     assert (state["complete"], state["record_count"]) == (True, 5)
+    # The 2SV payload is a subset of the one read, so the replayed collector counts the five policies once, not 3 + 5.
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert [row["item_count"] for row in summary["collectors"] if row["name"] == "google_policies"] == [5]
     for file in run_dir.rglob("*"):
         if file.is_file():
             text = file.read_text(encoding="utf-8", errors="replace")

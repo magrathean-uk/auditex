@@ -448,7 +448,7 @@ def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None
     elif collector == "google_alert_center":
         rows.append(_preflight_call(collector, "alerts", lambda: client.list_alerts(top=top)))
     elif collector == "google_policies":
-        rows.append(_preflight_call(collector, "twoStepVerificationPolicies", lambda: client.list_policies(top=top)))
+        rows.append(_preflight_call(collector, "policySettings", lambda: client.list_policies(limit=top)))
     elif collector == "google_gmail_settings":
         def gmail_check() -> list[dict[str, Any]]:
             # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
@@ -726,7 +726,10 @@ def run_google_offline(
             continue
         payload = held if isinstance(held, dict) else {}
         item_count = 0
-        for section in payload.values():
+        for section_name, section in payload.items():
+            # ``twoStepVerificationPolicies`` is a subset of the one policies read in ``policySettings``: count it once.
+            if name == "google_policies" and section_name == "twoStepVerificationPolicies" and "policySettings" in payload:
+                continue
             if isinstance(section, dict) and isinstance(section.get("value"), list):
                 item_count += len(section["value"])
         replayed = [
