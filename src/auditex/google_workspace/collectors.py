@@ -1019,12 +1019,14 @@ def _setting_event(event: dict[str, Any]) -> dict[str, Any] | None:
         parameters = [{"name": "SETTING_NAME", "value": "unrecognised"}] if setting is not None else []
         return {"name": name, "event_parameters": parameters}
     org_unit, group = values.get("ORG_UNIT_NAME"), values.get("GROUP_EMAIL")
+    application = values.get("APPLICATION_NAME")
+    application_unusable = "APPLICATION_NAME" in values and (application is None or not application.isprintable())
     deletion = name == "DELETE_APPLICATION_SETTING"
     target_unusable = (
         ("ORG_UNIT_NAME" in values and (org_unit is None or not _scuba_org_unit(org_unit)))
         or ("GROUP_EMAIL" in values and (group is None or not _scuba_group_email(group)))
         or (name != "TOGGLE_CAA_ENABLEMENT" and org_unit is None and group is None)
-        or (deletion and "NEW_VALUE" in values)
+        or (deletion and ("NEW_VALUE" in values or application_unusable))
     )
     if target_unusable:
         # A guarded group must not turn into an OU-level change, even if the payload named an OU.
@@ -1034,10 +1036,10 @@ def _setting_event(event: dict[str, Any]) -> dict[str, Any] | None:
     if not deletion:
         known, categories = allowed
         value_usable = value is not None and (_categories(value, known) is not None if categories else value in known)
-        values["NEW_VALUE"] = value if value_usable and not target_unusable else "unrecognised"
+        values["NEW_VALUE"] = value if value_usable and not (target_unusable or application_unusable) else "unrecognised"
     if setting is not None and setting not in fields:
         values["SETTING_NAME"] = "unrecognised"
-    if "APPLICATION_NAME" in values and not _scuba_application_allowed(values["APPLICATION_NAME"]):
+    if "APPLICATION_NAME" in values and not _scuba_application_allowed(application):
         values["APPLICATION_NAME"] = "unrecognised"
     return {"name": name, "event_parameters": [{"name": key, "value": values[key]} for key in sorted(values)]}
 

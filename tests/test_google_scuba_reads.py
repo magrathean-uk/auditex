@@ -148,6 +148,7 @@ def test_unreadable_event_timestamp_is_incomplete(timestamp):
 @pytest.mark.parametrize("extra", [
     [], [("NEW_VALUE", "ANYONE_WITH_LINK")], [("NEW_VALUE", None)],
     [("NEW_VALUE", True)], [("NEW_VALUE", "")], [("NEW_VALUE", "https://example.org/private")],
+    [("NEW_VALUE", "IN_DOMAIN"), ("APPLICATION_NAME", "")],
 ])
 def test_unusable_event_value_only_weakens_its_own_policy(extra):
     event_name = "CHANGE_APPLICATION_SETTING"
