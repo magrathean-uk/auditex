@@ -553,7 +553,8 @@ TIE = "2026-10-02T10:00:00.123Z"
 
 def _assured(calendar, gemini_unit="ou:root"):
     """Docs, Gmail, Chat and Meet off at the root on 2 September, Gemini on 2 November, Calendar as given."""
-    evs = [_event(f"{app}{REGION}", "DISABLED", time="2026-09-02T10:00:00Z") for app in ("Docs", "Gmail", "Chat", "Meet")]
+    evs = [_event(f"{app}{REGION}", "DISABLED", time="2026-09-02T10:00:00Z")
+           for app in ("Docs", "Gmail", "Chat", "Meet")]
     return evs + calendar + [_event(f"Gemini{REGION}", "ENABLED", unit=gemini_unit, time="2026-11-02T10:00:00Z")]
 
 
@@ -704,6 +705,9 @@ FIELD_WALK = [
     ("application wrong type", _set("application", 7), SHAPE, SHAPE),
     ("application blank", _set("application", ""), UNUSABLE, UNUSABLE),
     ("application padded", _set("application", " Gmail"), UNUSABLE, UNUSABLE),
+    # The setting name is the identity (ScubaGoggles never reads APPLICATION_NAME); another readable product name
+    # neither voids nor shifts the read.
+    ("application another product", _set("application", "Calendar"), MET, NOT_MET),
 ]
 
 

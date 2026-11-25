@@ -20,8 +20,9 @@ the service gate (GEMINI.1.1).
   does (SG:scubagoggles/rego/Utils.rego:423-438), as is a group event for a setting that is not group-scoped, whatever
   else the event holds. An event that might be the slot's but cannot be told (a blank or malformed event name, a
   setting change with a null or blank setting, a padded spelling, a blank application, no unit or a malformed one) is
-  ambiguous: it never answers met, and it voids any violation it is not proven older than. A known other setting and a setting-less non-setting event
-  (``TOGGLE_CAA_ENABLEMENT``) stay isolated.
+  ambiguous: it never answers met, and it voids any violation it is not proven older than. A known other setting and
+  a setting-less non-setting event (``TOGGLE_CAA_ENABLEMENT``) stay isolated. The setting name is the identity, as in
+  ScubaGoggles, which never reads ``APPLICATION_NAME``; a readable application is carried, not compared.
 - A value outside the row's good and bad values, a null value, a CHAT.5.2 payload that is not a category list, or an
   unreadable time is unusable, never compliant.
 - A violation at the top unit counts only once every slot has a readable, current top-level event (Chat.rego:323-349):
