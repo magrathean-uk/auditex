@@ -865,8 +865,8 @@ def test_an_unreadable_or_absent_policy_read_is_unknown_not_not_enforced() -> No
 
 
 def test_the_policy_finding_cites_a_record_that_exists() -> None:
-    with_policy = build_google_findings(_snapshot(policies=[_policy("two_step_verification_enforcement")]))
-    without = build_google_findings(_snapshot(policies=[]))
+    with_policy = build_google_findings(_snapshot(policies=[_policy("two_step_verification_enforcement")], org_units=_ROOT_ONLY))
+    without = build_google_findings(_snapshot(policies=[], org_units=_ROOT_ONLY))
 
     (cited,) = _by_rule(with_policy, "google.org_2sv_policy_not_enforced")
     (stand_in,) = _by_rule(without, "google.org_2sv_policy_not_enforced")

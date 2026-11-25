@@ -21,6 +21,11 @@ from azure_tenant_audit.collectors.base import (
     record_truncation,
 )
 from azure_tenant_audit.data_minimisation import (
+    POLICY_QUERY_MAX,
+    POLICY_SETTING_TYPE,
+    POLICY_SYSTEM_GROUPS,
+    POLICY_TIMESTAMP_TEXT,
+    POLICY_UNIT_ID,
     minimise_policy_section,
     minimise_policy_settings,
     minimise_policy_value,
@@ -616,7 +621,8 @@ POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 # with any problem is never complete or unconditional evidence: the collector and a replay mark the read partial,
 # the normaliser leaves the affected setting out (``unusable_scopes`` or ``unusable_sections``) and the read
 # incomplete, and the 2-step verification status becomes unknown. ``""`` is proto3 JSON's unset string, so an empty
-# ``orgUnit``, ``group`` or ``query`` is the field left out.
+# ``orgUnit``, ``group`` or ``query`` is the field left out; a key that is present and holds null is not left out, it
+# is the wrong type. A minimised policy carries ``query_scope`` (see ``policy_query_scope``) in place of ``query``.
 #
 # | field                       | absent              | null / wrong type | blank, malformed or out of range           |
 # |-----------------------------|---------------------|-------------------|--------------------------------------------|
@@ -627,21 +633,18 @@ POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 # | setting.type                | setting_type_invalid| same              | not ``settings/<a>.<b>``; outside the filter: setting_type_not_requested |
 # | setting.value               | value_missing       | value_invalid     | an address list whose counts are unknown: value_unreadable |
 # | policyQuery                 | query_object_invalid| same              | -                                          |
-# | policyQuery.orgUnit, group  | fine (one required: target_missing) | org_unit_invalid / group_invalid | not ``orgUnits/<id>`` / ``groups/<id>`` |
+# | policyQuery.orgUnit, group  | fine (one required: target_missing) | org_unit_invalid / group_invalid | not ``orgUnits/<id>`` / ``groups/<id>`` or a system group id |
 # | policyQuery.sortOrder       | fine (proto3 0)     | sort_order_invalid| NaN, infinite or outside the double range  |
-# | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL that the targets cannot represent is unsupported scope (normaliser) |
+# | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL that the targets cannot represent is unsupported scope (collector partial, normaliser unusable scope) |
+# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets`` or ``other``              |
 # | 2SV enforcedFrom            | fine (not enforced) | two_step_value_invalid | blank or not an RFC 3339 timestamp    |
 # | 2SV allowEnrollment         | fine                | two_step_value_invalid | not a Boolean                         |
 # | 2SV allowedSignInFactorSet  | fine                | two_step_value_invalid | not an upper-case enum name           |
 # | 2SV enrollmentGracePeriod   | fine                | two_step_value_invalid | not a ``<seconds>s`` duration         |
 # | 2SV camelCase vs snake_case | -                   | -                 | both present and different: two_step_value_conflict |
 
-POLICY_UNIT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
-POLICY_SETTING_TYPE = re.compile(r"settings/[a-z0-9_]+(?:\.[a-z0-9_]+)+")
-POLICY_QUERY_MAX = 4_096
 POLICY_TYPES = ("ADMIN", "SYSTEM")
 _DOUBLE_MAX = sys.float_info.max
-_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})")
 _DURATION = re.compile(r"\d{1,12}(?:\.\d{1,9})?s")
 _ENUM = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 
@@ -660,8 +663,8 @@ def finite_number(value: Any) -> bool:
 
 
 def policy_timestamp(value: Any) -> bool:
-    """An RFC 3339 timestamp with a zone, as the Policy API writes ``enforcedFrom``."""
-    if not isinstance(value, str) or not _TIMESTAMP.fullmatch(value):
+    """An RFC 3339 timestamp with a zone and up to nine fractional digits, as the Policy API writes ``enforcedFrom``."""
+    if not isinstance(value, str) or not POLICY_TIMESTAMP_TEXT.fullmatch(value):
         return False
     try:
         datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -680,13 +683,28 @@ TWO_STEP_VALUE_FIELDS: tuple[tuple[str, str, Callable[[Any], bool]], ...] = (
 
 
 def policy_target(value: Any, prefix: str) -> str | None | bool:
-    """A policy target's bare id; ``None`` when unset (absent or ``""``); ``False`` when not ``<prefix><id>``."""
-    if value is None or value == "":
+    """A policy target's bare id; ``None`` when unset (``""``); ``False`` when null or not ``<prefix><id>``.
+
+    A Google system group (``WORKSPACE_ALL_ADMIN_GROUP``, ``UNCONSENTED_CHILD_GROUP``) has no ``groups/`` prefix and
+    keeps its own id as its bare id.
+    """
+    if value == "":
         return None
-    if not isinstance(value, str) or not value.startswith(prefix):
+    if not isinstance(value, str):
+        return False
+    if prefix == "groups/" and value in POLICY_SYSTEM_GROUPS:
+        return value
+    if not value.startswith(prefix):
         return False
     bare = value[len(prefix) :]
     return bare if POLICY_UNIT_ID.fullmatch(bare) else False
+
+
+def policy_query_target(query: dict[str, Any], key: str) -> str | None | bool:
+    """``policy_target`` of ``policyQuery[key]``: ``None`` when the key is left out, ``False`` when it holds null."""
+    if key not in query:
+        return None
+    return policy_target(query[key], "orgUnits/" if key == "orgUnit" else "groups/")
 
 
 def policy_value_unreadable(value: Any) -> bool:
@@ -751,8 +769,8 @@ def policy_problems(policy: Any) -> tuple[str, ...]:
     if not isinstance(query, dict):
         problems.append("query_object_invalid")
     else:
-        org_unit = policy_target(query.get("orgUnit"), "orgUnits/")
-        group = policy_target(query.get("group"), "groups/")
+        org_unit = policy_query_target(query, "orgUnit")
+        group = policy_query_target(query, "group")
         if org_unit is False:
             problems.append("org_unit_invalid")
         if group is False:
@@ -761,8 +779,9 @@ def policy_problems(policy: Any) -> tuple[str, ...]:
             problems.append("target_missing")
         if "sortOrder" in query and not finite_number(query["sortOrder"]):
             problems.append("sort_order_invalid")
-        text = query.get("query")
-        if text is not None and (not isinstance(text, str) or len(text) > POLICY_QUERY_MAX):
+        if "query" in query and (not isinstance(query["query"], str) or len(query["query"]) > POLICY_QUERY_MAX):
+            problems.append("query_invalid")
+        if "query_scope" in query and query["query_scope"] not in ("targets", "other"):
             problems.append("query_invalid")
     return tuple(sorted(set(problems)))
 
@@ -775,6 +794,19 @@ POLICY_TARGET_PROBLEMS = frozenset({"query_object_invalid", "org_unit_invalid", 
 def policy_row_readable(policy: Any) -> bool:
     """Whether one Policy API policy has every field its readers rely on (see :func:`policy_problems`)."""
     return not policy_problems(policy)
+
+
+def policy_scope_unrepresentable(policy: Any) -> bool:
+    """Whether a readable policy's CEL query holds a scope its targets cannot show (another unit or group, an
+    exception or any other condition): its setting for that unit is unknown, so the read is not complete."""
+    if not isinstance(policy, dict) or not isinstance(policy.get("policyQuery"), dict):
+        return False
+    (minimised,) = minimise_policy_settings([{"policyQuery": policy["policyQuery"]}])
+    return minimised["policyQuery"].get("query_scope") == "other"
+
+
+def _scope_policy_error(count: int, total: int) -> str:
+    return f"{count} of {total} policies hold a scope their targets cannot show; the settings they hold for those units are unknown."
 
 
 def _is_two_step_policy(policy: Any) -> bool:
@@ -861,8 +893,11 @@ def policy_replay_rows(collector: str, payload: Any) -> list[dict[str, Any]]:
             status, item_count, error = "failed", 0, f"google_policies.{name}: the offline sample holds no readable policies in this section."
         else:
             bad = sum(1 for policy in values if not policy_row_readable(policy))
+            unscoped = sum(1 for policy in values if policy_row_readable(policy) and policy_scope_unrepresentable(policy))
             if bad:
                 status, item_count, error = "partial", len(values), _malformed_policy_error(bad, len(values))
+            elif unscoped:
+                status, item_count, error = "partial", len(values), _scope_policy_error(unscoped, len(values))
             elif name == "twoStepVerificationPolicies" and two_step_subset_differs(payload):
                 status, item_count = "partial", len(values)
                 error = "google_policies.twoStepVerificationPolicies: the list is not the 2-step verification part of policySettings."
@@ -943,8 +978,13 @@ class GooglePoliciesCollector:
             if row.get("result_limit"):
                 markers["result_limit"] = row["result_limit"]
         bad = sum(1 for policy in policies if not policy_row_readable(policy))
+        unscoped = sum(1 for policy in policies if policy_row_readable(policy) and policy_scope_unrepresentable(policy))
         if bad and row.get("status") == "ok":
             row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_malformed_policy_error(bad, len(policies)))
+        elif unscoped and row.get("status") == "ok":
+            # A query naming another unit or holding a condition: that unit's setting is unknown, so the read is
+            # partial and the run says so, as the normaliser's read state does.
+            row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_scope_policy_error(unscoped, len(policies)))
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(
             self.name,

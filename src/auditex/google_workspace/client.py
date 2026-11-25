@@ -197,6 +197,9 @@ class PolicyReadError(RuntimeError):
         self.error_class = error_class
 
 
+POLICY_UNREADABLE_ROWS_TEXT = "Some policies returned by the Cloud Identity policies read cannot be read; the settings they hold are unknown."
+
+
 def policy_malformed_error(*, later_page: bool) -> PolicyReadError:
     """A fixed error for a policies answer that cannot be read: no policies at all, or a page of the wrong shape."""
     text = (
@@ -360,19 +363,27 @@ class CollectedRows(list):
 def _policy_page(payload: Any) -> tuple[list[dict[str, Any]], str | None] | None:
     """One ``policies.list`` page as (policies, next cursor), or ``None`` when its shape cannot be read.
 
-    Only ``policies`` holds rows (an ``items`` or ``value`` list is not a policies answer). It must be a non-empty list
-    of objects: every page of a read that has policies holds some, so an empty page (``{}`` or ``[]``, first or later)
-    proves nothing and is not read as the end of a complete list. A cursor must be a non-blank string of bounded length.
+    Only ``policies`` holds rows (an ``items`` or ``value`` list is not a policies answer), as a list of objects. A
+    page may hold no rows and still carry a cursor (Google may return an empty page before the end of a list; proto3
+    JSON then leaves ``policies`` out, so ``{"nextPageToken": ...}`` alone is such a page): the read goes on. An empty
+    page with no cursor proves nothing and is not read as the end of a complete list. A cursor must be a non-blank
+    string of bounded length; ``""`` is proto3's unset cursor (the last page), an explicit null is not a cursor.
     """
-    if not isinstance(payload, dict) or "policies" not in payload:
+    if not isinstance(payload, dict):
         return None
+    token: str | None = None
+    if "nextPageToken" in payload:
+        raw = payload["nextPageToken"]
+        if raw != "":
+            if not isinstance(raw, str) or not raw.strip() or len(raw) > POLICY_CURSOR_MAX:
+                return None
+            token = raw
+    if "policies" not in payload:
+        return ([], token) if token is not None and set(payload) == {"nextPageToken"} else None
     values = payload["policies"]
-    if not isinstance(values, list) or not values or not all(isinstance(item, dict) for item in values):
+    if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
         return None
-    token = payload.get("nextPageToken")
-    if token is None or token == "":
-        return values, None
-    if not isinstance(token, str) or not token.strip() or len(token) > POLICY_CURSOR_MAX:
+    if not values and token is None:
         return None
     return values, token
 
@@ -382,8 +393,8 @@ def _collect_policy_pages(request_factory: Callable[[str | None], Any], *, cap: 
 
     ``bounded`` is a probe's own limit (a cut there is the operator-style limit); otherwise ``cap`` is the safety cap
     and a cut there is ``pagination_not_followed``. A first page that fails or cannot be read raises (a malformed one
-    as ``malformed_response``): nothing was read. A later page that fails or cannot be read keeps the rows read before
-    it as a list cut by a page error. A repeated cursor or ``POLICY_PAGE_BUDGET`` requests stop the read as not
+    as ``malformed_response``): nothing was read. An empty page with a new cursor is followed within the bounds. A
+    later page that fails or cannot be read keeps the rows read before it as a list cut by a page error. A repeated cursor or ``POLICY_PAGE_BUDGET`` requests stop the read as not
     followed.
     """
     rows: list[dict[str, Any]] = []
@@ -851,6 +862,16 @@ class GoogleWorkspaceClient:
                 cap=cap,
                 bounded=limit is not None,
             )
+            if limit is not None:
+                # The probe has no collector behind it to check the rows: a read whose rows cannot be read did not
+                # read a setting, and one where only some can be read is not a complete read.
+                from .collectors import policy_row_readable
+
+                unreadable = sum(1 for row in rows if not policy_row_readable(row))
+                if rows and unreadable == len(rows):
+                    raise policy_malformed_error(later_page=False)
+                if unreadable and rows.page_error is None:
+                    rows.page_error = PolicyReadError(POLICY_UNREADABLE_ROWS_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
         except Exception as exc:
             raise policy_read_error(exc) from None
         if rows.page_error is not None:
