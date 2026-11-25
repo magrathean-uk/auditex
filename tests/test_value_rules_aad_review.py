@@ -129,8 +129,10 @@ def test_r027_exempt_shared_exclusion_does_not_decide():
     assert cell("MS.AAD.3.2v2", ca_sections(one, two, config=config)) == ("not_assessed", "union_possible")
 
 
-# R028: an assigned custom app management policy replaces the tenant default for its apps (Graph: the default applies only to
-# apps with no custom policy), so a custom policy that omits the restriction leaves those apps without it.
+# R028 (settled 25 Nov 2026, not a defect): Microsoft documents that an assigned custom app management policy overrides the
+# tenant default only for the restrictions it defines; a restriction it does not define falls back to the tenant default
+# ("Anything not defined inherits from default policy", Microsoft Graph application management policy API overview). The
+# rules read precedence per restriction type, as the pinned v3.9.1 vectors do, and these tests pin that reading.
 
 ALL_APPS = "0001-01-01T00:00:00Z"
 
@@ -166,15 +168,13 @@ def test_r028_baseline_is_met():
     assert cell("MS.AAD.5.7v1", app_sections()) == ("met", "restrictions_compliant")
 
 
-@pytest.mark.xfail(strict=True, reason="R028 not fixed: pinned v3.9.1 vectors (s9 custom_other_type_exempt, custom_other_cred_exempt, D81 moot rows) "
-                                        "fix the per-restriction-type reading; whole-policy precedence needs a spec decision")
 @pytest.mark.parametrize("policy,custom", [
     ("MS.AAD.5.5v1", custom_policy(password=[entry("passwordLifetime", maxd=90)])),
     ("MS.AAD.5.5v1", custom_policy(keys=[entry("asymmetricKeyLifetime", maxd=180)])),
     ("MS.AAD.5.7v1", custom_policy(password=[entry("passwordAddition")])),
 ])
-def test_r028_custom_policy_without_the_restriction_is_not_met(policy, custom):
-    assert cell(policy, app_sections([custom])) == ("not_met", "restriction_not_met")
+def test_r028_custom_policy_without_the_restriction_falls_back_to_the_default(policy, custom):
+    assert cell(policy, app_sections([custom])) == ("met", "restrictions_compliant")
 
 
 def test_r028_disabled_or_untargeted_custom_policy_changes_nothing():
@@ -184,12 +184,10 @@ def test_r028_disabled_or_untargeted_custom_policy_changes_nothing():
     assert cell("MS.AAD.5.5v1", app_sections([untargeted])) == ("met", "restrictions_compliant")
 
 
-@pytest.mark.xfail(strict=True, reason="R028 not fixed: pinned v3.9.1 vectors (s9 custom_other_type_exempt, custom_other_cred_exempt, D81 moot rows) "
-                                        "fix the per-restriction-type reading; whole-policy precedence needs a spec decision")
-def test_r028_unreadable_targets_are_unknown():
+def test_r028_unreadable_targets_on_another_restriction_do_not_matter():
     custom = custom_policy(password=[entry("passwordLifetime", maxd=90)])
     custom["Restrictions"]["PasswordCredentials"][0]["AppliesTo"] = "synthetic"
-    assert cell("MS.AAD.5.5v1", app_sections([custom])) == ("not_assessed", "restriction_unusable")
+    assert cell("MS.AAD.5.5v1", app_sections([custom])) == ("met", "restrictions_compliant")
 
 
 def test_r028_lifetime_is_moot_where_the_custom_policy_blocks_password_addition():
