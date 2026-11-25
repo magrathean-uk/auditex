@@ -18,7 +18,7 @@
           "ALLOWLISTED_DOMAINS",
           "DISALLOWED"
         ],
-        "source": "SG:scubagoggles/rego/Drive.rego:18-46"
+        "source": "SG:scubagoggles/rego/Drive.rego:15-52"
       },
       "rule_id": "GWS.DRIVEDOCS.1.1v1.setting",
       "sections": [
@@ -40,7 +40,7 @@
           "RECIPIENTS_OR_AUDIENCE",
           "RECIPIENTS_OR_AUDIENCE_OR_PUBLIC"
         ],
-        "source": "SG:scubagoggles/rego/Drive.rego:304-320"
+        "source": "SG:scubagoggles/rego/Drive.rego:324-348"
       },
       "rule_id": "GWS.DRIVEDOCS.1.6v1.setting",
       "sections": [
@@ -63,7 +63,7 @@
           "PRIMARY_AUDIENCE_WITH_LINK_OR_SEARCH",
           "LINK_SHARING_PRIVATE"
         ],
-        "source": "SG:scubagoggles/rego/Drive.rego:395-412; SG:scubagoggles/policy_api.py:403"
+        "source": "SG:scubagoggles/rego/Drive.rego:422-447; SG:scubagoggles/policy_api.py:403"
       },
       "rule_id": "GWS.DRIVEDOCS.1.8v1.setting",
       "sections": [
@@ -150,7 +150,7 @@
           "EXTERNAL_ALL_INFO_READ_WRITE",
           "EXTERNAL_ALL_INFO_READ_WRITE_MANAGE"
         ],
-        "source": "SG:scubagoggles/rego/Calendar.rego:16-34"
+        "source": "SG:scubagoggles/rego/Calendar.rego:13-39"
       },
       "rule_id": "GWS.CALENDAR.1.1v1.setting",
       "sections": [
@@ -173,7 +173,7 @@
           "EXTERNAL_ALL_INFO_READ_WRITE",
           "EXTERNAL_ALL_INFO_READ_WRITE_MANAGE"
         ],
-        "source": "SG:scubagoggles/rego/Calendar.rego:16-34,58-70"
+        "source": "SG:scubagoggles/rego/Calendar.rego:13-39,59-78"
       },
       "rule_id": "GWS.CALENDAR.1.2v1.setting",
       "sections": [
@@ -276,7 +276,7 @@
           "IMAGES_ONLY",
           "FILE_SHARING_OPTION_UNSPECIFIED"
         ],
-        "source": "SG:scubagoggles/rego/Chat.rego:94-111"
+        "source": "SG:scubagoggles/rego/Chat.rego:97-121"
       },
       "rule_id": "GWS.CHAT.2.1v1.setting",
       "sections": [
@@ -300,7 +300,7 @@
           "DEFAULT_HISTORY_ON",
           "HISTORY_STATE_UNSPECIFIED"
         ],
-        "source": "SG:scubagoggles/rego/Chat.rego:141-159"
+        "source": "SG:scubagoggles/rego/Chat.rego:145-174"
       },
       "rule_id": "GWS.CHAT.3.1v1.setting",
       "sections": [
@@ -326,7 +326,7 @@
           "OPEN",
           "ALLOWED_AUDIENCE_UNSPECIFIED"
         ],
-        "source": "SG:scubagoggles/rego/Meet.rego:21-37"
+        "source": "SG:scubagoggles/rego/Meet.rego:16-42"
       },
       "rule_id": "GWS.MEET.1.1v1.setting",
       "sections": [
@@ -351,7 +351,7 @@
           "ANY_WORKSPACE_ORGANIZATION",
           "ALL"
         ],
-        "source": "SG:scubagoggles/rego/Meet.rego:66-89"
+        "source": "SG:scubagoggles/rego/Meet.rego:66-90"
       },
       "rule_id": "GWS.MEET.2.1v1.setting",
       "sections": [
@@ -436,7 +436,7 @@
           "DOMAIN_USERS_ONLY",
           "ANYONE_CAN_ACCESS"
         ],
-        "source": "SG:scubagoggles/rego/Groups.rego:22-36"
+        "source": "SG:scubagoggles/rego/Groups.rego:19-40"
       },
       "rule_id": "GWS.GROUPS.1.1v1.setting",
       "sections": [
@@ -490,7 +490,7 @@
           "USERS_IN_DOMAIN",
           "ANYONE_CAN_CREATE"
         ],
-        "source": "SG:scubagoggles/rego/Groups.rego:129-145"
+        "source": "SG:scubagoggles/rego/Groups.rego:134-157"
       },
       "rule_id": "GWS.GROUPS.2.1v1.setting",
       "sections": [
@@ -514,7 +514,7 @@
           "DOMAIN_USERS",
           "ANYONE_CAN_VIEW_TOPICS"
         ],
-        "source": "SG:scubagoggles/rego/Groups.rego:172-192"
+        "source": "SG:scubagoggles/rego/Groups.rego:181-208"
       },
       "rule_id": "GWS.GROUPS.3.1v1.setting",
       "sections": [
@@ -535,7 +535,8 @@
           "DISABLED",
           "ENABLED"
         ],
-        "source": "SG:scubagoggles/rego/Sites.rego:16-40; SG:scubagoggles/rego/Utils.rego:605-637"
+        "case": "fold",
+        "source": "SG:scubagoggles/rego/Sites.rego:11-65; SG:scubagoggles/rego/Utils.rego:605-637 (AppExplicitStatus folds case)"
       },
       "rule_id": "GWS.SITES.1.1v1.setting",
       "sections": [
@@ -561,7 +562,7 @@
           "ANY_GOOGLE_WORKSPACE_USER",
           "ANYONE"
         ],
-        "source": "SG:scubagoggles/rego/Classroom.rego:16-35"
+        "source": "SG:scubagoggles/rego/Classroom.rego:13-39"
       },
       "rule_id": "GWS.CLASSROOM.1.1v1.setting",
       "sections": [
@@ -586,7 +587,7 @@
           "CLASSES_IN_ALLOWLISTED_DOMAINS",
           "ANY_GOOGLE_WORKSPACE_CLASS"
         ],
-        "source": "SG:scubagoggles/rego/Classroom.rego:61-84"
+        "source": "SG:scubagoggles/rego/Classroom.rego:61-85"
       },
       "rule_id": "GWS.CLASSROOM.1.2v1.setting",
       "sections": [
@@ -623,7 +624,7 @@
           "OFF",
           "ON_CLEVER"
         ],
-        "source": "SG:scubagoggles/rego/Classroom.rego:152-166"
+        "source": "SG:scubagoggles/rego/Classroom.rego:160-181"
       },
       "rule_id": "GWS.CLASSROOM.3.1v1.setting",
       "sections": [
@@ -644,7 +645,7 @@
           "TEACHERS_ONLY",
           "STUDENTS_AND_TEACHERS"
         ],
-        "source": "SG:scubagoggles/rego/Classroom.rego:193-207"
+        "source": "SG:scubagoggles/rego/Classroom.rego:205-226"
       },
       "rule_id": "GWS.CLASSROOM.4.1v1.setting",
       "sections": [
@@ -666,7 +667,7 @@
           "ALL_PENDING_AND_VERIFIED_TEACHERS",
           "ANYONE_IN_DOMAIN"
         ],
-        "source": "SG:scubagoggles/rego/Classroom.rego:237-251"
+        "source": "SG:scubagoggles/rego/Classroom.rego:251-274"
       },
       "rule_id": "GWS.CLASSROOM.5.1v1.setting",
       "sections": [
@@ -708,7 +709,7 @@
           "PREFERENCE_UNSPECIFIED",
           "EU_GOOGLE_STAFF"
         ],
-        "source": "SG:scubagoggles/rego/Assuredcontrols.rego:46-62"
+        "source": "SG:scubagoggles/rego/Assuredcontrols.rego:46-69"
       },
       "rule_id": "GWS.ASSUREDCONTROLS.1.2v1.setting",
       "sections": [
