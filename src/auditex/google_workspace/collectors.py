@@ -4,6 +4,8 @@ import json
 import re
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from fractions import Fraction
 from functools import lru_cache
 from typing import Any, Literal
 
@@ -945,11 +947,15 @@ _TARGET_PATH_OR_URI = re.compile(
     r"(?:^[a-z][a-z0-9+.-]*:/|://|(?:^|\s)/(?:users|volumes|home|tmp|var|private)(?:/|$))",
     re.IGNORECASE,
 )
-_SCUBA_APPLICATIONS = frozenset({
-    "Assured Controls", "Chat", "Context-Aware Access", "Data regions", "Drive and Docs", "Gemini app", "Gemini in Workspace",
-    "Gemini in Workspace apps", "Gmail", "Google Chat", "Google Meet", "Google Meet GenAI", "Security", "SSO",
-})
 SCUBA_READ_SECTIONS = {"google_setting_events": "settingEvents", "google_sso_assignments": "inboundSsoAssignments"}
+
+
+def _scuba_application_allowed(value: str | None) -> bool:
+    return value in {
+        "Assured Controls", "Chat", "Context-Aware Access", "Data regions", "Drive and Docs", "Gemini app",
+        "Gemini in Workspace", "Gemini in Workspace apps", "Gmail", "Google Chat", "Google Meet", "Google Meet GenAI",
+        "Security", "SSO",
+    }
 
 
 @lru_cache(maxsize=1)
@@ -966,7 +972,7 @@ def _event_value_fields() -> dict[str, tuple[frozenset[str], bool]]:
 
 
 def _event_parameters(event: dict[str, Any]) -> dict[str, str | None] | None:
-    parameters = event.get("parameters", [])
+    parameters = event.get("event_parameters", event.get("parameters", []))
     if not isinstance(parameters, list):
         return None
     values: dict[str, str | None] = {}
@@ -988,6 +994,13 @@ def _scuba_group_email(value: str) -> bool:
     return len(value) <= 254 and bool(_GROUP_EMAIL.fullmatch(value)) and CUSTOMER_ID.search(value) is None
 
 
+def _scuba_org_unit(value: str) -> bool:
+    return (
+        value.isprintable() and len(value) <= 512 and not any(part in ("..", ".") for part in value.split("/"))
+        and not _TARGET_PATH_OR_URI.search(value) and not CUSTOMER_ID.search(value) and "\\" not in value
+    )
+
+
 def _setting_event(event: dict[str, Any]) -> dict[str, Any] | None:
     values = _event_parameters(event)
     if values is None:
@@ -1004,41 +1017,37 @@ def _setting_event(event: dict[str, Any]) -> dict[str, Any] | None:
         # Its name or readable setting proves this activity is outside the audited controls.
         # Its value and target can be free text and cannot weaken unrelated SCuBA evidence.
         parameters = [{"name": "SETTING_NAME", "value": "unrecognised"}] if setting is not None else []
-        return {"name": name, "parameters": parameters}
-    if None in values.values():
-        return None
+        return {"name": name, "event_parameters": parameters}
     org_unit, group = values.get("ORG_UNIT_NAME"), values.get("GROUP_EMAIL")
-    if org_unit is not None and (
-        not org_unit.isprintable() or len(org_unit) > 512 or any(part in ("..", ".") for part in org_unit.split("/"))
-        or _TARGET_PATH_OR_URI.search(org_unit) or CUSTOMER_ID.search(org_unit) or "\\" in org_unit
-    ):
-        return None
-    if group is not None and not _scuba_group_email(group):
-        return None
+    deletion = name == "DELETE_APPLICATION_SETTING"
+    target_unusable = (
+        ("ORG_UNIT_NAME" in values and (org_unit is None or not _scuba_org_unit(org_unit)))
+        or ("GROUP_EMAIL" in values and (group is None or not _scuba_group_email(group)))
+        or (name != "TOGGLE_CAA_ENABLEMENT" and org_unit is None and group is None)
+        or (deletion and "NEW_VALUE" in values)
+    )
+    if target_unusable:
+        # A guarded group must not turn into an OU-level change, even if the payload named an OU.
+        values.pop("ORG_UNIT_NAME", None)
+        values.pop("GROUP_EMAIL", None)
     value = values.pop("NEW_VALUE", None)
-    if name == "DELETE_APPLICATION_SETTING":
-        if value is not None:
-            return None
-    else:
+    if not deletion:
         known, categories = allowed
-        if value is None or (_categories(value, known) is None if categories else value not in known):
-            return None
-        values["NEW_VALUE"] = value
-    if name != "TOGGLE_CAA_ENABLEMENT" and org_unit is None and group is None:
-        return None
+        value_usable = value is not None and (_categories(value, known) is not None if categories else value in known)
+        values["NEW_VALUE"] = value if value_usable and not target_unusable else "unrecognised"
     if setting is not None and setting not in fields:
         values["SETTING_NAME"] = "unrecognised"
-    if (application := values.get("APPLICATION_NAME")) is not None and application not in _SCUBA_APPLICATIONS:
-        if not application.isprintable():
-            return None
+    if "APPLICATION_NAME" in values and not _scuba_application_allowed(values["APPLICATION_NAME"]):
         values["APPLICATION_NAME"] = "unrecognised"
-    return {"name": name, "parameters": [{"name": key, "value": values[key]} for key in sorted(values)]}
+    return {"name": name, "event_parameters": [{"name": key, "value": values[key]} for key in sorted(values)]}
 
 
 def minimise_scuba_activity(item: Any, event_name: str | None = None) -> dict[str, Any] | None:
-    if not isinstance(item, dict) or not isinstance(identity := item.get("id"), dict):
+    if not isinstance(item, dict):
         return None
-    timestamp, events = identity.get("time"), item.get("events")
+    identity = item.get("id")
+    timestamp = item.get("event_time", identity.get("time") if isinstance(identity, dict) else None)
+    events = item.get("events")
     if _time(timestamp) is None or not isinstance(events, list) or not events:
         return None
     kept = []
@@ -1050,7 +1059,7 @@ def minimise_scuba_activity(item: Any, event_name: str | None = None) -> dict[st
         if name not in SCUBA_ADMIN_EVENTS or (record := _setting_event(event)) is None:
             return None
         kept.append(record)
-    return {"id": {"time": timestamp}, "events": kept} if kept else None
+    return {"event_time": timestamp, "events": kept} if kept else None
 
 
 def minimise_scuba_assignment(item: Any) -> dict[str, Any] | None:
@@ -1083,6 +1092,33 @@ def scuba_read_rows(
     return kept, len(kept) == len(values)
 
 
+def _utc_event_time(when: Fraction) -> str:
+    seconds, nanos = divmod(int(when * 10**9), 10**9)
+    whole = datetime.fromtimestamp(seconds, UTC).isoformat().removesuffix("+00:00")
+    fraction = f".{nanos:09d}".rstrip("0") if nanos else ""
+    return f"{whole}{fraction}Z"
+
+
+def scuba_event_window(section: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, str] | None:
+    """Use saved bounds when present, otherwise derive the interval from retained activities."""
+    times = [_time(row["event_time"]) for row in rows]
+    observed = [when for when in times if when is not None]
+    if "window_start" in section or "window_end" in section:
+        start, end = _time(section.get("window_start")), _time(section.get("window_end"))
+        if start is None or end is None or start >= end or any(not start <= when <= end for when in observed):
+            return None
+    elif observed:
+        start, end = min(observed), max(observed)
+        if start == end:
+            end += Fraction(1, 10**9)  # The projection requires a non-empty interval.
+    else:
+        return {}
+    try:
+        return {"window_start": _utc_event_time(start), "window_end": _utc_event_time(end)}
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def scuba_probe_rows(rows: CollectedRows, collector: str, *, event_name: str | None = None) -> CollectedRows:
     kept, readable = scuba_read_rows(rows, collector, event_name=event_name)
     if readable:
@@ -1102,6 +1138,12 @@ def replay_scuba_payload(collector: str, payload: Any) -> Any:
     values = section.get("value") if isinstance(section, dict) else None
     rows, readable = scuba_read_rows(values, collector)
     out: dict[str, Any] = {"value": rows}
+    if collector == "google_setting_events" and isinstance(section, dict):
+        window = scuba_event_window(section, rows)
+        if window is None:
+            readable = False
+        else:
+            out.update(window)
     if isinstance(section, dict) and section_was_cut(section):
         reason = section.get("truncation_reason")
         out["collection_truncated"] = True
@@ -1152,7 +1194,20 @@ class GoogleSettingEventsCollector:
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")
         requests = [(name, lambda name=name: client.list_admin_setting_events(name)) for name in SCUBA_ADMIN_EVENTS]
-        return _scuba_read(self.name, context, requests, endpoint="activities.list")
+        started = datetime.now(UTC)
+        result = _scuba_read(self.name, context, requests, endpoint="activities.list")
+        section = result.payload["settingEvents"]
+        window = scuba_event_window(section, section["value"])
+        if window is None:
+            result.status = "partial"
+            section.update(error_class=POLICY_MALFORMED_ERROR_CLASS, error="The SCuBA event window could not be read.")
+        elif window:
+            section.update(window)
+        else:
+            finished = max(datetime.now(UTC), started + timedelta(microseconds=1))
+            section.update(window_start=started.isoformat().replace("+00:00", "Z"),
+                           window_end=finished.isoformat().replace("+00:00", "Z"))
+        return result
 
 
 class GoogleSsoAssignmentsCollector:

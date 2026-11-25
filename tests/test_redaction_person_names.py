@@ -797,6 +797,13 @@ def test_every_product_field_name_is_exempt_from_whole_key_masking() -> None:
 
 
 
+@pytest.mark.parametrize("name", ["Chat", "Time", "Parameters"])
+def test_google_reports_names_can_be_pseudonymised_as_display_names(name: str) -> None:
+    assert redact_output({"owners": {name: 3}}, context=_people(name)) == {
+        "owners": {_prose(name=name): 3},
+    }
+
+
 def test_product_field_keys_are_kept_when_a_person_has_that_name() -> None:
     people = ("Break Glass", "Emergency Access", "Data Protection", "Display Name")
     context = _people(*people)

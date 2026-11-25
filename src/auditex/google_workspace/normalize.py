@@ -34,6 +34,7 @@ from .collectors import (
     policy_problems,
     policy_query_target,
     policy_row_readable,
+    scuba_event_window,
     scuba_read_rows,
     two_step_subset_differs,
 )
@@ -354,14 +355,17 @@ def _scuba_read_records(
     rows, readable = scuba_read_rows(section.get("value") if isinstance(section, dict) else None, collector)
     complete = readable and _read_complete(collector, section, result_rows, coverage_rows)
     records = []
+    window = {}
     if collector == "google_setting_events":
+        window = scuba_event_window(section, rows) if isinstance(section, dict) else None
+        complete = complete and window is not None
         event_org_units = event_org_units or {}
         for activity in rows:
             for event in activity["events"]:
-                params = {parameter["name"]: parameter["value"] for parameter in event["parameters"]}
+                params = {parameter["name"]: parameter["value"] for parameter in event["event_parameters"]}
                 group = params.get("GROUP_EMAIL")
                 records.append(_record(
-                    "google_setting_event", source, str(len(records) + 1), time=activity["id"]["time"],
+                    "google_setting_event", source, str(len(records) + 1), event_time=activity["event_time"],
                     event=event["name"], setting=params.get("SETTING_NAME"), new_value=params.get("NEW_VALUE"),
                     org_unit=None if group else event_org_units.get(params.get("ORG_UNIT_NAME", "")), group_email=group,
                     application=params.get("APPLICATION_NAME"),
@@ -372,7 +376,8 @@ def _scuba_read_records(
                 "google_sso_assignment", source, str(len(records) + 1), target_org_unit=row.get("targetOrgUnit"),
                 target_group=row.get("targetGroup"), sso_mode=row["ssoMode"],
             ))
-    records.append(_record(f"{collector}_read_state", source, "read_state", complete=complete, record_count=len(records)))
+    records.append(_record(f"{collector}_read_state", source, "read_state",
+                           complete=complete, record_count=len(records), **(window or {})))
     return records
 
 

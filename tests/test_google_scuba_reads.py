@@ -13,6 +13,7 @@ from auditex.google_workspace.normalize import build_google_normalized_snapshot
 from auditex.google_workspace.run import build_google_preflight_rows, run_google_offline
 from auditex.setup_guide import build_setup_guide
 from azure_tenant_audit.scope_catalog import build_google_scope_catalog
+from azure_tenant_audit.value_rules import gws
 
 EVENTS = "google_setting_events"
 SSO = "google_sso_assignments"
@@ -95,8 +96,8 @@ def test_request_names_retention_and_event_minimisation():
     assert all(call["applicationName"] == "admin" and call["userKey"] == "all" for call in service.calls)
     assert all({"startTime", "endTime"}.isdisjoint(call) and call["maxResults"] == 100 for call in service.calls)
     values = result.payload["settingEvents"]["value"]
-    assert values[1] == {"id": {"time": "2026-11-23T00:02:28.672000091Z"}, "events": [
-        {"name": "TOGGLE_CAA_ENABLEMENT", "parameters": [{"name": "NEW_VALUE", "value": "ENABLED"}]},
+    assert values[1] == {"event_time": "2026-11-23T00:02:28.672000091Z", "events": [
+        {"name": "TOGGLE_CAA_ENABLEMENT", "event_parameters": [{"name": "NEW_VALUE", "value": "ENABLED"}]},
     ]}
     records = _normalise(result, directory={"orgUnits": {"value": [
         {"orgUnitId": "id:root", "orgUnitPath": "/", "name": "Example Root"},
@@ -105,6 +106,7 @@ def test_request_names_retention_and_event_minimisation():
         ("DELETE_APPLICATION_SETTING", "ContentReportingProto one_on_one_reporting", None, "root"),
         ("TOGGLE_CAA_ENABLEMENT", None, "ENABLED", None),
     ]
+    assert all(row["event_time"] == TIME for row in records[:-1])
     assert records[-1]["complete"] is True
     assert all(text not in json.dumps([result.payload, records]) for text in (
         "actor", "192.0.2.25", "C0123abc", "OLD_VALUE", "uniqueQualifier",
@@ -143,13 +145,39 @@ def test_unreadable_event_timestamp_is_incomplete(timestamp):
     assert _normalise(result)[EVENTS]["records"][-1]["complete"] is False
 
 
-@pytest.mark.parametrize("bad", [None, True, "", " ", "unreadable", "true ", "https://example.org/private"])
-def test_unreadable_event_values_are_incomplete(bad):
+@pytest.mark.parametrize("extra", [
+    [], [("NEW_VALUE", "ANYONE_WITH_LINK")], [("NEW_VALUE", None)],
+    [("NEW_VALUE", True)], [("NEW_VALUE", "")], [("NEW_VALUE", "https://example.org/private")],
+])
+def test_unusable_event_value_only_weakens_its_own_policy(extra):
     event_name = "CHANGE_APPLICATION_SETTING"
-    item = _activity(event_name, ("SETTING_NAME", SETTING), ("NEW_VALUE", bad), ("ORG_UNIT_NAME", "Example Root"))
-    service = _Service({(event_name, None): {"items": [item]}})
+    item = _activity(event_name, ("SETTING_NAME", "MeetGenAiSmartNotesDocAccessProto default_smart_notes_doc_access"),
+                     ("ORG_UNIT_NAME", "Example Root"), *extra)
+    service = _Service({(event_name, None): {"items": [item]}, ("TOGGLE_CAA_ENABLEMENT", None): {"items": [_enable()]}})
     result = REGISTRY[EVENTS].run({"client": _client(service)})
-    assert result.payload["settingEvents"]["value"] == []
+    assert result.status == "ok"
+    directory = {"orgUnits": {"value": [{"orgUnitId": "id:root", "orgUnitPath": "/", "name": "Example Root"}]}}
+    meet, caa, state = _normalise(result, directory=directory)[EVENTS]["records"]
+    assert meet["new_value"] == "unrecognised" and meet["org_unit"] == "root"
+    assert state["complete"] is True
+    assert all(text not in json.dumps(result.payload) for text in ("ANYONE_WITH_LINK", "https://example.org/private"))
+    sections = {
+        "gws_tenant": {"top_unit": "ou:root", "org_units": {"ou:root": None}, "complete": True},
+        "gws_setting_events": {**state, "events": [
+            {**meet, "time": meet["event_time"], "unit": "ou:root"},
+            {**caa, "time": caa["event_time"]},
+        ]},
+    }
+    assert gws.assess("GWS.MEET.6.2v1", sections)["reason_code"] == "data_unusable_event_value"
+    assert gws.assess("GWS.COMMONCONTROLS.2.1v1", sections)["verdict"] == "met"
+
+
+def test_malformed_event_parameter_is_still_an_incomplete_read():
+    event_name = "CHANGE_APPLICATION_SETTING"
+    item = _activity(event_name, ("SETTING_NAME", SETTING))
+    item["events"][0]["parameters"].append("not an object")
+    result = REGISTRY[EVENTS].run({"client": _client(_Service({(event_name, None): {"items": [item]}}))})
+    assert result.status == "partial"
     assert _normalise(result)[EVENTS]["records"][-1]["complete"] is False
 
 
@@ -208,6 +236,7 @@ def test_ambiguous_and_cut_ou_targets_never_become_root_evidence():
     ("ORG_UNIT_NAME", "Example OU https://example.org/private"),
     ("ORG_UNIT_NAME", "Example OU C0123abc"),
     ("GROUP_EMAIL", "C0123abc@example.org"),
+    ("GROUP_EMAIL", "team@exämple.org"),
 ])
 def test_event_targets_cannot_carry_paths_urls_or_customer_ids(field, label):
     event_name = "DELETE_APPLICATION_SETTING"
@@ -215,8 +244,36 @@ def test_event_targets_cannot_carry_paths_urls_or_customer_ids(field, label):
     service = _Service({(event_name, None): {"items": [item]}})
     result = REGISTRY[EVENTS].run({"client": _client(service)})
     records = _normalise(result)[EVENTS]["records"]
-    assert label not in json.dumps([result.payload, records, result.coverage])
-    assert records[-1]["complete"] is False
+    assert label not in json.dumps([result.payload, records, result.coverage], ensure_ascii=False)
+    assert len(records) == 2
+    assert {"org_unit", "group_email"}.isdisjoint(records[0])
+    assert records[-1]["complete"] is True
+
+
+def test_guarded_group_does_not_fall_back_to_the_ou():
+    event_name = "CHANGE_APPLICATION_SETTING"
+    item = _activity(event_name, ("SETTING_NAME", SETTING), ("NEW_VALUE", "CONTENT_REPORTING_STATE_ENABLED"),
+                     ("ORG_UNIT_NAME", "Example Root"), ("GROUP_EMAIL", "team@exämple.org"))
+    result = REGISTRY[EVENTS].run({"client": _client(_Service({(event_name, None): {"items": [item]}}))})
+    directory = {"orgUnits": {"value": [{"orgUnitId": "id:root", "orgUnitPath": "/", "name": "Example Root"}]}}
+    event, state = _normalise(result, directory=directory)[EVENTS]["records"]
+    assert event["new_value"] == "unrecognised"
+    assert {"org_unit", "group_email"}.isdisjoint(event)
+    assert state["complete"] is True
+
+
+def test_event_window_uses_utc_instants_across_streams():
+    early = _enable()
+    early["id"]["time"] = "2026-11-23T01:02:28.672000090+01:00"
+    result = REGISTRY[EVENTS].run({"client": _client(_Service({
+        ("DELETE_APPLICATION_SETTING", None): {"items": [_delete()]},
+        ("TOGGLE_CAA_ENABLEMENT", None): {"items": [early]},
+    }))})
+    raw = result.payload["settingEvents"]
+    state = _normalise(result)[EVENTS]["records"][-1]
+    for section in (raw, state):
+        assert section["window_start"] == "2026-11-23T00:02:28.67200009Z"
+        assert section["window_end"] == "2026-11-23T00:02:28.672000091Z"
 
 
 @pytest.mark.parametrize("assignment", [
@@ -308,12 +365,15 @@ def test_scope_catalogue_setup_guide_and_presets():
     assert SSO_SCOPE in next(line.split(",") for line in docs.splitlines() if line.startswith("https://www.googleapis.com/auth/"))
 
 
-def test_offline_bundle_reapplies_minimisation_and_records_invalid_sections(tmp_path):
+@pytest.mark.parametrize("sso_error", [{}, {"error": "private failure https://example.org/customers/C0123abc"}])
+def test_offline_bundle_reapplies_minimisation_and_records_invalid_sections(tmp_path, sso_error):
     sample = tmp_path / "sample.json"
     sample.write_text(json.dumps({
-        EVENTS: {"settingEvents": {"value": [_enable(), _delete()], "actor": "actor@example.com"}},
-        SSO: {"inboundSsoAssignments": {"value": [{"targetOrgUnit": "orgUnits/root", "ssoMode": None}],
-                                        "error": "private failure https://example.org/customers/C0123abc"}},
+        EVENTS: {"settingEvents": {"value": [_enable(), _delete()], "actor": "actor@example.com",
+                                   "window_start": "2026-10-01T00:00:00Z", "window_end": "2026-11-25T00:00:00Z"}},
+        SSO: {"inboundSsoAssignments": {
+            "value": [{"targetOrgUnit": "orgUnits/root", "ssoMode": ""}], **sso_error,
+        }},
     }))
     out = tmp_path / "out"
     assert run_google_offline(
@@ -324,5 +384,9 @@ def test_offline_bundle_reapplies_minimisation_and_records_invalid_sections(tmp_
         for section in ("raw", "normalized"):
             text = (run_dir / section / f"{name}.json").read_text()
             assert all(secret not in text for secret in ("actor@example.com", "192.0.2.25", "C0123abc", "private failure"))
-    assert json.loads((run_dir / "normalized/google_setting_events.json").read_text())["records"][-1]["complete"] is True
-    assert json.loads((run_dir / "normalized/google_sso_assignments.json").read_text())["records"][-1]["complete"] is False
+    records = json.loads((run_dir / "normalized/google_setting_events.json").read_text())["records"]
+    assert records[-1]["complete"] is True
+    assert records[-1]["window_start"] == "2026-10-01T00:00:00Z"
+    assert records[-1]["window_end"] == "2026-11-25T00:00:00Z"
+    sso_records = json.loads((run_dir / "normalized/google_sso_assignments.json").read_text())["records"]
+    assert len(sso_records) == 1 and sso_records[0]["complete"] is False
