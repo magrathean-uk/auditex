@@ -645,7 +645,15 @@ class GoogleWorkspaceClient:
             return _cut(payload.get("organizationUnits") or [], top)
         if resource == "domains":
             payload = _execute(lambda: service.domains().list(customer=self.customer).execute())
-            return _cut(payload.get("domains") or [], top)
+            domains = payload.get("domains") if isinstance(payload, dict) else None
+            if not isinstance(domains, list):
+                raise PolicyReadError("The Google Workspace domains list is unreadable.",
+                                      error_class=POLICY_MALFORMED_ERROR_CLASS)
+            rows = _cut(domains, top)
+            if any(not isinstance(item, dict) for item in domains) or payload.get("nextPageToken", "") != "":
+                rows.page_error = PolicyReadError("The Google Workspace domains list could not be read in full.",
+                                                  error_class=POLICY_MALFORMED_ERROR_CLASS)
+            return rows
         if resource == "roles":
             return self._collect_pages(
                 lambda page_token: service.roles().list(customer=self.customer, maxResults=page_size, pageToken=page_token),

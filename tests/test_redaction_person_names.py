@@ -796,6 +796,10 @@ def test_every_product_field_name_is_exempt_from_whole_key_masking() -> None:
     assert not missing, "regenerate _D5_FIELD_NAMES in src/azure_tenant_audit/output_redaction.py; missing: " + " ".join(missing)
 
 
+@pytest.mark.parametrize("field", ["alias", "domainAliases", "domainAliasName", "inherited", "query_name", "selectors"])
+def test_google_dns_field_names_survive_a_matching_person_name(field: str) -> None:
+    assert redact_output({field: False}, context=_people(field)) == {field: False}
+
 
 @pytest.mark.parametrize("name", ["Chat", "Time", "Parameters"])
 def test_google_reports_names_can_be_pseudonymised_as_display_names(name: str) -> None:

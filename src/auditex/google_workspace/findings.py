@@ -2224,7 +2224,8 @@ def build_google_findings(
         spf = posture.get("spf") if isinstance(posture.get("spf"), dict) else {}
         dmarc = posture.get("dmarc") if isinstance(posture.get("dmarc"), dict) else {}
         dkim = posture.get("dkim") if isinstance(posture.get("dkim"), dict) else {}
-        if not spf.get("present"):
+        is_alias = posture.get("alias") is True
+        if not is_alias and not spf.get("present"):
             findings.append(
                 _finding(
                     rule_id="google.dns_spf_missing",
@@ -2239,7 +2240,10 @@ def build_google_findings(
                     returned_value=posture.get("domain"),
                 )
             )
-        if dmarc.get("policy") in {None, "", "none"}:
+        policy = dmarc.get("policy")
+        if dmarc.get("inherited") is True and dmarc.get("subdomain_policy") is not None:
+            policy = dmarc["subdomain_policy"]
+        if policy in (None, "", "none"):
             findings.append(
                 _finding(
                     rule_id="google.dns_dmarc_monitor_only",
@@ -2251,10 +2255,10 @@ def build_google_findings(
                     record=posture,
                     description="The domain's DMARC policy does not enforce quarantine or reject.",
                     remediation="Move DMARC toward quarantine or reject after validating mail flows.",
-                    returned_value=dmarc.get("policy"),
+                    returned_value=policy,
                 )
             )
-        if not dkim.get("selectors_present"):
+        if not is_alias and not dkim.get("selectors_present"):
             findings.append(
                 _finding(
                     rule_id="google.dns_dkim_missing",

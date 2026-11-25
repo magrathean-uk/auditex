@@ -79,11 +79,11 @@ def collector_activity_notices(collectors: list[str], mode: str, doh_endpoint: s
             "A skipped Security & Compliance read leaves the collector and run ok when other reads succeed."
         )
     if "google_dns_posture" in collectors:
-        # Review R083: Google runs send every verified domain to the same DoH resolver.
         notices.append(
-            "Selected Google DNS posture collection sends each verified Google Workspace domain name to "
-            f"{_resolver_text(doh_endpoint)}: SPF, DMARC, MTA-STS, TLS-RPT and BIMI TXT lookups and up to six DKIM "
-            "selector names. Only domain names, no user data, are sent to the resolver."
+            f"Selected Google DNS posture collection sends TXT queries to {_resolver_text(doh_endpoint)}. "
+            "It reads SPF, DMARC, MTA-STS, TLS-RPT, BIMI and up to eight DKIM selectors for verified base domains. "
+            "DMARC also uses verified alias names and, when needed, parent DNS names. "
+            "Only DNS names and the TXT query type are sent to the resolver."
         )
         switches.append(
             "Deselect it with --exclude google_dns_posture; --collectors replaces the selection, and the "
