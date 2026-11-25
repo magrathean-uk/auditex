@@ -6,6 +6,7 @@ shipped main file with empty fragments), so a later lane adding valid kinds and 
 from __future__ import annotations
 
 import json
+import time
 import traceback
 from pathlib import Path
 
@@ -755,3 +756,127 @@ def test_complete_tenant_and_read_apply_the_default():
     units = _with_tenant({"top_unit": "ou:root", "org_units": {"ou:root": None, "ou:a": "ou:root"}, "complete": True})
     assert units.complete is True
     assert units.values == {"ou:root": {"gmail_mail_delegation": {"enableMailDelegation": False}}}
+
+
+# --- broken topology: dangling parents and cycles (review round 2, B4) ---------------------------------------------
+
+_BROKEN = [
+    {"ou:root": None, "ou:a": "ou:missing"},
+    {"ou:root": None, "ou:a": "ou:a"},
+    {"ou:root": None, "ou:a": "ou:b", "ou:b": "ou:a"},
+    {"ou:root": None, "ou:c": "ou:a", "ou:a": "ou:b", "ou:b": "ou:a"},
+    {"ou:root": None, "ou:a": "ou:root", "ou:b": "ou:a", "ou:c": "ou:b", "ou:d": "ou:gone"},
+]
+
+
+@pytest.mark.parametrize("org_units", _BROKEN)
+def test_complete_topology_with_a_dangling_parent_or_cycle_gets_no_default(org_units):
+    units = _with_tenant({"top_unit": "ou:root", "org_units": org_units, "complete": True})
+    assert units.complete is False
+    assert units.inherits is False
+    assert units.values == {"ou:root": {}}
+    assert R.effective(units, "ou:root", "gmail_mail_delegation", "enableMailDelegation") is R.MISSING
+    assert R.effective(units, "ou:a", "gmail_mail_delegation", "enableMailDelegation") is R.UNUSABLE
+
+
+@pytest.mark.parametrize("complete", [True, False])
+def test_broken_topology_never_lends_the_top_unit_value(complete):
+    tenant = {"top_unit": "ou:root", "org_units": {"ou:root": None, "ou:a": "ou:b", "ou:b": "ou:a"},
+              "complete": complete}
+    units = R.effective_units({"gws_tenant": tenant, "gws_policies": {"complete": True, "policies": [
+        _p("ou:root", "gmail_mail_delegation", 1, {"enableMailDelegation": False}),
+        _p("ou:root", "gmail_service_status", 1, {"serviceState": "DISABLED"}),
+        _p("ou:b", "gmail_mail_delegation", 1, {"enableMailDelegation": True})]}},
+        ["gmail_mail_delegation", "gmail_service_status"])
+    assert (units.complete, units.inherits) == (False, False)
+    assert R.effective(units, "ou:root", "gmail_mail_delegation", "enableMailDelegation") is False
+    assert R.effective(units, "ou:a", "gmail_mail_delegation", "enableMailDelegation") is R.UNUSABLE
+    assert R.effective(units, "ou:b", "gmail_mail_delegation", "enableMailDelegation") is True
+    assert R.service_on(units, "ou:root", "gmail") == "off"
+    assert R.service_on(units, "ou:a", "gmail") == "unknown"
+
+
+@pytest.mark.parametrize("org_units", [
+    {"ou:root": None, "ou:a": "ou:missing"},
+    {"ou:root": None, "ou:a": "ou:root", "ou:b": "ou:gone"},
+])
+def test_partial_topology_with_an_unread_parent_still_inherits(org_units):
+    units = R.effective_units({"gws_tenant": {"top_unit": "ou:root", "org_units": org_units, "complete": False},
+                               "gws_policies": {"complete": True, "policies": [
+                                   _p("ou:root", "gmail_mail_delegation", 1, {"enableMailDelegation": False})]}},
+                              ["gmail_mail_delegation"])
+    assert (units.complete, units.inherits) == (False, True)
+    assert R.effective(units, "ou:a", "gmail_mail_delegation", "enableMailDelegation") is False
+
+
+def test_deep_complete_topology_applies_the_default_and_inherits():
+    units = _with_tenant({"top_unit": "ou:root", "complete": True, "org_units": {
+        "ou:root": None, "ou:a": "ou:root", "ou:b": "ou:a", "ou:c": "ou:b", "ou:d": "ou:root"}})
+    assert (units.complete, units.inherits) == (True, True)
+    assert R.effective(units, "ou:c", "gmail_mail_delegation", "enableMailDelegation") is False
+
+
+def test_dangling_parent_never_answers_met_through_assess(monkeypatch):
+    data = _load(_with_gated(_files()))
+    monkeypatch.setattr(gws_catalogue, "catalogue", lambda: data)
+
+    def kind(policy_id, row, sections):
+        units = R.effective_units(sections, ["gmail_mail_delegation"])
+        if R.effective(units, units.top, "gmail_mail_delegation", "enableMailDelegation") is False:
+            return {"policy_id": policy_id, "verdict": "met", "reason_code": "no_unit_violates",
+                    "reason_text": "Requirement met: no unit violates the setting.", "cell": "no_unit_violates",
+                    "cited_sections": None, "detail": {}}
+        return rule_failure_gws(policy_id)
+
+    monkeypatch.setattr(gws, "_registry", lambda: {"test_gate": kind, "manual_only": lambda *a: None})
+    tenant = {"top_unit": "ou:root", "org_units": {"ou:root": None, "ou:a": "ou:missing"}, "complete": True}
+    record = gws.assess("GWS.GMAIL.1.1v1", {"gws_tenant": tenant, "gws_policies": {"complete": True, "policies": []}})
+    assert (record["verdict"], record["reason_code"]) == ("not_assessed", "rule_evaluation_failed")
+    tenant["org_units"] = {"ou:root": None, "ou:a": "ou:root"}
+    record = gws.assess("GWS.GMAIL.1.1v1", {"gws_tenant": tenant, "gws_policies": {"complete": True, "policies": []}})
+    assert record["verdict"] == "met"
+
+
+# --- reduction cost and order (review round 2, M3 and Low) ---------------------------------------------------------
+
+_ROOT_ONLY = {"top_unit": "ou:root", "org_units": {"ou:root": None}, "complete": True}
+
+
+def _root_only(policies, keys):
+    return R.effective_units({"gws_tenant": _ROOT_ONLY, "gws_policies": {"complete": True, "policies": policies}},
+                             keys)
+
+
+def test_max_map_with_many_keys_reduces_in_linear_time():
+    entries = [{"id": f"l{index:05d}"} for index in range(16000)]
+    started = time.perf_counter()
+    units = _root_only([_p("ou:root", "gmail_email_address_lists", 1, {"emailAddressList": entries})],
+                       ["gmail_email_address_lists"])
+    assert time.perf_counter() - started < 1.5
+    reduced = units.values["ou:root"]["gmail_email_address_lists"]["emailAddressList"]
+    assert (len(reduced), reduced[0], reduced[-1]) == (16000, {"id": "l00000"}, {"id": "l15999"})
+
+
+def test_many_distinct_ranks_reduce_in_linear_time():
+    policies = [_p("ou:root", "gmail_service_status", rank, {"serviceState": "ENABLED"}) for rank in range(16000)]
+    started = time.perf_counter()
+    units = _root_only(policies, ["gmail_service_status"])
+    assert time.perf_counter() - started < 1.5
+    assert units.values["ou:root"]["gmail_service_status"] == {"serviceState": "ENABLED"}
+
+
+def test_max_map_keeps_one_policy_list_order():
+    units = _root_only([_p("ou:root", "gmail_email_address_lists", 1,
+                           {"emailAddressList": [{"id": "z"}, {"id": "a"}, {"id": "m"}]})],
+                       ["gmail_email_address_lists"])
+    assert units.values["ou:root"]["gmail_email_address_lists"] == {
+        "emailAddressList": [{"id": "z"}, {"id": "a"}, {"id": "m"}]}
+
+
+def test_max_map_orders_keys_by_rank_then_list_place():
+    first = _p("ou:root", "gmail_email_address_lists", 5, {"emailAddressList": [{"id": "y"}, {"id": "b"}]})
+    second = _p("ou:root", "gmail_email_address_lists", 2, {"emailAddressList": [{"id": "x"}, {"id": "y", "n": 1}]})
+    for policies in ([first, second], [second, first]):
+        units = _root_only(policies, ["gmail_email_address_lists"])
+        assert units.values["ou:root"]["gmail_email_address_lists"] == {
+            "emailAddressList": [{"id": "y", "n": 1}, {"id": "b"}, {"id": "x"}]}

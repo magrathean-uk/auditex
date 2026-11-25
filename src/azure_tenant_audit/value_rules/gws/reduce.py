@@ -5,7 +5,9 @@
   every value (:1069-1095); ``max_map`` merges list entries by primary key (:973-1040).
 - A group-scoped unit (``ou:<id>/group:<pseudonym>``) is its own unit, never ranked against an OU (:784-825).
 - Pinned defaults fill the top unit only (:1097-1170), and only when both the policy read and the tenant topology
-  are complete and the topology holds the top unit as its one root. ScubaGoggles' "absent service status is DISABLED"
+  are complete and the topology holds the top unit as its one root. A topology with a cycle, or a complete one with
+  an OU whose parent chain does not reach that root, is broken (review B4): it is incomplete and no unit inherits
+  the top unit's values, so a dangling or looping OU never borrows a compliant root value. ScubaGoggles' "absent service status is DISABLED"
   is not copied: ``service_on`` answers ``unknown`` (divergence D3).
 - Unknown is not safe: an envelope that cannot be placed raises ``Unusable``; a value that cannot be reduced reduces
   to ``UNUSABLE`` for that (unit, section) only. So does a tie (D11): two policies at the rank that decides a value
@@ -49,6 +51,7 @@ class Units:
     complete: bool
     values: dict[str, dict[str, Any]]
     explicit: dict[str, frozenset[tuple[str, str]]]
+    inherits: bool = True
 
 
 class _Placed(NamedTuple):
@@ -63,11 +66,40 @@ def _sort_order(value: Any) -> bool:
             or isinstance(value, float) and math.isfinite(value))
 
 
-def _topology(tenant: Any) -> tuple[str, bool]:
-    """The top unit and whether the tenant topology is complete (design 7: ``top_unit``, ``org_units``,
-    ``complete``). A top unit that is not an OU, or an ``org_units`` map of the wrong shape, cannot be placed. A
-    complete topology must hold the top unit as its only root; a partial one is carried through as incomplete, so no
-    default is applied on a root the read never confirmed."""
+def _chains(org_units: dict[str, str | None], top: str) -> set[str]:
+    """How each OU's parent chain ends: ``top``, ``root`` (another root), ``dangling`` (a parent outside the map) or
+    ``cycle``. One pass: every OU is walked once and its outcome shared by the whole path."""
+    ends: dict[str, str] = {}
+    for start in org_units:
+        path, seen, unit = [], set(), start
+        while True:
+            if unit in ends:
+                outcome = ends[unit]
+                break
+            if unit not in org_units:
+                outcome = "dangling"
+                break
+            if unit in seen:
+                outcome = "cycle"
+                break
+            seen.add(unit)
+            path.append(unit)
+            if org_units[unit] is None:
+                outcome = "top" if unit == top else "root"
+                break
+            unit = org_units[unit]
+        for unit in path:
+            ends[unit] = outcome
+    return set(ends.values())
+
+
+def _topology(tenant: Any) -> tuple[str, bool, bool]:
+    """The top unit, whether the tenant topology is complete, and whether units inherit the top unit's values
+    (design 7: ``top_unit``, ``org_units``, ``complete``). A top unit that is not an OU, or an ``org_units`` map of
+    the wrong shape, cannot be placed. A complete topology must hold the top unit as its only root; a partial one is
+    carried through as incomplete, so no default is applied on a root the read never confirmed. A cycle, or in a
+    complete topology a parent chain that does not reach the top unit, breaks the topology: incomplete, and no
+    inheritance (review B4)."""
     if not isinstance(tenant, dict) or not isinstance(tenant.get("top_unit"), str) \
             or not _OU.fullmatch(tenant["top_unit"]):
         raise Unusable("gws_tenant has no top unit")
@@ -81,13 +113,15 @@ def _topology(tenant: Any) -> tuple[str, bool]:
     roots = [unit for unit, parent in org_units.items() if parent is None]
     if complete and roots != [top]:
         raise Unusable("gws_tenant does not hold its top unit as the root")
-    return top, complete
+    ends = _chains(org_units, top)
+    broken = "cycle" in ends or complete and ends != {"top"}
+    return top, complete and not broken, not broken
 
 
-def _entries(sections: Any, keys: set[str]) -> tuple[str, bool, list[_Placed]]:
+def _entries(sections: Any, keys: set[str]) -> tuple[str, bool, bool, list[_Placed]]:
     if not isinstance(sections, dict):
         raise Unusable("sections is not a mapping")
-    top, tenant_complete = _topology(sections.get("gws_tenant"))
+    top, tenant_complete, inherits = _topology(sections.get("gws_tenant"))
     read = sections.get("gws_policies")
     if not isinstance(read, dict) or not isinstance(read.get("policies"), list):
         raise Unusable("gws_policies is not a policy list")
@@ -106,7 +140,7 @@ def _entries(sections: Any, keys: set[str]) -> tuple[str, bool, list[_Placed]]:
         usable = _sort_order(rank) and "value" in entry
         kept.append(_Placed(unit, entry["section"], rank if usable else math.inf,
                             entry["value"] if usable else UNUSABLE))
-    return top, tenant_complete and read.get("complete") is True, kept
+    return top, tenant_complete and read.get("complete") is True, inherits, kept
 
 
 def _canonical(value: Any) -> str:
@@ -120,9 +154,12 @@ def _canonical(value: Any) -> str:
 
 
 def _tiers(group: list[_Placed]) -> list[list[Any]]:
-    """The values by rank, highest first; within a rank in canonical order, never in read order."""
-    ranks = sorted({entry.rank for entry in group}, reverse=True)
-    return [sorted((entry.value for entry in group if entry.rank == rank), key=_canonical) for rank in ranks]
+    """The values by rank, highest first; within a rank in canonical order, never in read order. One pass groups
+    the records by rank (review M3)."""
+    by_rank: dict[float, list[Any]] = {}
+    for entry in group:
+        by_rank.setdefault(entry.rank, []).append(entry.value)
+    return [sorted(by_rank[rank], key=_canonical) for rank in sorted(by_rank, reverse=True)]
 
 
 class _Tie(Exception):
@@ -133,9 +170,15 @@ def _decided(tiers: list[list[dict]]) -> dict[str, Any]:
     """Each field from the highest rank that holds it; equal-ranked values that disagree on it are a tie (D11)."""
     merged: dict[str, Any] = {}
     for tier in tiers:
-        for name in sorted({name for value in tier for name in value} - set(merged)):
-            candidates = [value[name] for value in tier if name in value]
-            if any(_canonical(candidate) != _canonical(candidates[0]) for candidate in candidates[1:]):
+        found: dict[str, list[Any]] = {}
+        for value in tier:
+            for name, part in value.items():
+                if name not in merged:
+                    found.setdefault(name, []).append(part)
+        for name in sorted(found):
+            candidates = found[name]
+            first = _canonical(candidates[0])
+            if any(_canonical(candidate) != first for candidate in candidates[1:]):
                 raise _Tie
             merged[name] = copy.deepcopy(candidates[0])
     return merged
@@ -177,14 +220,15 @@ def _max_map(tiers: list[list[Any]], field: str, key: str) -> Any:
         # Fields beside the map merge as ``merge`` does; each map item merges field by field at its own rank.
         merged = _decided([[{name: part for name, part in value.items() if name != field} for value in tier]
                            for tier in tiers])
-        first: dict[Any, tuple[int, str]] = {}
+        # One pass groups the items by key and rank (review M3). Keys keep their first place: rank, then the
+        # canonical order of equal-ranked policies, then the place in that policy's list, so one policy's list
+        # keeps its own order and read order never matters.
+        by_key: dict[Any, dict[int, list[dict]]] = {}
         for index, tier in enumerate(tiers):
             for value in tier:
                 for item in value[field]:
-                    first.setdefault(item[key], (index, _canonical(item[key])))
-        items = [_decided([[item for value in tier for item in value[field] if item[key] == item_key]
-                           for tier in tiers])
-                 for item_key in sorted(first, key=first.__getitem__)]
+                    by_key.setdefault(item[key], {}).setdefault(index, []).append(item)
+        items = [_decided([ranks[index] for index in sorted(ranks)]) for ranks in by_key.values()]
     except _Tie:
         return UNUSABLE
     merged[field] = items
@@ -215,7 +259,7 @@ def effective_units(sections: dict, section_keys: list[str] | tuple[str, ...]) -
     keys = set(section_keys)
     for key in keys:
         section_semantics(key)
-    top, complete, entries = _entries(sections, keys)
+    top, complete, inherits, entries = _entries(sections, keys)
     grouped: dict[tuple[str, str], list[_Placed]] = {}
     for entry in entries:
         grouped.setdefault((entry.unit, entry.section), []).append(entry)
@@ -238,15 +282,17 @@ def effective_units(sections: dict, section_keys: list[str] | tuple[str, ...]) -
             elif isinstance(current, dict):
                 for field, value in default.items():
                     current.setdefault(field, copy.deepcopy(value))
-    return Units(top, complete, values, {unit: frozenset(fields) for unit, fields in explicit.items()})
+    return Units(top, complete, values, {unit: frozenset(fields) for unit, fields in explicit.items()}, inherits)
 
 
 def effective(units: Units, unit: str, section: str, field: str) -> Any:
     """The unit's own value, else the top unit's (``GetApiSettingValue``, SG:scubagoggles/rego/Utils.rego:496-505).
 
-    ``MISSING`` when neither holds the field; ``UNUSABLE`` when the value that applies could not be reduced.
+    ``MISSING`` when neither holds the field; ``UNUSABLE`` when the value that applies could not be reduced, or when
+    the unit lacks the field and a broken topology (review B4) leaves nothing it may inherit.
     """
-    for source in (unit, units.top):
+    inherits = units.inherits or unit == units.top
+    for source in (unit, units.top) if inherits else (unit,):
         value = units.values.get(source, {}).get(section, MISSING)
         if value is UNUSABLE:
             return UNUSABLE
@@ -254,7 +300,7 @@ def effective(units: Units, unit: str, section: str, field: str) -> Any:
             return value[field]
         if value is not MISSING and not isinstance(value, dict):
             return UNUSABLE
-    return MISSING
+    return MISSING if inherits else UNUSABLE
 
 
 def _state(units: Units, unit: str, section: str) -> str | None:
@@ -280,5 +326,7 @@ def service_on(units: Units, unit: str, service: str) -> str:
     own = _state(units, unit, section)
     if own is not None:
         return own
+    if not units.inherits:
+        return UNKNOWN
     top = _state(units, units.top, section)
     return UNKNOWN if top is None else top
