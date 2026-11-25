@@ -359,7 +359,7 @@ def admin_sso(policy_id: str, row: dict, sections: dict) -> dict:
     users, assigned = _privileged(admins), _assignments(sso)
     count = _count(admins.get("super_admin_count")) if isinstance(admins, dict) else None
     try:
-        _, topology_sound, _ = _topology(sections["gws_tenant"])
+        _, topology_sound, _, _ = _topology(sections["gws_tenant"])
     except Unusable:
         users = None
     if (users is None or assigned is None or count is None
