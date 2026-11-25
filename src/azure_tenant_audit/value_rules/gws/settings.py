@@ -14,6 +14,15 @@ is compliant here: a deliberate, lenient reading of an API value Google does not
 compare whole numbers. ``duration_gt`` and ``duration_ne`` parse ``<n>[smhd]`` into seconds
 (SG:scubagoggles/rego/Utils.rego:655); anything else is unusable.
 
+A unit whose service is on (or unknown) and that holds no value of its own is evaluated on its effective value
+(design 8.1: its own, else the inherited value through ``reduce.effective``, else the top unit's value or pinned
+default), so a sub-unit that switches the service on under a non-compliant top value is not met. ``explicit_only``
+rows never inherit.
+
+Known limitation (review Q3): a string enum has no pinned vocabulary, so an unknown enum constant on an ``ne`` or
+``not_in`` row (for example an ``allowedStrength`` no one has seen) answers not_met, the safe direction, not
+not_assessed.
+
 Decision order, the first rule that applies decides: the shared section gate (``gws.assess``); a wrong-shaped
 envelope; an incomplete read; the service off in every unit; no unit known to be on while a state is unknown; a
 violating value in a unit whose service is on; a violating or unusable value where the service state is unknown; an
@@ -36,6 +45,7 @@ from .reduce import (
     UNKNOWN,
     UNUSABLE,
     Unusable,
+    effective,
     effective_units,
     service_on,
 )
@@ -117,7 +127,7 @@ def _violates(op: str, actual: Any, pinned: Any) -> bool | None:
 
 def _read(units: Any, unit: str, section: str, fields: tuple[str, ...], explicit_only: bool) -> Any:
     """The unit's own value of the field: ``MISSING`` when it holds none (a non-top unit is then not evaluated),
-    ``UNUSABLE`` when its section could not be reduced or its fields disagree (D7)."""
+    ``UNUSABLE`` when its section could not be reduced or its fields disagree (D7). The caller adds inheritance."""
     block = units.values.get(unit, {}).get(section, MISSING)
     if block is UNUSABLE or block is not MISSING and not isinstance(block, dict):
         return UNUSABLE
@@ -127,6 +137,21 @@ def _read(units: Any, unit: str, section: str, fields: tuple[str, ...], explicit
     if explicit_only and not any((section, name) in held for name in fields):
         return MISSING
     found = [block[name] for name in fields if name in block]
+    if not found:
+        return MISSING
+    if any((type(item), item) != (type(found[0]), found[0]) for item in found[1:]):
+        return UNUSABLE
+    return found[0]
+
+
+def _inherited(units: Any, unit: str, section: str, fields: tuple[str, ...]) -> Any:
+    """The value a unit with no value of its own is evaluated on (design 8.1): the inherited value through
+    ``reduce.effective`` (the top unit's value or pinned default). ``UNUSABLE`` when the topology leaves nothing it may
+    inherit or the inherited fields disagree (D7)."""
+    found = [effective(units, unit, section, name) for name in fields]
+    if any(item is UNUSABLE for item in found):
+        return UNUSABLE
+    found = [item for item in found if item is not MISSING]
     if not found:
         return MISSING
     if any((type(item), item) != (type(found[0]), found[0]) for item in found[1:]):
@@ -160,6 +185,8 @@ def setting(policy_id: str, row: dict, sections: dict) -> dict:
     evaluated = 0
     for unit in sorted(units.values):
         value = _read(units, unit, section, fields, explicit_only)
+        if value is MISSING and not explicit_only and unit != units.top and states[unit] != OFF:
+            value = _inherited(units, unit, section, fields)
         if value is MISSING:
             continue
         evaluated += 1

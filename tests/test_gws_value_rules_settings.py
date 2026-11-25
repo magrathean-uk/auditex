@@ -1,6 +1,6 @@
 """``setting`` kind and its 38 Gmail and Common Controls rows (design M13 sections 8.2 and 14; lane L07).
 
-Synthetic data only; every expected value is a literal. The 337 vectors in ``fixtures/gws-value-rules/setting-core.jsonl``
+Synthetic data only; every expected value is a literal. The 343 vectors in ``fixtures/gws-value-rules/setting-core.jsonl``
 replay through ``test_gws_value_rules_replay.py``; this file pins the rows against a second literal copy of the design
 table, the operators, the parameter checks and the unknown-is-not-safe paths.
 """
@@ -351,3 +351,32 @@ def test_unicode_case_folding_never_makes_an_unknown_value_compliant():
              "REPLACE_CONFLıCTING_ACCOUNT")):
         sections = _sections([_p("ou:root", section, {field: value})])
         assert _answer(policy_id, sections) == ("not_assessed", "setting_value_unusable"), policy_id
+
+
+# --- a unit with the service on and no value of its own is judged on its effective value (design 8.1) ---------------------
+
+OFF_TOP = _p("ou:root", "gmail_service_status", {"serviceState": "DISABLED"})
+ON_SUB = _p("ou:a", "gmail_service_status", {"serviceState": "ENABLED"})
+
+
+def test_a_sub_ou_switching_the_service_on_inherits_a_violating_top_value():
+    sections = _sections([OFF_TOP, _p("ou:root", SE, {FIELD: False}), ON_SUB])
+    assert _answer("GWS.GMAIL.5.1v1", sections) == ("not_met", "unit_violates")
+
+
+def test_a_sub_ou_switching_the_service_on_inherits_a_compliant_top_value():
+    sections = _sections([OFF_TOP, GOOD, ON_SUB])
+    assert _answer("GWS.GMAIL.5.1v1", sections) == ("met", "no_unit_violates")
+
+
+def test_a_sub_ou_switching_the_service_on_with_a_broken_topology_is_not_assessed():
+    tenant = dict(TENANT, org_units={"ou:root": None, "ou:a": "ou:gone"})
+    sections = _sections([OFF_TOP, _p("ou:root", SE, {FIELD: False}), ON_SUB], tenant=tenant)
+    assert _answer("GWS.GMAIL.5.1v1", sections) == ("not_assessed", "policy_read_incomplete")
+
+
+def test_a_sub_ou_with_the_service_on_inherits_the_pinned_default_when_the_top_value_is_absent():
+    # GMAIL.1.1 pins a default of false for enableMailDelegation (eq true violates).
+    off_ok = _sections([OFF_TOP, ON_SUB])
+    assert _answer("GWS.GMAIL.1.1v1", off_ok) == ("met", "no_unit_violates")
+
