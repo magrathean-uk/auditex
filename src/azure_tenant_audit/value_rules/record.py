@@ -21,6 +21,7 @@ BLOCKED_CODES = frozenset({"data_unavailable_no_licence", "data_unavailable_lice
 UNDECIDABLE_CODES = frozenset({"data_unusable_policy_set", "data_unusable_qualifier_shadowed",
                                "data_unusable_hidden_covering_rule", "data_unusable_partial_tier",
                                "data_unusable_partial_tier_may_cover", "data_unusable_rule_priority_tie",
+                               "data_unavailable_manual_check",
                                "data_unavailable_custom_policy_priority", "data_unavailable_no_baseline_text"})
 
 
