@@ -142,6 +142,26 @@ def test_loader_refuses(change, message):
     _mutate(message, change)
 
 
+@pytest.mark.parametrize("change", [
+    lambda f: f[MAIN]["section_semantics"]["gmail_pop_access"].update(reducer=["max"]),
+    lambda f: f[MAIN]["section_semantics"]["gmail_pop_access"].update(fields={"enablePopAccess": ["bool"]}),
+    lambda f: f[MAIN]["kinds"]["manual_only"]["cells"]["manual_check"].update(verdict=["not_assessed"]),
+    lambda f: f[MAIN]["kinds"]["manual_only"]["cells"]["manual_check"].update(cited=[["gws_tenant"]]),
+    lambda f: f[MAIN]["policies"]["GWS.MEET.6.3v1"].update(kind=["manual_only"]),
+    lambda f: f[MAIN]["policies"]["GWS.MEET.6.3v1"].update(sections=[["gws_tenant"]]),
+    lambda f: f[MAIN]["kinds"]["manual_only"].update(evidence_free=1),
+    lambda f: f[MAIN].update(schema_version=True),
+    lambda f: f[MAIN]["section_semantics"]["gmail_pop_access"].update(outside_expected_table=1),
+    lambda f: f.update({FRAGMENT: ["kinds", "policies"]}),
+    lambda f: f[FRAGMENT].update(policies={"GWS.GMAIL.1.1v1": "row"}),
+])
+def test_loader_refuses_malformed_shapes_with_value_error(change):
+    files = _files()
+    change(files)
+    with pytest.raises(ValueError):
+        _load(files)
+
+
 def test_loader_refuses_a_gated_kind_without_the_gate_cell():
     files = _with_gated(_files())
     del files[FRAGMENT]["kinds"]["test_gate"]["cells"]["section_not_collected"]
@@ -375,6 +395,16 @@ def test_max_map_merges_entries_by_primary_key():
     [_p("ou:a", "gmail_rule_states", 4, {"ruleStates": [{"state": "ON"}]})],
     [_p("ou:a", "gmail_rule_states", 4, {"ruleStates": "x"})],
     [_p("ou:a", "gmail_rule_states", 4, {"ruleStates": [{"ruleId": "r1"}, {"ruleId": "r1"}]})],
+    [_p("ou:a", "gmail_rule_states", 4, {"ruleStates": [{"ruleId": "r1"}]}),
+     _p("ou:a", "gmail_rule_states", 1, {"ruleStates": [{"ruleId": "r2", "y": 1}, {"ruleId": "r2", "y": 2}]})],
+    [_p("ou:a", "gmail_pop_access", 4, {"enablePopAccess": True}),
+     _p("ou:a", "gmail_pop_access", 4, {"enablePopAccess": 1})],
+    [_p("ou:a", "gmail_pop_access", True, {"enablePopAccess": True})],
+    [_p("ou:a", "gmail_pop_access", float("nan"), {"enablePopAccess": True})],
+    [_p("ou:a", "gmail_pop_access", "1", {"enablePopAccess": True})],
+    [{"unit": "ou:a", "unit_kind": "org_unit", "section": "gmail_pop_access", "sort_order": 1}],
+    [_p("ou:a", "gmail_pop_access", None, {"enablePopAccess": False}),
+     _p("ou:a", "gmail_pop_access", 9, {"enablePopAccess": False})],
 ])
 def test_unreducible_value_is_unusable_for_that_unit_only(policies):
     section = policies[0]["section"]
@@ -399,17 +429,19 @@ def test_equal_sort_order_with_equal_values_is_not_a_tie():
     {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": ["x"]}},
     {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": [{"section": 3}]}},
     {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": [
-        _p("ou:a", "gmail_pop_access", True, {"enablePopAccess": True})]}},
-    {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": [
-        _p("ou:a", "gmail_pop_access", float("nan"), {"enablePopAccess": True})]}},
-    {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": [
         _p("ou:a/group:g1", "gmail_pop_access", 1, {"enablePopAccess": True}, unit_kind="org_unit")]}},
     {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": [
-        {"unit": "ou:a", "unit_kind": "org_unit", "section": "gmail_pop_access", "sort_order": 1}]}},
+        _p("ou:a", "gmail_pop_access", 1, {"enablePopAccess": True}, unit_kind=["org_unit"])]}},
+    {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": [
+        _p("ou:root/group:g1", "gmail_pop_access", 1, {"enablePopAccess": True}, unit_kind="group")]},
+     "_top_group": True},
+    None,
     {"gws_tenant": TENANT, "gws_policies": {"complete": True, "policies": [
         _p("", "gmail_pop_access", 1, {"enablePopAccess": True})]}},
 ])
 def test_envelope_that_cannot_be_placed_is_unusable(sections):
+    if isinstance(sections, dict) and sections.pop("_top_group", False):
+        sections["gws_tenant"] = {**TENANT, "top_unit": "ou:root/group:g1"}
     with pytest.raises(R.Unusable):
         R.effective_units(sections, ["gmail_pop_access"])
 

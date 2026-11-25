@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -51,6 +52,8 @@ def _sort_order(value: Any) -> bool:
 
 
 def _entries(sections: dict, keys: set[str]) -> tuple[str, bool, list[dict]]:
+    if not isinstance(sections, dict):
+        raise Unusable("sections is not a mapping")
     tenant, read = sections.get("gws_tenant"), sections.get("gws_policies")
     if not isinstance(tenant, dict) or not isinstance(tenant.get("top_unit"), str) or not tenant["top_unit"]:
         raise Unusable("gws_tenant has no top unit")
@@ -63,11 +66,12 @@ def _entries(sections: dict, keys: set[str]) -> tuple[str, bool, list[dict]]:
         if entry["section"] not in keys:
             continue
         unit, kind = entry.get("unit"), entry.get("unit_kind")
-        if (not isinstance(unit, str) or not unit or kind not in {"org_unit", "group"}
-                or (kind == "group") != ("/group:" in unit) or unit == tenant["top_unit"] and kind == "group"
-                or not _sort_order(entry.get("sort_order")) or "value" not in entry):
+        if (not isinstance(unit, str) or not unit or not isinstance(kind, str) or kind not in {"org_unit", "group"}
+                or (kind == "group") != ("/group:" in unit) or unit == tenant["top_unit"] and kind == "group"):
             raise Unusable("gws_policies holds an entry that cannot be placed")
-        kept.append(entry)
+        # Placed but unrankable or valueless: only this (unit, section) becomes unusable.
+        kept.append(entry if _sort_order(entry.get("sort_order")) and "value" in entry
+                    else {**entry, "sort_order": math.inf, "value": UNUSABLE})
     return tenant["top_unit"], read.get("complete") is True, kept
 
 
@@ -101,10 +105,10 @@ def _max_map(ranked: list[dict], field: str, key: str) -> Any:
                     item.get(key), bool) for item in value[field]))
     if any(not usable(entry["value"]) for entry in ranked):
         return UNUSABLE
+    if any(len({item[key] for item in entry["value"][field]}) != len(entry["value"][field]) for entry in ranked):
+        return UNUSABLE
     merged = copy.deepcopy(ranked[0]["value"])
     by_key = {item[key]: item for item in merged[field]}
-    if len(by_key) != len(merged[field]):
-        return UNUSABLE
     for entry in ranked[1:]:
         for item in entry["value"][field]:
             if item[key] in by_key:
@@ -120,8 +124,18 @@ def _tied(ranked: list[dict], reducer: str) -> bool:
     """Two different values share the winning sort order: which one Google applies is unknown."""
     if reducer == "list":
         return False
-    top = [entry["value"] for entry in ranked if entry["sort_order"] == ranked[0]["sort_order"]]
+    top = [_canonical(entry["value"]) for entry in ranked if entry["sort_order"] == ranked[0]["sort_order"]]
     return any(value != top[0] for value in top[1:])
+
+
+def _canonical(value: Any) -> str:
+    """Type-aware equality: ``true`` and ``1`` differ, as they do in the evidence."""
+    if value is UNUSABLE:
+        return "\0unusable"
+    try:
+        return json.dumps(value, sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError):
+        return "\0unusable"
 
 
 def _reduce(section: str, group: list[dict]) -> Any:
@@ -129,7 +143,7 @@ def _reduce(section: str, group: list[dict]) -> Any:
     reducer = semantics["reducer"]
     # Stable sort, highest first: equal sort orders keep the read order, as sorted(reverse=True) does in ScubaGoggles.
     ranked = sorted(group, key=lambda entry: entry["sort_order"], reverse=True)
-    if _tied(ranked, reducer):
+    if any(entry["value"] is UNUSABLE for entry in ranked) or _tied(ranked, reducer):
         return UNUSABLE
     if reducer == "merge":
         return _merge(ranked)

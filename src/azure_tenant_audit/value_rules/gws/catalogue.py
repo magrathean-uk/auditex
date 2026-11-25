@@ -62,7 +62,7 @@ def _section_semantics(entries: Any) -> None:
                 or any(not isinstance(name, str) or kind not in FIELD_TYPES for name, kind in fields.items())
                 or ("key" in entry) != (entry["reducer"] == "max_map")
                 or (entry["reducer"] == "max_map" and (not isinstance(entry["key"], str) or len(fields) != 1))
-                or entry.get("outside_expected_table", False) not in (True, False)):
+                or not isinstance(entry.get("outside_expected_table", False), bool)):
             _fail("Invalid GWS section semantics")
         if ("default" in entry) != ("default_src" in entry):
             _fail("Invalid GWS section default")
@@ -101,7 +101,7 @@ def _check_kind(name: str, kind: Any) -> None:
         _fail("Invalid GWS value-rule kind")
     cells = kind.get("cells")
     evidence_free = kind.get("evidence_free", False)
-    if not isinstance(cells, dict) or not cells or evidence_free not in (True, False):
+    if not isinstance(cells, dict) or not cells or not isinstance(evidence_free, bool):
         _fail("Invalid GWS value-rule kind")
     for cell, entry in cells.items():
         _check_cell(cell, entry)
@@ -139,8 +139,18 @@ def _resolve(row: dict, kind: dict) -> dict[str, dict]:
 
 
 def _load(read: Callable[[str], str]) -> dict[str, Any]:
+    """Every malformed shape is refused with ``ValueError``, including one a type check would only meet as a
+    ``TypeError`` (an unhashable value where a name belongs)."""
+    try:
+        return _load_checked(read)
+    except (TypeError, KeyError, AttributeError) as exc:
+        raise ValueError("Invalid GWS value-rule catalogue") from exc
+
+
+def _load_checked(read: Callable[[str], str]) -> dict[str, Any]:
     data = json.loads(read(MAIN))
-    if (not isinstance(data, dict) or set(data) != _MAIN_KEYS or data["schema_version"] != 1
+    if (not isinstance(data, dict) or set(data) != _MAIN_KEYS or type(data["schema_version"]) is not int
+            or data["schema_version"] != 1
             or data["scubagoggles_version"] != SCUBAGOGGLES_VERSION
             or data["scubagoggles_commit"] != SCUBAGOGGLES_COMMIT):
         _fail("Invalid GWS value-rule catalogue")
