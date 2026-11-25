@@ -245,15 +245,20 @@ def settings_multi(policy_id: str, row: dict, sections: dict) -> dict:
         off = all(state == OFF for state in states.values())
         return _answer(policy_id, row, "service_off_everywhere" if off else "service_status_absent")
     evaluate = _evaluator(params.kind)
+    explicit_by_unit = {unit: True if unit == units.top else _explicit(units, unit, pairs) for unit in units.values}
+    # A unit with the service on and no participating field of its own takes every value from the top unit. When the
+    # top unit's own service is off it is skipped, so its values are judged on that unit's behalf; otherwise an
+    # inherited violation would answer met with no unit evaluated (lens 2, M13-L09).
+    inherited = any(explicit is False and states.get(unit, ON) == ON for unit, explicit in explicit_by_unit.items())
     results = []
     for unit in sorted(units.values):
-        explicit = True if unit == units.top else _explicit(units, unit, pairs)
+        explicit = explicit_by_unit[unit]
         if explicit is False:
             continue
         state = states.get(unit, ON)
-        if state == OFF:
+        if state == OFF and not (unit == units.top and inherited):
             continue
-        if state != ON:
+        if state not in {ON, OFF}:
             results.append(_SERVICE_UNKNOWN)
         elif explicit is None:
             results.append(_UNUSABLE)

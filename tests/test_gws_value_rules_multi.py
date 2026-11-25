@@ -139,7 +139,8 @@ def test_the_kind_specific_cases_are_present():
     assert {"multi-gmail55-group", "multi-gmail55-sub-ou", "multi-gmail55-bad-wins", "multi-gmail91-merge",
             "multi-drive12-sub-mode-from-top", "multi-drive12-sub-field-from-top", "multi-drive13-other-branch",
             "multi-drive13-sub-wrong-branch", "multi-drive51-sub-effective", "multi-chat41-sub-effective",
-            "multi-groups41-other-field", "multi-cc121-status-absent", "multi-gmail91-tie"} <= notes
+            "multi-groups41-other-field", "multi-cc121-status-absent", "multi-gmail91-tie",
+            "multi-drive31-top-off-inherit", "multi-groups41-top-off-inherit"} <= notes
     assert {vector["divergence"] for vector in VECTORS if "divergence" in vector} == {"D3", "D11", "D12"}
 
 
