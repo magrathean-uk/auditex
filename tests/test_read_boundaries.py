@@ -135,6 +135,9 @@ _UNTRACEABLE_LAUNCHES: dict[tuple[str, str], str] = {
     ("src/azure_tenant_audit/value_rules/__init__.py", "_registry"): (
         "imports each value_rules submodule found by pkgutil under this package and reads only its KINDS dict"
     ),
+    ("src/azure_tenant_audit/value_rules/gws/__init__.py", "_registry"): (
+        "imports each value_rules.gws submodule found by pkgutil under this subpackage and reads only its KINDS dict"
+    ),
 }
 
 # PowerShell approved verbs (plus ForEach/Tee) used to recognise a cmdlet name inside a string.

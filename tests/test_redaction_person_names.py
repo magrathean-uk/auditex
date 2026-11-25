@@ -987,3 +987,25 @@ def test_a_ce_plus_spelling_as_a_mapping_key_is_masked_in_the_shareable_json_pre
     assert key not in content
     assert f'"{_prose(_key(root), person)}": 1' in content
     assert key.lower() not in redaction._D5_FIELD_NAMES
+
+
+def test_gws_setting_words_as_mapping_keys_are_masked_in_the_shareable_json_preview(tmp_path: Path) -> None:
+    # M13-L02 review B1: the GWS catalogue keeps Google setting words (``securityUpdate``, ``region``) as values, so
+    # they never become product field names; a person or group with that name is pseudonymised where it is a key.
+    from auditex.reporting import preview_report
+
+    users = [_user("Security Update", "directory-fixture-1@example.invalid"),
+             _user("Region", "directory-fixture-2@example.invalid")]
+    root = _run(tmp_path / "run", users, narrative="Security Update reviewed it")
+    report = root / "reports" / "report-pack.json"
+    payload = json.loads(report.read_text())
+    payload["executive_summary"]["per_reviewer"] = {"security_update": 1, "Region": 2}
+    report.write_text(json.dumps(payload))
+
+    content = preview_report(run_dir=str(root), format_name="json", include_sections=["executive_summary"],
+                             profile="shareable")["content"]
+
+    assert "security_update" not in content and '"Region"' not in content
+    assert f'"{_id(_key(root), "Security Update")}": 1' in content  # an identifier-shaped key keeps its shape
+    assert f'"{_prose(_key(root), "Region")}": 2' in content
+    assert "securityupdate" not in redaction._D5_FIELD_NAMES and "region" not in redaction._D5_FIELD_NAMES
