@@ -59,7 +59,7 @@
             "Details": "SENTINEL-DETAILS-TEXT for admin@example.com"
           },
           {
-            "Control ID": "MS.AAD.7.7v1",
+            "Control ID": "MS.AAD.3.3v2",
             "Requirement": "Synthetic requirement",
             "Result": "Pass",
             "Criticality": "Shall",
@@ -82,7 +82,7 @@
         "GroupReferenceURL": "https://example.com/exo",
         "Controls": [
           {
-            "Control ID": "MS.EXO.1.1v1",
+            "Control ID": "MS.EXO.1.1v2",
             "Requirement": "Synthetic requirement",
             "Result": "Omitted",
             "Criticality": "Shall",

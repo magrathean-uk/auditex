@@ -9,7 +9,8 @@ ids, domains, details text or paths. No tenant contact. Same-input mode runs the
 directory, reads its assessment in memory and removes the directory before returning, so nothing from the export
 lands in ``--out``.
 
-Exit codes: 0 compared; 1 compared with ``--strict`` and at least one ``disagreement``; 2 unusable input.
+Exit codes: 0 compared; 1 compared with ``--strict`` and at least one ``disagreement`` or ``auditex_row_invalid``;
+2 unusable input.
 """
 from __future__ import annotations
 
@@ -54,11 +55,15 @@ TOOLS = {
                   "rule_reference": "cisagov/ScubaGear@2446ad723b7f55031cc02c8aca244d731d468cba"},
     "ScubaGoggles": {"platform": "gws", "id": GWS_ID, "pinned": "1.1.0", "rule_reference": "cisagov/ScubaGoggles@v1.1.0"},
 }
-# Policies whose CISA Rego changed between the rule reference and the pinned release, so the release's verdict is
-# not the oracle's: a non-agreement there is labelled release_delta, not a rule fault or a documented divergence.
-# ScubaGear 2446ad72..v2.0.0: #2515 (MS.AAD.3.2v2 exclusions read), #2513 (MS.AAD.5.5v1 unconfigured password
-# addition), #2522 (MS.AAD.9.1v1 agent exclusions and the no-licence N/A).
-RELEASE_DELTAS = {"ScubaGear": frozenset({"MS.AAD.3.2v2", "MS.AAD.5.5v1", "MS.AAD.9.1v1"}), "ScubaGoggles": frozenset()}
+# Verdict pairs on which the pinned release is known to differ from the rule oracle, each with a cited reason. A pair is
+# labelled release_delta only when the CISA tool's version is the pinned one and the policy, the CISA class and the
+# Auditex verdict all match an entry here; every other non-agreement stays a disagreement, and an Error row is never
+# matched (name only the classes in DIVERGENCE_CISA). ScubaGear 2446ad72..v2.0.0 changed MS.AAD.3.2v2 (#2515, exclusions
+# read), MS.AAD.5.5v1 (#2513, a missing password-addition restriction in either scope), MS.AAD.5.6v1 (the same change
+# through the lifetime check) and MS.AAD.9.1v1 (#2522, agent exclusions and the no-licence N/A). Each effect depends on
+# the export, not on a verdict pair, so none can be named from verdicts alone: a difference on those policies is a
+# disagreement until it is explained against the exact rule revision, and an entry is added only with that proof.
+RELEASE_DELTAS: dict[str, tuple[dict[str, Any], ...]] = {"ScubaGear": (), "ScubaGoggles": ()}
 
 # The CISA "Result" literals, mapped explicitly. pass and fail are decisions; every other class is not.
 # Warning is a SHOULD (or MAY) requirement not met: the same answer as Auditex not_met.
@@ -84,13 +89,15 @@ CISA_CLASSES = frozenset(CISA_RESULTS.values()) | frozenset(CISA_OVERLAYS.values
 AUDITEX_VERDICTS = ("met", "not_met", "not_applicable", "not_assessed")
 RULE_REASONS = {"rule_not_implemented", "policy_not_in_catalogue"}
 NOT_A_RULE_ANSWER = "not_a_rule_answer"
+INVALID_ROW, INVALID_CODE = "invalid", "row_invalid"
 
 CATEGORIES = (
     "disagreement",                 # both decided, opposite answers, not documented: needs a look
+    "auditex_row_invalid",          # the Auditex row fails the writer's own checks: unusable, never a verdict
     "auditex_not_assessed",         # CISA decided, Auditex did not: unknown is not safe, but find out why
     "auditex_decided",              # CISA could not decide, Auditex did
     "documented_divergence",        # a non-agreement that matches a documented D row
-    "release_delta",                # a non-agreement on a policy whose CISA rule changed after the rule reference
+    "release_delta",                # a non-agreement matching a cited release-delta pair of the pinned release
     "cisa_only",                    # policy id only in the CISA result
     "auditex_only",                 # policy id only in the Auditex assessment
     "neither_decided",              # both sides undecided
@@ -210,22 +217,25 @@ def _holds(node: Any, marker: str) -> bool:
     return False
 
 
-def _only_adapter_duplicates(document: Any) -> bool:
+def _adapter_duplicates(document: Any) -> bool | None:
     """The one duplicate key the adapter accepts: ``accepted_domains`` directly in ``Raw`` (the EXO and Security Suite
-    exporters both write it). Any other duplicate, anywhere, is refused."""
+    exporters both write it). Any other duplicate, anywhere, is refused (None); else whether the exception was used."""
+    used = False
     stack = [(document, False)]
     while stack:
         node, is_raw = stack.pop()
         if isinstance(node, _Keys):
-            if node.duplicates - ({"accepted_domains"} if is_raw else set()):
-                return False
+            extra = node.duplicates - ({"accepted_domains"} if is_raw else set())
+            if extra:
+                return None
+            used = used or bool(node.duplicates)
             stack.extend((child, node is document and key == "Raw") for key, child in node.items())
         elif isinstance(node, list):
             stack.extend((child, False) for child in node)
-    return True
+    return used
 
 
-def _cisa_document(path: Path) -> tuple[Any, bool]:
+def _cisa_document(path: Path) -> tuple[Any, bool, bool]:
     """Strict JSON, else the export adapter's one allowed repair: PowerShell writes an empty array as nothing
     (``"key": ,``). The repair is accepted only inside the embedded export ``Raw``; one in ``Results``, ``MetaData`` or
     anywhere else is refused. ``MetaData`` is read from the file itself either way."""
@@ -246,14 +256,15 @@ def _cisa_document(path: Path) -> tuple[Any, bool]:
             document, repaired = _parse_cisa(_REPAIR.sub(lambda match: match[1] + "[]", text)), True
     except (UnicodeError, ValueError, RecursionError):
         raise ParityError("cisa") from None
-    if not _only_adapter_duplicates(document):
+    duplicated = _adapter_duplicates(document)
+    if duplicated is None:
         raise ParityError("cisa")
-    return document, repaired
+    return document, repaired, duplicated
 
 
 def load_cisa(path: Path) -> dict[str, Any]:
     """Validate a ScubaResults file and return its tool, version and per-policy verdicts."""
-    document, repaired = _cisa_document(path)
+    document, repaired, duplicated = _cisa_document(path)
     if not isinstance(document, dict) or not isinstance(document.get("MetaData"), dict):
         raise ParityError("cisa")
     results = document.get("Results")
@@ -283,6 +294,8 @@ def load_cisa(path: Path) -> dict[str, Any]:
     if not rows:
         raise ParityError("cisa")
     tool = _detect_tool(document["MetaData"], rows)
+    if tool != "ScubaGear" and (repaired or duplicated):
+        raise ParityError("cisa")  # the two parser exceptions are the ScubaGear export adapter's, not ScubaGoggles'
     version = document["MetaData"].get("ToolVersion")
     version = version if isinstance(version, str) and VERSION.fullmatch(version) else None
     raw = document.get("Raw")
@@ -366,11 +379,64 @@ def _auditex_verdict(record: dict[str, Any], version: str) -> tuple[str, str]:
     return verdict, code
 
 
+def _value_rule_row_holds(record: dict[str, Any], version: str) -> bool:
+    """The writer's own semantic and citation checks for one current-schema Microsoft 365 value-rule row
+    (``validate_assessment``): the catalogue cell, its reason, its citation, and the claims, limitations and
+    recommendations the cell implies, all together. A row that fails them is not a verdict."""
+    from azure_tenant_audit.resources import open_text_resource
+    from azure_tenant_audit.scuba_assessment import _LATE_EVIDENCE, _legacy_safelinks_cell
+    from azure_tenant_audit.scuba_precheck import precheck_response
+    from azure_tenant_audit.value_rules.catalogue import cell_entry, citation_variants, reason_matches, row_for, shared_reason
+    from azure_tenant_audit.value_rules.record import RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE, is_shared_reason
+    try:
+        detail, policy_id = record["rule_precheck"], record["policy_id"]
+        policy = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"].get(policy_id)
+        value_row = row_for(policy_id)
+        if policy is None or value_row is None or not {"cell", "reason_code", "reason_text"} <= detail.keys():
+            return False
+        name = detail["cell"]
+        if name in {RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE}:
+            return False
+        if name is None:
+            if not is_shared_reason(detail["reason_code"]) or detail["rule_id"] != value_row["rule_id"]:
+                return False
+            shared = shared_reason(detail["reason_code"])
+            cell = {"verdict": shared["verdict"], "reason_code": shared["reason_code"],
+                    "reason_texts": [shared["reason_text"]], "cited": list(value_row["sections"])}
+        else:
+            cell = cell_entry(policy_id, name, value_row)
+        cell = _legacy_safelinks_cell(version, policy_id, detail, value_row, cell)
+        section = detail["section"]
+        if (cell is None or detail["rule_id"] != value_row["rule_id"]
+                or not reason_matches(cell, detail["reason_code"], detail["reason_text"])
+                or detail["field"] is not None or detail["value"] is not None
+                or not set(section) <= set(value_row["sections"])
+                or (section != [s for s in value_row["sections"] if s in section]
+                    and section not in citation_variants(cell))):
+            return False
+        if cell["verdict"] == "not_assessed" and name == "section_not_collected":
+            if detail["reason_text"] != ("Data unavailable: required evidence section(s) not collected: "
+                                         + ", ".join(section) + "."):
+                return False
+        elif section not in citation_variants(cell):
+            return False
+        late = version in _LATE_EVIDENCE
+        for legacy in (False, True):
+            for form in ([late, False] if late else [False]):
+                answer = precheck_response(detail, policy["policy_item"], policy["sections"], legacy=legacy,
+                                           verdict=cell["verdict"], late_evidence=form)
+                if all(record[key] == answer[key] for key in answer):
+                    return True
+        return False
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+        return False
+
+
 def known_reason_codes() -> frozenset[str]:
     """Every reason code the shipped rule configs name, the precheck classes and the fixed rule reasons. A code
     outside this set is reported as ``unlisted_reason_code``, so free text in an assessment never reaches the
     report."""
-    codes: set[str] = set(PRECHECK_CLASSES) | RULE_REASONS | {NOT_A_RULE_ANSWER}
+    codes: set[str] = set(PRECHECK_CLASSES) | RULE_REASONS | {NOT_A_RULE_ANSWER, INVALID_CODE}
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
@@ -435,6 +501,10 @@ def load_auditex(path: Path | None = None, *, document: Any = None) -> dict[str,
         except (ValueError, KeyError, TypeError, RecursionError):
             raise ParityError("auditex") from None
         verdict, code = _auditex_verdict(record, version)
+        # The Google Workspace writer lands with M13; until then its rows meet the row contract above and nothing more.
+        if (not gws and record["reason"] == "rule_precheck" and record["rule_precheck"]["class"] == "value_rule"
+                and not _value_rule_row_holds(record, version)):
+            verdict, code = INVALID_ROW, INVALID_CODE
         rows[policy_id] = {"verdict": verdict, "reason_code": code}
     return rows
 
@@ -489,6 +559,8 @@ def matching_divergences(entries: list[dict[str, Any]], policy_id: str, cisa: st
 
 
 def categorise(cisa: str, auditex: str, divergences: list[str], release_delta: bool = False) -> str:
+    if auditex == INVALID_ROW:
+        return "auditex_row_invalid"
     cisa_decided, auditex_decided = cisa in CISA_DECIDED, auditex != "not_assessed"
     if (cisa == "pass" and auditex in {"met", "not_applicable"}) or (cisa == "fail" and auditex == "not_met"):
         return "agree"
@@ -515,7 +587,7 @@ def compare(cisa: dict[str, Any], auditex: dict[str, dict[str, str]], entries: l
     tool = TOOLS[cisa["tool"]]
     check_platform(cisa, auditex)
     version_matches = cisa["version"] == tool["pinned"]
-    deltas = RELEASE_DELTAS[cisa["tool"]] if version_matches else frozenset()
+    deltas = RELEASE_DELTAS[cisa["tool"]] if version_matches else ()
     rows = []
     for policy_id in sorted(set(cisa["rows"]) | set(auditex)):
         c, a = cisa["rows"].get(policy_id), auditex.get(policy_id)
@@ -530,7 +602,9 @@ def compare(cisa: dict[str, Any], auditex: dict[str, dict[str, str]], entries: l
         else:
             row["divergences"] = matching_divergences(entries, policy_id, c["verdict"], a["verdict"],
                                                       a["reason_code"])
-            row["category"] = categorise(c["verdict"], a["verdict"], row["divergences"], policy_id in deltas)
+            delta = any(item["policy_id"] == policy_id and c["verdict"] in item["cisa"]
+                        and a["verdict"] in item["auditex"] for item in deltas)
+            row["category"] = categorise(c["verdict"], a["verdict"], row["divergences"], delta)
             if row["category"] != "documented_divergence":
                 row["divergences"] = []
         rows.append(row)
@@ -539,9 +613,11 @@ def compare(cisa: dict[str, Any], auditex: dict[str, dict[str, str]], entries: l
             "mode": mode, "cisa_tool": cisa["tool"], "cisa_tool_version": cisa["version"],
             "cisa_input_repaired": cisa["repaired"],
             "pinned_version": tool["pinned"], "rule_reference": tool["rule_reference"],
-            "version_matches": version_matches, "release_delta_policies": sorted(deltas),
-            # Never a claim of full parity when the release differs, or when ids sit on one side only.
-            "full_parity": version_matches and not counts["cisa_only"] and not counts["auditex_only"],
+            "version_matches": version_matches, "release_delta_policies": sorted({item["policy_id"] for item in deltas}),
+            # Never a claim of full parity when the release differs, ids sit on one side only, or any row is a
+            # disagreement or an unusable Auditex row (the same rows that make --strict exit 1).
+            "full_parity": (version_matches and not counts["cisa_only"] and not counts["auditex_only"]
+                            and not counts["disagreement"] and not counts["auditex_row_invalid"]),
             "counts": counts, "rows": rows}
 
 
@@ -552,10 +628,10 @@ def render_markdown(report: dict[str, Any]) -> str:
              f"{report['pinned_version']} (rule reference {report['rule_reference']})"
              + ("." if report["version_matches"] else ", so differences may come from the release gap and this is "
                                                       "not a parity result."),
-             "Policies whose CISA rule changed after the rule reference: "
+             "Policies with a cited release-delta verdict pair: "
              + (", ".join(report["release_delta_policies"]) or "none") + ".",
-             "Full parity: " + ("yes" if report["full_parity"] else "no (see cisa_only, auditex_only and the "
-                                                                   "version line)") + ".",
+             "Full parity: " + ("yes" if report["full_parity"] else "no (see disagreement, auditex_row_invalid, "
+                                                                   "cisa_only, auditex_only and the version line)") + ".",
              "", "| category | policies |", "|---|---|"]
     lines += [f"| {category} | {report['counts'][category]} |" for category in CATEGORIES]
     lines += ["", "| policy | CISA result | CISA verdict | Auditex verdict | Auditex reason | category | divergence |",
@@ -643,7 +719,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--same-input", action="store_true",
                         help="run Auditex's rules on the export embedded in the ScubaGear result")
     parser.add_argument("--out", required=True, metavar="DIR")
-    parser.add_argument("--strict", action="store_true", help="exit 1 when any row is a disagreement")
+    parser.add_argument("--strict", action="store_true", help="exit 1 when any row is a disagreement or an unusable Auditex row")
     args = parser.parse_args(argv)
     if args.same_input == (args.auditex is not None):
         parser.error("give an Auditex run or assessment, or --same-input, not both")
@@ -669,7 +745,7 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps({"mode": report["mode"], "cisa_tool": report["cisa_tool"], "counts": report["counts"],
                       "version_matches": report["version_matches"], "full_parity": report["full_parity"]},
                      sort_keys=True))
-    return 1 if args.strict and report["counts"]["disagreement"] else 0
+    return 1 if args.strict and (report["counts"]["disagreement"] or report["counts"]["auditex_row_invalid"]) else 0
 
 
 if __name__ == "__main__":
