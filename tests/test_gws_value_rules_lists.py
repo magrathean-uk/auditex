@@ -331,3 +331,295 @@ def test_m1_an_unplaceable_address_list_row_never_hides_the_hide_warning_for_all
     sections["gws_policies"]["policies"].append(
         {"unit": None, "unit_kind": "org_unit", "section": "gmail_email_address_lists", "sort_order": 1, "value": {}})
     assert _answer("GWS.GMAIL.18.3v1", sections) == ("not_met", "unit_violates")
+
+
+# Review round 2 (M13-L11-repair 2). Each B-test below failed on 97222383.
+MET = ("met", "no_unit_violates")
+NOT_MET = ("not_met", "unit_violates")
+ABSENT = ("not_assessed", "setting_absent")
+DROP = object()  # leaves the section, field or entry out
+KEEP = object()  # the clean baseline value
+
+
+def _gmail(*extra, **values) -> dict:
+    """Gmail on at the top unit plus the named ``gmail_*`` sections at the top unit; ``DROP`` leaves one out."""
+    rows = [("ou:root", "gmail_service_status", {"serviceState": "ENABLED"})]
+    rows += [("ou:root", f"gmail_{name}", value) for name, value in values.items() if value is not DROP]
+    return _sections([*rows, *extra])
+
+
+def _states(*entries) -> dict:
+    return {"ruleStates": [entry for entry in entries if entry is not DROP]}
+
+
+def _state(rule_id, enabled=True) -> dict:
+    return {"ruleId": rule_id} if enabled is DROP else {"ruleId": rule_id, "enabled": enabled}
+
+
+def _g17(violating, *, storage=KEEP, states=KEEP, extra=()) -> dict:
+    storage = {"ruleId": "s1"} if storage is KEEP else storage
+    states = _states(_state("s1", not violating)) if states is KEEP else states
+    return _gmail(*extra, comprehensive_mail_storage=storage, rule_states=states)
+
+
+def _g183(violating, *, override=KEEP, overrides=KEEP, states=KEEP) -> dict:
+    override = {"ruleId": "o1", "hideWarningBannerForAll": violating} if override is KEEP else override
+    overrides = {"spamOverride": [override]} if overrides is KEEP else overrides
+    states = _states(_state("o1")) if states is KEEP else states
+    return _gmail(spam_override_lists=overrides, rule_states=states)
+
+
+_LIST_FIELDS = {"GWS.GMAIL.18.1v1": ("bypassSelectedSenders", "bypassSenderAllowlist"),
+                "GWS.GMAIL.18.2v1": ("hideWarningBannerFromSelectedSenders", "hideWarningBannerSenderAllowlist")}
+
+
+def _g18l(policy_id, violating, *, entry=KEEP, lists=KEEP, override=KEEP, overrides=KEEP, states=KEEP,
+          extra=()) -> dict:
+    """An enabled override ``o1`` with its flag on, naming the enabled list ``l1``; ``violating`` puts a domain
+    entry in ``l1``. Each keyword replaces one input."""
+    enable, allow = _LIST_FIELDS[policy_id]
+    entry = {"id": "l1", "entry_count": 1, "domain_entry_count": 1 if violating else 0} if entry is KEEP else entry
+    lists = {"emailAddressList": [entry]} if lists is KEEP else lists
+    override = {"ruleId": "o1", enable: True, allow: ["l1"]} if override is KEEP else override
+    overrides = {"spamOverride": [override]} if overrides is KEEP else overrides
+    states = _states(_state("o1"), _state("l1")) if states is KEEP else states
+    return _gmail(*extra, email_address_lists=lists, spam_override_lists=overrides, rule_states=states)
+
+
+def _without(mapping: dict, key: str) -> dict:
+    return {name: value for name, value in mapping.items() if name != key}
+
+
+@pytest.mark.parametrize("violating", [False, True])
+@pytest.mark.parametrize("enabled", [1, 0, 1.0, 0.0, [], {}])
+def test_round2_b1_a_wrong_typed_storage_rule_state_is_unknown(enabled, violating):
+    assert _answer("GWS.GMAIL.17.1v1", _g17(violating, states=_states(_state("s1", enabled)))) == UNUSABLE
+
+
+@pytest.mark.parametrize("policy_id", ["GWS.GMAIL.18.1v1", "GWS.GMAIL.18.2v1"])
+@pytest.mark.parametrize("enabled", [1, 0, 1.0, 0.0, [], {}])
+def test_round2_b1_a_wrong_typed_list_or_override_state_is_unknown(policy_id, enabled):
+    assert _answer(policy_id, _g18l(policy_id, True, states=_states(_state("o1"), _state("l1", enabled)))) == UNUSABLE
+    assert _answer(policy_id, _g18l(policy_id, True, states=_states(_state("o1", enabled), _state("l1")))) == UNUSABLE
+
+
+def test_round2_b2_a_child_only_storage_rule_with_no_root_setting_is_absent():
+    assert _answer("GWS.GMAIL.17.1v1", _root_off_child_on(
+        ("ou:a", "gmail_comprehensive_mail_storage", {"ruleId": "s1"}),
+        ("ou:a", "gmail_rule_states", {"ruleStates": [{"ruleId": "s1", "enabled": True}]}))) == ABSENT
+
+
+@pytest.mark.parametrize("policy_id", ["GWS.GMAIL.18.1v1", "GWS.GMAIL.18.2v1", "GWS.GMAIL.18.3v1"])
+def test_round2_b2_a_child_only_override_list_with_no_root_setting_is_absent(policy_id):
+    assert _answer(policy_id, _root_off_child_on(
+        ("ou:a", "gmail_spam_override_lists", {"spamOverride": []}))) == ABSENT
+
+
+def test_round2_b2_a_child_violation_still_wins_over_an_absent_root_setting():
+    assert _answer("GWS.GMAIL.17.1v1", _root_off_child_on(
+        ("ou:a", "gmail_comprehensive_mail_storage", {"ruleId": "s1"}),
+        ("ou:a", "gmail_rule_states", {"ruleStates": [{"ruleId": "s1", "enabled": False}]}))) == NOT_MET
+
+
+@pytest.mark.parametrize("policy_id", ["GWS.GMAIL.18.1v1", "GWS.GMAIL.18.2v1"])
+@pytest.mark.parametrize(("violating", "expected"), [(True, NOT_MET), (False, MET)])
+def test_round2_b3_integer_list_ids_keep_their_verdict(policy_id, violating, expected):
+    enable, allow = _LIST_FIELDS[policy_id]
+    sections = _g18l(policy_id, violating,
+                     entry={"id": 42, "entry_count": 1, "domain_entry_count": 1 if violating else 0},
+                     override={"ruleId": "o1", enable: True, allow: [42]},
+                     states=_states(_state("o1"), _state(42)))
+    assert _answer(policy_id, sections) == expected
+
+
+@pytest.mark.parametrize(("violating", "expected"), [(True, NOT_MET), (False, MET)])
+def test_round2_b3_an_integer_keyed_state_never_hides_an_unrelated_override(violating, expected):
+    assert _answer("GWS.GMAIL.18.3v1", _g183(violating, states=_states(_state("o1"), _state(42)))) == expected
+
+
+@pytest.mark.parametrize(("violating", "expected"), [(True, NOT_MET), (False, MET)])
+def test_round2_b3_integer_rule_ids_answer_for_storage_and_overrides(violating, expected):
+    assert _answer("GWS.GMAIL.17.1v1", _g17(violating, storage={"ruleId": 7},
+                                            states=_states(_state(7, not violating)))) == expected
+    assert _answer("GWS.GMAIL.18.3v1", _g183(violating, override={"ruleId": 5, "hideWarningBannerForAll": violating},
+                                             states=_states(_state(5)))) == expected
+
+
+@pytest.mark.parametrize("violating", [False, True])
+@pytest.mark.parametrize("rule_id", ["", "  ", None, 1.5, True, [], DROP])
+def test_round2_b4_an_override_without_a_usable_primary_key_is_unknown(rule_id, violating):
+    override = {"hideWarningBannerForAll": violating}
+    if rule_id is not DROP:
+        override["ruleId"] = rule_id
+    states = _states(_state(rule_id)) if isinstance(rule_id, str) else _states()
+    assert _answer("GWS.GMAIL.18.3v1", _g183(violating, override=override, states=states)) == UNUSABLE
+
+
+def test_round2_the_baselines_of_the_matrix_answer():
+    for violating, expected in ((False, MET), (True, NOT_MET)):
+        assert _answer("GWS.GMAIL.17.1v1", _g17(violating)) == expected
+        assert _answer("GWS.GMAIL.18.3v1", _g183(violating)) == expected
+        for policy_id in _LIST_FIELDS:
+            assert _answer(policy_id, _g18l(policy_id, violating)) == expected
+
+
+def _tie(section: str, *values) -> tuple:
+    """Two equal-ranked top-unit rows for one section that disagree (D11)."""
+    return tuple(("ou:root", section, value) for value in values)
+
+
+# Every input field the kind reads, walked through absent, null, wrong type (int for string and the reverse), blank,
+# duplicate and contradictory values. ``violating`` is the baseline the corruption lands on: False reads met and True
+# reads not_met when the field is clean, so a literal UNUSABLE or ABSENT for both proves the field never confirms
+# either answer.
+MATRIX = [
+    # GMAIL.17.1: the storage section (a root setting) and its ruleId.
+    ("g17-storage-absent", "GWS.GMAIL.17.1v1", lambda v: _g17(v, storage=DROP), ABSENT),
+    ("g17-storage-null", "GWS.GMAIL.17.1v1", lambda v: _g17(v, storage=None), UNUSABLE),
+    ("g17-storage-list", "GWS.GMAIL.17.1v1", lambda v: _g17(v, storage=["s1"]), UNUSABLE),
+    ("g17-storage-empty", "GWS.GMAIL.17.1v1", lambda v: _g17(v, storage={}), UNUSABLE),
+    *[(f"g17-ruleid-{name}", "GWS.GMAIL.17.1v1", lambda v, bad=bad: _g17(v, storage={"ruleId": bad}), UNUSABLE)
+      for name, bad in (("null", None), ("blank", ""), ("spaces", "  "), ("float", 1.5), ("bool", True),
+                        ("list", ["s1"]), ("dict", {"id": "s1"}))],
+    ("g17-ruleid-int-vs-str-state", "GWS.GMAIL.17.1v1",
+     lambda v: _g17(v, storage={"ruleId": 7}, states=_states(_state("7", not v))), UNUSABLE),
+    ("g17-ruleid-str-vs-int-state", "GWS.GMAIL.17.1v1",
+     lambda v: _g17(v, storage={"ruleId": "7"}, states=_states(_state(7, not v))), UNUSABLE),
+    ("g17-ruleid-padded-state", "GWS.GMAIL.17.1v1",
+     lambda v: _g17(v, states=_states(_state(" s1", not v))), UNUSABLE),
+    # GMAIL.17.1: the rule-state section, its entries and ``enabled``.
+    ("g17-states-absent", "GWS.GMAIL.17.1v1", lambda v: _g17(v, states=DROP), UNUSABLE),
+    ("g17-states-null", "GWS.GMAIL.17.1v1", lambda v: _g17(v, states={"ruleStates": None}), UNUSABLE),
+    ("g17-states-wrong-type", "GWS.GMAIL.17.1v1", lambda v: _g17(v, states={"ruleStates": "s1"}), UNUSABLE),
+    ("g17-states-empty", "GWS.GMAIL.17.1v1", lambda v: _g17(v, states=_states()), UNUSABLE),
+    ("g17-states-entry-null", "GWS.GMAIL.17.1v1",
+     lambda v: _g17(v, states={"ruleStates": [_state("s1", not v), None]}), UNUSABLE),
+    *[(f"g17-states-other-id-{name}", "GWS.GMAIL.17.1v1",
+       lambda v, bad=bad: _g17(v, states=_states(_state("s1", not v), _state(bad))), UNUSABLE)
+      for name, bad in (("null", None), ("blank", ""), ("float", 1.5), ("bool", False))],
+    *[(f"g17-enabled-{name}", "GWS.GMAIL.17.1v1", lambda v, bad=bad: _g17(v, states=_states(_state("s1", bad))),
+       UNUSABLE)
+      for name, bad in (("absent", DROP), ("null", None), ("int-1", 1), ("int-0", 0), ("float-1", 1.0),
+                        ("float-0", 0.0), ("str-true", "true"), ("str-false", "false"), ("list", []), ("dict", {}))],
+    ("g17-states-duplicate-key", "GWS.GMAIL.17.1v1",
+     lambda v: _g17(v, states=_states(_state("s1", not v), _state("s1", not v))), UNUSABLE),
+    ("g17-states-contradictory-spelling", "GWS.GMAIL.17.1v1",
+     lambda v: _g17(v, states=_states(_state("s1", True), _state(" s1", False))), UNUSABLE),
+    ("g17-states-contradictory-rows", "GWS.GMAIL.17.1v1",
+     lambda v: _g17(v, states=DROP, extra=_tie("gmail_rule_states", _states(_state("s1", True)),
+                                                _states(_state("s1", False)))), UNUSABLE),
+    # GMAIL.18.3: the override section, its ruleId, the flag and the override's rule state.
+    ("g183-overrides-absent", "GWS.GMAIL.18.3v1", lambda v: _g183(v, overrides=DROP), ABSENT),
+    ("g183-overrides-empty", "GWS.GMAIL.18.3v1", lambda v: _g183(v, overrides={}), UNUSABLE),
+    ("g183-overrides-null", "GWS.GMAIL.18.3v1", lambda v: _g183(v, overrides={"spamOverride": None}), UNUSABLE),
+    ("g183-overrides-wrong-type", "GWS.GMAIL.18.3v1", lambda v: _g183(v, overrides={"spamOverride": "o1"}),
+     UNUSABLE),
+    *[(f"g183-ruleid-{name}", "GWS.GMAIL.18.3v1",
+       lambda v, bad=bad: _g183(v, override={"ruleId": bad, "hideWarningBannerForAll": v}), UNUSABLE)
+      for name, bad in (("null", None), ("blank", ""), ("spaces", "  "), ("float", 1.5), ("bool", True))],
+    ("g183-ruleid-absent", "GWS.GMAIL.18.3v1", lambda v: _g183(v, override={"hideWarningBannerForAll": v}),
+     UNUSABLE),
+    ("g183-ruleid-int-vs-str-state", "GWS.GMAIL.18.3v1",
+     lambda v: _g183(v, override={"ruleId": 5, "hideWarningBannerForAll": v}, states=_states(_state("5"))),
+     UNUSABLE),
+    ("g183-ruleid-str-vs-int-state", "GWS.GMAIL.18.3v1",
+     lambda v: _g183(v, override={"ruleId": "5", "hideWarningBannerForAll": v}, states=_states(_state(5))),
+     UNUSABLE),
+    *[(f"g183-flag-{name}", "GWS.GMAIL.18.3v1",
+       lambda v, bad=bad: _g183(v, override={"ruleId": "o1", "hideWarningBannerForAll": bad}), UNUSABLE)
+      for name, bad in (("null", None), ("int-1", 1), ("int-0", 0), ("str", "true"), ("list", []))],
+    ("g183-state-missing", "GWS.GMAIL.18.3v1", lambda v: _g183(v, states=_states()), UNUSABLE),
+    ("g183-states-absent", "GWS.GMAIL.18.3v1", lambda v: _g183(v, states=DROP), UNUSABLE),
+    *[(f"g183-enabled-{name}", "GWS.GMAIL.18.3v1",
+       lambda v, bad=bad: _g183(v, states=_states(_state("o1", bad))), UNUSABLE)
+      for name, bad in (("absent", DROP), ("null", None), ("int-1", 1), ("int-0", 0), ("float-1", 1.0),
+                        ("str", "true"))],
+    ("g183-states-contradictory-spelling", "GWS.GMAIL.18.3v1",
+     lambda v: _g183(v, states=_states(_state("o1", True), _state("o1 ", False))), UNUSABLE),
+]
+for _policy in _LIST_FIELDS:
+    _short = "g181" if _policy.endswith("18.1v1") else "g182"
+    _enable, _allow = _LIST_FIELDS[_policy]
+    MATRIX += [
+        # GMAIL.18.1 and 18.2: the address-list section, list id, counts and list state.
+        (f"{_short}-lists-absent", _policy, lambda v, p=_policy: _g18l(p, v, lists=DROP), UNUSABLE),
+        (f"{_short}-lists-empty", _policy, lambda v, p=_policy: _g18l(p, v, lists={}), UNUSABLE),
+        (f"{_short}-lists-null", _policy, lambda v, p=_policy: _g18l(p, v, lists={"emailAddressList": None}),
+         UNUSABLE),
+        (f"{_short}-list-unread", _policy,
+         lambda v, p=_policy: _g18l(p, v, lists={"emailAddressList": []}), UNUSABLE),
+        *[(f"{_short}-list-id-{name}", _policy,
+           lambda v, p=_policy, bad=bad: _g18l(p, v, entry={"id": bad, "entry_count": 1,
+                                                            "domain_entry_count": int(v)}), UNUSABLE)
+          for name, bad in (("null", None), ("blank", ""), ("spaces", "  "), ("float", 1.5), ("bool", True),
+                            ("int-other", 1))],
+        (f"{_short}-list-id-absent", _policy,
+         lambda v, p=_policy: _g18l(p, v, entry={"entry_count": 1, "domain_entry_count": int(v)}), UNUSABLE),
+        (f"{_short}-list-id-int-vs-str-ref", _policy,
+         lambda v, p=_policy: _g18l(p, v, entry={"id": 42, "entry_count": 1, "domain_entry_count": int(v)},
+                                    override={"ruleId": "o1", _LIST_FIELDS[p][0]: True, _LIST_FIELDS[p][1]: ["42"]},
+                                    states=_states(_state("o1"), _state(42))), UNUSABLE),
+        (f"{_short}-list-id-str-vs-int-ref", _policy,
+         lambda v, p=_policy: _g18l(p, v, entry={"id": "42", "entry_count": 1, "domain_entry_count": int(v)},
+                                    override={"ruleId": "o1", _LIST_FIELDS[p][0]: True, _LIST_FIELDS[p][1]: [42]},
+                                    states=_states(_state("o1"), _state(42))), UNUSABLE),
+        (f"{_short}-list-id-padded", _policy,
+         lambda v, p=_policy: _g18l(p, v, entry={"id": " l1", "entry_count": 1, "domain_entry_count": int(v)}),
+         UNUSABLE),
+        *[(f"{_short}-{field}-{name}", _policy,
+           lambda v, p=_policy, field=field, bad=bad: _g18l(p, v, entry={
+               "id": "l1", "entry_count": 1, "domain_entry_count": int(v), field: bad}), UNUSABLE)
+          for field in ("entry_count", "domain_entry_count")
+          for name, bad in (("null", None), ("float", 1.0), ("bool", True), ("str", "1"), ("negative", -1))],
+        *[(f"{_short}-{field}-absent", _policy,
+           lambda v, p=_policy, field=field: _g18l(p, v, entry=_without(
+               {"id": "l1", "entry_count": 1, "domain_entry_count": int(v)}, field)), UNUSABLE)
+          for field in ("entry_count", "domain_entry_count")],
+        (f"{_short}-counts-contradictory", _policy,
+         lambda v, p=_policy: _g18l(p, v, entry={"id": "l1", "entry_count": 0, "domain_entry_count": 1}), UNUSABLE),
+        (f"{_short}-list-rows-contradictory", _policy,
+         lambda v, p=_policy: _g18l(p, v, lists=DROP, extra=_tie(
+             "gmail_email_address_lists",
+             {"emailAddressList": [{"id": "l1", "entry_count": 1, "domain_entry_count": 0}]},
+             {"emailAddressList": [{"id": "l1", "entry_count": 1, "domain_entry_count": 1}]})), UNUSABLE),
+        (f"{_short}-list-duplicate-spelling", _policy,
+         lambda v, p=_policy: _g18l(p, v, lists={"emailAddressList": [
+             {"id": "l1", "entry_count": 1, "domain_entry_count": 0},
+             {"id": "l1 ", "entry_count": 1, "domain_entry_count": 1}]}), UNUSABLE),
+        (f"{_short}-list-state-missing", _policy,
+         lambda v, p=_policy: _g18l(p, v, states=_states(_state("o1"))), UNUSABLE),
+        *[(f"{_short}-list-enabled-{name}", _policy,
+           lambda v, p=_policy, bad=bad: _g18l(p, v, states=_states(_state("o1"), _state("l1", bad))), UNUSABLE)
+          for name, bad in (("absent", DROP), ("null", None), ("int-1", 1), ("int-0", 0), ("float-0", 0.0),
+                            ("str", "true"))],
+        # The override: its ruleId, flag, address-list field and rule state.
+        (f"{_short}-overrides-absent", _policy, lambda v, p=_policy: _g18l(p, v, overrides=DROP), ABSENT),
+        (f"{_short}-overrides-null", _policy,
+         lambda v, p=_policy: _g18l(p, v, overrides={"spamOverride": None}), UNUSABLE),
+        *[(f"{_short}-override-ruleid-{name}", _policy,
+           lambda v, p=_policy, bad=bad: _g18l(p, v, override={
+               "ruleId": bad, _LIST_FIELDS[p][0]: True, _LIST_FIELDS[p][1]: ["l1"]}), UNUSABLE)
+          for name, bad in (("null", None), ("blank", ""), ("float", 1.5), ("bool", True))],
+        *[(f"{_short}-flag-{name}", _policy,
+           lambda v, p=_policy, bad=bad: _g18l(p, v, override={
+               "ruleId": "o1", _LIST_FIELDS[p][0]: bad, _LIST_FIELDS[p][1]: ["l1"]}), UNUSABLE)
+          for name, bad in (("null", None), ("int-1", 1), ("int-0", 0), ("str", "true"))],
+        *[(f"{_short}-allowlist-{name}", _policy,
+           lambda v, p=_policy, bad=bad: _g18l(p, v, override={
+               "ruleId": "o1", _LIST_FIELDS[p][0]: True, _LIST_FIELDS[p][1]: bad}), UNUSABLE)
+          for name, bad in (("null", None), ("str", "l1"), ("entry-null", ["l1", None]), ("entry-blank", ["l1", ""]),
+                            ("entry-float", ["l1", 1.5]), ("entry-bool", ["l1", True]), ("entry-list", [["l1"]]),
+                            ("unread-list", ["l9"]))],
+        (f"{_short}-override-state-missing", _policy,
+         lambda v, p=_policy: _g18l(p, v, states=_states(_state("l1"))), UNUSABLE),
+        *[(f"{_short}-override-enabled-{name}", _policy,
+           lambda v, p=_policy, bad=bad: _g18l(p, v, states=_states(_state("o1", bad), _state("l1"))), UNUSABLE)
+          for name, bad in (("null", None), ("int-1", 1), ("float-1", 1.0), ("str", "true"))],
+    ]
+
+
+@pytest.mark.parametrize("violating", [False, True], ids=["clean-reads-met", "clean-reads-not-met"])
+@pytest.mark.parametrize(("policy_id", "build", "expected"), [case[1:] for case in MATRIX],
+                         ids=[case[0] for case in MATRIX])
+def test_round2_no_unreadable_input_confirms_met_or_not_met(policy_id, build, expected, violating):
+    assert _answer(policy_id, build(violating)) == expected

@@ -8,8 +8,8 @@ domain_entry_count}``, so the rule works on list ids and counts and never sees a
 
 - A Gmail rule (override, storage rule or address list) is on when its ``gmail_rule_states`` entry says
   ``enabled: true`` in the unit's own entry, as ``_enabled_rules(ou_policies)`` reads it; the top unit's states are
-  never borrowed. ScubaGoggles reads an absent entry as disabled; here an absent or unreadable entry is unknown, and it
-  only matters when the rule would otherwise decide the answer.
+  never borrowed. ScubaGoggles reads an absent entry as disabled; here an absent, unreadable or non-bool entry is
+  unknown, and every rule state the check reads must be readable before the answer is met (review round 2).
 - Address lists are read at the top unit with the top unit's rule states, as ``_gmail_address_lists`` does.
 - ``ServiceToScopeMapping`` (SG:scubagoggles/rego/Commoncontrols.rego:1345-1364), the high-risk scope groups (:1411)
   and the 30 system alert rule names with their default states (SG:scubagoggles/parsers/system_rules_parser.py:16-114)
@@ -18,9 +18,11 @@ domain_entry_count}``, so the rule works on list ids and counts and never sees a
   unrecognised service entry blocks both answers for 10.1 and a met for 10.2.
 - A unit with the service on that holds no section of its own is judged by the top unit's section, with the top
   unit's rule states, even when the service is off at the top unit (review B1).
-- Unknown is not safe (design 8.4): a malformed, blank, inconsistent or unrecognised value (a missing rule state, a
-  blank id, a list with more domain entries than entries, an unknown enum, an unnamed alert row, a string that is not
-  an IP address or range) or a referenced list that was not read never answers met or not_met. One positively read
+- Unknown is not safe (design 8.4): a malformed, blank, wrong-typed, inconsistent or unrecognised value (a missing or
+  non-bool rule state, a blank id, an id spelled two ways, a list with more domain entries than entries, an unknown
+  enum, an unnamed alert row, a string that is not an IP address or range) or a referenced list that was not read
+  never answers met or not_met. Gmail ids are non-blank strings or integers. No top-level value is unknown (8.2 step
+  6) whatever the top unit's service state. One positively read
   violation wins over unusable values elsewhere, except where the unusable value could be the violation itself.
 """
 from __future__ import annotations
@@ -80,40 +82,56 @@ def _flag(mapping: dict, name: str) -> bool | None:
 
 
 def _id(value: Any) -> bool:
-    """A Gmail rule or list id: a non-blank string. A blank or non-string id identifies no rule or list (review B3)."""
-    return isinstance(value, str) and bool(value.strip())
+    """A Gmail rule or list id: a non-blank string or an integer (the L03 minimiser keeps integer ids and the L02
+    ``max_map`` reducer keys on them, review round 2 B3). A blank string, a bool, a float or any other type identifies
+    no rule or list."""
+    if isinstance(value, str):
+        return bool(value.strip())
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _ids(value: Any) -> bool:
+    """A list of usable Gmail list ids."""
+    return isinstance(value, list) and all(_id(item) for item in value)
 
 
 def _count(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
-def _matches(items: Any, field: str, wanted: str) -> list[dict] | None:
-    """The entries of ``items`` whose ``field`` is ``wanted``; None when the list cannot be read or holds an entry
-    without a usable id, since that entry may be the one wanted (review B3)."""
+def _matches(items: Any, field: str, wanted: Any) -> list[dict] | None:
+    """The entries of ``items`` whose ``field`` is ``wanted``; None when the list cannot be read, holds an entry
+    without a usable id (that entry may be the one wanted, review B3), or holds an id that reads the same as
+    ``wanted`` but is spelled differently (``42`` against ``"42"``, ``" o1"`` against ``"o1"``): which one is meant
+    is unknown (review round 2 B3)."""
     if not isinstance(items, list) or any(not isinstance(item, dict) or not _id(item.get(field)) for item in items):
         return None
-    return [item for item in items if item[field] == wanted]
+    found = [item for item in items if str(item[field]).strip() == str(wanted).strip()]
+    if any(type(item[field]) is not type(wanted) or item[field] != wanted for item in found):
+        return None
+    return found
 
 
 def _rule_state(units: Units, unit: str, rule_id: Any) -> bool | None:
     """``enabled`` of one Gmail rule in the unit's own ``gmail_rule_states`` (gmail_rules_parser.py:277-293); None
-    when the unit holds no readable entry for it (ScubaGoggles: disabled; here unknown), when the id is blank, or when
-    entries for it disagree."""
+    when the unit holds no readable entry for it (ScubaGoggles: disabled; here unknown), when the id is unusable, when
+    entries for it disagree, or when ``enabled`` is anything but a JSON bool: ``1``, ``0``, ``1.0`` and ``0.0`` equal
+    ``True`` and ``False`` in Python and must never pass for them (review round 2 B1)."""
     if not _id(rule_id):
         return None
     value = units.values.get(unit, {}).get("gmail_rule_states", MISSING)
     found = _matches(value.get("ruleStates") if isinstance(value, dict) else None, "ruleId", rule_id)
-    states = {item.get("enabled") for item in found or ()}
-    if len(states) != 1 or not states <= {True, False}:
+    states = [item.get("enabled") for item in found or ()]
+    if not states or any(not isinstance(state, bool) for state in states) or len(set(states)) != 1:
         return None
-    return states.pop()
+    return states[0]
 
 
 def _list_has_domains(units: Units, list_id: Any) -> bool | None:
     """Whether one top-level address list is on and holds a domain-shaped entry (``_gmail_address_lists`` and
     ``_gmail_domain_addr``); None when the list, its counts or its state cannot be read, or the counts are
-    impossible: more domain entries than entries, or a domain count with no readable total (review B2)."""
+    impossible: more domain entries than entries, or a domain count with no readable total (review B2). The list's
+    state is read even when it holds no domain entry: an unreadable state never confirms met (review round 2)."""
     if not _id(list_id):
         return None
     value = units.values[units.top].get("gmail_email_address_lists", MISSING)
@@ -124,27 +142,40 @@ def _list_has_domains(units: Units, list_id: Any) -> bool | None:
     total, domains = counts.pop()
     if total is None or domains is None or domains > total:
         return None
-    return False if domains == 0 else _rule_state(units, units.top, list_id)
+    state = _rule_state(units, units.top, list_id)
+    return None if state is None else state and domains > 0
 
 
-def _override_effect(units: Units, override: dict, check: str) -> bool | None:
-    """Whether one spam override would violate the check if it is on."""
+def _override_fields(check: str) -> tuple[str, str | None]:
+    """The enable flag and the address-list field one check reads in a spam override (gmail_rules_parser.py). Kept
+    out of module-level constants and dict displays, which the redaction registry reads as product field names."""
     if check == "gmail_hide_warning_all":
-        return _flag(override, "hideWarningBannerForAll")
+        return "hideWarningBannerForAll", None
     if check == "gmail_bypass_domains":
-        enable, allow = "bypassSelectedSenders", "bypassSenderAllowlist"
-    else:
-        enable, allow = "hideWarningBannerFromSelectedSenders", "hideWarningBannerSenderAllowlist"
-    on = _flag(override, enable)
-    if on is False:
-        return False
-    list_ids = override.get(allow, [])
-    if not isinstance(list_ids, list):
+        return "bypassSelectedSenders", "bypassSenderAllowlist"
+    return "hideWarningBannerFromSelectedSenders", "hideWarningBannerSenderAllowlist"
+
+
+def _override(units: Units, unit: str, override: Any, check: str) -> bool | None:
+    """Whether one spam override violates the check. Every field the check reads must be readable whatever the
+    others say: the primary key (a blank or wrong-typed ``ruleId`` is unknown even with the flag false, review round
+    2 B4), the enable flag, the address-list field and the override's rule state. A list is looked up only when the
+    flag is on, since an off flag never applies it."""
+    if not isinstance(override, dict) or not _id(override.get("ruleId")):
         return None
-    found = [_list_has_domains(units, list_id) for list_id in list_ids]
-    if all(item is False for item in found):
-        return False
-    return True if on is True and True in found else None
+    enable, allow = _override_fields(check)
+    on = _flag(override, enable)
+    if on is None or allow is not None and not _ids(override.get(allow, [])):
+        return None
+    state = _rule_state(units, unit, override["ruleId"])
+    if state is None:
+        return None
+    if not state or not on or allow is None:
+        return state and on
+    found = [_list_has_domains(units, list_id) for list_id in override.get(allow, [])]
+    if True in found:
+        return True
+    return None if None in found else False
 
 
 def _overrides(check: str):
@@ -152,27 +183,17 @@ def _overrides(check: str):
         overrides = value.get("spamOverride") if isinstance(value, dict) else None
         if not isinstance(overrides, list):
             return None
-        result: bool | None = False
-        for override in overrides:
-            if not isinstance(override, dict):
-                result = None
-                continue
-            state = _rule_state(units, unit, override.get("ruleId"))
-            if state is False:
-                continue
-            effect = _override_effect(units, override, check)
-            if effect is True and state is True:
-                return True
-            if effect is not False:
-                result = None
-        return result
+        found = [_override(units, unit, override, check) for override in overrides]
+        if True in found:
+            return True
+        return None if None in found else False
     return judge
 
 
 def _storage(units: Units, unit: str, value: Any) -> bool | None:
     """GMAIL.17.1: the storage rule's ``enabled`` (the parser's ``mail_storage``) must be true."""
     rule_id = value.get("ruleId") if isinstance(value, dict) else None
-    if not isinstance(rule_id, str) or not rule_id:
+    if not _id(rule_id):
         return None
     state = _rule_state(units, unit, rule_id)
     return None if state is None else not state
@@ -194,7 +215,10 @@ def _scan(units: Units, section: str, service: str, judge) -> str:
     gate = _gate(units, service, sorted(units.values))
     if gate:
         return gate
-    unusable = unknown_service = absent = False
+    # Design 8.2 step 6 and 8.4: no top-level value and no pinned default is unknown, even with the service off at
+    # the top unit and a child holding its own value (review round 2 B2).
+    absent = units.values[units.top].get(section, MISSING) is MISSING
+    unusable = unknown_service = False
     for unit in sorted(units.values):
         state = service_on(units, unit, service)
         if state == OFF:
@@ -203,7 +227,6 @@ def _scan(units: Units, section: str, service: str, judge) -> str:
         value = units.values[source].get(section, MISSING)
         if value is MISSING:
             outcome = None
-            absent = True
         else:
             outcome = None if value is UNUSABLE else judge(units, source, value)
         if state == UNKNOWN:
@@ -307,7 +330,7 @@ def _system_alerts(units: Units, params: dict) -> str:
     anonymous = False
     for entry in [] if value is MISSING else value:
         name = entry.get("displayName") if isinstance(entry, dict) else None
-        if not _id(name):
+        if not isinstance(name, str) or not name.strip():
             anonymous = True
         elif name in pinned:
             state = entry.get("state")
