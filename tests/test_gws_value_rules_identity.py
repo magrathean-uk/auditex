@@ -246,6 +246,8 @@ _CC61_WALK = [
     ("user-null", ("gws_admins", "privileged", 0, "user"), None, _SHAPE),
     ("user-wrong-type", ("gws_admins", "privileged", 0, "user"), 1, _SHAPE),
     ("user-blank", ("gws_admins", "privileged", 0, "user"), "", _SHAPE),
+    ("user-whitespace-only", ("gws_admins", "privileged", 0, "user"), " \t\n", _SHAPE),
+    ("user-padded-is-the-same-account", ("gws_admins", "privileged", 0, "user"), " p1\t", _MET),
     ("org-unit-absent", ("gws_admins", "privileged", 0, "org_unit"), _DROP, _SHAPE),
     ("org-unit-null", ("gws_admins", "privileged", 0, "org_unit"), None, _SHAPE),
     ("org-unit-wrong-type", ("gws_admins", "privileged", 0, "org_unit"), 1, _SHAPE),
@@ -316,3 +318,25 @@ def test_cc61_input_walk(path, value, answer):
 def test_cc61_walk_base_is_met():
     record = gws.assess("GWS.COMMONCONTROLS.6.1v1", _cc61_base())
     assert (record["verdict"], record["cell"]) == _MET
+
+
+def _blank_second_admin(user: str, mode: str) -> dict:
+    sections = _cc61_base()
+    sections["gws_admins"]["super_admin_count"] = 2
+    sections["gws_admins"]["privileged"].append({"user": user, "org_unit": "ou:b", "groups": ["group:g2"]})
+    sections["gws_sso"]["assignments"].append({"target": "group:g2", "sso_mode": mode})
+    return sections
+
+
+@pytest.mark.parametrize("mode", ["SSO_OFF", "SAML_SSO"])
+@pytest.mark.parametrize("user", [" ", "\t\n", "   "])
+def test_cc61_whitespace_user_id_never_fills_the_super_admin_count(user, mode):
+    record = gws.assess("GWS.COMMONCONTROLS.6.1v1", _blank_second_admin(user, mode))
+    assert (record["verdict"], record["cell"]) == _SHAPE
+
+
+@pytest.mark.parametrize("mode", ["SSO_OFF", "SAML_SSO"])
+def test_cc61_padded_user_id_is_the_same_account_not_a_second_one(mode):
+    # " p1 " is "p1" read twice with different groups, so the read contradicts itself and no row is trusted.
+    record = gws.assess("GWS.COMMONCONTROLS.6.1v1", _blank_second_admin(" p1 ", mode))
+    assert (record["verdict"], record["cell"]) == _USERS

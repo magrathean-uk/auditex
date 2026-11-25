@@ -293,18 +293,21 @@ def _mode(modes: set[str]) -> int:
 
 
 def _privileged(admins: Any) -> list[tuple[str, str, frozenset[str]]] | None:
-    """``[(user, org unit, groups)]`` per privileged user; None when any entry has the wrong shape."""
+    """``[(user, org unit, groups)]`` per privileged user; None when any entry has the wrong shape. A user id that is
+    empty or only whitespace is no evidence of an account, so it is a wrong shape and never counts toward the
+    super-admin count; surrounding whitespace on a real id is dropped so one account has one identity."""
     users = admins.get("privileged") if isinstance(admins, dict) else None
     if not isinstance(users, list):
         return None
     out = []
     for user in users:
-        if (not isinstance(user, dict) or not isinstance(user.get("user"), str) or not user["user"]
+        if (not isinstance(user, dict) or not isinstance(user.get("user"), str)
+                or not user["user"].strip()
                 or not isinstance(user.get("org_unit"), str) or not _OU.fullmatch(user["org_unit"])
                 or not isinstance(user.get("groups"), list)
                 or any(not isinstance(group, str) or not _GROUP.fullmatch(group) for group in user["groups"])):
             return None
-        out.append((user["user"], user["org_unit"], frozenset(user["groups"])))
+        out.append((user["user"].strip(), user["org_unit"], frozenset(user["groups"])))
     return out
 
 
