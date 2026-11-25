@@ -18,13 +18,18 @@ Per-policy keys use field names already in the shared redaction registry: ``serv
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import re
 import stat
 import sys
 from pathlib import Path
+
+_SRC = Path(__file__).resolve().parent.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 
 REPO = "https://github.com/cisagov/ScubaGoggles"
 TAG = "v1.1.0"
@@ -298,7 +303,7 @@ def partial_names(value: str) -> tuple[str, ...]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0], allow_abbrev=False)
+    parser = build_argument_parser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--source", required=True, type=Path, help="ScubaGoggles checkout (untrusted, read only)")
     parser.add_argument("--out", required=True, type=Path, help="catalogue file to write, or to check")
     parser.add_argument("--check", action="store_true", help="compare with --out instead of writing")

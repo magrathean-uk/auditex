@@ -870,11 +870,21 @@ def test_max_map_with_many_keys_reduces_in_linear_time():
 
 
 def test_many_distinct_ranks_reduce_in_linear_time():
-    policies = [_p("ou:root", "gmail_service_status", rank, {"serviceState": "ENABLED"}) for rank in range(16000)]
-    started = time.perf_counter()
-    units = _root_only(policies, ["gmail_service_status"])
-    assert time.perf_counter() - started < 1.5
-    assert units.values["ou:root"]["gmail_service_status"] == {"serviceState": "ENABLED"}
+    """Scaling, not wall clock (a shared, loaded test box made a fixed time limit flaky): eight times the ranks may
+    cost at most 24 times the time; a quadratic reducer costs about 64 times."""
+    def best_time(count):
+        policies = [_p("ou:root", "gmail_service_status", rank, {"serviceState": "ENABLED"}) for rank in range(count)]
+        best = None
+        for _ in range(3):
+            started = time.perf_counter()
+            units = _root_only(policies, ["gmail_service_status"])
+            elapsed = time.perf_counter() - started
+            best = elapsed if best is None else min(best, elapsed)
+        assert units.values["ou:root"]["gmail_service_status"] == {"serviceState": "ENABLED"}
+        return best
+
+    small, large = best_time(2000), best_time(16000)
+    assert large < max(small, 0.001) * 24
 
 
 def test_max_map_keeps_one_policy_list_order():

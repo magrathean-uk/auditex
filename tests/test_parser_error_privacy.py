@@ -71,6 +71,7 @@ SCRIPT_BUILDERS = [
     ("derive-scubagear-prune-table.py", "main"),
     ("generate-explainer-baselines.py", "main"),
     ("generate-explainer.py", "main"),
+    ("generate-gws-scuba-catalogue.py", "main"),
     ("generate-rule-packs.py", "main"),
 ]
 
