@@ -10,7 +10,7 @@ as RFC 7208 (SPF) and RFC 7489 (DMARC) do rather than by substring (lead, 25 Nov
   some answer among them starts ``v=DKIM1;``. Any other selector the collector holds is not read.
 - SPF: exactly one record whose version section is ``v=spf1`` (RFC 7208 4.5, case-insensitive). Its terms must parse
   (RFC 7208 4.6, 5, 6 and 7: every domain-spec and macro, CIDR length, IP address, ``redirect`` and ``exp`` argument
-  and unknown-modifier macro-string; a malformed record establishes no policy and fails), and it passes only when
+  and unknown-modifier macro-string, with no empty label in a domain-spec; a malformed record establishes no policy and fails), and it passes only when
   its single ``all`` is the final directive with qualifier ``-``, or it has no ``all`` and one ``redirect=`` modifier.
   ``~all``, ``?all``, ``+all`` and a bare ``all`` fail, and so does a second record.
 - DMARC: exactly one record whose first tag is ``v=DMARC1`` (4.1). It is an RFC 6376 3.2 tag-list (blanks around
@@ -22,7 +22,11 @@ as RFC 7208 (SPF) and RFC 7489 (DMARC) do rather than by substring (lead, 25 Nov
   6.4 URI lists: each URI is RFC 3986 with an optional size limit within 64 bits, and a ``mailto:`` URI is RFC 6068
   (header fields allowed; its ``to`` part and ``to`` fields are percent-decoded RFC 5322 addr-specs). A malformed URI,
   or a ``mailto:`` naming no recipient, makes that tag count for nothing in 4.3 and 4.4; the 6.6.3 fallback needs only
-  one syntactically valid URI of any scheme. 4.3 wants a ``rua`` address whose local part is exactly ``reports`` (RFC
+  one syntactically valid URI of any scheme (RFC 3986: a closed IP literal and, for ``http`` and ``https``, a host).
+  A ``mailto:`` URI is read by its raw text: the ``@`` between local part and domain must be unencoded, a domain
+  literal's brackets and a second recipient's comma must be percent-encoded (RFC 6068 2, RFC 3986 2.2). Known
+  limitation: a ``to`` header field whose value carries a display name (``Name <addr>``) is not read, and the
+  recipient in it counts for nothing; real DMARC records do not use it. 4.3 wants a ``rua`` address whose local part is exactly ``reports`` (RFC
   5321 2.4) at ``dmarc.cyber.dhs.gov`` in any case; 4.4 wants at least two ``rua`` and one ``ruf`` addresses.
 - A non-DMARC TXT answer beside the DMARC record is never read for the later rows (design 8.3 D22).
 - A domain with ``resolver_error`` is unknown, never compliant. A positively read violation wins over unknown
@@ -59,13 +63,19 @@ _U64 = 2 ** 64 - 1
 _DIGITS = re.compile(r"[0-9]+")
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 # RFC 3986 characters less "," and "!" (RFC 7489 6.4), and well-formed percent-encodings.
-_URI_REST = re.compile(r"(?:[A-Za-z0-9\-._~:/?#\[\]@$&'()*+;=]|%[0-9A-Fa-f]{2})*")
+# Square brackets belong to an IP literal in the authority only (RFC 3986 2.2, 3.2.2); see ``_authority``.
+_URI_REST = re.compile(r"(?:[A-Za-z0-9\-._~:/?#@$&'()*+;=]|%[0-9A-Fa-f]{2})*")
+_REG_NAME = re.compile(r"(?:[A-Za-z0-9\-._~$&'()*+;=]|%[0-9A-Fa-f]{2})*")
+_USERINFO = re.compile(r"(?:[A-Za-z0-9\-._~:$&'()*+;=]|%[0-9A-Fa-f]{2})*")
+_PORT = re.compile(r"[0-9]*")
+_IPVFUTURE = re.compile(r"v[0-9A-Fa-f]+\.[A-Za-z0-9\-._~$&'()*+;=:]+")
 # RFC 6068 2: hfields = "?" hfield *( "&" hfield ), hfield = *qchar "=" *qchar; qchar = unreserved / pct-encoded /
 # some-delims, less "," and "!" (RFC 7489 6.4).
 _QCHARS = r"(?:[A-Za-z0-9\-._~$'()*+;:@]|%[0-9A-Fa-f]{2})*"
 _HFIELDS = re.compile(_QCHARS + "=" + _QCHARS + "(?:&" + _QCHARS + "=" + _QCHARS + ")*")
 # The raw ``to`` part before percent-decoding: addr-spec characters a URI may carry unencoded (RFC 6068 2).
-_TO_RAW = re.compile(r"(?:[A-Za-z0-9\-._~$&'()*+;:@=\[\]]|%[0-9A-Fa-f]{2})*")
+# Brackets are not among them: a domain literal's brackets must be percent-encoded.
+_TO_RAW = re.compile(r"(?:[A-Za-z0-9\-._~$&'()*+;:@=]|%[0-9A-Fa-f]{2})*")
 _ATEXT = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-/=?^_`{|}~")
 # RFC 7208 12: mechanism names and modifier names are case-insensitive.
 _MECHANISM = re.compile(r"([+?~-]?)(all|include|a|mx|ptr|ip4|ip6|exists)([:/].*)?", re.IGNORECASE | re.DOTALL)
@@ -144,12 +154,15 @@ def _domain_spec(text: str) -> bool:
     flat = _macro_string(text)
     if not flat:
         return False
-    if flat.endswith("%"):
-        return True
+    macro_end = flat.endswith("%")
     if flat.endswith("."):
         flat = flat[:-1]
-    head, dot, label = flat.rpartition(".")
-    return bool(dot) and "%" not in label and _TOPLABEL.fullmatch(label) is not None
+    labels = flat.split(".")
+    # RFC 7208 4.8: a domain-spec that is not a valid domain name is a permerror, so no label may be empty (a leading
+    # dot, a double dot) or, when it holds no macro, longer than 63 characters (RFC 1035 2.3.4).
+    if any(not label or (len(label) > 63 and "%" not in label) for label in labels):
+        return False
+    return macro_end or (len(labels) > 1 and "%" not in labels[-1] and _TOPLABEL.fullmatch(labels[-1]) is not None)
 
 
 def _ip_argument(argument: str, version: int) -> bool:
@@ -285,15 +298,39 @@ def _dot_atom(text: str, start: int) -> int:
     return -1 if last_dot else index
 
 
+def _decode(raw: str) -> tuple[str, list[bool]] | None:
+    """Percent-decode ``raw`` (already matched by ``_TO_RAW``) as UTF-8, with a flag per decoded character that is True
+    when it came from a percent-encoding; None when the octets are not UTF-8."""
+    text: list[str] = []
+    encoded: list[bool] = []
+    index = 0
+    while index < len(raw):
+        if raw[index] != "%":
+            text.append(raw[index])
+            encoded.append(False)
+            index += 1
+            continue
+        start = index
+        while raw.startswith("%", index):
+            index += 3
+        try:
+            piece = bytes.fromhex(raw[start:index].replace("%", "")).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None
+        text.extend(piece)
+        encoded.extend([True] * len(piece))
+    return "".join(text), encoded
+
+
 def _addresses(to: str) -> list[tuple[str, str]] | None:
     """RFC 6068 2 ``to = addr-spec *( "," addr-spec )``, percent-decoded: (local part, domain) pairs, the local part
-    unquoted (RFC 5321 4.1.2: a quoted and an unquoted spelling name the same mailbox); None when malformed."""
-    if _TO_RAW.fullmatch(to) is None:
+    unquoted (RFC 5321 4.1.2: a quoted and an unquoted spelling name the same mailbox); None when malformed. The
+    ``@`` between local part and domain must be written unencoded: an encoded ``%40`` is data, not the separator
+    (RFC 3986 2.2)."""
+    decoded = _TO_RAW.fullmatch(to) and _decode(to)
+    if not decoded:
         return None
-    try:
-        text = unquote(to, encoding="utf-8", errors="strict")
-    except UnicodeDecodeError:
-        return None
+    text, encoded = decoded
     if not text:
         return []
     found, index = [], 0
@@ -319,7 +356,7 @@ def _addresses(to: str) -> list[tuple[str, str]] | None:
             if end < 0:
                 return None
             local_part, index = text[index:end], end
-        if not text.startswith("@", index):
+        if not text.startswith("@", index) or encoded[index]:
             return None
         index += 1
         if text.startswith("[", index):  # domain literal: dtext-no-obs (%d33-90 / %d94-126)
@@ -340,6 +377,35 @@ def _addresses(to: str) -> list[tuple[str, str]] | None:
         index += 1
 
 
+def _authority(authority: str, scheme: str) -> bool:
+    """RFC 3986 3.2 ``[ userinfo "@" ] host [ ":" port ]``. An IP literal must be closed and hold an IPv6 address or an
+    IPvFuture; an ``http`` or ``https`` host is not empty (RFC 9110 4.2.2)."""
+    userinfo, at, hostport = authority.rpartition("@")
+    if at and _USERINFO.fullmatch(userinfo) is None:
+        return False
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        if close < 0:
+            return False
+        host, port = hostport[1:close], hostport[close + 1:]
+        if port and not (port[0] == ":" and _PORT.fullmatch(port[1:])):
+            return False
+        if _IPVFUTURE.fullmatch(host) is None:
+            try:
+                ipaddress.IPv6Address(host)
+            except ValueError:
+                return False
+            if "%" in host:
+                return False
+        return True
+    host, colon, port = hostport.partition(":")
+    if colon and not _PORT.fullmatch(port):
+        return False
+    if _REG_NAME.fullmatch(host) is None:
+        return False
+    return bool(host) or scheme.lower() not in ("http:", "https:")
+
+
 def _uri(token: str) -> list[tuple[str, str]] | None:
     """One RFC 7489 6.4 dmarc-uri: the mailbox addresses a ``mailto:`` URI names in its ``to`` part and ``to`` header
     fields (RFC 6068 2), an empty list for any other valid URI, None when malformed. A ``mailto:`` URI that names no
@@ -350,7 +416,15 @@ def _uri(token: str) -> list[tuple[str, str]] | None:
         if _SIZE.fullmatch(size) is None or len(number) > 20 or int(number) > _U64:
             return None
     scheme = _SCHEME.match(uri)
-    if scheme is None or _URI_REST.fullmatch(uri, scheme.end()) is None:
+    if scheme is None:
+        return None
+    rest = uri[scheme.end():]
+    if scheme[0].lower() != "mailto:" and rest.startswith("//"):
+        end = min((rest.find(mark, 2) for mark in "/?#" if mark in rest[2:]), default=len(rest))
+        if not _authority(rest[2:end], scheme[0]):
+            return None
+        rest = rest[end:]
+    if _URI_REST.fullmatch(rest) is None:
         return None
     if scheme[0].lower() != "mailto:":
         return []
