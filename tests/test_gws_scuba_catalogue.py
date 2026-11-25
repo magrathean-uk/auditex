@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -19,6 +20,12 @@ SCRIPT = ROOT / "scripts" / "generate-gws-scuba-catalogue.py"
 CATALOGUE = ROOT / "configs" / "scuba-gws-policy-sections.json"
 FIXTURE = ROOT / "tests" / "fixtures" / "gws-baselines"
 BASELINES = "scubagoggles/baselines"
+PARTIAL = "gemini.md,sites.md"
+# Literal SHA-256 of the two fixture files (byte-identical to ScubaGoggles v1.1.0 at 08a08ce1).
+FIXTURE_DIGESTS = {
+    "gemini.md": "fa902507384984d72ab533ff344c168d50a8e5c548f2f113c00aac60cce188a8",
+    "sites.md": "3d1617d16aeac86120114eb19c6ea1a1fd0b221ce5936b3afe537f10395d6508",
+}
 
 MANUAL_IDS = {
     "GWS.CALENDAR.3.2v1",
@@ -96,18 +103,18 @@ def test_ids_and_shape(catalogue):
     policies = catalogue["policies"]
     assert len(policies) == 138
     assert all(re.fullmatch(r"GWS\.[A-Z]+\.\d+\.\d+v1", policy_id) for policy_id in policies)
-    assert Counter(item["product"] for item in policies.values()) == PRODUCT_COUNTS
+    assert Counter(item["service"] for item in policies.values()) == PRODUCT_COUNTS
     for item in policies.values():
-        assert set(item) == {"product", "group_title", "baseline_text", "criticality", "manual", "log_based", "sections"}
+        assert set(item) == {"service", "heading", "baseline_text", "criticality", "manual", "events", "sections"}
         assert item["criticality"] in {"SHALL", "SHOULD"}
         assert 0 < len(item["baseline_text"]) <= 400
-        assert item["group_title"]
+        assert item["heading"]
 
 
 def test_manual_and_log_based_sets(catalogue):
     policies = catalogue["policies"]
     assert {pid for pid, item in policies.items() if item["manual"]} == MANUAL_IDS
-    assert {pid for pid, item in policies.items() if item["log_based"]} == LOG_BASED_IDS
+    assert {pid for pid, item in policies.items() if item["events"]} == LOG_BASED_IDS
 
 
 def test_source_block_and_vocabulary(catalogue):
@@ -132,7 +139,7 @@ def test_spot_checked_baseline_texts(catalogue):
     assert policies["GWS.GMAIL.3.1v1"]["baseline_text"] == (
         "An SPF policy SHALL be published for each domain that fails all non-approved senders."
     )
-    assert policies["GWS.GMAIL.3.1v1"]["group_title"] == "Sender Policy Framework"
+    assert policies["GWS.GMAIL.3.1v1"]["heading"] == "Sender Policy Framework"
     assert policies["GWS.GEMINI.1.1v1"]["baseline_text"] == (
         "Gemini app user access SHALL be set to OFF for everyone without a license."
     )
@@ -156,8 +163,47 @@ def test_sections_by_kind(catalogue):
     assert all(set(item["sections"]) <= allowed for item in policies.values())
 
 
+def unpinned(generator, monkeypatch, source: Path) -> None:
+    """Pin the files under ``source`` at their own digests so a parse rule can be tested on edited text."""
+    for path in (source / BASELINES).glob("*.md"):
+        monkeypatch.setitem(generator.PINNED_SHA256, path.name, hashlib.sha256(path.read_bytes()).hexdigest())
+
+
+def test_fixture_is_the_pinned_baseline_pair():
+    for name, digest in FIXTURE_DIGESTS.items():
+        assert hashlib.sha256((FIXTURE / BASELINES / name).read_bytes()).hexdigest() == digest
+
+
+def test_pinned_digests_match_the_committed_source_block(generator, catalogue):
+    assert generator.PINNED_SHA256 == catalogue["source"]["files"]
+    assert generator.PINNED_SHA256["gemini.md"] == FIXTURE_DIGESTS["gemini.md"]
+    assert generator.PINNED_SHA256["sites.md"] == FIXTURE_DIGESTS["sites.md"]
+
+
 def test_check_passes_on_fixture_checkout():
-    result = run_generator("--source", FIXTURE, "--out", CATALOGUE, "--check", "--partial")
+    assert sorted(p.name for p in (FIXTURE / BASELINES).glob("*.md")) == ["gemini.md", "sites.md"]
+    result = run_generator("--source", FIXTURE, "--out", CATALOGUE, "--check", "--partial", PARTIAL)
+    assert (result.returncode, result.stderr) == (0, "")
+
+
+def test_partial_check_requires_every_named_file(tmp_path):
+    source = fixture_copy(tmp_path)
+    (source / BASELINES / "gemini.md").unlink()
+    result = run_generator("--source", source, "--out", CATALOGUE, "--check", "--partial", PARTIAL)
+    assert result.returncode == 2
+    assert "gemini.md: baseline file missing" in result.stderr
+    assert str(tmp_path) not in result.stderr
+
+
+@pytest.mark.parametrize("names", ["", "gemini.md,", "gemini.md,nope.md", "../sites.md", "README.md"])
+def test_partial_names_must_be_pinned_baselines(names):
+    result = run_generator("--source", FIXTURE, "--out", CATALOGUE, "--check", "--partial", names)
+    assert result.returncode == 2
+    assert "nope" not in result.stderr and "README" not in result.stderr and ".." not in result.stderr
+
+
+def test_partial_checks_only_the_named_files():
+    result = run_generator("--source", FIXTURE, "--out", CATALOGUE, "--check", "--partial", "sites.md")
     assert (result.returncode, result.stderr) == (0, "")
 
 
@@ -168,31 +214,56 @@ def test_check_without_partial_refuses_an_incomplete_checkout():
     assert str(FIXTURE) not in result.stderr
 
 
-def test_check_detects_edited_baseline(tmp_path):
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda text: text.replace("SHALL", "SHOULD", 1),
+        lambda text: text[: text.index("Sites Service SHOULD be") + len("Sites Service SHOULD be")],
+        lambda text: text + "\nSee /Users/synthetic/review for details.\n",
+        lambda text: text.rstrip("\n"),
+    ],
+    ids=["edited-word", "cut-after-last-id", "appended-text", "trailing-newline-lost"],
+)
+def test_edited_or_cut_baseline_is_refused_not_pinned(tmp_path, edit):
     source = fixture_copy(tmp_path)
     sites = source / BASELINES / "sites.md"
-    sites.write_text(sites.read_text(encoding="utf-8").replace("SHALL", "SHOULD", 1), encoding="utf-8")
-    result = run_generator("--source", source, "--out", CATALOGUE, "--check", "--partial")
-    assert result.returncode == 1
-    assert "sites.md" in result.stderr
+    text = sites.read_text(encoding="utf-8")
+    assert edit(text) != text
+    sites.write_text(edit(text), encoding="utf-8")
+    result = run_generator("--source", source, "--out", CATALOGUE, "--check", "--partial", PARTIAL)
+    assert result.returncode == 2
+    assert result.stderr == "catalogue error: sites.md: bytes differ from the pinned v1.1.0 digest\n"
+
+
+def test_generation_refuses_a_cut_baseline_and_writes_nothing(generator, tmp_path):
+    source = fixture_copy(tmp_path)
+    sites = source / BASELINES / "sites.md"
+    text = sites.read_text(encoding="utf-8")
+    sites.write_text(text[: text.index("Sites Service SHOULD be") + len("Sites Service SHOULD be")], encoding="utf-8")
+    with pytest.raises(generator.CatalogueError, match=r"sites\.md: bytes differ from the pinned"):
+        generator.build(source, ("sites.md",))
+    out = tmp_path / "out.json"
+    result = run_generator("--source", source, "--out", out)
+    assert result.returncode == 2
+    assert not out.exists()
 
 
 def test_check_detects_edited_catalogue(tmp_path, catalogue):
     catalogue["policies"]["GWS.SITES.1.1v1"]["baseline_text"] = "edited"
     edited = tmp_path / "edited.json"
     edited.write_text(json.dumps(catalogue), encoding="utf-8")
-    result = run_generator("--source", FIXTURE, "--out", edited, "--check", "--partial")
+    result = run_generator("--source", FIXTURE, "--out", edited, "--check", "--partial", PARTIAL)
     assert result.returncode == 1
     assert "GWS.SITES.1.1v1" in result.stderr
 
 
 def test_check_with_missing_catalogue_is_drift(tmp_path):
-    result = run_generator("--source", FIXTURE, "--out", tmp_path / "none.json", "--check", "--partial")
+    result = run_generator("--source", FIXTURE, "--out", tmp_path / "none.json", "--check", "--partial", PARTIAL)
     assert result.returncode == 1
 
 
 def test_partial_generation_is_refused(tmp_path):
-    result = run_generator("--source", FIXTURE, "--out", tmp_path / "out.json", "--partial")
+    result = run_generator("--source", FIXTURE, "--out", tmp_path / "out.json", "--partial", PARTIAL)
     assert result.returncode == 2
     assert not (tmp_path / "out.json").exists()
 
@@ -206,21 +277,59 @@ def test_partial_generation_is_refused(tmp_path):
         ("#### GWS.GEMINI.1.1v1\n", "#### GWS.GEMINI.1.1v2\n", "malformed policy heading"),
     ],
 )
-def test_malformed_baseline_is_refused(tmp_path, old, new, message):
+def test_malformed_baseline_is_refused(generator, monkeypatch, tmp_path, old, new, message):
     source = fixture_copy(tmp_path)
     gemini = source / BASELINES / "gemini.md"
     text = gemini.read_text(encoding="utf-8")
     assert old in text
     gemini.write_text(text.replace(old, new, 1), encoding="utf-8")
-    result = run_generator("--source", source, "--out", tmp_path / "out.json", "--check", "--partial")
+    unpinned(generator, monkeypatch, source)
+    with pytest.raises(generator.CatalogueError, match=message):
+        generator.build(source, ("gemini.md",))
+
+
+def test_malformed_heading_is_reported_by_file_and_line_only(generator):
+    text = "## 1. Grp\n\n#### GWS./Users/synthetic/review\nA SHALL b.\n"
+    with pytest.raises(generator.CatalogueError) as raised:
+        generator.parse_baseline("sites.md", text)
+    assert str(raised.value) == "sites.md: line 3: malformed policy heading"
+
+
+def test_malformed_heading_in_a_checkout_discloses_no_input_text(tmp_path):
+    source = fixture_copy(tmp_path)
+    sites = source / BASELINES / "sites.md"
+    text = sites.read_text(encoding="utf-8")
+    sites.write_text(text.replace("#### GWS.SITES.1.1v1", "#### GWS./Users/synthetic/review", 1), encoding="utf-8")
+    result = run_generator("--source", source, "--out", CATALOGUE, "--check", "--partial", PARTIAL)
     assert result.returncode == 2
-    assert message in result.stderr
+    assert "synthetic" not in result.stderr and "/Users" not in result.stderr and str(tmp_path) not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["null", "[]", "42", '"x"', "{}", '{"source": null}', '{"source": {"files": null}}', '{"source": {}, "policies": {}}',
+     '{"source": {"files": {}}, "policies": null}', '{"source": {"files": {}}, "policies": []}'],
+)
+def test_malformed_catalogue_structure_exits_two_without_a_traceback(tmp_path, content):
+    out = tmp_path / "out.json"
+    out.write_text(content, encoding="utf-8")
+    result = run_generator("--source", FIXTURE, "--out", out, "--check", "--partial", PARTIAL)
+    assert result.returncode == 2
+    assert result.stderr == "catalogue error: the committed catalogue has a malformed structure\n"
+
+
+def test_deeply_nested_catalogue_is_drift_not_a_traceback(tmp_path):
+    out = tmp_path / "out.json"
+    out.write_text("[" * 200000, encoding="utf-8")
+    result = run_generator("--source", FIXTURE, "--out", out, "--check", "--partial", PARTIAL)
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
 
 
 def test_unwritable_output_and_unreadable_catalogue_exit_two(tmp_path):
-    result = run_generator("--source", FIXTURE, "--out", tmp_path / "missing" / "x.json", "--partial", "--check")
+    result = run_generator("--source", FIXTURE, "--out", tmp_path / "missing" / "x.json", "--partial", PARTIAL, "--check")
     assert result.returncode == 1  # a missing catalogue is drift
-    result = run_generator("--source", FIXTURE, "--out", tmp_path, "--check", "--partial")
+    result = run_generator("--source", FIXTURE, "--out", tmp_path, "--check", "--partial", PARTIAL)
     assert result.returncode == 2
     assert str(tmp_path) not in result.stderr
 
@@ -228,7 +337,7 @@ def test_unwritable_output_and_unreadable_catalogue_exit_two(tmp_path):
 def test_badge_without_blank_line_is_not_statement_text(generator):
     text = "## 1. Grp\n#### GWS.GEMINI.3.1v1\nA SHALL b.\n[![Manual](m)](n)\n[![Log-Based Check](x)](y)\n"
     (item,) = generator.parse_baseline("x.md", text)
-    assert (item["baseline_text"], item["manual"], item["log_based"]) == ("A SHALL b.", True, True)
+    assert (item["baseline_text"], item["manual"], item["events"]) == ("A SHALL b.", True, True)
 
 
 def test_unnumbered_group_heading_clears_the_group(generator):
@@ -248,7 +357,7 @@ def test_symlinked_baseline_is_refused(tmp_path):
     sites = source / BASELINES / "sites.md"
     sites.unlink()
     sites.symlink_to(source / BASELINES / "gemini.md")
-    result = run_generator("--source", source, "--out", CATALOGUE, "--check", "--partial")
+    result = run_generator("--source", source, "--out", CATALOGUE, "--check", "--partial", PARTIAL)
     assert result.returncode == 2
     assert "not a regular file" in result.stderr
 
@@ -266,3 +375,27 @@ def test_statement_trims_at_a_sentence_boundary(generator):
 def test_committed_catalogue_matches_pinned_checkout():
     result = run_generator("--source", os.environ["AUDITEX_GWS_SCUBA_CHECKOUT"], "--out", CATALOGUE, "--check")
     assert (result.returncode, result.stderr) == (0, "")
+
+
+@pytest.mark.parametrize(("person", "key"), [("Group Title", "GroupTitle"), ("Log Based", "LogBased"), ("Product", "Product")])
+def test_gws_catalogue_does_not_unmask_m365_mapping_keys(tmp_path, person, key):
+    """The catalogue keys reuse registered field names; the shared exemption list is not widened, so an M365 report
+    mapping key that spells a person's name is still pseudonymised in the shareable JSON preview."""
+    from test_redaction_person_names import _key, _prose, _run, _user
+
+    from auditex.reporting import preview_report
+    from azure_tenant_audit import output_redaction
+
+    root = _run(tmp_path / "run", [_user(person, "directory-fixture@example.invalid")], narrative=f"{person} reviewed it")
+    report = root / "reports" / "report-pack.json"
+    payload = json.loads(report.read_text())
+    payload["executive_summary"]["per_reviewer"] = {key: 1}
+    report.write_text(json.dumps(payload))
+
+    content = preview_report(run_dir=str(root), format_name="json", include_sections=["executive_summary"],
+                             profile="shareable")["content"]
+
+    assert f'"{key}"' not in content
+    assert f'"{_prose(_key(root), person)}": 1' in content
+    assert key.lower() not in output_redaction._D5_FIELD_NAMES
+

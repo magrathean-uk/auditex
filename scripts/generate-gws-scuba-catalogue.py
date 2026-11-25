@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Generate configs/scuba-gws-policy-sections.json from the pinned ScubaGoggles baseline Markdown.
 
-    python3 -I scripts/generate-gws-scuba-catalogue.py --source <checkout> --out <file> [--check] [--partial]
+    python3 -I scripts/generate-gws-scuba-catalogue.py --source <checkout> --out <file> [--check [--partial NAMES]]
 
 The checkout is untrusted data: this script only reads the 11 Markdown files (never follows links, never runs
 anything from it). Run it with ``python3 -I``. It works from the Markdown alone; the per-policy kind assignment
 (design section 14) is the table below. Exit codes: 0 ok, 1 drift, 2 bad input.
 
-``--check`` regenerates and compares with ``--out``. ``--partial`` (check only) compares just the Markdown files
-present in the source, so a small fixture can be checked; a release check runs without it against the full pin.
+Every baseline file is verified against the SHA-256 pinned below before it is parsed: a cut or edited file is
+refused (exit 2) even when every policy id survives. ``--check`` regenerates and compares with ``--out``.
+``--partial NAME[,NAME...]`` (check only) compares just the named baseline files, each of which must be present
+and match its pinned digest, so a small fixture can be checked; a release check runs without it against the full pin.
+
+Per-policy keys use field names already in the shared redaction registry: ``service`` (product), ``heading``
+(group title) and ``events`` (true for a Log-Based Check policy, answered from audit-log events).
 """
 
 from __future__ import annotations
@@ -31,6 +36,20 @@ FILES = (
     "assuredcontrols.md calendar.md chat.md classroom.md commoncontrols.md drive.md "
     "gemini.md gmail.md groups.md meet.md sites.md"
 ).split()
+# SHA-256 of each baseline file at v1.1.0 (commit above); any other bytes are refused.
+PINNED_SHA256 = {
+    "assuredcontrols.md": "9f9f3c0e803954010ab90882d463757eb3e5bedaab2d53b1dbbed321369b2388",
+    "calendar.md": "2eb9434a25659fec204011f3555a09dacb3648f885be608a97667d2dbad24386",
+    "chat.md": "536b616a6c05d51259d42d8b13261730bd993457d1b576f7d3f5700590436114",
+    "classroom.md": "ec918f2c2e549eafe41163530b6a0a31fad7fe6897b96fea57352e6ebc4f5806",
+    "commoncontrols.md": "7acbe5253a83d0b9292cee8eb5b09ae1475dfc0c8c7792be73039c5dc0463d28",
+    "drive.md": "29b37b73556d68c15f8f5360fc398a853247318a6993747566f3698522f2c234",
+    "gemini.md": "fa902507384984d72ab533ff344c168d50a8e5c548f2f113c00aac60cce188a8",
+    "gmail.md": "33b5cc5b8c31a7ec87ae85af5fa4205f60a5d710cac369a6ebe647da66796b95",
+    "groups.md": "b94f1444b1f42e431db27aba4c0b850c198750e949ef8d895784ddb05133f439",
+    "meet.md": "b9e25cad07da933c6a7facd12df2e67042780f664f5158b3da61a21049d72e06",
+    "sites.md": "3d1617d16aeac86120114eb19c6ea1a1fd0b221ce5936b3afe537f10395d6508",
+}
 EXPECTED_POLICIES = 138
 MAX_TEXT = 400
 
@@ -142,7 +161,7 @@ def parse_baseline(name: str, text: str) -> list[dict]:
             continue
         policy_id = match.group(1)
         if not ID_RE.match(policy_id):
-            raise CatalogueError(f"{name}: malformed policy heading {policy_id!r}")
+            raise CatalogueError(f"{name}: line {index + 1}: malformed policy heading")
         if group is None:
             raise CatalogueError(f"{name}: {policy_id} has no numbered group heading")
         end = index + 1
@@ -164,12 +183,12 @@ def parse_baseline(name: str, text: str) -> list[dict]:
         found.append(
             {
                 "id": policy_id,
-                "product": policy_id.split(".")[1],
-                "group_title": group,
+                "service": policy_id.split(".")[1],
+                "heading": group,
                 "baseline_text": statement_text,
                 "criticality": keywords.pop(),
                 "manual": "[![manual]" in rest,
-                "log_based": "[![log-based check]" in rest,
+                "events": "[![log-based check]" in rest,
             }
         )
     return found
@@ -193,20 +212,22 @@ def read_markdown(source: Path, name: str) -> bytes | None:
     return path.read_bytes()
 
 
-def build(source: Path, partial: bool) -> dict:
+def build(source: Path, names: tuple[str, ...] = tuple(FILES)) -> dict:
+    """Build the catalogue from the named baseline files (all 11 unless a partial check names fewer)."""
+    partial = tuple(names) != tuple(FILES)
     digests = {}
     policies = {}
-    for name in FILES:
+    for name in names:
         raw = read_markdown(source, name)
         if raw is None:
-            if partial:
-                continue
             raise CatalogueError(f"{name}: baseline file missing")
+        if hashlib.sha256(raw).hexdigest() != PINNED_SHA256[name]:
+            raise CatalogueError(f"{name}: bytes differ from the pinned v1.1.0 digest")
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise CatalogueError(f"{name}: not valid UTF-8") from exc
-        digests[name] = hashlib.sha256(raw).hexdigest()
+        digests[name] = PINNED_SHA256[name]
         for item in parse_baseline(name, text):
             policy_id = item.pop("id")
             if policy_id in policies:
@@ -217,8 +238,6 @@ def build(source: Path, partial: bool) -> dict:
                 raise CatalogueError(f"{policy_id}: Manual badge disagrees with the kind assignment")
             item["sections"] = sections_for(policy_id)
             policies[policy_id] = item
-    if not digests:
-        raise CatalogueError("no baseline Markdown found in the source")
     if not partial and (len(policies) != EXPECTED_POLICIES or set(policies) != set(KIND_OF)):
         raise CatalogueError(f"expected {EXPECTED_POLICIES} policies, found {len(policies)}")
     return {
@@ -248,17 +267,34 @@ def differences(built: dict, committed: dict) -> list[str]:
     for key in ("schema_version", "limitation_ids", "recommendation_ids"):
         if built[key] != committed.get(key):
             problems.append(key)
-    source = committed.get("source", {})
+    source = committed["source"]
     for key in ("repo", "tag", "commit", "licence", "path", "attribution"):
         if built["source"][key] != source.get(key):
             problems.append(f"source.{key}")
     for name, digest in built["source"]["files"].items():
-        if source.get("files", {}).get(name) != digest:
+        if source["files"].get(name) != digest:
             problems.append(f"source.files.{name}")
     for policy_id, item in built["policies"].items():
-        if committed.get("policies", {}).get(policy_id) != item:
+        if committed["policies"].get(policy_id) != item:
             problems.append(policy_id)
     return problems
+
+
+def well_formed(committed: object) -> bool:
+    """The nested objects a check compares must be objects; anything else is bad input, not drift."""
+    return (
+        isinstance(committed, dict)
+        and isinstance(committed.get("source"), dict)
+        and isinstance(committed["source"].get("files"), dict)
+        and isinstance(committed.get("policies"), dict)
+    )
+
+
+def partial_names(value: str) -> tuple[str, ...]:
+    names = value.split(",")
+    if any(part not in FILES for part in names):
+        raise CatalogueError("--partial must name baseline files from the pinned set, comma separated")
+    return tuple(name for name in FILES if name in names)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -266,13 +302,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", required=True, type=Path, help="ScubaGoggles checkout (untrusted, read only)")
     parser.add_argument("--out", required=True, type=Path, help="catalogue file to write, or to check")
     parser.add_argument("--check", action="store_true", help="compare with --out instead of writing")
-    parser.add_argument("--partial", action="store_true", help="with --check: compare only the files present")
+    parser.add_argument("--partial", metavar="NAMES", help="with --check: compare only these baseline files (a,b)")
     args = parser.parse_args(argv)
-    if args.partial and not args.check:
+    if args.partial is not None and not args.check:
         print("--partial only applies to --check", file=sys.stderr)
         return 2
     try:
-        built = build(args.source, args.partial)
+        names = partial_names(args.partial) if args.partial is not None else tuple(FILES)
+        built = build(args.source, names)
     except (CatalogueError, OSError) as exc:
         print(f"catalogue error: {exc if isinstance(exc, CatalogueError) else type(exc).__name__}", file=sys.stderr)
         return 2
@@ -289,14 +326,17 @@ def main(argv: list[str] | None = None) -> int:
     except FileNotFoundError:
         print("drift: the committed catalogue is missing", file=sys.stderr)
         return 1
-    except ValueError:
+    except (ValueError, RecursionError):
         print("drift: the committed catalogue is not valid JSON", file=sys.stderr)
         return 1
     except OSError as exc:
         print(f"catalogue error: cannot read the catalogue ({type(exc).__name__})", file=sys.stderr)
         return 2
-    if args.partial:
-        problems = differences(built, committed) if isinstance(committed, dict) else ["catalogue"]
+    if not well_formed(committed):
+        print("catalogue error: the committed catalogue has a malformed structure", file=sys.stderr)
+        return 2
+    if args.partial is not None:
+        problems = differences(built, committed)
     else:
         problems = [] if committed_text == render(built) else ["catalogue"]
     if problems:
