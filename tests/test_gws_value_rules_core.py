@@ -860,13 +860,23 @@ def _root_only(policies, keys):
 
 
 def test_max_map_with_many_keys_reduces_in_linear_time():
-    entries = [{"id": f"l{index:05d}"} for index in range(16000)]
-    started = time.perf_counter()
-    units = _root_only([_p("ou:root", "gmail_email_address_lists", 1, {"emailAddressList": entries})],
-                       ["gmail_email_address_lists"])
-    assert time.perf_counter() - started < 1.5
-    reduced = units.values["ou:root"]["gmail_email_address_lists"]["emailAddressList"]
-    assert (len(reduced), reduced[0], reduced[-1]) == (16000, {"id": "l00000"}, {"id": "l15999"})
+    """Scaling, not wall clock (a fixed limit is flaky on a shared, loaded box): eight times the keys may cost at most
+    24 times the time; a quadratic reducer costs about 64 times."""
+    def best_time(count):
+        entries = [{"id": f"l{index:05d}"} for index in range(count)]
+        best = None
+        for _ in range(3):
+            started = time.perf_counter()
+            units = _root_only([_p("ou:root", "gmail_email_address_lists", 1, {"emailAddressList": entries})],
+                               ["gmail_email_address_lists"])
+            elapsed = time.perf_counter() - started
+            best = elapsed if best is None else min(best, elapsed)
+        reduced = units.values["ou:root"]["gmail_email_address_lists"]["emailAddressList"]
+        assert (len(reduced), reduced[0], reduced[-1]) == (count, {"id": "l00000"}, {"id": f"l{count - 1:05d}"})
+        return best
+
+    small, large = best_time(2000), best_time(16000)
+    assert large < max(small, 0.001) * 24
 
 
 def test_many_distinct_ranks_reduce_in_linear_time():
