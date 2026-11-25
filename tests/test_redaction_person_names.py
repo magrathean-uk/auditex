@@ -1019,6 +1019,30 @@ def test_gws_setting_words_as_mapping_keys_are_masked_in_the_shareable_json_prev
     assert "securityupdate" not in redaction._D5_FIELD_NAMES and "region" not in redaction._D5_FIELD_NAMES
 
 
+def test_gws_projection_words_as_mapping_keys_are_masked_in_the_shareable_json_preview(tmp_path: Path) -> None:
+    # M13-L06 review B2: the GWS projection writes its section keys as values (DEC-171), so a Microsoft 365 person
+    # named like one of them is still pseudonymised where that spelling is a mapping key in shareable output.
+    from auditex.reporting import preview_report
+
+    users = [_user("Top Unit", "directory-fixture-1@example.invalid"),
+             _user("Inherited", "directory-fixture-2@example.invalid")]
+    root = _run(tmp_path / "run", users, narrative="Top Unit reviewed it")
+    report = root / "reports" / "report-pack.json"
+    payload = json.loads(report.read_text())
+    payload["executive_summary"]["per_reviewer"] = {"top_unit": 1, "Inherited": 2}
+    report.write_text(json.dumps(payload))
+
+    content = preview_report(run_dir=str(root), format_name="json", include_sections=["executive_summary"],
+                             profile="shareable")["content"]
+
+    assert "top_unit" not in content and '"Inherited"' not in content
+    assert f'"{_id(_key(root), "Top Unit")}": 1' in content
+    assert f'"{_prose(_key(root), "Inherited")}": 2' in content
+    words = {"asof", "topunit", "unit", "unitkind", "time", "spf", "selectors", "inherited", "membershipscomplete",
+             "userids", "groupids"}
+    assert words.isdisjoint(redaction._D5_FIELD_NAMES)
+
+
 def test_contextual_google_policy_fields_survive_in_their_own_setting() -> None:
     source = [
         {"type": "settings/data_regions.data_at_rest_region", "value": {"region": "EUROPE"}},
