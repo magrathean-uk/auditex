@@ -1,4 +1,5 @@
-"""``lists``: Gmail address-list and rule-state policies, API access controls and system alert rules (design M13 8.2).
+"""``gws_list_settings``: Gmail address-list and rule-state policies, API access controls and system alert rules
+(design M13 8.2).
 
 GMAIL 14.1, 17.1, 18.1 to 18.3 and COMMONCONTROLS 10.1, 10.2 and 13.1. Each row names one ``check`` in its params.
 The logic of SG:scubagoggles/parsers/gmail_rules_parser.py and SG:scubagoggles/parsers/system_rules_parser.py is
@@ -13,13 +14,18 @@ domain_entry_count}``, so the rule works on list ids and counts and never sees a
 - ``ServiceToScopeMapping`` (SG:scubagoggles/rego/Commoncontrols.rego:1345-1364), the high-risk scope groups (:1411)
   and the 30 system alert rule names with their default states (SG:scubagoggles/parsers/system_rules_parser.py:16-114)
   are pinned in the row params with their cites, never in code.
-- CC.10.1 follows D6 and CC.10.2 D2: no ``api_controls_google_services`` in any unit is unknown. An unreadable
-  service entry can only hide a restriction, so it blocks a not_met for 10.1 and never a met.
-- Unknown is not safe (design 8.4): a malformed value, a missing rule state, an unknown enum or a referenced list that
-  was not read never answers met. One positively read violation wins over unusable values elsewhere.
+- CC.10.1 follows D6 and CC.10.2 D2: no ``api_controls_google_services`` in any unit is unknown. An unreadable or
+  unrecognised service entry blocks both answers for 10.1 and a met for 10.2.
+- A unit with the service on that holds no section of its own is judged by the top unit's section, with the top
+  unit's rule states, even when the service is off at the top unit (review B1).
+- Unknown is not safe (design 8.4): a malformed, blank, inconsistent or unrecognised value (a missing rule state, a
+  blank id, a list with more domain entries than entries, an unknown enum, an unnamed alert row, a string that is not
+  an IP address or range) or a referenced list that was not read never answers met or not_met. One positively read
+  violation wins over unusable values elsewhere, except where the unusable value could be the violation itself.
 """
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
 from ..record import _rec
@@ -62,7 +68,7 @@ def _say(policy_id: str, cell: str) -> dict:
     ):
         if name == cell:
             return _rec(policy_id, verdict, code, text, cell, list(_CITED))
-    raise ValueError("Unknown lists cell")
+    raise ValueError("Unknown gws_list_settings cell")
 
 
 def _flag(mapping: dict, name: str) -> bool | None:
@@ -73,36 +79,52 @@ def _flag(mapping: dict, name: str) -> bool | None:
     return True if mapping[name] is True else None
 
 
+def _id(value: Any) -> bool:
+    """A Gmail rule or list id: a non-blank string. A blank or non-string id identifies no rule or list (review B3)."""
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _count(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _matches(items: Any, field: str, wanted: str) -> list[dict] | None:
+    """The entries of ``items`` whose ``field`` is ``wanted``; None when the list cannot be read or holds an entry
+    without a usable id, since that entry may be the one wanted (review B3)."""
+    if not isinstance(items, list) or any(not isinstance(item, dict) or not _id(item.get(field)) for item in items):
+        return None
+    return [item for item in items if item[field] == wanted]
+
+
 def _rule_state(units: Units, unit: str, rule_id: Any) -> bool | None:
     """``enabled`` of one Gmail rule in the unit's own ``gmail_rule_states`` (gmail_rules_parser.py:277-293); None
-    when the unit holds no readable entry for it (ScubaGoggles: disabled; here unknown)."""
-    value = units.values.get(unit, {}).get("gmail_rule_states", MISSING)
-    if not isinstance(value, dict) or not isinstance(value.get("ruleStates"), list):
+    when the unit holds no readable entry for it (ScubaGoggles: disabled; here unknown), when the id is blank, or when
+    entries for it disagree."""
+    if not _id(rule_id):
         return None
-    for item in value["ruleStates"]:
-        if isinstance(item, dict) and item.get("ruleId") == rule_id:
-            enabled = item.get("enabled")
-            return enabled if isinstance(enabled, bool) else None
-    return None
+    value = units.values.get(unit, {}).get("gmail_rule_states", MISSING)
+    found = _matches(value.get("ruleStates") if isinstance(value, dict) else None, "ruleId", rule_id)
+    states = {item.get("enabled") for item in found or ()}
+    if len(states) != 1 or not states <= {True, False}:
+        return None
+    return states.pop()
 
 
 def _list_has_domains(units: Units, list_id: Any) -> bool | None:
     """Whether one top-level address list is on and holds a domain-shaped entry (``_gmail_address_lists`` and
-    ``_gmail_domain_addr``); None when the list, its count or its state cannot be read."""
-    if not isinstance(list_id, str | int) or isinstance(list_id, bool):
+    ``_gmail_domain_addr``); None when the list, its counts or its state cannot be read, or the counts are
+    impossible: more domain entries than entries, or a domain count with no readable total (review B2)."""
+    if not _id(list_id):
         return None
     value = units.values[units.top].get("gmail_email_address_lists", MISSING)
-    if not isinstance(value, dict) or not isinstance(value.get("emailAddressList"), list):
+    found = _matches(value.get("emailAddressList") if isinstance(value, dict) else None, "id", list_id)
+    counts = {(_count(item.get("entry_count")), _count(item.get("domain_entry_count"))) for item in found or ()}
+    if len(counts) != 1:
         return None
-    for entry in value["emailAddressList"]:
-        if isinstance(entry, dict) and entry.get("id") == list_id:
-            count = entry.get("domain_entry_count")
-            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
-                return None
-            if count == 0:
-                return False
-            return _rule_state(units, units.top, list_id)
-    return None
+    total, domains = counts.pop()
+    if total is None or domains is None or domains > total:
+        return None
+    return False if domains == 0 else _rule_state(units, units.top, list_id)
 
 
 def _override_effect(units: Units, override: dict, check: str) -> bool | None:
@@ -164,33 +186,37 @@ def _gate(units: Units, service: str, scope: list[str]) -> str | None:
 
 
 def _scan(units: Units, section: str, service: str, judge) -> str:
-    """Every unit holding the section with the service on (``some OU, settings in input.policies``); one violation
-    wins over unusable values and unknown service states elsewhere."""
+    """Every unit with the service on or unknown (``some OU, settings in input.policies``), each judged by its own
+    section or, without one, by the top unit's section with the top unit's rule states: the top unit's setting
+    applies on behalf of a unit that inherits it, even with the service off at the top (review B1). One
+    violation wins over unusable values and unknown service states elsewhere. Reached only on a complete read, so the
+    topology is unbroken and every unit inherits the top unit."""
     gate = _gate(units, service, sorted(units.values))
     if gate:
         return gate
-    unusable = unknown_service = False
+    unusable = unknown_service = absent = False
     for unit in sorted(units.values):
-        value = units.values[unit].get(section, MISSING)
-        if value is MISSING:
-            continue
         state = service_on(units, unit, service)
         if state == OFF:
             continue
-        outcome = None if value is UNUSABLE else judge(units, unit, value)
+        source = unit if units.values[unit].get(section, MISSING) is not MISSING else units.top
+        value = units.values[source].get(section, MISSING)
+        if value is MISSING:
+            outcome = None
+            absent = True
+        else:
+            outcome = None if value is UNUSABLE else judge(units, source, value)
         if state == UNKNOWN:
             unknown_service = unknown_service or outcome is not False
         elif outcome is True:
             return "unit_violates"
-        elif outcome is None:
+        elif outcome is None and value is not MISSING:
             unusable = True
     if unusable:
         return "setting_value_unusable"
     if unknown_service:
         return "service_status_absent"
-    if units.values[units.top].get(section, MISSING) is MISSING:
-        return "setting_absent"
-    return "no_unit_violates"
+    return "setting_absent" if absent else "no_unit_violates"
 
 
 def _ip_allowlist(units: Units) -> str:
@@ -203,14 +229,27 @@ def _ip_allowlist(units: Units) -> str:
     if value is MISSING or isinstance(value, dict) and "allowedIpAddresses" not in value:
         return "setting_absent"
     addresses = value.get("allowedIpAddresses") if isinstance(value, dict) else None
-    if not isinstance(addresses, list) or any(not isinstance(item, str) for item in addresses):
+    if not isinstance(addresses, list) or not all(_address(item) for item in addresses):
         return "setting_value_unusable"
     return "unit_violates" if addresses else "no_unit_violates"
 
 
-def _api_scopes(units: Units) -> tuple[bool, bool, set[str]]:
-    """Whether any unit holds ``api_controls_google_services``, whether any of it is unreadable, and every scope
-    group read (``EnabledScopes``, every OU and group)."""
+def _address(item: Any) -> bool:
+    """An IPv4 or IPv6 address or CIDR range; a blank or arbitrary string is not one (review B6)."""
+    if not isinstance(item, str):
+        return False
+    try:
+        ipaddress.ip_network(item, strict=False)
+    except ValueError:
+        return False
+    return True
+
+
+def _api_scopes(units: Units, params: dict) -> tuple[bool, bool, set[str]]:
+    """Whether any unit holds ``api_controls_google_services``, whether any of it is unreadable or outside the pinned
+    mapping, and every pinned scope group read (``EnabledScopes``, every OU and group). A scope group outside the
+    mapping may be another spelling of a pinned one, so it is unusable (review B4)."""
+    known = {scope for service in params["values"] for scope in service["scopes"]}
     present = unusable = False
     scopes: set[str] = set()
     for unit in sorted(units.values):
@@ -224,7 +263,7 @@ def _api_scopes(units: Units) -> tuple[bool, bool, set[str]]:
             continue
         for service in services:
             group = service.get("scopesGroup") if isinstance(service, dict) else None
-            if isinstance(group, str) and group:
+            if isinstance(group, str) and group in known:
                 scopes.add(group)
             else:
                 unusable = True
@@ -233,31 +272,33 @@ def _api_scopes(units: Units) -> tuple[bool, bool, set[str]]:
 
 def _restricted(units: Units, params: dict) -> str:
     """CC.10.1: every pinned service has one of its scope groups restricted somewhere (Commoncontrols.rego:1366-1379).
-    An unreadable entry may be a missing restriction, so it blocks not_met; D6 for an absent section."""
-    present, unusable, scopes = _api_scopes(units)
+    An unreadable or unrecognised entry answers neither met nor not_met (review B4); D6 for an absent section."""
+    present, unusable, scopes = _api_scopes(units, params)
     if not present:
         return "setting_absent"
+    if unusable:
+        return "setting_value_unusable"
     if all(set(service["scopes"]) & scopes for service in params["values"]):
         return "no_unit_violates"
-    return "setting_value_unusable" if unusable else "unit_violates"
+    return "unit_violates"
 
 
 def _high_risk(units: Units, params: dict) -> str:
     """CC.10.2: no unit restricts a service to its high-risk scope group only (Commoncontrols.rego:1411-1418); D2. A
     scope group outside the pinned mapping may be a high-risk one under another spelling, so it is unknown."""
-    present, unusable, scopes = _api_scopes(units)
+    present, unusable, scopes = _api_scopes(units, params)
     if scopes & set(params["scopes"]):
         return "unit_violates"
-    known = {scope for service in params["values"] for scope in service["scopes"]}
-    if unusable or scopes - known:
+    if unusable:
         return "setting_value_unusable"
     return "no_unit_violates" if present else "setting_absent"
 
 
 def _system_alerts(units: Units, params: dict) -> str:
     """CC.13.1: every pinned system rule ACTIVE at the top unit, a rule not returned taking its pinned default
-    (``SystemRulesParser``; Commoncontrols.rego:1736-1741). A returned rule without a readable name may be any
-    pinned rule, so no default is trusted beside it; duplicates that disagree are unknown."""
+    (``SystemRulesParser``; Commoncontrols.rego:1736-1741). A returned row without a readable, non-blank name may be
+    any pinned rule, a default or a duplicate that contradicts a named state, so it answers neither met nor not_met
+    (review B5); duplicates that disagree are unknown."""
     value = units.values[units.top].get("rule_system_defined_alerts", MISSING)
     if value is not MISSING and not isinstance(value, list):
         return "setting_value_unusable"
@@ -266,18 +307,18 @@ def _system_alerts(units: Units, params: dict) -> str:
     anonymous = False
     for entry in [] if value is MISSING else value:
         name = entry.get("displayName") if isinstance(entry, dict) else None
-        if not isinstance(name, str):
+        if not _id(name):
             anonymous = True
         elif name in pinned:
             state = entry.get("state")
             seen.setdefault(name, set()).add(state if isinstance(state, str) else None)
+    if anonymous:
+        return "setting_value_unusable"
     explicit = default = unknown = False
     for rule in params["rules"]:
         states = seen.get(rule["name"])
         if states is None:
-            if anonymous:
-                unknown = True
-            elif rule["value"] != "ACTIVE":
+            if rule["value"] != "ACTIVE":
                 default = True
         elif len(states) != 1 or not states <= {"ACTIVE", "INACTIVE"}:
             unknown = True
@@ -298,7 +339,11 @@ def _plan(check: Any) -> tuple[tuple[str, ...], Any]:
     if check == "gmail_mail_storage":
         return (*gmail, "gmail_comprehensive_mail_storage"), lambda units, _: _scan(
             units, "gmail_comprehensive_mail_storage", "gmail", _storage)
-    if check in {"gmail_bypass_domains", "gmail_warning_domains", "gmail_hide_warning_all"}:
+    if check == "gmail_hide_warning_all":
+        # Reads the override flag and its rule state only, so address-list evidence never changes it (review M1).
+        return (*gmail, "gmail_spam_override_lists"), lambda units, _: _scan(
+            units, "gmail_spam_override_lists", "gmail", _overrides(check))
+    if check in {"gmail_bypass_domains", "gmail_warning_domains"}:
         return (*gmail, "gmail_spam_override_lists", "gmail_email_address_lists"), lambda units, _: _scan(
             units, "gmail_spam_override_lists", "gmail", _overrides(check))
     if check == "api_services_restricted":
@@ -307,10 +352,10 @@ def _plan(check: Any) -> tuple[tuple[str, ...], Any]:
         return ("api_controls_google_services",), _high_risk
     if check == "system_alerts_active":
         return ("rule_system_defined_alerts",), _system_alerts
-    raise ValueError("Unknown lists check")
+    raise ValueError("Unknown gws_list_settings check")
 
 
-def lists(policy_id: str, row: dict, sections: dict) -> dict:
+def gws_list_settings(policy_id: str, row: dict, sections: dict) -> dict:
     keys, evaluate = _plan(row["params"].get("check"))
     try:
         units = effective_units(sections, keys)
@@ -321,4 +366,4 @@ def lists(policy_id: str, row: dict, sections: dict) -> dict:
     return _say(policy_id, evaluate(units, row["params"]))
 
 
-KINDS = {"lists": lists}
+KINDS = {"gws_list_settings": gws_list_settings}

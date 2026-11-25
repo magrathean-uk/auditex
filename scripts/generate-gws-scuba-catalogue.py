@@ -72,7 +72,7 @@ KIND_SECTIONS = {
     "setting": _SETTING_PAIR,
     "settings_multi": _SETTING_PAIR,
     "twosv": _SETTING_PAIR,
-    "lists": _SETTING_PAIR,
+    "gws_list_settings": _SETTING_PAIR,
     "setting_event": ["gws_tenant", "gws_setting_events"],
     "gws_dns": ["gws_dns"],
     "super_admin_count": ["gws_admins"],
@@ -106,7 +106,7 @@ _KIND_IDS = {
     "twosv": (
         "COMMONCONTROLS.1.1 COMMONCONTROLS.1.2 COMMONCONTROLS.1.3 COMMONCONTROLS.1.4 COMMONCONTROLS.1.5 "
     ).split(),
-    "lists": (
+    "gws_list_settings": (
         "GMAIL.14.1 GMAIL.17.1 GMAIL.18.1 GMAIL.18.2 GMAIL.18.3 COMMONCONTROLS.10.1 COMMONCONTROLS.10.2 "
         "COMMONCONTROLS.13.1 "
     ).split(),

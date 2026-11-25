@@ -1,6 +1,6 @@
 {
   "kinds": {
-    "lists": {
+    "gws_list_settings": {
       "cells": {
         "no_unit_violates": {
           "reason_code": "no_unit_violates",
@@ -115,7 +115,7 @@
   },
   "policies": {
     "GWS.COMMONCONTROLS.10.1v1": {
-      "kind": "lists",
+      "kind": "gws_list_settings",
       "params": {
         "check": "api_services_restricted",
         "source": [
@@ -236,14 +236,14 @@
           }
         ]
       },
-      "rule_id": "GWS.COMMONCONTROLS.10.1v1.lists",
+      "rule_id": "GWS.COMMONCONTROLS.10.1v1.gws_list_settings",
       "sections": [
         "gws_tenant",
         "gws_policies"
       ]
     },
     "GWS.COMMONCONTROLS.10.2v1": {
-      "kind": "lists",
+      "kind": "gws_list_settings",
       "params": {
         "check": "api_no_high_risk",
         "scopes": [
@@ -370,14 +370,14 @@
           }
         ]
       },
-      "rule_id": "GWS.COMMONCONTROLS.10.2v1.lists",
+      "rule_id": "GWS.COMMONCONTROLS.10.2v1.gws_list_settings",
       "sections": [
         "gws_tenant",
         "gws_policies"
       ]
     },
     "GWS.COMMONCONTROLS.13.1v1": {
-      "kind": "lists",
+      "kind": "gws_list_settings",
       "params": {
         "check": "system_alerts_active",
         "rules": [
@@ -507,14 +507,14 @@
           "SG:scubagoggles/parsers/system_rules_parser.py:16-114"
         ]
       },
-      "rule_id": "GWS.COMMONCONTROLS.13.1v1.lists",
+      "rule_id": "GWS.COMMONCONTROLS.13.1v1.gws_list_settings",
       "sections": [
         "gws_tenant",
         "gws_policies"
       ]
     },
     "GWS.GMAIL.14.1v1": {
-      "kind": "lists",
+      "kind": "gws_list_settings",
       "params": {
         "check": "gmail_ip_allowlist",
         "service": "gmail",
@@ -522,14 +522,14 @@
           "SG:scubagoggles/rego/Gmail.rego:1422-1448"
         ]
       },
-      "rule_id": "GWS.GMAIL.14.1v1.lists",
+      "rule_id": "GWS.GMAIL.14.1v1.gws_list_settings",
       "sections": [
         "gws_tenant",
         "gws_policies"
       ]
     },
     "GWS.GMAIL.17.1v1": {
-      "kind": "lists",
+      "kind": "gws_list_settings",
       "params": {
         "check": "gmail_mail_storage",
         "service": "gmail",
@@ -538,14 +538,14 @@
           "SG:scubagoggles/parsers/gmail_rules_parser.py:44-69"
         ]
       },
-      "rule_id": "GWS.GMAIL.17.1v1.lists",
+      "rule_id": "GWS.GMAIL.17.1v1.gws_list_settings",
       "sections": [
         "gws_tenant",
         "gws_policies"
       ]
     },
     "GWS.GMAIL.18.1v1": {
-      "kind": "lists",
+      "kind": "gws_list_settings",
       "params": {
         "check": "gmail_bypass_domains",
         "service": "gmail",
@@ -554,14 +554,14 @@
           "SG:scubagoggles/parsers/gmail_rules_parser.py:71-274"
         ]
       },
-      "rule_id": "GWS.GMAIL.18.1v1.lists",
+      "rule_id": "GWS.GMAIL.18.1v1.gws_list_settings",
       "sections": [
         "gws_tenant",
         "gws_policies"
       ]
     },
     "GWS.GMAIL.18.2v1": {
-      "kind": "lists",
+      "kind": "gws_list_settings",
       "params": {
         "check": "gmail_warning_domains",
         "service": "gmail",
@@ -570,14 +570,14 @@
           "SG:scubagoggles/parsers/gmail_rules_parser.py:71-274"
         ]
       },
-      "rule_id": "GWS.GMAIL.18.2v1.lists",
+      "rule_id": "GWS.GMAIL.18.2v1.gws_list_settings",
       "sections": [
         "gws_tenant",
         "gws_policies"
       ]
     },
     "GWS.GMAIL.18.3v1": {
-      "kind": "lists",
+      "kind": "gws_list_settings",
       "params": {
         "check": "gmail_hide_warning_all",
         "service": "gmail",
@@ -586,7 +586,7 @@
           "SG:scubagoggles/parsers/gmail_rules_parser.py:71-148"
         ]
       },
-      "rule_id": "GWS.GMAIL.18.3v1.lists",
+      "rule_id": "GWS.GMAIL.18.3v1.gws_list_settings",
       "sections": [
         "gws_tenant",
         "gws_policies"
