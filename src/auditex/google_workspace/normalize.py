@@ -339,9 +339,17 @@ def _unrecognised_system_alert(setting: Any) -> bool:
 
 
 def unplaced_policy_count(payloads: dict[str, dict[str, Any]], coverage_rows: list[dict[str, Any]]) -> int:
-    """Count dangling OU targets in the one Policy API read or its legacy subset."""
+    """Count dangling OU targets in the one Policy API read or its legacy subset.
+
+    A target is dangling only against a complete Directory org unit read. Without one (no ``orgUnits`` section, or a
+    partial or malformed one) no target can be placed or called absent: the policies stay unclassified and the 2-step
+    verification status is unknown, which already keeps every placement-dependent verdict unassessed.
+    """
     payload = payloads.get("google_policies", {})
     name = "policySettings" if "policySettings" in payload else "twoStepVerificationPolicies"
+    topology = _org_unit_topology(payloads.get("google_directory"), coverage_rows)
+    if topology is None or not topology[0]:
+        return 0
     roots, units = _policy_unit_tree(payloads.get("google_directory"), coverage_rows)
     known_units = roots | units
     return sum(

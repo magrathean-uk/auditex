@@ -1906,3 +1906,26 @@ def test_two_step_finding_excludes_a_scope_scheduled_one_nanosecond_ahead() -> N
         {"scope": "org_unit", "org_unit": "orgUnits/sales", "enforced_from": "2026-11-25T12:00:00Z"},
     ]
     assert snapshot["google_two_step_policies"]["records"][2]["enforced_from"] == "2026-11-25T12:00:00.000000001Z"
+
+
+def test_l03b_a_policy_target_is_dangling_only_against_a_complete_directory_read() -> None:
+    # M13-L03b: without a complete org unit read no target can be called absent, so the policies read is not marked
+    # partial; the 2SV status goes unknown instead (tests/test_gate_integrity.py keeps the compare reason).
+    from auditex.google_workspace.normalize import unplaced_policy_count
+
+    policies = {"google_policies": _widened([_two_step("orgUnits/root", _ENFORCED), _two_step("orgUnits/deleted", _ENFORCED)])}
+    partial = [{"collector": "google_directory", "name": "orgUnits", "status": "partial"}]
+    cut = {"orgUnits": {"value": [], "collection_truncated": True}}
+    for directory, coverage in (
+        (None, _OK_COVERAGE),
+        ({}, _OK_COVERAGE),
+        ({"orgUnits": None}, _OK_COVERAGE),
+        (_SALES_DIRECTORY, partial),
+        (cut, _OK_COVERAGE),
+        ({"orgUnits": {"value": [None]}}, _OK_COVERAGE),
+    ):
+        payloads = {**policies, "google_directory": directory}
+        assert unplaced_policy_count(payloads, coverage) == 0, directory
+    # A complete tree holds the root but not the deleted unit; a complete empty tree holds neither.
+    assert unplaced_policy_count({**policies, "google_directory": _SALES_DIRECTORY}, _OK_COVERAGE) == 1
+    assert unplaced_policy_count({**policies, "google_directory": {"orgUnits": {"value": []}}}, _OK_COVERAGE) == 2
