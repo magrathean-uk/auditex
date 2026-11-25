@@ -5,55 +5,55 @@
         "reason_texts": [
           "Requirement not met: at least one privileged account is assigned to sign in through an external identity provider."
         ],
-        "remediation_steps": "Check the setting against the baseline in the Admin console."
+        "remediation_steps": "In the Admin console, move each privileged account that uses an external identity provider to sign in with Google."
       },
       "admins_use_google_sign_in": {
         "reason_texts": [
           "Requirement met: every privileged account signs in with Google, not through an external identity provider."
         ],
-        "remediation_steps": "Check the setting again after changes."
+        "remediation_steps": "Check the SSO profile assignments again after any change."
       },
       "assignment_unusable": {
         "reason_texts": [
           "Data unusable: an inbound SSO assignment that applies to a privileged account has an unknown mode, or one target holds disagreeing assignments; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check the inbound SSO profile assignments in the Admin console for an unknown mode or two that disagree for one target, then collect again."
       },
       "lineage_unresolved": {
         "reason_texts": [
           "Data unavailable: the organisational unit read is incomplete or inconsistent, so the nearest SSO assignment of a privileged account cannot be found; the policy was not assessed.",
           "Data unavailable: the organisational unit read is incomplete or inconsistent; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the organisational unit read completes, then check the SSO assignments of privileged accounts."
       },
       "membership_incomplete": {
         "reason_texts": [
           "Data unavailable: an inbound SSO assignment targets a group and the group membership read is incomplete; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the group membership read completes, then check the groups that hold an SSO assignment."
       },
       "section_not_collected": {
         "reason_texts": [],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
       },
       "section_shape_unusable": {
         "reason_texts": [
           "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
       },
       "sso_read_incomplete": {
         "reason_texts": [
           "Data unavailable: an inbound SSO assignment that applies to a privileged account uses the domain-wide SAML provider only if one is enabled, and the read does not show whether it is; the policy was not assessed.",
           "Data unavailable: the inbound SSO assignment read is incomplete; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the inbound SSO assignment read completes, then check how privileged accounts sign in."
       },
       "user_read_incomplete": {
         "reason_texts": [
           "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the user and admin role read completes."
       }
     },
     "gws_dns": {
@@ -61,47 +61,47 @@
         "reason_texts": [
           "Data unavailable: the DNS read was cut or incomplete, so domains may be missing."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so every domain's DNS lookup completes; the records live at the domain's DNS host, not in the Admin console."
       },
       "domain_record_unusable": {
         "reason_texts": [
           "Data unusable: a domain's DNS evidence is not in the expected shape, so it cannot be checked."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check the domain's SPF TXT, DKIM selector or DMARC TXT (at _dmarc) record at its DNS host for a malformed entry, then collect again."
       },
       "domain_violates": {
         "reason_texts": [
           "Requirement not met: at least one domain the policy covers does not meet it."
         ],
-        "remediation_steps": "Check the setting against the baseline in the Admin console."
+        "remediation_steps": "Correct the failing domain's SPF TXT, DKIM selector or DMARC TXT (at _dmarc) record at its DNS host; generate DKIM keys in the Admin console, then publish them in DNS."
       },
       "no_domain_violates": {
         "reason_texts": [
           "Requirement met: every domain the policy covers meets it."
         ],
-        "remediation_steps": "Check the setting again after changes."
+        "remediation_steps": "Check the domain DNS records again after any change at the DNS host."
       },
       "no_domains": {
         "reason_texts": [
           "Data unavailable: no domain the policy covers was collected."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check the tenant's domains are collected, then run the collection again; the records are read from each domain's DNS host."
       },
       "resolver_error": {
         "reason_texts": [
           "Data unavailable: a DNS resolver error left at least one domain unchecked."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if a lookup keeps failing, check the SPF TXT, DKIM selector or DMARC TXT (at _dmarc) record answers at the domain's DNS host."
       },
       "section_not_collected": {
         "reason_texts": [],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the DNS lookups run; the records are read from each domain's DNS host, not the Admin console."
       },
       "section_shape_unusable": {
         "reason_texts": [
           "Data unusable: the DNS evidence section is not in the expected shape."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if the DNS evidence is still malformed, report it as an Auditex problem."
       }
     },
     "gws_list_settings": {
@@ -109,53 +109,53 @@
         "reason_texts": [
           "Requirement met: no org unit or group holds a value this policy forbids."
         ],
-        "remediation_steps": "Check the setting again after changes."
+        "remediation_steps": "Check the setting again after any change in the Admin console."
       },
       "policy_read_incomplete": {
         "reason_texts": [
           "Data unavailable: the Google Workspace policy or org unit read was incomplete, so an unset value cannot be told from an unread one."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the policy and organisational unit read completes."
       },
       "section_not_collected": {
         "reason_texts": [],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
       },
       "section_shape_unusable": {
         "reason_texts": [
           "Data unusable: the Google Workspace policy or org unit evidence has the wrong shape for this check."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
       },
       "service_off_everywhere": {
         "reason_texts": [
           "Not applicable: the service this policy covers is read as off in every org unit and group."
         ],
-        "remediation_steps": "Check whether the service is enabled."
+        "remediation_steps": "Check the service is meant to stay off in every organisational unit."
       },
       "service_status_absent": {
         "reason_texts": [
           "Data unavailable: the service on or off status could not be read for a unit this policy covers."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the service on or off status is read for every unit this policy covers."
       },
       "setting_absent": {
         "reason_texts": [
           "Data unavailable: the setting this policy reads was not returned and no default is pinned, so compliance is unknown."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check in the Admin console that the setting is configured at the top-level organisational unit, then collect again."
       },
       "setting_value_unusable": {
         "reason_texts": [
           "Data unusable: a setting, list or rule state this policy reads is malformed, unknown or ambiguous."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check the setting, list or rule state in the Admin console for an unknown or malformed value, then collect again."
       },
       "unit_violates": {
         "reason_texts": [
           "Requirement not met: at least one org unit or group holds a value this policy forbids."
         ],
-        "remediation_steps": "Check the setting against the baseline in the Admin console."
+        "remediation_steps": "In the Admin console, remove the forbidden value from each organisational unit or group that holds it."
       }
     },
     "manual_only": {
@@ -163,7 +163,7 @@
         "reason_texts": [
           "Data unavailable: no read-only Google Workspace API exposes this setting; check it by hand in the Admin console against the baseline text."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check the setting by hand in the Admin console against the baseline; no read-only API exposes it."
       }
     },
     "setting": {
@@ -171,53 +171,53 @@
         "reason_texts": [
           "Requirement met: no organisational unit or group holds a value that violates the setting."
         ],
-        "remediation_steps": "Check the setting again after changes."
+        "remediation_steps": "Check the setting again after any change in the Admin console."
       },
       "policy_read_incomplete": {
         "reason_texts": [
           "Data unavailable: the Google Workspace policy read is incomplete; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the policy and organisational unit read completes."
       },
       "section_not_collected": {
         "reason_texts": [],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
       },
       "section_shape_unusable": {
         "reason_texts": [
           "Data unusable: the Google Workspace policy evidence has an unexpected shape; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
       },
       "service_off_everywhere": {
         "reason_texts": [
           "Not applicable: the Google Workspace service this policy covers is turned off in every organisational unit."
         ],
-        "remediation_steps": "Check whether the service is enabled."
+        "remediation_steps": "Check the service is meant to stay off in every organisational unit."
       },
       "service_status_absent": {
         "reason_texts": [
           "Data unavailable: the status of the Google Workspace service this policy covers is absent or unreadable; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the service on or off status is read for every unit this policy covers."
       },
       "setting_absent": {
         "reason_texts": [
           "Data unavailable: the setting is absent from the collected policies and has no pinned default; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check in the Admin console that the setting is configured at the top-level organisational unit, then collect again."
       },
       "setting_value_unusable": {
         "reason_texts": [
           "Data unusable: a unit holds a value for the setting that cannot be read as the expected type; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check the setting in the Admin console for an unknown or malformed value, then collect again."
       },
       "unit_violates": {
         "reason_texts": [
           "Requirement not met: at least one organisational unit or group holds a value that violates the setting."
         ],
-        "remediation_steps": "Check the setting against the baseline in the Admin console."
+        "remediation_steps": "In the Admin console, change the setting on each organisational unit or group that holds a value the baseline forbids."
       }
     },
     "setting_event": {
@@ -225,59 +225,59 @@
         "reason_texts": [
           "Data unavailable: the admin setting-change event read was cut or incomplete, so the last change per unit is not known."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the admin log read completes, then check the last change logged for each unit."
       },
       "event_value_unusable": {
         "reason_texts": [
           "Data unusable: a relevant setting-change event has a missing, unknown or unreadable value, time or unit, or two latest events disagree."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check the admin log for a setting-change event with a missing or unknown value, time or unit, or two that conflict, then collect again."
       },
       "no_setting_event": {
         "reason_texts": [
           "Data unavailable: the admin logs hold no current setting change at the top-level unit for every setting this policy reads; logs are kept about six months, and a reset to the default is not logged as a value."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Set the setting at the top-level organisational unit in the Admin console so the admin log records a change, then collect again."
       },
       "no_unit_violates": {
         "reason_texts": [
           "Requirement met: the top-level unit has a logged setting change for every setting this policy reads, and the last change for every unit is compliant."
         ],
-        "remediation_steps": "Check the setting again after changes."
+        "remediation_steps": "Check the setting again after any further change."
       },
       "policy_read_incomplete": {
         "reason_texts": [
           "Data unavailable: the policy read was cut or incomplete, so the service status is not known."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the policy read completes and the service status is known."
       },
       "section_not_collected": {
         "reason_texts": [],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
       },
       "section_shape_unusable": {
         "reason_texts": [
           "Data unusable: the tenant topology is cut, broken or of the wrong shape, or the setting-change events, their log window or the policy section has the wrong shape."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if the topology, setting-change events or policy evidence is still malformed, report it as an Auditex problem."
       },
       "service_off_everywhere": {
         "reason_texts": [
           "Not applicable: the service is off in every unit."
         ],
-        "remediation_steps": "Check whether the service is enabled."
+        "remediation_steps": "Check the service is meant to stay off in every unit."
       },
       "service_status_absent": {
         "reason_texts": [
           "Data unavailable: the top-level unit has no readable service status and no unit has the service explicitly on."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the top-level unit's service status is read, or set the service on or off explicitly in the Admin console."
       },
       "unit_violates": {
         "reason_texts": [
           "Requirement not met: the last logged setting change for at least one unit sets a non-compliant value."
         ],
-        "remediation_steps": "Check the setting against the baseline in the Admin console."
+        "remediation_steps": "In the Admin console, change the setting on each unit whose last logged change set a value the baseline forbids."
       }
     },
     "settings_multi": {
@@ -285,53 +285,53 @@
         "reason_texts": [
           "Requirement met: no organisational unit or group has a setting combination the baseline does not allow."
         ],
-        "remediation_steps": "Check the setting again after changes."
+        "remediation_steps": "Check the settings again after any change in the Admin console."
       },
       "policy_read_incomplete": {
         "reason_texts": [
           "Data unavailable: the Google Workspace policy or organisational unit read is incomplete, so a unit may be missing."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the policy and organisational unit read completes."
       },
       "section_not_collected": {
         "reason_texts": [],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
       },
       "section_shape_unusable": {
         "reason_texts": [
           "Data unusable: the Google Workspace tenant or policy evidence has the wrong shape, so no unit can be placed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
       },
       "service_off_everywhere": {
         "reason_texts": [
           "Not applicable: the service is turned off in every organisational unit and group."
         ],
-        "remediation_steps": "Check whether the service is enabled."
+        "remediation_steps": "Check the service is meant to stay off in every organisational unit."
       },
       "service_status_absent": {
         "reason_texts": [
           "Data unavailable: a service status is absent or unreadable, so it is not known where the settings apply."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the service on or off status is read for every unit this policy covers."
       },
       "setting_absent": {
         "reason_texts": [
           "Data unavailable: a setting the policy reads is absent at the top-level organisational unit and has no pinned default."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check in the Admin console that every setting this policy reads is configured at the top-level organisational unit, then collect again."
       },
       "setting_value_unusable": {
         "reason_texts": [
           "Data unusable: a setting the policy reads has the wrong type or an unknown value."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check each setting this policy reads in the Admin console for a wrong type or unknown value, then collect again."
       },
       "unit_violates": {
         "reason_texts": [
           "Requirement not met: at least one organisational unit or group has a setting combination the baseline does not allow."
         ],
-        "remediation_steps": "Check the setting against the baseline in the Admin console."
+        "remediation_steps": "In the Admin console, change the settings on each organisational unit or group whose combination the baseline does not allow."
       }
     },
     "super_admin_count": {
@@ -339,35 +339,35 @@
         "reason_texts": [
           "Requirement met: two to eight super admin accounts are configured."
         ],
-        "remediation_steps": "Check the setting again after changes."
+        "remediation_steps": "Check the super admin count again after adding or removing an account."
       },
       "count_out_of_range": {
         "reason_texts": [
           "Requirement not met: fewer than two or more than eight super admin accounts are configured."
         ],
-        "remediation_steps": "Check the setting against the baseline in the Admin console."
+        "remediation_steps": "In the Admin console, bring the number of super admin accounts to between two and eight."
       },
       "count_unusable": {
         "reason_texts": [
           "Data unusable: the read reports no super admin, which a Google Workspace tenant cannot have; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; a tenant always has a super admin, so report it as an Auditex problem if the read keeps showing none."
       },
       "section_not_collected": {
         "reason_texts": [],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
       },
       "section_shape_unusable": {
         "reason_texts": [
           "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
       },
       "user_read_incomplete": {
         "reason_texts": [
           "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the user and admin role read completes."
       }
     },
     "twosv": {
@@ -375,35 +375,35 @@
         "reason_texts": [
           "Requirement met: no organisational unit or group has a 2-Step Verification setting that breaks this policy."
         ],
-        "remediation_steps": "Check the setting again after changes."
+        "remediation_steps": "Check the 2-Step Verification settings again after any change in the Admin console."
       },
       "policy_read_incomplete": {
         "reason_texts": [
           "Data unavailable: the Google Workspace policy read or the organisational unit read is incomplete; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again so the policy and organisational unit read completes."
       },
       "section_not_collected": {
         "reason_texts": [],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Grant the scope the missing evidence section needs, then run the collection again."
       },
       "section_shape_unusable": {
         "reason_texts": [
           "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Run the collection again; if the evidence section is still malformed, report it as an Auditex problem."
       },
       "setting_value_unusable": {
         "reason_texts": [
           "Data unusable: a 2-Step Verification setting that applies has an unreadable value, a value of the wrong type or an unknown option; the policy was not assessed."
         ],
-        "remediation_steps": "Check the setting and collect complete evidence in the Admin console."
+        "remediation_steps": "Check the 2-Step Verification settings of each organisational unit and group in the Admin console for an unreadable value, then collect again."
       },
       "unit_violates": {
         "reason_texts": [
           "Requirement not met: at least one organisational unit or group has a 2-Step Verification setting that breaks this policy."
         ],
-        "remediation_steps": "Check the setting against the baseline in the Admin console."
+        "remediation_steps": "In the Admin console, change the 2-Step Verification setting on each organisational unit or group that breaks the policy."
       }
     }
   },
