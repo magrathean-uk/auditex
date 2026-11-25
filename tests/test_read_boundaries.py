@@ -3224,7 +3224,7 @@ def test_every_google_api_call_is_a_read_method() -> None:
         "members.list", "users.aliases.list", "tokens.list", "activities.list", "alerts.list",
         "getAutoForwarding", "filters.list", "forwardingAddresses.list", "sendAs.list", "getImap", "getPop",
         "getVacation", "delegates.list", "files.list", "permissions.list", "drives.list", "groups.get", "resources.calendars.list",
-        "calendarList.list", "acl.list", "list", "mobiledevices.list", "chromeosdevices.list",
+        "calendarList.list", "acl.list", "list", "inboundSsoAssignments.list", "mobiledevices.list", "chromeosdevices.list",
     }
     violations = [
         f"{file}:{line} {chain}" for file, line, chain, _ in calls if not _GOOGLE_READ_METHOD.match(chain.rsplit(".", 1)[-1])

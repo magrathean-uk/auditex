@@ -123,7 +123,7 @@ Admin flow:
 2. Create a delegated service identity in Google Cloud.
 3. Copy its OAuth app ID.
 4. In Admin Console, open Security > Access and data control > API controls > Domain-wide delegation.
-5. Add the OAuth app ID and paste the generated comma-separated scopes. The 2-step verification policy needs `cloud-identity.policies.readonly` and the Cloud Identity API.
+5. Add the OAuth app ID and paste the generated comma-separated scopes. Enable the Cloud Identity API for the `cloud-identity.policies.readonly` and `cloud-identity.inboundsso.readonly` reads.
 6. Run the generated doctor and probe commands.
 
 Google DNS posture (`google_dns_posture`, in the `core-security`, `mail` and `everything` presets) sends the

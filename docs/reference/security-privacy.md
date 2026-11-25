@@ -136,6 +136,8 @@ call, and the audit log records both what ran and what was refused.
 
 The Google Cloud Identity Policy API read uses the existing `cloud-identity.policies.readonly` scope. It asks for the audited settings and excludes DLP rule bodies. The collector, offline replay and bundle writer use the same per-setting field allow-list. Policy resource names, response customer IDs, raw CEL queries, custom messages, descriptions and notification recipients are discarded. Policy values retain typed evidence, including the pinned names of Google-built system alerts. Other system alert names and unrecognised requested settings outside 2SV use a fixed `unrecognised` marker. Gmail address lists retain opaque IDs and entry counts, with a separate count for domain-shaped entries. Rule and list references remain available for joining the audit evidence. Invalid required values leave the affected setting unusable.
 
+The read-only `cloud-identity.inboundsso.readonly` scope can read inbound SAML and OIDC profiles, their assignments and SAML public-key metadata. Auditex lists assignments and keeps only their OU or group target and mode. With domain-wide delegation the collector uses its own token, so a missing grant affects only the inbound SSO read.
+
 MCP tools with `read_only_hint` false (a test compares this list with the registry).
 None of them writes to a tenant; the hint is false because they write local files,
 or, for the response tool, because it is a gated response action:
@@ -814,7 +816,10 @@ the table above.
   collected data and in no schema, config or source literal (a Graph property
   passed through), and a field name the generator misses (a key passed as a call
   keyword, for example in `google_workspace/normalize.py`), is not exempt, so a
-  person with that name has the key renamed. A new product key under `src/`,
+  person with that name has the key renamed. Google Workspace setting and
+  Policy API field names (`region`, `securityUpdate`) are held as values, never
+  as mapping keys or module-level constants, so they are not exempt either
+  (DEC-171). A new product key under `src/`,
   `schemas/` or `configs/` fails the drift test until `_D5_FIELD_NAMES` is
   edited by hand; the failure lists the missing names.
 - Stated limits of the merged matcher (DEC-044 stop rule: limits, not defects to

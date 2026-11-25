@@ -29,12 +29,22 @@ GOOGLE_SCOPE_NOTES: dict[str, dict[str, str]] = {
         "risk": "content_capable",
         "note": "Drive readonly can read file content; Auditex only uses metadata/list endpoints and records no content reads.",
     },
+    "https://www.googleapis.com/auth/cloud-identity.inboundsso.readonly": {
+        "risk": "read_only",
+        "note": (
+            "Can read inbound SAML and OIDC profiles, assignment records and SAML public-key metadata. "
+            "Auditex lists assignments and retains only the OU or group target and mode."
+        ),
+    },
 }
 
 GOOGLE_API_ENABLEMENT = {
     "google_directory": ["Admin SDK API"],
     "google_reports": ["Admin SDK API"],
+    "google_setting_events": ["Admin SDK API"],
     "google_alert_center": ["Alert Center API"],
+    "google_policies": ["Cloud Identity API"],
+    "google_sso_assignments": ["Cloud Identity API"],
     "google_gmail_settings": ["Gmail API", "Admin SDK API"],
     "google_devices": ["Admin SDK API"],
     "google_dns_posture": ["Admin SDK API"],

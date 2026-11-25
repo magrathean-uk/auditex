@@ -67,13 +67,19 @@ from .collectors import (
     SUBJECT_SCOPED_COLLECTORS,
     policy_replay_rows,
     replay_policy_payload,
+    replay_scuba_payload,
+    scuba_probe_rows,
 )
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
     DEFAULT_STALE_USER_DAYS,
     build_google_findings,
 )
-from .normalize import build_google_normalized_snapshot, unplaced_policy_count
+from .normalize import (
+    build_google_normalized_snapshot,
+    org_unit_read_malformed,
+    unplaced_policy_count,
+)
 
 LOG = logging.getLogger("auditex.google_workspace")
 _OFFLINE_SAMPLE_METADATA_KEYS = frozenset({"_fixture_provenance"})
@@ -451,6 +457,15 @@ def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None
         rows.append(_preflight_call(collector, "alerts", lambda: client.list_alerts(top=top)))
     elif collector == "google_policies":
         rows.append(_preflight_call(collector, "policySettings", lambda: client.list_policies(limit=top)))
+    elif collector == "google_setting_events":
+        event_name = "CHANGE_APPLICATION_SETTING"
+        rows.append(_preflight_call(collector, "settingEvents", lambda: scuba_probe_rows(
+            client.list_admin_setting_events(event_name, limit=top), collector, event_name=event_name,
+        )))
+    elif collector == "google_sso_assignments":
+        rows.append(_preflight_call(collector, "inboundSsoAssignments", lambda: scuba_probe_rows(
+            client.list_inbound_sso_assignments(limit=top), collector,
+        )))
     elif collector == "google_gmail_settings":
         def gmail_check() -> list[dict[str, Any]]:
             # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
@@ -653,27 +668,50 @@ def _record_policy_placement(
     collector_payloads: dict[str, dict[str, Any]],
     result_rows: list[dict[str, Any]],
     coverage_rows: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    count = unplaced_policy_count(collector_payloads, coverage_rows)
-    if not count:
-        return None
-    row = {
-        "collector": "google_policies",
-        "type": "derived",
-        "name": "policyPlacement",
-        "status": "partial",
-        "item_count": 0,
-        "error_class": "malformed_response",
-        "error": f"{count} policies target organisational units absent from the complete Directory read.",
-        "policy_row_validation": True,
-    }
-    coverage_rows.append(row)
-    summary = next(item for item in result_rows if item["name"] == "google_policies")
-    if summary["status"] == "ok":
-        summary["status"] = "partial"
-    summary["coverage_rows"] += 1
-    writer.write_checkpoint("google_policies", summary)
-    return row
+) -> list[dict[str, Any]]:
+    """Partial coverage rows for a malformed Directory OU read and for OU targets absent from a complete one."""
+    new_rows: list[tuple[str, dict[str, Any]]] = []
+    if org_unit_read_malformed(collector_payloads.get("google_directory")):
+        new_rows.append(
+            (
+                "google_directory",
+                {
+                    "collector": "google_directory",
+                    "type": "derived",
+                    "name": "orgUnits",
+                    "status": "partial",
+                    "item_count": 0,
+                    "error_class": "malformed_response",
+                    "error": "The Directory organisational unit read is present but malformed.",
+                },
+            )
+        )
+    if count := unplaced_policy_count(collector_payloads, coverage_rows):
+        new_rows.append(
+            (
+                "google_policies",
+                {
+                    "collector": "google_policies",
+                    "type": "derived",
+                    "name": "policyPlacement",
+                    "status": "partial",
+                    "item_count": 0,
+                    "error_class": "malformed_response",
+                    "error": f"{count} policies target organisational units absent from the complete Directory read.",
+                    "policy_row_validation": True,
+                },
+            )
+        )
+    for collector, row in new_rows:
+        coverage_rows.append(row)
+        summary = next((item for item in result_rows if item["name"] == collector), None)
+        if summary is None:
+            continue
+        if summary["status"] == "ok":
+            summary["status"] = "partial"
+        summary["coverage_rows"] += 1
+        writer.write_checkpoint(collector, summary)
+    return [row for _, row in new_rows]
 
 
 def run_google_offline(
@@ -744,7 +782,8 @@ def run_google_offline(
     # ``null``, a list or an empty object under a collector's name is a collector that delivered nothing, not one that is
     # absent from the sample: it stays in the run, with every section it should have carried recorded as absent.
     sample_collectors = {
-        str(key): replay_policy_payload(str(key), value) for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS
+        str(key): replay_scuba_payload(str(key), replay_policy_payload(str(key), value))
+        for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS
     }
     collector_payloads = {name: value for name, value in sample_collectors.items() if isinstance(value, dict)}
     result_rows: list[dict[str, Any]] = []
@@ -783,8 +822,7 @@ def run_google_offline(
         result_rows.append(row)
         writer.write_checkpoint(name, row)
         writer.write_raw(name, payload)
-    if placement := _record_policy_placement(writer, collector_payloads, result_rows, coverage_rows):
-        diagnostics.append(placement)
+    diagnostics.extend(_record_policy_placement(writer, collector_payloads, result_rows, coverage_rows))
     for row in result_rows:
         writer.write_summary(row)
     writer.write_index_records(coverage_rows)
@@ -912,7 +950,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         coverage_rows.extend(output.coverage_rows)
         collector_payloads[name] = output.result.payload
     if placement := _record_policy_placement(writer, collector_payloads, result_rows, coverage_rows):
-        writer.write_index_records([placement])
+        writer.write_index_records(placement)
     for row in result_rows:
         writer.write_summary(row)
     name_missing_scopes(client, coverage_rows)
