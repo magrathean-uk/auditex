@@ -90,6 +90,12 @@ def _id(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _rule_id(value: Any) -> bool:
+    """The id of a storage or spam override rule: a non-blank string only. Google documents string rule ids for both,
+    so a number there is out of type and confirms nothing (review round 3 M2). Address-list ids keep ``_id``."""
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _ids(value: Any) -> bool:
     """A list of usable Gmail list ids."""
     return isinstance(value, list) and all(_id(item) for item in value)
@@ -161,7 +167,7 @@ def _override(units: Units, unit: str, override: Any, check: str) -> bool | None
     others say: the primary key (a blank or wrong-typed ``ruleId`` is unknown even with the flag false, review round
     2 B4), the enable flag, the address-list field and the override's rule state. A list is looked up only when the
     flag is on, since an off flag never applies it."""
-    if not isinstance(override, dict) or not _id(override.get("ruleId")):
+    if not isinstance(override, dict) or not _rule_id(override.get("ruleId")):
         return None
     enable, allow = _override_fields(check)
     on = _flag(override, enable)
@@ -193,7 +199,7 @@ def _overrides(check: str):
 def _storage(units: Units, unit: str, value: Any) -> bool | None:
     """GMAIL.17.1: the storage rule's ``enabled`` (the parser's ``mail_storage``) must be true."""
     rule_id = value.get("ruleId") if isinstance(value, dict) else None
-    if not _id(rule_id):
+    if not _rule_id(rule_id):
         return None
     state = _rule_state(units, unit, rule_id)
     return None if state is None else not state
@@ -235,6 +241,11 @@ def _scan(units: Units, section: str, service: str, judge) -> str:
             return "unit_violates"
         elif outcome is None and value is not MISSING:
             unusable = True
+    # The top unit's own record must be readable even where its service is off: a record the evaluator cannot read
+    # (``{}``, a null field) is no root value, so a readable child never makes the whole policy met (review round 3 M1).
+    top = units.values[units.top].get(section, MISSING)
+    if top is not MISSING and (top is UNUSABLE or judge(units, units.top, top) is None):
+        unusable = True
     if unusable:
         return "setting_value_unusable"
     if unknown_service:

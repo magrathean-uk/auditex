@@ -437,12 +437,52 @@ def test_round2_b3_an_integer_keyed_state_never_hides_an_unrelated_override(viol
     assert _answer("GWS.GMAIL.18.3v1", _g183(violating, states=_states(_state("o1"), _state(42)))) == expected
 
 
-@pytest.mark.parametrize(("violating", "expected"), [(True, NOT_MET), (False, MET)])
-def test_round2_b3_integer_rule_ids_answer_for_storage_and_overrides(violating, expected):
+@pytest.mark.parametrize("violating", [False, True])
+def test_round3_m2_a_numeric_storage_or_override_rule_id_confirms_nothing(violating):
     assert _answer("GWS.GMAIL.17.1v1", _g17(violating, storage={"ruleId": 7},
-                                            states=_states(_state(7, not violating)))) == expected
+                                            states=_states(_state(7, not violating)))) == UNUSABLE
     assert _answer("GWS.GMAIL.18.3v1", _g183(violating, override={"ruleId": 5, "hideWarningBannerForAll": violating},
-                                             states=_states(_state(5)))) == expected
+                                             states=_states(_state(5)))) == UNUSABLE
+
+
+@pytest.mark.parametrize("policy_id", ["GWS.GMAIL.18.1v1", "GWS.GMAIL.18.2v1"])
+@pytest.mark.parametrize("violating", [False, True])
+def test_round3_m2_a_numeric_override_rule_id_on_a_list_check_confirms_nothing(policy_id, violating):
+    enable, allow = _LIST_FIELDS[policy_id]
+    sections = _g18l(policy_id, violating, override={"ruleId": 5, enable: True, allow: ["l1"]},
+                     states=_states(_state(5), _state("l1")))
+    assert _answer(policy_id, sections) == UNUSABLE
+
+
+@pytest.mark.parametrize("storage_bad", [{}, {"ruleId": None}])
+def test_round3_m1_an_unusable_root_storage_record_never_lets_a_readable_child_pass(storage_bad):
+    assert _answer("GWS.GMAIL.17.1v1", _root_off_child_on(
+        ("ou:root", "gmail_comprehensive_mail_storage", storage_bad),
+        ("ou:a", "gmail_comprehensive_mail_storage", {"ruleId": "s1"}),
+        ("ou:a", "gmail_rule_states", {"ruleStates": [{"ruleId": "s1", "enabled": True}]}))) == UNUSABLE
+
+
+@pytest.mark.parametrize("policy_id", ["GWS.GMAIL.18.1v1", "GWS.GMAIL.18.2v1", "GWS.GMAIL.18.3v1"])
+@pytest.mark.parametrize("root_bad", [{}, {"spamOverride": None}])
+def test_round3_m1_an_unusable_root_override_record_never_lets_a_readable_child_pass(policy_id, root_bad):
+    assert _answer(policy_id, _root_off_child_on(
+        ("ou:root", "gmail_spam_override_lists", root_bad),
+        ("ou:a", "gmail_spam_override_lists", {"spamOverride": []}))) == UNUSABLE
+
+
+def test_round3_m1_a_readable_root_record_with_the_service_off_still_lets_a_readable_child_answer():
+    assert _answer("GWS.GMAIL.17.1v1", _root_off_child_on(
+        ("ou:root", "gmail_comprehensive_mail_storage", {"ruleId": "s1"}),
+        ("ou:root", "gmail_rule_states", {"ruleStates": [{"ruleId": "s1", "enabled": True}]}),
+        ("ou:a", "gmail_comprehensive_mail_storage", {"ruleId": "s2"}),
+        ("ou:a", "gmail_rule_states", {"ruleStates": [{"ruleId": "s2", "enabled": True}]}))) == MET
+
+
+def test_round3_m1_a_readable_child_violation_still_wins_over_an_unusable_root_record():
+    assert _answer("GWS.GMAIL.17.1v1", _root_off_child_on(
+        ("ou:root", "gmail_comprehensive_mail_storage", {}),
+        ("ou:a", "gmail_comprehensive_mail_storage", {"ruleId": "s1"}),
+        ("ou:a", "gmail_rule_states", {"ruleStates": [{"ruleId": "s1", "enabled": False}]}))) == NOT_MET
 
 
 @pytest.mark.parametrize("violating", [False, True])
