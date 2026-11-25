@@ -131,7 +131,7 @@ release-archive:
 		$(PYTHON) scripts/check-archive-wheel.py "$$dir/source/src" "$$dir"/wheel/*.whl
 
 # The artefacts land in $(DIST_DIR); earlier auditex wheels and sdists there are removed first, so the
-# folder holds only this build (release smoke and the gh release command take every file in it).
+# folder holds only this build (release smoke takes every file in it).
 DIST_DIR ?= dist
 
 .PHONY: dist

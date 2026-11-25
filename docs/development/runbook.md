@@ -121,7 +121,7 @@ The replay kit is three files in one folder: `vectors.jsonl`, `a2-vectors.jsonl`
 
 ### Publication
 
-A release is a signed `vX.Y.Z` tag plus a GitHub release carrying the wheel and sdist from `make dist` (`gh release create vX.Y.Z dist/*.whl dist/*.tar.gz`), and the same two files uploaded to PyPI under the name `auditex` (`twine upload dist/auditex-X.Y.Z-py3-none-any.whl dist/auditex-X.Y.Z.tar.gz`) after `make dist-check` passes. Customers install from PyPI with `pipx install auditex` (see the [install guide](../guides/install-guide.md)). Tagging, the release and the PyPI upload wait for G's explicit yes naming the version; a green `make release-check` is not approval.
+A release is a signed, annotated `vX.Y.Z` tag plus the wheel and sdist from `make dist` uploaded to PyPI under the name `auditex` (`twine upload dist/auditex-X.Y.Z-py3-none-any.whl dist/auditex-X.Y.Z.tar.gz`) after `make dist-check` passes. Auditex has no GitHub Releases; PyPI is the only package channel. Customers install from PyPI with `pipx install auditex` (see the [install guide](../guides/install-guide.md)). Tagging and the PyPI upload wait for G's explicit yes naming the version; a green `make release-check` is not approval.
 
 ### Internal tools
 
