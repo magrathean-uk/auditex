@@ -384,10 +384,23 @@ def _value_rule_row_holds(record: dict[str, Any], version: str) -> bool:
     (``validate_assessment``): the catalogue cell, its reason, its citation, and the claims, limitations and
     recommendations the cell implies, all together. A row that fails them is not a verdict."""
     from azure_tenant_audit.resources import open_text_resource
-    from azure_tenant_audit.scuba_assessment import _LATE_EVIDENCE, _legacy_safelinks_cell
+    from azure_tenant_audit.scuba_assessment import (
+        _LATE_EVIDENCE,
+        _legacy_safelinks_cell,
+    )
     from azure_tenant_audit.scuba_precheck import precheck_response
-    from azure_tenant_audit.value_rules.catalogue import cell_entry, citation_variants, reason_matches, row_for, shared_reason
-    from azure_tenant_audit.value_rules.record import RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE, is_shared_reason
+    from azure_tenant_audit.value_rules.catalogue import (
+        cell_entry,
+        citation_variants,
+        reason_matches,
+        row_for,
+        shared_reason,
+    )
+    from azure_tenant_audit.value_rules.record import (
+        RULE_FAILURE_CODE,
+        RULE_NOT_IMPLEMENTED_CODE,
+        is_shared_reason,
+    )
     try:
         detail, policy_id = record["rule_precheck"], record["policy_id"]
         policy = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"].get(policy_id)

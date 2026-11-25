@@ -72,6 +72,7 @@ SCRIPT_BUILDERS = [
     ("generate-explainer-baselines.py", "main"),
     ("generate-explainer.py", "main"),
     ("generate-rule-packs.py", "main"),
+    ("scuba-parity.py", "main"),
 ]
 
 

@@ -23,7 +23,10 @@ Inputs:
   rules for a rule answer: `validation_status` valid, no model attempts, latency or hashes, exactly the two claims,
   every known claim citing `e0`, a value-rule class only in a 2026-11-05 or later file, and a verdict the pre-check
   class can carry (closed gate: not_applicable; empty required list: not_met; absent section or field:
-  not_assessed). A row that fails is refused (exit 2), never mapped to a verdict. A row from the retired model layer
+  not_assessed). A row that fails is refused (exit 2), never mapped to a verdict. A value-rule row that passes the
+  schema but fails the writer's own semantic and citation checks (catalogue cell, reason, citation and the claims they
+  imply, as `validate_assessment` applies them) is unusable: category `auditex_row_invalid`, no verdict, exit 1 under
+  `--strict`. A row from the retired model layer
   reads `not_assessed` with reason `not_a_rule_answer`. Google Workspace rows use the same row contract with the GWS
   id pattern until M13 ships its writer.
 - or, for Microsoft 365, `--same-input`: the script runs the internal ScubaGear export adapter
@@ -40,7 +43,7 @@ then linked to its final name, which fails rather than replace an existing file;
 only the files this invocation created, so a concurrent run into the same directory never loses its reports.
 Stdout gets one JSON line of counts.
 
-Exit codes: 0 compared; 1 compared with `--strict` and at least one `disagreement`; 2 unusable input, with one
+Exit codes: 0 compared; 1 compared with `--strict` and at least one `disagreement` or `auditex_row_invalid`; 2 unusable input, with one
 fixed message on stderr that never contains a path or input text.
 
 ```sh
@@ -70,8 +73,8 @@ Auditex verdicts come from the `requirement_met` claim exactly as `value_rule_ve
 `not_met`, `not_applicable` (inferred true with `policy_not_applicable`) and `not_assessed`. The reason code is the
 rule precheck's `reason_code`, else its class (`absent_section` and so on), else `rule_not_implemented`,
 `policy_not_in_catalogue` or `not_a_rule_answer`. A code that no shipped rule config (`configs/*.json`) or divergence entry names is
-reported as `unlisted_reason_code`, so free text in an assessment never reaches the report. The assessment is
-checked structurally, not against its schema version, so older assessments still load.
+reported as `unlisted_reason_code`, so free text in an assessment never reaches the report. Each row is
+checked against the row schema of the assessment's own `schema_version`, so older assessments still load.
 
 ### Categories
 
@@ -79,13 +82,14 @@ checked structurally, not against its schema version, so older assessments still
 |---|---|
 | `agree` | pass with met or not_applicable, or fail with not_met |
 | `documented_divergence` | a non-agreement that matches a documented D row (named in the row) |
+| `auditex_row_invalid` | the Auditex value-rule row fails the writer's own semantic or citation checks: unusable, never a verdict; `--strict` exits 1 |
 | `auditex_not_assessed` | the CISA tool decided and Auditex did not: unknown is not safe, but find out why |
 | `auditex_decided` | the CISA tool could not decide and Auditex did |
 | `disagreement` | both decided, opposite answers, nothing documented: needs a look |
 | `neither_decided` | neither side decided |
 | `cisa_only`, `auditex_only` | the policy id is in one input only (product subset, version suffix or catalogue gap) |
 
-| `release_delta` | a non-agreement on a policy whose ScubaGear Rego changed between the rule reference and the pinned release |
+| `release_delta` | a non-agreement whose policy, CISA class and Auditex verdict match a cited pair in the pinned-release map (`RELEASE_DELTAS`); the map is empty until a pair is proven against the exact rule revision. Never an `Error` row |
 
 Order: `agree` first, then `neither_decided` (so a D row never applies when neither side decided), then
 `documented_divergence`, then `release_delta`, then the rest.
@@ -124,16 +128,19 @@ Two different ScubaGear references exist; parity uses the rule one.
 | ScubaGear v1.8.0 baselines | the framework mapping's catalogue entry (`configs/framework-catalog.json`); its product set has Defender (`MS.DEFENDER.*`) instead of Security Suite, and its `-ProductNames *` leaves out Power BI | framework mappings only |
 
 Parity pins ScubaGear release v2.0.0 (22 October 2026). The rule oracle is an ancestor of tag v2.0.0, eight
-commits behind it, with the same product set and policy ids as the Auditex v3.9.1 catalogue, so `-ProductNames *`
-covers every catalogue product. Three Rego changes landed in those eight commits, and their policies are labelled
-`release_delta` rather than `disagreement` when the two sides differ: MS.AAD.3.2v2 (#2515, exclusions were read under
-the old id), MS.AAD.5.5v1 (#2513, an unconfigured password addition restriction passed) and MS.AAD.9.1v1 (#2522,
-agent exclusions and an N/A when no agent licence exists). Every other v2.0.0 change in that range is report text,
+commits behind it, in the same seven products, so `-ProductNames *` covers every catalogue product. The tagged v2.0.0
+sample compared in same-input mode covers all seven products but not every id: it has eight CISA-only manual controls
+and one Auditex-only id (`MS.POWERPLATFORM.2.3v1`), the report shows these counts, and `full_parity` is false. Four
+policies had Rego changes in those eight commits: MS.AAD.3.2v2 (#2515, exclusions read), MS.AAD.5.5v1 (#2513, a
+missing password-addition restriction in either scope), MS.AAD.5.6v1 (the same change through the lifetime check)
+and MS.AAD.9.1v1 (#2522, agent exclusions and an N/A when no agent licence exists). Each effect depends on the export,
+not on a verdict pair, so a difference on them stays a `disagreement` until it is explained against the exact rule
+revision; only then is a cited pair added to `RELEASE_DELTAS`. Every other v2.0.0 change in that range is report text,
 providers' throttling retries or tooling.
 
 ScubaGoggles is pinned to v1.1.0, the M13 oracle. The report records the CISA tool version, `version_matches`, the
-rule reference, the release-delta policies and `full_parity`, which is true only when the version matches and no id
-sits on one side only. A result from another release is still compared but is never reported as matching: a
+rule reference, the release-delta policies and `full_parity`, which is true only when the version matches, no id
+sits on one side only and no row is a `disagreement` or `auditex_row_invalid` (the rows that make `--strict` exit 1). A result from another release is still compared but is never reported as matching: a
 v1.8.0 report shows `MS.DEFENDER.*` as `cisa_only` and `MS.SECURITYSUITE.*` as `auditex_only`, and the Markdown
 says it is not a parity result.
 
