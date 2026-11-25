@@ -1,1 +1,384 @@
-{"kinds": {}, "policies": {}}
+{
+  "kinds": {
+    "admin_sso": {
+      "cells": {
+        "admin_uses_external_sso": {
+          "reason_code": "admin_uses_external_sso",
+          "reason_texts": [
+            "Requirement not met: at least one privileged account is assigned to sign in through an external identity provider."
+          ],
+          "verdict": "not_met"
+        },
+        "admins_use_google_sign_in": {
+          "reason_code": "admins_use_google_sign_in",
+          "reason_texts": [
+            "Requirement met: every privileged account signs in with Google, not through an external identity provider."
+          ],
+          "verdict": "met"
+        },
+        "assignment_unusable": {
+          "cited": [
+            "gws_sso"
+          ],
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_sso_assignment",
+          "reason_texts": [
+            "Data unusable: an inbound SSO assignment that applies to a privileged account has an unknown mode, or one target holds disagreeing assignments; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "lineage_unresolved": {
+          "cited": [
+            "gws_tenant",
+            "gws_admins"
+          ],
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_org_unit_lineage",
+          "reason_texts": [
+            "Data unavailable: the organisational unit read is incomplete or inconsistent, so the nearest SSO assignment of a privileged account cannot be found; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "membership_incomplete": {
+          "cited": [
+            "gws_admins",
+            "gws_sso"
+          ],
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_membership_incomplete",
+          "reason_texts": [
+            "Data unavailable: an inbound SSO assignment targets a group and the group membership read is incomplete; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_privileged_users": {
+          "cited": [
+            "gws_admins"
+          ],
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_no_privileged_users",
+          "reason_texts": [
+            "Data unusable: the read reports no privileged account, which a Google Workspace tenant cannot have; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "evidence_kind": null,
+          "limitations": [
+            "required_evidence_section_not_collected",
+            "required_evidence_section_not_collected:<section>"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "recommendations": [
+            "collect_missing_evidence_section"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "sso_read_incomplete": {
+          "cited": [
+            "gws_sso"
+          ],
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_sso_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the inbound SSO assignment read is incomplete; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "user_read_incomplete": {
+          "cited": [
+            "gws_admins"
+          ],
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_user_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        }
+      }
+    },
+    "super_admin_count": {
+      "cells": {
+        "count_in_range": {
+          "reason_code": "count_in_range",
+          "reason_texts": [
+            "Requirement met: two to eight super admin accounts are configured."
+          ],
+          "verdict": "met"
+        },
+        "count_out_of_range": {
+          "reason_code": "count_out_of_range",
+          "reason_texts": [
+            "Requirement not met: fewer than two or more than eight super admin accounts are configured."
+          ],
+          "verdict": "not_met"
+        },
+        "count_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_super_admin_count",
+          "reason_texts": [
+            "Data unusable: the read reports no super admin, which a Google Workspace tenant cannot have; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "evidence_kind": null,
+          "limitations": [
+            "required_evidence_section_not_collected",
+            "required_evidence_section_not_collected:<section>"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "recommendations": [
+            "collect_missing_evidence_section"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "user_read_incomplete": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_user_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        }
+      }
+    },
+    "twosv": {
+      "cells": {
+        "no_unit_violates": {
+          "reason_code": "no_unit_violates",
+          "reason_texts": [
+            "Requirement met: no organisational unit or group has a 2-Step Verification setting that breaks this policy."
+          ],
+          "verdict": "met"
+        },
+        "policy_read_incomplete": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_policy_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the Google Workspace policy read or the organisational unit read is incomplete; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "evidence_kind": null,
+          "limitations": [
+            "required_evidence_section_not_collected",
+            "required_evidence_section_not_collected:<section>"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "recommendations": [
+            "collect_missing_evidence_section"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: an evidence section this policy reads has the wrong shape; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_value_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_setting_value",
+          "reason_texts": [
+            "Data unusable: a 2-Step Verification setting that applies has an unreadable value, a value of the wrong type or an unknown option; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "unit_violates": {
+          "reason_code": "unit_violates",
+          "reason_texts": [
+            "Requirement not met: at least one organisational unit or group has a 2-Step Verification setting that breaks this policy."
+          ],
+          "verdict": "not_met"
+        }
+      }
+    }
+  },
+  "policies": {
+    "GWS.COMMONCONTROLS.1.1v1": {
+      "kind": "twosv",
+      "params": {
+        "check": "passkey_only"
+      },
+      "rule_id": "GWS.COMMONCONTROLS.1.1v1.twosv",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.2v1": {
+      "kind": "twosv",
+      "params": {
+        "check": "enrolled_and_enforced"
+      },
+      "rule_id": "GWS.COMMONCONTROLS.1.2v1.twosv",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.3v1": {
+      "kind": "twosv",
+      "params": {
+        "check": "no_telephony"
+      },
+      "rule_id": "GWS.COMMONCONTROLS.1.3v1.twosv",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.4v1": {
+      "kind": "twosv",
+      "params": {
+        "check": "grace_period_one_to_seven_days"
+      },
+      "rule_id": "GWS.COMMONCONTROLS.1.4v1.twosv",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.5v1": {
+      "kind": "twosv",
+      "params": {
+        "check": "device_trust_off"
+      },
+      "rule_id": "GWS.COMMONCONTROLS.1.5v1.twosv",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.6.1v1": {
+      "kind": "admin_sso",
+      "params": {},
+      "rule_id": "GWS.COMMONCONTROLS.6.1v1.admin_sso",
+      "sections": [
+        "gws_tenant",
+        "gws_admins",
+        "gws_sso"
+      ]
+    },
+    "GWS.COMMONCONTROLS.6.2v1": {
+      "kind": "super_admin_count",
+      "params": {},
+      "rule_id": "GWS.COMMONCONTROLS.6.2v1.super_admin_count",
+      "sections": [
+        "gws_admins"
+      ]
+    }
+  }
+}
