@@ -13,9 +13,11 @@
   user, the modes of the SSO assignments on the groups the user is in decide; with none, the assignment on the
   nearest organisational unit of the user's parent chain decides; with neither, the user signs in with Google.
 
-Unknown is not safe (design 8.4): a malformed value, an unknown enum, a cut read, a group assignment met with
-incomplete memberships or an unresolved parent chain never answers met. A positively read violation still wins over
-unknowns elsewhere (design 8.2, step 4). Texts are constant; no input value enters an answer.
+Unknown is not safe (design 8.4): a malformed value, an unknown enum, a cut read, an unplaceable policy target, a
+present record without its field, a group assignment met with incomplete memberships, an incomplete or broken OU
+read, or a privileged list too short for the super admin count never answers met, and never not_met either: every
+completeness check runs before the scan (design 8.2, step 2). Within a complete read a positively read violation
+still wins over unknowns elsewhere (design 8.2, step 4). Texts are constant; no input value enters an answer.
 """
 from __future__ import annotations
 
@@ -37,10 +39,12 @@ from .reduce import (
 
 # Outcomes, ordered so the strongest wins under ``max``: a positively read violation wins over any unknown. Ints, not
 # words, so no outcome name becomes a product field name.
-_FINE, _LINEAGE, _MEMBERSHIP, _UNKNOWN, _VIOLATES = range(5)
+_FINE, _LINEAGE, _UNKNOWN, _VIOLATES = range(4)
 _DAY = 86_400
 _GROUP = re.compile(r"group:[^/\s]+")
-_DURATION = re.compile(r"(\d+)([dhms])", re.ASCII | re.IGNORECASE)
+_GROUP_UNIT = re.compile(r"(ou:[^/\s]+)/group:[^/\s]+")
+# At most 18 digits (review M1): a longer count is unusable, and int() never meets the interpreter digit limit.
+_DURATION = re.compile(r"(\d{1,18})([dhms])", re.ASCII | re.IGNORECASE)
 _RFC3339 = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})",
                       re.ASCII)
 
@@ -51,7 +55,8 @@ _SHAPE_TEXT = "Data unusable: an evidence section this policy reads has the wron
 
 
 def duration_seconds(value: Any) -> int | None:
-    """``<n>[smhd]`` in seconds (``DurationToSeconds``, SG:scubagoggles/rego/Utils.rego:655-665); None otherwise."""
+    """``<n>[smhd]`` in seconds (``DurationToSeconds``, SG:scubagoggles/rego/Utils.rego:655-665); None otherwise,
+    including a count of more than 18 digits."""
     if not isinstance(value, str):
         return None
     match = _DURATION.fullmatch(value)
@@ -128,13 +133,23 @@ def _breaks(check: str, value: Any) -> int:
 
 
 def _own(units: Units, unit: str, section: str, field: str) -> Any:
-    """The unit's own value, defaults included on the top unit (ScubaGoggles' ``settings.<section>.<field>``)."""
+    """The unit's own value, defaults included on the top unit (ScubaGoggles' ``settings.<section>.<field>``).
+
+    ``MISSING`` only when the unit holds no record for the section. A record without the field (``{}`` or an unrelated
+    field) is ``UNUSABLE``: an explicit override that cannot be read, never "no override" (review B4). Every 2SV field
+    has a pinned default, so the top unit of a complete read always holds it."""
     value = units.values.get(unit, {}).get(section, MISSING)
     if value is MISSING or value is UNUSABLE:
         return value
     if not isinstance(value, dict):
         return UNUSABLE
-    return value.get(field, MISSING)
+    return value.get(field, UNUSABLE)
+
+
+def _applies(units: Units, unit: str, section: str, field: str) -> Any:
+    """The value that applies at the unit: its own record when it has one (readable or not), else the inherited one."""
+    own = _own(units, unit, section, field)
+    return own if own is not MISSING else effective(units, unit, section, field)
 
 
 def _enforced(value: Any, as_of: int) -> bool | None:
@@ -147,7 +162,7 @@ def _enforced(value: Any, as_of: int) -> bool | None:
 
 def _enrolled(units: Units, unit: str) -> bool | None:
     enrollment, _ = _twosv_sections()
-    value = effective(units, unit, enrollment, "allowEnrollment")
+    value = _applies(units, unit, enrollment, "allowEnrollment")
     return value if isinstance(value, bool) else None
 
 
@@ -171,11 +186,19 @@ def _twosv_unit(units: Units, unit: str, check: str, as_of: int) -> int:
             verdict = _UNKNOWN if own_value is UNUSABLE else _breaks(check, own_value)
             if verdict == _VIOLATES:
                 enrolled = _enrolled(units, unit)
-                in_force = _enforced(effective(units, unit, enforcement, "enforcedFrom"), as_of)
+                in_force = _enforced(_applies(units, unit, enforcement, "enforcedFrom"), as_of)
                 verdict = (_FINE if enrolled is False or in_force is False else
                            _UNKNOWN if enrolled is None or in_force is None else _VIOLATES)
             outcomes.add(verdict)
     return max(outcomes)
+
+
+def _placed(unit: str, org_units: dict[str, str | None]) -> bool:
+    """A policy target of design 7 (``ou:<id>`` or ``ou:<id>/group:<pseudonym>``) whose OU is in the complete OU map
+    (review B5). The shared reducer only refuses targets it cannot rank; this verdict path needs a real unit."""
+    match = _GROUP_UNIT.fullmatch(unit)
+    ou = match.group(1) if match else unit if _OU.fullmatch(unit) else None
+    return ou is not None and ou in org_units
 
 
 def twosv(policy_id: str, row: dict, sections: dict) -> dict:
@@ -193,6 +216,8 @@ def twosv(policy_id: str, row: dict, sections: dict) -> dict:
         return _A(policy_id, "data_unavailable_policy_read_incomplete",
                   "Data unavailable: the Google Workspace policy read or the organisational unit read is incomplete; "
                   "the policy was not assessed.", "policy_read_incomplete", row["sections"])
+    if not all(_placed(unit, sections["gws_tenant"]["org_units"]) for unit in units.values):
+        return _A(policy_id, "data_unusable_section_shape", _SHAPE_TEXT, "section_shape_unusable", row["sections"])
     outcome = max(_twosv_unit(units, unit, check, as_of) for unit in units.values)
     if outcome == _VIOLATES:
         return _rec(policy_id, "not_met", "unit_violates",
@@ -215,15 +240,19 @@ def _count(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
+def _user_read_incomplete(policy_id: str) -> dict:
+    return _A(policy_id, "data_unavailable_user_read_incomplete",
+              "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not "
+              "assessed.", "user_read_incomplete", ["gws_admins"])
+
+
 def super_admin_count(policy_id: str, row: dict, sections: dict) -> dict:
     admins = sections["gws_admins"]
     count = _count(admins.get("super_admin_count")) if isinstance(admins, dict) else None
     if count is None:
         return _A(policy_id, "data_unusable_section_shape", _SHAPE_TEXT, "section_shape_unusable", row["sections"])
     if admins.get("complete") is not True:
-        return _A(policy_id, "data_unavailable_user_read_incomplete",
-                  "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not "
-                  "assessed.", "user_read_incomplete", row["sections"])
+        return _user_read_incomplete(policy_id)
     if count == 0:
         return _A(policy_id, "data_unusable_super_admin_count",
                   "Data unusable: the read reports no super admin, which a Google Workspace tenant cannot have; the "
@@ -242,9 +271,11 @@ def super_admin_count(policy_id: str, row: dict, sections: dict) -> dict:
 
 def _sso_modes() -> tuple[frozenset[str], frozenset[str]]:
     """Google-only modes (``SsoModeRepresentsGoogleAuthOnly``, SG:scubagoggles/rego/Commoncontrols.rego:1031-1044)
-    and the external-SSO modes of the Cloud Identity ``InboundSsoAssignment.SsoMode`` enum; any other value is
-    unknown."""
-    return frozenset(("SSO_OFF", "SSO_MODE_UNSPECIFIED", "")), frozenset(("SAML_SSO", "DOMAIN_WIDE_SAML_IF_ENABLED"))
+    and the external-SSO modes of the Cloud Identity ``InboundSsoAssignment.SsoMode`` enum (an external SAML or OIDC
+    identity provider, or the domain-wide SAML provider when one is configured; review B3); any other value is
+    unknown (D14)."""
+    return (frozenset(("SSO_OFF", "SSO_MODE_UNSPECIFIED", "")),
+            frozenset(("SAML_SSO", "OIDC_SSO", "DOMAIN_WIDE_SAML_IF_ENABLED")))
 
 
 def _mode(modes: set[str]) -> int:
@@ -255,8 +286,8 @@ def _mode(modes: set[str]) -> int:
     return _FINE if modes <= google else _UNKNOWN
 
 
-def _privileged(admins: Any) -> list[tuple[str, frozenset[str]]] | None:
-    """``[(org unit, groups)]`` per privileged user; None when any entry has the wrong shape."""
+def _privileged(admins: Any) -> list[tuple[str, str, frozenset[str]]] | None:
+    """``[(user, org unit, groups)]`` per privileged user; None when any entry has the wrong shape."""
     users = admins.get("privileged") if isinstance(admins, dict) else None
     if not isinstance(users, list):
         return None
@@ -267,7 +298,7 @@ def _privileged(admins: Any) -> list[tuple[str, frozenset[str]]] | None:
                 or not isinstance(user.get("groups"), list)
                 or any(not isinstance(group, str) or not _GROUP.fullmatch(group) for group in user["groups"])):
             return None
-        out.append((user["org_unit"], frozenset(user["groups"])))
+        out.append((user["user"], user["org_unit"], frozenset(user["groups"])))
     return out
 
 
@@ -297,24 +328,16 @@ def _lineage(org_units: dict[str, str | None], unit: str) -> list[str]:
     return chain
 
 
-def _admin_user(org_unit: str, groups: frozenset[str], assigned: dict[str, set[str]], members_known: bool,
-                org_units: dict[str, str | None] | None) -> int:
+def _admin_user(org_unit: str, groups: frozenset[str], assigned: dict[str, set[str]],
+                org_units: dict[str, str | None]) -> int:
     """One privileged user (SG:scubagoggles/rego/Commoncontrols.rego:1015-1029): group assignments first, else the
-    nearest assignment on the user's OU chain, else SSO_OFF (:1006)."""
-    group_modes = set().union(*(assigned.get(group, set()) for group in groups))
-    outcome = _mode(group_modes) if group_modes else _FINE
-    if outcome == _VIOLATES:
-        return _VIOLATES
-    if not members_known:
-        # An unseen membership may add an external-SSO group, or a Google-only group that overrides the OU.
-        return _MEMBERSHIP
-    if group_modes:
-        return outcome
-    if org_unit in assigned:
-        # The user's own OU is the nearest whatever the chain above it holds, so no lineage is needed.
-        return _UNKNOWN if len(assigned[org_unit]) > 1 else _mode(assigned[org_unit])
-    if org_units is None or org_unit not in org_units:
+    nearest assignment on the user's OU chain, else SSO_OFF (:1006). The OU map, the memberships (when a group is
+    targeted) and the admin read are complete here; a user outside the complete OU map is inconsistent evidence."""
+    if org_unit not in org_units:
         return _LINEAGE
+    group_modes = set().union(*(assigned.get(group, set()) for group in groups))
+    if group_modes:
+        return _mode(group_modes)
     for unit in _lineage(org_units, org_unit):
         if unit in assigned:
             # One OU holds one assignment; two different modes on it are ambiguous, not a choice.
@@ -325,27 +348,43 @@ def _admin_user(org_unit: str, groups: frozenset[str], assigned: dict[str, set[s
 def admin_sso(policy_id: str, row: dict, sections: dict) -> dict:
     admins, sso = sections["gws_admins"], sections["gws_sso"]
     users, assigned = _privileged(admins), _assignments(sso)
+    count = _count(admins.get("super_admin_count")) if isinstance(admins, dict) else None
     try:
         _, topology_sound, _ = _topology(sections["gws_tenant"])
     except Unusable:
         users = None
-    if users is None or assigned is None or not isinstance(admins.get("memberships_complete"), bool):
+    if (users is None or assigned is None or count is None
+            or not isinstance(admins.get("memberships_complete"), bool)):
         return _A(policy_id, "data_unusable_section_shape", _SHAPE_TEXT, "section_shape_unusable", row["sections"])
+    # Design 8.2, step 2: every required read must be complete before any unit is scanned, so an incomplete read
+    # never confirms met or not_met (review B1, B2, B6).
     if admins.get("complete") is not True:
-        return _A(policy_id, "data_unavailable_user_read_incomplete",
-                  "Data unavailable: the Google Workspace user or admin role read is incomplete; the policy was not "
-                  "assessed.", "user_read_incomplete", ["gws_admins"])
+        return _user_read_incomplete(policy_id)
     if sso.get("complete") is not True:
         return _A(policy_id, "data_unavailable_sso_read_incomplete",
                   "Data unavailable: the inbound SSO assignment read is incomplete; the policy was not assessed.",
                   "sso_read_incomplete", ["gws_sso"])
+    if not topology_sound:
+        # Incomplete, or complete with a cycle or a chain that misses the top unit: no unit's lineage is known.
+        return _A(policy_id, "data_unavailable_org_unit_lineage",
+                  "Data unavailable: the organisational unit read is incomplete or inconsistent; the policy was not "
+                  "assessed.", "lineage_unresolved", ["gws_tenant", "gws_admins"])
     if not users:
         return _A(policy_id, "data_unusable_no_privileged_users",
                   "Data unusable: the read reports no privileged account, which a Google Workspace tenant cannot "
                   "have; the policy was not assessed.", "no_privileged_users", ["gws_admins"])
-    members_known = admins["memberships_complete"] or not any(_GROUP.fullmatch(target) for target in assigned)
-    org_units = sections["gws_tenant"]["org_units"] if topology_sound else None
-    outcome = max(_admin_user(org_unit, groups, assigned, members_known, org_units) for org_unit, groups in users)
+    if count > len({user for user, _, _ in users}):
+        # Every super admin is privileged (design 7): fewer distinct privileged accounts than super admins means the
+        # privileged list is partial, whatever its ``complete`` flag says (review B6).
+        return _user_read_incomplete(policy_id)
+    if not admins["memberships_complete"] and any(_GROUP.fullmatch(target) for target in assigned):
+        # The lane rule is unconditional (review B1): an unseen membership may add an external-SSO group or a
+        # Google-only group that overrides the OU, so even a known external-SSO group does not decide here.
+        return _A(policy_id, "data_unavailable_membership_incomplete",
+                  "Data unavailable: an inbound SSO assignment targets a group and the group membership read is "
+                  "incomplete; the policy was not assessed.", "membership_incomplete", ["gws_admins", "gws_sso"])
+    org_units = sections["gws_tenant"]["org_units"]
+    outcome = max(_admin_user(org_unit, groups, assigned, org_units) for _, org_unit, groups in users)
     if outcome == _VIOLATES:
         return _rec(policy_id, "not_met", "admin_uses_external_sso",
                     "Requirement not met: at least one privileged account is assigned to sign in through an external "
@@ -355,10 +394,6 @@ def admin_sso(policy_id: str, row: dict, sections: dict) -> dict:
                   "Data unusable: an inbound SSO assignment that applies to a privileged account has an unknown mode, "
                   "or one target holds disagreeing assignments; the policy was not assessed.", "assignment_unusable",
                   ["gws_sso"])
-    if outcome == _MEMBERSHIP:
-        return _A(policy_id, "data_unavailable_membership_incomplete",
-                  "Data unavailable: an inbound SSO assignment targets a group and the group membership read is "
-                  "incomplete; the policy was not assessed.", "membership_incomplete", ["gws_admins", "gws_sso"])
     if outcome == _LINEAGE:
         return _A(policy_id, "data_unavailable_org_unit_lineage",
                   "Data unavailable: the organisational unit read is incomplete or inconsistent, so the nearest SSO "

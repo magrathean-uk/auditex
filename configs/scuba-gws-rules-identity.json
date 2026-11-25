@@ -46,7 +46,8 @@
           ],
           "reason_code": "data_unavailable_org_unit_lineage",
           "reason_texts": [
-            "Data unavailable: the organisational unit read is incomplete or inconsistent, so the nearest SSO assignment of a privileged account cannot be found; the policy was not assessed."
+            "Data unavailable: the organisational unit read is incomplete or inconsistent, so the nearest SSO assignment of a privileged account cannot be found; the policy was not assessed.",
+            "Data unavailable: the organisational unit read is incomplete or inconsistent; the policy was not assessed."
           ],
           "recommendations": [
             "recollect_unusable_evidence"

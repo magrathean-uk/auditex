@@ -44,18 +44,20 @@ def test_identity_vectors_cover_every_policy_and_divergence():
         by_policy.setdefault(vector["policy"], set()).add(vector["verdict"])
     assert by_policy == {f"GWS.COMMONCONTROLS.{n}v1": {"met", "not_met", "not_assessed"}
                          for n in ("1.1", "1.2", "1.3", "1.4", "1.5", "6.1", "6.2")}
-    assert {vector.get("divergence") for vector in vectors} - {None} == {"D5", "D8", "D9", "D11"}
+    assert {vector.get("divergence") for vector in vectors} - {None} == {"D5", "D8", "D9", "D11", "D14"}
 
 
 @pytest.mark.parametrize(("text", "seconds"), [
     ("0s", 0), ("86399s", 86399), ("86400s", 86400), ("1d", 86400), ("7D", 604800), ("168h", 604800),
     ("604800s", 604800), ("604801s", 604801), ("10m", 600), ("1440M", 86400),
+    ("999999999999999999s", 999_999_999_999_999_999),
 ])
 def test_duration_seconds(text, seconds):
     assert identity.duration_seconds(text) == seconds
 
 
-@pytest.mark.parametrize("text", ["", "1w", "-1d", "1.5d", "d", "1 d", " 1d", "1d\n", "١d", 86400, None, True])
+@pytest.mark.parametrize("text", ["", "1w", "-1d", "1.5d", "d", "1 d", " 1d", "1d\n", "١d", 86400, None, True,
+                                  "9" * 19 + "s", "9" * 4301 + "s", "0" * 4300 + "1d"])
 def test_duration_unreadable(text):
     assert identity.duration_seconds(text) is None
 
@@ -109,7 +111,7 @@ def test_unknown_twosv_check_is_a_programming_error():
 
 def test_answers_carry_no_input_value():
     sections = {"gws_tenant": TENANT,
-                "gws_admins": {"complete": True, "super_admin_count": 2, "memberships_complete": True,
+                "gws_admins": {"complete": True, "super_admin_count": 1, "memberships_complete": True,
                                "privileged": [{"user": "pseudonym-p1", "org_unit": "ou:a", "groups": ["group:g9"]}]},
                 "gws_sso": {"complete": True, "assignments": [{"target": "group:g9", "sso_mode": "SAML_SSO"}]}}
     record = gws.assess("GWS.COMMONCONTROLS.6.1v1", sections)
@@ -117,3 +119,44 @@ def test_answers_carry_no_input_value():
     assert record["detail"] == {}
     text = json.dumps(record)
     assert "pseudonym-p1" not in text and "g9" not in text and "ou:a" not in text
+
+
+def _sso(mode: str, target: str = "ou:a") -> tuple[str, str]:
+    sections = {"gws_tenant": TENANT,
+                "gws_admins": {"complete": True, "super_admin_count": 1, "memberships_complete": True,
+                               "privileged": [{"user": "p1", "org_unit": "ou:a", "groups": ["group:g1"]}]},
+                "gws_sso": {"complete": True, "assignments": [{"target": target, "sso_mode": mode}]}}
+    record = gws.assess("GWS.COMMONCONTROLS.6.1v1", sections)
+    return record["verdict"], record["cell"]
+
+
+@pytest.mark.parametrize(("mode", "answer"), [
+    # Google Cloud Identity v1 ``InboundSsoAssignment.SsoMode`` (review B3); an undocumented value stays unusable (D14).
+    ("SSO_OFF", ("met", "admins_use_google_sign_in")),
+    ("SSO_MODE_UNSPECIFIED", ("met", "admins_use_google_sign_in")),
+    ("", ("met", "admins_use_google_sign_in")),
+    ("SAML_SSO", ("not_met", "admin_uses_external_sso")),
+    ("OIDC_SSO", ("not_met", "admin_uses_external_sso")),
+    ("DOMAIN_WIDE_SAML_IF_ENABLED", ("not_met", "admin_uses_external_sso")),
+    ("PASSWORDLESS_SSO", ("not_assessed", "assignment_unusable")),
+])
+@pytest.mark.parametrize("target", ["ou:root", "ou:a", "group:g1"])
+def test_sso_modes(mode, answer, target):
+    assert _sso(mode, target) == answer
+
+
+def test_oversized_grace_period_is_unusable_not_an_error():
+    # Review M1: 4,301 digits passed the old pattern and int() raised through gws.assess.
+    sections = {"gws_tenant": TENANT,
+                "gws_policies": {"complete": True, "policies": [
+                    {"unit": "ou:root", "unit_kind": "org_unit", "sort_order": 1,
+                     "section": "security_two_step_verification_enforcement",
+                     "value": {"enforcedFrom": "2026-01-01T00:00:00Z"}},
+                    {"unit": "ou:root", "unit_kind": "org_unit", "sort_order": 1,
+                     "section": "security_two_step_verification_grace_period",
+                     "value": {"enrollmentGracePeriod": "1d"}},
+                    {"unit": "ou:a", "unit_kind": "org_unit", "sort_order": 1,
+                     "section": "security_two_step_verification_grace_period",
+                     "value": {"enrollmentGracePeriod": "9" * 4301 + "s"}}]}}
+    record = gws.assess("GWS.COMMONCONTROLS.1.4v1", sections)
+    assert (record["verdict"], record["cell"]) == ("not_assessed", "setting_value_unusable")
