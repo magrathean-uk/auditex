@@ -290,7 +290,7 @@
     "gws_policies"
    ],
    "params": {
-    "kind": "sharing_mode",
+    "kind": "mode_branch",
     "service": "drive_and_docs",
     "mode": {
      "section": "drive_and_docs_external_sharing",
@@ -331,7 +331,7 @@
     "gws_policies"
    ],
    "params": {
-    "kind": "sharing_mode",
+    "kind": "mode_branch",
     "service": "drive_and_docs",
     "mode": {
      "section": "drive_and_docs_external_sharing",
@@ -372,7 +372,7 @@
     "gws_policies"
    ],
    "params": {
-    "kind": "sharing_mode",
+    "kind": "mode_branch",
     "service": "drive_and_docs",
     "mode": {
      "section": "drive_and_docs_external_sharing",
@@ -413,7 +413,7 @@
     "gws_policies"
    ],
    "params": {
-    "kind": "sharing_mode",
+    "kind": "mode_branch",
     "service": "drive_and_docs",
     "mode": {
      "section": "drive_and_docs_external_sharing",
@@ -454,7 +454,7 @@
     "gws_policies"
    ],
    "params": {
-    "kind": "sharing_mode",
+    "kind": "mode_branch",
     "service": "drive_and_docs",
     "mode": {
      "section": "drive_and_docs_external_sharing",
@@ -626,8 +626,17 @@
     "gws_policies"
    ],
    "params": {
-    "kind": "effective_any_bad",
+    "kind": "mode_branch",
     "service": null,
+    "mode": {
+     "section": "workspace_marketplace_apps_access_options",
+     "field": "accessLevel",
+     "values": [
+      "ALLOW_ALL",
+      "ALLOW_LISTED_APPS",
+      "ALLOW_NONE"
+     ]
+    },
     "checks": [
      {
       "section": "workspace_marketplace_apps_access_options",
@@ -640,14 +649,27 @@
        "ALLOW_ALL",
        "ALLOW_LISTED_APPS",
        "ALLOW_NONE"
-      ]
+      ],
+      "mode": "ALLOW_ALL",
+      "scope": "effective"
      },
      {
       "section": "workspace_marketplace_apps_access_options",
       "field": "allowAllInternalApps",
       "good": [
        false
-      ]
+      ],
+      "mode": "ALLOW_LISTED_APPS",
+      "scope": "effective"
+     },
+     {
+      "section": "workspace_marketplace_apps_access_options",
+      "field": "allowAllInternalApps",
+      "good": [
+       false
+      ],
+      "mode": "ALLOW_NONE",
+      "scope": "effective"
      }
     ]
    }
