@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 from azure_tenant_audit.resources import open_text_resource  # noqa: E402
 from azure_tenant_audit.value_rules.gws.catalogue import catalogue  # noqa: E402
 
@@ -116,11 +117,10 @@ def generate():
         "shared_reasons": "Check the policy and report the assessment problem."}
 
 
-def main():
-    if sys.argv[1:] not in ([], ["--check"]):
-        print("usage: generate-gws-explainer.py [--check]", file=sys.stderr)
-        return 2
-    check = bool(sys.argv[1:])
+def main(argv=None):
+    parser = build_argument_parser(description="Generate or check configs/explainer-gws-template.json.")
+    parser.add_argument("--check", action="store_true", help="compare with the committed file instead of writing")
+    check = parser.parse_args(argv).check
     output = Path("configs/explainer-gws-template.json")
     try:
         result = (json.dumps(generate(), ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
