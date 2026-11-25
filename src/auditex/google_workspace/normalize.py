@@ -338,6 +338,18 @@ def _unrecognised_system_alert(setting: Any) -> bool:
     )
 
 
+def org_unit_read_malformed(directory: dict[str, Any] | None) -> bool:
+    """Whether the Directory ``orgUnits`` section is present but unreadable (not a list of sound rows or tree).
+
+    A missing section is not malformed: the read was never attempted (a legacy sample). Explicit error, cut and
+    partial markers are reported by their own coverage rows.
+    """
+    if not isinstance(directory, dict) or "orgUnits" not in directory:
+        return False
+    topology = _org_unit_topology(directory, [])
+    return topology is None or topology[3] > 0
+
+
 def unplaced_policy_count(payloads: dict[str, dict[str, Any]], coverage_rows: list[dict[str, Any]]) -> int:
     """Count dangling OU targets in the one Policy API read or its legacy subset.
 

@@ -1929,3 +1929,17 @@ def test_l03b_a_policy_target_is_dangling_only_against_a_complete_directory_read
     # A complete tree holds the root but not the deleted unit; a complete empty tree holds neither.
     assert unplaced_policy_count({**policies, "google_directory": _SALES_DIRECTORY}, _OK_COVERAGE) == 1
     assert unplaced_policy_count({**policies, "google_directory": {"orgUnits": {"value": []}}}, _OK_COVERAGE) == 2
+
+
+def test_l03b_a_present_but_malformed_org_unit_read_fails_the_replay(tmp_path: Path) -> None:
+    # A present, unreadable orgUnits section is a Directory read failure: no dangling target is counted, but the run is
+    # partial and exits non-zero. The 2SV status stays unknown.
+    policies = _widened([_two_step("orgUnits/root", _ENFORCED)])
+    for index, orgunits in enumerate(({"value": [None]}, None, {"value": "unreadable"})):
+        rc, run_dir = _replay(tmp_path / str(index), policies, directory={"orgUnits": orgunits})
+        manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+        summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+        assert rc == 1, orgunits
+        assert manifest["overall_status"] == "partial", orgunits
+        assert [row["status"] for row in summary["collectors"] if row["name"] == "google_directory"] == ["partial"], orgunits
+        assert _bundle_two_step_status(run_dir) == "unknown", orgunits
