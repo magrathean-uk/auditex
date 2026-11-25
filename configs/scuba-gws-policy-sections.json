@@ -1,0 +1,1669 @@
+{
+  "schema_version": "2026-11-25",
+  "source": {
+    "repo": "https://github.com/cisagov/ScubaGoggles",
+    "tag": "v1.1.0",
+    "commit": "08a08ce145178582284d81ab1f3625987f3ad66b",
+    "licence": "CC0-1.0",
+    "path": "scubagoggles/baselines",
+    "files": {
+      "assuredcontrols.md": "9f9f3c0e803954010ab90882d463757eb3e5bedaab2d53b1dbbed321369b2388",
+      "calendar.md": "2eb9434a25659fec204011f3555a09dacb3648f885be608a97667d2dbad24386",
+      "chat.md": "536b616a6c05d51259d42d8b13261730bd993457d1b576f7d3f5700590436114",
+      "classroom.md": "ec918f2c2e549eafe41163530b6a0a31fad7fe6897b96fea57352e6ebc4f5806",
+      "commoncontrols.md": "7acbe5253a83d0b9292cee8eb5b09ae1475dfc0c8c7792be73039c5dc0463d28",
+      "drive.md": "29b37b73556d68c15f8f5360fc398a853247318a6993747566f3698522f2c234",
+      "gemini.md": "fa902507384984d72ab533ff344c168d50a8e5c548f2f113c00aac60cce188a8",
+      "gmail.md": "33b5cc5b8c31a7ec87ae85af5fa4205f60a5d710cac369a6ebe647da66796b95",
+      "groups.md": "b94f1444b1f42e431db27aba4c0b850c198750e949ef8d895784ddb05133f439",
+      "meet.md": "b9e25cad07da933c6a7facd12df2e67042780f664f5158b3da61a21049d72e06",
+      "sites.md": "3d1617d16aeac86120114eb19c6ea1a1fd0b221ce5936b3afe537f10395d6508"
+    },
+    "attribution": "Baseline excerpts: CISA ScubaGoggles (CC0). No CISA endorsement."
+  },
+  "limitation_ids": [
+    "required_evidence_section_not_collected",
+    "policy_scope_depends_on_licence",
+    "policy_not_applicable"
+  ],
+  "recommendation_ids": [
+    "collect_missing_evidence_section",
+    "review_policy_against_baseline_text"
+  ],
+  "policies": {
+    "GWS.ASSUREDCONTROLS.1.1v1": {
+      "service": "ASSUREDCONTROLS",
+      "heading": "Google Support Staff Data Access",
+      "baseline_text": "Access Approvals SHOULD be enabled.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.ASSUREDCONTROLS.1.2v1": {
+      "service": "ASSUREDCONTROLS",
+      "heading": "Google Support Staff Data Access",
+      "baseline_text": "Agencies SHOULD restrict support access to U.S.-based Google staff only.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.ASSUREDCONTROLS.2.1v1": {
+      "service": "ASSUREDCONTROLS",
+      "heading": "Data Regions Advanced Settings",
+      "baseline_text": "Data processing across multiple regions SHOULD be disabled for all Google Workspace products.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.CALENDAR.1.1v1": {
+      "service": "CALENDAR",
+      "heading": "External Sharing Options",
+      "baseline_text": "External sharing options for primary calendars SHALL be configured to \"Only free/busy information (hide event details).\"",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.1.2v1": {
+      "service": "CALENDAR",
+      "heading": "External Sharing Options",
+      "baseline_text": "External sharing options for secondary calendars SHALL be configured to \"Only free/busy information (hide event details).\"",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.2.1v1": {
+      "service": "CALENDAR",
+      "heading": "External Invitations Warnings",
+      "baseline_text": "External invitations warnings SHALL be enabled to prompt users before sending invitations.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.3.1v1": {
+      "service": "CALENDAR",
+      "heading": "Calendar Interop Management",
+      "baseline_text": "Calendar Interop SHOULD be disabled.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.3.2v1": {
+      "service": "CALENDAR",
+      "heading": "Calendar Interop Management",
+      "baseline_text": "Microsoft 365 (Graph API) SHALL be used instead of basic authentication to establish connectivity between tenants or organizations in cases where Calendar Interop is deemed necessary for agency mission fulfillment.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.CALENDAR.4.1v1": {
+      "service": "CALENDAR",
+      "heading": "Paid Appointments",
+      "baseline_text": "\"Appointment Schedule with Payments\" SHOULD be disabled.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.1.1v1": {
+      "service": "CHAT",
+      "heading": "Chat History",
+      "baseline_text": "Chat history SHALL be enabled for information traceability.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.1.2v1": {
+      "service": "CHAT",
+      "heading": "Chat History",
+      "baseline_text": "Users SHALL NOT be allowed to change their history setting.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.2.1v1": {
+      "service": "CHAT",
+      "heading": "External File Sharing",
+      "baseline_text": "External file sharing SHALL be disabled to protect sensitive information from unauthorized or accidental sharing.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.3.1v1": {
+      "service": "CHAT",
+      "heading": "History for Spaces",
+      "baseline_text": "Space history SHOULD be enabled for information traceability.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.4.1v1": {
+      "service": "CHAT",
+      "heading": "External Chat Messaging",
+      "baseline_text": "External chat messaging SHALL be restricted to allowlisted domains only.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.5.1v1": {
+      "service": "CHAT",
+      "heading": "Content Reporting",
+      "baseline_text": "Chat content reporting SHALL be enabled for all conversation types.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.CHAT.5.2v1": {
+      "service": "CHAT",
+      "heading": "Content Reporting",
+      "baseline_text": "All reporting message categories SHOULD be selected.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.CLASSROOM.1.1v1": {
+      "service": "CLASSROOM",
+      "heading": "Class Membership",
+      "baseline_text": "\"Who can join classes in your domain\" SHOULD be set to \"Users in your domain only.\"",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.1.2v1": {
+      "service": "CLASSROOM",
+      "heading": "Class Membership",
+      "baseline_text": "\"Which classes users in your domain can join\" SHOULD be set to \"Classes in your domain only.\"",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.2.1v1": {
+      "service": "CLASSROOM",
+      "heading": "Classroom API",
+      "baseline_text": "Users SHOULD NOT be able to authorize apps to access their Google Classroom data.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.3.1v1": {
+      "service": "CLASSROOM",
+      "heading": "Roster Import",
+      "baseline_text": "\"Roster Import\" with Clever SHOULD be turned off.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.4.1v1": {
+      "service": "CLASSROOM",
+      "heading": "Student Unenrollment",
+      "baseline_text": "Only teachers SHOULD be allowed to unenroll students from classes.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.5.1v1": {
+      "service": "CLASSROOM",
+      "heading": "Class Creation",
+      "baseline_text": "Class creation SHOULD be restricted to verified teachers only.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Phishing-Resistant Multifactor Authentication",
+      "baseline_text": "Phishing-Resistant MFA SHALL be required for all users.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Phishing-Resistant Multifactor Authentication",
+      "baseline_text": "If phishing-resistant MFA has not been enforced, an alternative MFA method SHALL be enforced for all users.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.3v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Phishing-Resistant Multifactor Authentication",
+      "baseline_text": "SMS or Voice SHALL NOT be used as the MFA method.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.4v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Phishing-Resistant Multifactor Authentication",
+      "baseline_text": "The Google 2-Step Verification (2SV) new user enrollment period SHALL be set to at least one day and at most one week.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.1.5v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Phishing-Resistant Multifactor Authentication",
+      "baseline_text": "Allow users to trust the device SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.2.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Context-aware Access",
+      "baseline_text": "Policies restricting access to Google Workspace (GWS) based on enterprise device signals SHOULD be implemented.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.COMMONCONTROLS.3.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Login Challenges",
+      "baseline_text": "Post-single sign-on (SSO) verification SHOULD be enabled for users signing in using the organization's SSO profile.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.COMMONCONTROLS.3.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Login Challenges",
+      "baseline_text": "Post-SSO verification SHOULD be enabled for users signing in using other SSO profiles.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.COMMONCONTROLS.4.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "User Session Duration",
+      "baseline_text": "Users SHALL be forced to re-authenticate after an established 12-hour GWS login session has expired.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.5.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Secure Passwords",
+      "baseline_text": "User password strength SHALL be enforced.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.5.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Secure Passwords",
+      "baseline_text": "User password length SHALL be at least 12 characters.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.5.3v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Secure Passwords",
+      "baseline_text": "User password length SHOULD be at least 16 characters.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.5.4v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Secure Passwords",
+      "baseline_text": "Password policy SHALL be enforced at next sign-in.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.5.5v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Secure Passwords",
+      "baseline_text": "User passwords SHALL NOT be reused.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.5.6v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Secure Passwords",
+      "baseline_text": "User passwords SHALL NOT expire.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.6.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Privileged Accounts",
+      "baseline_text": "All administrative accounts SHALL be provisioned as cloud-only accounts separate from an agency's authoritative on-premises or other federated identity providers.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_admins",
+        "gws_sso"
+      ]
+    },
+    "GWS.COMMONCONTROLS.6.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Privileged Accounts",
+      "baseline_text": "A minimum of **two** and a maximum of **eight** separate and distinct super admin users SHALL be configured.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_admins"
+      ]
+    },
+    "GWS.COMMONCONTROLS.7.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Conflicting Account Management",
+      "baseline_text": "Account conflict management SHOULD be configured to replace conflicting unmanaged accounts with managed accounts.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.8.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Account Recovery Options",
+      "baseline_text": "Account self-recovery for super admins SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.8.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Account Recovery Options",
+      "baseline_text": "Account self-recovery for users and non-super admins SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.8.3v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Account Recovery Options",
+      "baseline_text": "Ability to add recovery information SHOULD be disabled.",
+      "criticality": "SHOULD",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.COMMONCONTROLS.9.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "GWS Advanced Protection Program",
+      "baseline_text": "Highly privileged accounts SHALL be enrolled in the Google Workspace (GWS) Advanced Protection Program.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.COMMONCONTROLS.9.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "GWS Advanced Protection Program",
+      "baseline_text": "All sensitive user accounts SHOULD be enrolled into the GWS Advanced Protection Program.",
+      "criticality": "SHOULD",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.COMMONCONTROLS.10.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "App Access to Google APIs",
+      "baseline_text": "Agencies SHALL use GWS application access control policies to restrict access to all GWS services by third-party applications.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.10.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "App Access to Google APIs",
+      "baseline_text": "Agencies SHALL NOT allow users to grant consent for access to low-risk scopes.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.10.3v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "App Access to Google APIs",
+      "baseline_text": "Agencies SHALL NOT trust unconfigured internal applications.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.10.4v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "App Access to Google APIs",
+      "baseline_text": "Agencies SHALL NOT allow users to access unconfigured third-party applications.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.10.5v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "App Access to Google APIs",
+      "baseline_text": "Access to GWS applications by less secure applications that do not meet security authentication standards SHALL be prevented.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.11.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Authorized Google Marketplace Apps",
+      "baseline_text": "Only approved Google Workspace (GWS) Marketplace applications SHALL be allowed for installation.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.12.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Google Takeout Services for Users",
+      "baseline_text": "Google Takeout services SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.13.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "System-defined Rules",
+      "baseline_text": "Required system-defined alerting rules, as listed in the policy group description, SHALL be enabled with alerts.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.14.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Google Workspace Logs",
+      "baseline_text": "The following critical logs SHALL be sent to the agency's centralized SIEM.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.COMMONCONTROLS.14.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Google Workspace Logs",
+      "baseline_text": "Audit logs SHALL be retained and searchable for a minimum of 3 months and retrievable for a minimum of 12 months.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.COMMONCONTROLS.15.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Data Regions and Storage",
+      "baseline_text": "The data storage region SHALL be set to be the United States for all users in the agency's GWS environment.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.15.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Data Regions and Storage",
+      "baseline_text": "Data SHALL be processed in the region selected for data at rest.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.16.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Additional Google Services",
+      "baseline_text": "Service status for Google services that do not have an individual control SHOULD be set to OFF for everyone.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.16.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Additional Google Services",
+      "baseline_text": "User access to Early Access applications SHOULD be disabled.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.16.3v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Additional Google Services",
+      "baseline_text": "Looker Studio Sharing outside org SHOULD be set to OFF.",
+      "criticality": "SHOULD",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.COMMONCONTROLS.16.4v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Additional Google Services",
+      "baseline_text": "Pinpoint access to drive SHOULD be set to OFF.",
+      "criticality": "SHOULD",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.COMMONCONTROLS.17.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Multi-Party Approval",
+      "baseline_text": "Require multi-party approval for sensitive admin actions SHOULD be enabled.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.COMMONCONTROLS.18.1v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Data Loss Prevention",
+      "baseline_text": "A custom policy SHALL be configured for Google Drive, Google Calendar, Google Chat, and Gmail to protect PII and sensitive information as defined by the agency, covering at a minimum: credit card numbers, U.S. Individual Taxpayer Identification Numbers (ITIN), and U.S. Social Security numbers (SSN).",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.COMMONCONTROLS.18.2v1": {
+      "service": "COMMONCONTROLS",
+      "heading": "Data Loss Prevention",
+      "baseline_text": "The action for DLP policies SHOULD be set to block.",
+      "criticality": "SHOULD",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.1v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "External sharing SHALL be restricted to allowlisted domains.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.2v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "Receiving files from non-allowlisted domains SHOULD be disabled.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.3v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "Warnings SHALL be enabled when a user is attempting to share with someone in a non-allowlisted domain.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.4v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "If sharing outside of the organization, agencies SHOULD disable sharing of files with individuals who are not using a Google account.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.5v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "Any Organizational Units that allow external sharing SHOULD disable content availability to \"anyone with the link.\"",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.6v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "Agencies SHALL set access checking to \"recipients only.\"",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.7v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "Users SHOULD NOT be allowed to upload or move content to shared drives owned by another organization.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.8v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "\"Private to owner\" SHALL be the default access level for newly created items.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.9v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "Out-of-Domain file-level warnings SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.10v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "If external sharing is not allowed, then forms owned by users within the organization SHOULD NOT be able to accept responses from anyone accessing the link from outside the organization.",
+      "criticality": "SHOULD",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.11v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Sharing Outside the Organization",
+      "baseline_text": "If receiving external files is not allowed, then users in the organization SHOULD NOT be able to submit responses to forms from users or shared drives outside of the organization.",
+      "criticality": "SHOULD",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.DRIVEDOCS.2.1v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Shared Drive Creation",
+      "baseline_text": "Agencies SHOULD NOT allow members with manager access to override shared Google Drive creation settings.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.2.2v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Shared Drive Creation",
+      "baseline_text": "Agencies SHALL allow users who are not members of a shared Google Drive to be added to files.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.3.1v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Security Updates for Files",
+      "baseline_text": "Agencies SHALL enable the security update for Google Drive files.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.4.1v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Drive SDK",
+      "baseline_text": "Agencies SHOULD disable Google Drive SDK access.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.5.1v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Drive for Desktop",
+      "baseline_text": "Google Drive for Desktop SHALL be enabled for authorized devices only.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.5.2v1": {
+      "service": "DRIVEDOCS",
+      "heading": "Drive for Desktop",
+      "baseline_text": "Monitoring for potential ransomware corruption SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.GEMINI.1.1v1": {
+      "service": "GEMINI",
+      "heading": "Gemini App Access",
+      "baseline_text": "Gemini app user access SHALL be set to OFF for everyone without a license.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_policies",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.GEMINI.2.1v1": {
+      "service": "GEMINI",
+      "heading": "Gemini Beta features",
+      "baseline_text": "Gemini Beta features SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.GEMINI.3.1v1": {
+      "service": "GEMINI",
+      "heading": "Gemini Conversation History",
+      "baseline_text": "Gemini conversation history SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.GEMINI.3.2v1": {
+      "service": "GEMINI",
+      "heading": "Gemini Conversation History",
+      "baseline_text": "Gemini conversation retention SHALL be set to minimum of 18 months.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.GEMINI.4.1v1": {
+      "service": "GEMINI",
+      "heading": "Gemini Conversation Sharing",
+      "baseline_text": "Conversation sharing SHALL be set to OFF.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.GMAIL.1.1v1": {
+      "service": "GMAIL",
+      "heading": "Mail Delegation",
+      "baseline_text": "Mail delegation SHOULD be disabled.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.2.1v1": {
+      "service": "GMAIL",
+      "heading": "DomainKeys Identified Mail",
+      "baseline_text": "DKIM SHOULD be enabled for all domains.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.3.1v1": {
+      "service": "GMAIL",
+      "heading": "Sender Policy Framework",
+      "baseline_text": "An SPF policy SHALL be published for each domain that fails all non-approved senders.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.4.1v1": {
+      "service": "GMAIL",
+      "heading": "Domain-based Message Authentication, Reporting, and Conformance",
+      "baseline_text": "A DMARC policy SHALL be published at the full domain or the second-level domain for all Google Workspace domains, including user alias domains.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.4.2v1": {
+      "service": "GMAIL",
+      "heading": "Domain-based Message Authentication, Reporting, and Conformance",
+      "baseline_text": "The DMARC message rejection option SHALL be p=reject.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.4.3v1": {
+      "service": "GMAIL",
+      "heading": "Domain-based Message Authentication, Reporting, and Conformance",
+      "baseline_text": "The DMARC point of contact for aggregate reports SHALL include `reports@dmarc.cyber.dhs.gov`.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.4.4v1": {
+      "service": "GMAIL",
+      "heading": "Domain-based Message Authentication, Reporting, and Conformance",
+      "baseline_text": "An agency point of contact SHOULD be included for aggregate and failure reports.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.5.1v1": {
+      "service": "GMAIL",
+      "heading": "Attachment Protections",
+      "baseline_text": "\"Protect against encrypted attachments from untrusted senders\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.5.2v1": {
+      "service": "GMAIL",
+      "heading": "Attachment Protections",
+      "baseline_text": "\"Protect against attachments with scripts from untrusted senders\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.5.3v1": {
+      "service": "GMAIL",
+      "heading": "Attachment Protections",
+      "baseline_text": "\"Protect against anomalous attachment types in emails\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.5.4v1": {
+      "service": "GMAIL",
+      "heading": "Attachment Protections",
+      "baseline_text": "Google SHOULD be allowed to automatically apply future recommended settings for attachments.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.5.5v1": {
+      "service": "GMAIL",
+      "heading": "Attachment Protections",
+      "baseline_text": "Emails flagged by SCuBA policies GWS.GMAIL.5.1 through GWS.GMAIL.5.3 SHALL NOT be kept in inbox.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.6.1v1": {
+      "service": "GMAIL",
+      "heading": "Links and External Images Protection",
+      "baseline_text": "\"Identify links behind shortened URLs\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.6.2v1": {
+      "service": "GMAIL",
+      "heading": "Links and External Images Protection",
+      "baseline_text": "\"Scan linked images\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.6.3v1": {
+      "service": "GMAIL",
+      "heading": "Links and External Images Protection",
+      "baseline_text": "\"Show warning prompt for any click on links to untrusted domains\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.6.4v1": {
+      "service": "GMAIL",
+      "heading": "Links and External Images Protection",
+      "baseline_text": "Google SHALL be allowed to automatically apply future recommended settings for links and external images.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.7.1v1": {
+      "service": "GMAIL",
+      "heading": "Spoofing and Authentication Protection",
+      "baseline_text": "\"Protect against domain spoofing based on similar domain names\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.7.2v1": {
+      "service": "GMAIL",
+      "heading": "Spoofing and Authentication Protection",
+      "baseline_text": "\"Protect against spoofing of employee names\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.7.3v1": {
+      "service": "GMAIL",
+      "heading": "Spoofing and Authentication Protection",
+      "baseline_text": "\"Protect against inbound emails spoofing your domain\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.7.4v1": {
+      "service": "GMAIL",
+      "heading": "Spoofing and Authentication Protection",
+      "baseline_text": "\"Protect against any unauthenticated emails\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.7.5v1": {
+      "service": "GMAIL",
+      "heading": "Spoofing and Authentication Protection",
+      "baseline_text": "\"Protect your Groups from inbound emails spoofing your domain\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.7.6v1": {
+      "service": "GMAIL",
+      "heading": "Spoofing and Authentication Protection",
+      "baseline_text": "Emails flagged by SCuBA policies GWS.GMAIL.7.1 through GWS.GMAIL.7.5 SHALL NOT be kept in inbox.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.7.7v1": {
+      "service": "GMAIL",
+      "heading": "Spoofing and Authentication Protection",
+      "baseline_text": "Google SHALL be allowed to automatically apply future recommended settings for spoofing and authentication.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.8.1v1": {
+      "service": "GMAIL",
+      "heading": "User Email Uploads",
+      "baseline_text": "User email uploads SHALL be disabled to protect against unauthorized files being introduced into the secured environment.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.9.1v1": {
+      "service": "GMAIL",
+      "heading": "POP and IMAP Access for Users",
+      "baseline_text": "POP and IMAP access SHALL be disabled to protect sensitive agency or organization emails from being accessed through legacy applications or other third-party mail clients.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.10.1v1": {
+      "service": "GMAIL",
+      "heading": "Google Workspace Sync",
+      "baseline_text": "Google Workspace Sync SHOULD be disabled.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.11.1v1": {
+      "service": "GMAIL",
+      "heading": "Automatic Forwarding",
+      "baseline_text": "Automatic forwarding SHOULD be disabled, especially to external domains.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.12.1v1": {
+      "service": "GMAIL",
+      "heading": "Per-user Outbound Gateways",
+      "baseline_text": "The option to use a per-user outbound gateway that is a mail server other than the Google Workspace (GWS) mail servers SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.13.1v1": {
+      "service": "GMAIL",
+      "heading": "Unintended External Reply Warning",
+      "baseline_text": "Unintended external reply warnings SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.GMAIL.14.1v1": {
+      "service": "GMAIL",
+      "heading": "Email Allowlist",
+      "baseline_text": "An email allowlist SHOULD NOT be implemented.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.15.1v1": {
+      "service": "GMAIL",
+      "heading": "Enhanced Pre-Delivery Message Scanning",
+      "baseline_text": "Enhanced pre-delivery message scanning SHALL be enabled to prevent phishing.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.16.1v1": {
+      "service": "GMAIL",
+      "heading": "Security Sandbox",
+      "baseline_text": "Security sandbox SHOULD be enabled to provide additional email protections.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.GMAIL.17.1v1": {
+      "service": "GMAIL",
+      "heading": "Comprehensive Mail Storage",
+      "baseline_text": "Comprehensive mail storage SHOULD be enabled to allow information traceability across applications.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.18.1v1": {
+      "service": "GMAIL",
+      "heading": "Spam Filtering",
+      "baseline_text": "Domains SHALL NOT be added to lists that bypass spam filters.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.18.2v1": {
+      "service": "GMAIL",
+      "heading": "Spam Filtering",
+      "baseline_text": "Domains SHALL NOT be added to lists that bypass spam filters and hide warnings.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GMAIL.18.3v1": {
+      "service": "GMAIL",
+      "heading": "Spam Filtering",
+      "baseline_text": "\"Bypass spam filters\" and \"hide warnings for all messages from internal and external senders\" SHALL NOT be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.1.1v1": {
+      "service": "GROUPS",
+      "heading": "External Group Access",
+      "baseline_text": "Group access from outside the organization SHALL be disabled unless explicitly granted by the group owner.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.1.2v1": {
+      "service": "GROUPS",
+      "heading": "External Group Access",
+      "baseline_text": "Group owners' ability to add external members to groups SHOULD be disabled unless necessary for agency mission fulfillment.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.1.3v1": {
+      "service": "GROUPS",
+      "heading": "External Group Access",
+      "baseline_text": "Group owners' ability to allow external, non-group members to post in the group SHOULD be disabled unless necessary for agency mission fulfillment.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.2.1v1": {
+      "service": "GROUPS",
+      "heading": "Group Creation",
+      "baseline_text": "Group creation SHOULD be restricted to administrators within the organization unless alternative creators are necessary for agency mission fulfillment.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.3.1v1": {
+      "service": "GROUPS",
+      "heading": "Default Permissions for Viewing Conversations",
+      "baseline_text": "The default permission to view conversations SHOULD be set to \"All group members.\"",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.4.1v1": {
+      "service": "GROUPS",
+      "heading": "Ability to Hide Groups from the Directory",
+      "baseline_text": "The ability for groups to be hidden from the directory SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.1.1v1": {
+      "service": "MEET",
+      "heading": "Meeting Access",
+      "baseline_text": "External users who were not explicitly invited to a Google Meet meeting SHALL be required to ask to join.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.2.1v1": {
+      "service": "MEET",
+      "heading": "Internal Access to External Meetings",
+      "baseline_text": "Meeting access SHALL be disabled for meetings created by users who are not members of any Google Workspace (GWS) tenant or organization.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.3.1v1": {
+      "service": "MEET",
+      "heading": "Host Management Meeting Features",
+      "baseline_text": "Host management meeting features SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.4.1v1": {
+      "service": "MEET",
+      "heading": "External Participants",
+      "baseline_text": "\"Warn for external participants\" SHALL be enabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.5.1v1": {
+      "service": "MEET",
+      "heading": "Video Meeting Settings",
+      "baseline_text": "Automatic recordings for Google Meet SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.5.2v1": {
+      "service": "MEET",
+      "heading": "Video Meeting Settings",
+      "baseline_text": "Automatic transcripts for Google Meet SHALL be disabled.",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.6.1v1": {
+      "service": "MEET",
+      "heading": "Gemini Settings",
+      "baseline_text": "Administrators SHOULD NOT be allowed to override the default sharing level for meeting notes set by the organization.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.MEET.6.2v1": {
+      "service": "MEET",
+      "heading": "Gemini Settings",
+      "baseline_text": "Default sharing setting for Google AI notes SHALL be restricted to \"Guests in your organization.\"",
+      "criticality": "SHALL",
+      "manual": false,
+      "events": true,
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ]
+    },
+    "GWS.MEET.6.3v1": {
+      "service": "MEET",
+      "heading": "Gemini Settings",
+      "baseline_text": "Screenshots of presented content SHALL only captured in notes when recording is enabled.",
+      "criticality": "SHALL",
+      "manual": true,
+      "events": false,
+      "sections": [
+        "gws_tenant"
+      ]
+    },
+    "GWS.SITES.1.1v1": {
+      "service": "SITES",
+      "heading": "Sites Service Status",
+      "baseline_text": "Sites Service SHOULD be disabled for all users.",
+      "criticality": "SHOULD",
+      "manual": false,
+      "events": false,
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    }
+  }
+}
