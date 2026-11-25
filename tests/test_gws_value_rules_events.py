@@ -542,3 +542,205 @@ def test_m2_unreadable_value_in_a_proven_off_leaf_is_out_of_scope():
     record = gws.assess("GWS.GEMINI.1.1v1", sections)
     assert (record["verdict"], record["cell"]) == UNUSABLE
     assert _gemini(evs, [_status("ou:root", "ENABLED"), _status("ou:a", "DISABLED")]) == UNUSABLE
+
+
+# --- review M13-L12 round 2 -------------------------------------------------------------------------------------------
+
+ASSURED = "GWS.ASSUREDCONTROLS.2.1v1"
+REGION = "NonRegionalizedFunctionalityStateSettingsProto state"
+TIE = "2026-10-02T10:00:00.123Z"
+
+
+def _assured(calendar, gemini_unit="ou:root"):
+    """Docs, Gmail, Chat and Meet off at the root on 2 September, Gemini on 2 November, Calendar as given."""
+    evs = [_event(f"{app}{REGION}", "DISABLED", time="2026-09-02T10:00:00Z") for app in ("Docs", "Gmail", "Chat", "Meet")]
+    return evs + calendar + [_event(f"Gemini{REGION}", "ENABLED", unit=gemini_unit, time="2026-11-02T10:00:00Z")]
+
+
+def test_r2_b1_a_root_reset_tied_with_a_change_voids_the_root_prerequisite():
+    change = _event(f"Calendar{REGION}", "DISABLED", time=TIE)
+    reset = _delete(f"Calendar{REGION}", time=TIE)
+    assert _answer(ASSURED, _assured([change, reset])) == UNUSABLE
+    assert _answer(ASSURED, _assured([reset, change])) == UNUSABLE
+    # The reset 1 ms later is a clean reset (D1); 1 ms earlier, the change stands and the root violation counts.
+    assert _answer(ASSURED, _assured([change, _delete(f"Calendar{REGION}", time="2026-10-02T10:00:00.124Z")])) \
+        == NO_EVENT
+    assert _answer(ASSURED, _assured([change, _delete(f"Calendar{REGION}", time="2026-10-02T10:00:00.122Z")])) \
+        == NOT_MET
+    # An unreadable root Calendar value, or a later unidentified reset at the root, leaves the prerequisite unknown.
+    assert _answer(ASSURED, _assured([_event(f"Calendar{REGION}", None, time=TIE)])) == UNUSABLE
+    unknown_reset = {**_delete(None, time="2026-10-15T10:00:00Z")}
+    assert _answer(ASSURED, _assured([change, unknown_reset])) == UNUSABLE
+    # Child and group violations stay independent of the root prerequisite.
+    assert _answer(ASSURED, _assured([change, reset], gemini_unit="ou:a")) == NOT_MET
+    assert _answer(ASSURED, _assured([change, reset], gemini_unit="group:g1")) == NOT_MET
+
+
+def test_r2_b1_chat_5_1_root_violation_needs_every_root_setting_readable():
+    evs = _good_top("GWS.CHAT.5.1v1")
+    restriction = "ContentReportingProto room_restrictions"
+    bad = _event("ContentReportingProto one_on_one_reporting", CR_OFF, time=T3)
+    tied = [_event(restriction, "SPACE_RESTRICTIONS_NO_RESTRICTIONS", time=T1), _event(restriction, "UNKNOWN", time=T1)]
+    assert _answer("GWS.CHAT.5.1v1", evs[:3] + tied + [bad]) == UNUSABLE
+    assert _answer("GWS.CHAT.5.1v1", evs + [bad]) == NOT_MET
+
+
+def test_r2_m1_blank_event_identities_never_confirm():
+    reset = {**_delete(S13), "setting": ""}
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time=T1), reset]) == UNUSABLE
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", name=" ")]) == UNUSABLE
+
+
+def test_r2_m2_malformed_offsets_and_oversized_fractions_are_unreadable():
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time="2026-10-01T10:00:00+00:99")]) == UNUSABLE
+    assert _windowed([_event(S13, "true")], "2026-05-25T00:00:00+00:99", "2026-11-25T00:00:00Z") == SHAPE
+    huge = "2026-10-01T10:00:00." + "1" * 4301 + "Z"
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time=huge)]) == UNUSABLE
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "true", time=huge)]) == UNUSABLE
+
+
+@pytest.mark.parametrize("value", [
+    "[unrelated_field: SPAM]",
+    ALL_CATEGORIES[:-1] + ", unrelated_field: SPAM]",
+    ALL_CATEGORIES.replace("system_violation: SPAM", "System_violation: SPAM"),
+])
+def test_r2_m3_an_unrelated_field_is_not_a_reporting_category(value):
+    assert _answer("GWS.CHAT.5.2v1", [_event("ContentReportingProto report_types", value)]) == UNUSABLE
+
+
+def test_r2_m4_known_out_of_scope_units_win_over_a_malformed_identity():
+    reset_group = {**_delete(S13, unit="group:g1"), "setting": None}
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time=T1), reset_group]) == MET
+    reset_gone = {**_delete(S13, unit="ou:deleted"), "setting": None}
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "true", time=T1), reset_gone]) == NOT_MET
+    # On a group-scoped row the same group reset might be the slot's.
+    meet = "MeetGenAiSmartNotesDocAccessProto manage_smart_notes_doc_access"
+    assert _answer("GWS.MEET.6.1v1", [_event(meet, "true", unit="group:g1", time=T1),
+                                      {**_delete(meet, unit="group:g1"), "setting": None}]) == UNUSABLE
+
+
+# Every field of the deciding event walked through absent, null, wrong type, blank, out of range, malformed and
+# contradictory values. Probe A: an older root violation, then the probed event setting the compliant value (read as
+# written, MET). Probe B: an older compliant root value, then the probed event setting the violating value (NOT_MET).
+# Unless the probed event is positively out of scope, neither probe may answer met or not_met, and none may raise.
+_GONE = object()
+
+
+def _set(field, value):
+    def change(event):
+        event = dict(event)
+        if value is _GONE:
+            del event[field]
+        else:
+            event[field] = value
+        return [event]
+    return change
+
+
+def _tie(event):
+    other = "true" if event["new_value"] == "false" else "false"
+    return [event, {**event, "new_value": other}]
+
+
+FIELD_WALK = [
+    # time, with its offset and fraction
+    ("time absent", _set("time", _GONE), UNUSABLE, UNUSABLE),
+    ("time null", _set("time", None), UNUSABLE, UNUSABLE),
+    ("time wrong type", _set("time", 1790000000), UNUSABLE, UNUSABLE),
+    ("time blank", _set("time", " "), UNUSABLE, UNUSABLE),
+    ("time month out of range", _set("time", "2026-13-01T10:00:00Z"), UNUSABLE, UNUSABLE),
+    ("time day out of range", _set("time", "2026-09-31T10:00:00Z"), UNUSABLE, UNUSABLE),
+    ("time hour 24", _set("time", "2026-10-01T24:00:00Z"), UNUSABLE, UNUSABLE),
+    ("time minute out of range", _set("time", "2026-10-01T10:61:00Z"), UNUSABLE, UNUSABLE),
+    ("time after the window", _set("time", "2027-01-01T00:00:00Z"), UNUSABLE, UNUSABLE),
+    ("offset minutes out of range", _set("time", "2026-10-01T10:00:00+00:99"), UNUSABLE, UNUSABLE),
+    ("offset hours out of range", _set("time", "2026-10-01T10:00:00-24:00"), UNUSABLE, UNUSABLE),
+    ("offset malformed", _set("time", "2026-10-01T10:00:00+1:00"), UNUSABLE, UNUSABLE),
+    ("fraction empty", _set("time", "2026-10-01T10:00:00.Z"), UNUSABLE, UNUSABLE),
+    ("fraction oversized", _set("time", "2026-10-01T10:00:00." + "9" * 4301 + "Z"), UNUSABLE, UNUSABLE),
+    ("fraction 19 digits", _set("time", "2026-10-01T10:00:00." + "1" * 19 + "Z"), UNUSABLE, UNUSABLE),
+    ("time ties the older event", _set("time", "2026-09-01T11:00:00+01:00"), UNUSABLE, UNUSABLE),
+    # event name
+    ("event absent", _set("event", _GONE), SHAPE, SHAPE),
+    ("event null", _set("event", None), SHAPE, SHAPE),
+    ("event wrong type", _set("event", 7), SHAPE, SHAPE),
+    ("event blank", _set("event", ""), UNUSABLE, UNUSABLE),
+    ("event whitespace", _set("event", "\t"), UNUSABLE, UNUSABLE),
+    ("event lower case", _set("event", "change_application_setting"), UNUSABLE, UNUSABLE),
+    ("event padded", _set("event", "CHANGE_APPLICATION_SETTING "), UNUSABLE, UNUSABLE),
+    ("event a reset carrying a value", _set("event", DELETE), NO_EVENT, NO_EVENT),
+    # setting name
+    ("setting absent", _set("setting", _GONE), UNUSABLE, UNUSABLE),
+    ("setting null", _set("setting", None), UNUSABLE, UNUSABLE),
+    ("setting wrong type", _set("setting", ["x"]), SHAPE, SHAPE),
+    ("setting blank", _set("setting", ""), UNUSABLE, UNUSABLE),
+    ("setting whitespace", _set("setting", " "), UNUSABLE, UNUSABLE),
+    ("setting padded", _set("setting", S13 + "\n"), UNUSABLE, UNUSABLE),
+    ("setting another known one", _set("setting", "SomeOtherProto field"), NOT_MET, MET),
+    # value
+    ("value absent", _set("new_value", _GONE), UNUSABLE, UNUSABLE),
+    ("value null", _set("new_value", None), UNUSABLE, UNUSABLE),
+    ("value wrong type", _set("new_value", True), UNUSABLE, UNUSABLE),
+    ("value list", _set("new_value", ["false"]), UNUSABLE, UNUSABLE),
+    ("value blank", _set("new_value", " "), UNUSABLE, UNUSABLE),
+    ("value out of range", _set("new_value", "UNKNOWN_ENUM_VALUE"), UNUSABLE, UNUSABLE),
+    ("value malformed", _set("new_value", "False"), UNUSABLE, UNUSABLE),
+    ("value contradicted at one time", _tie, UNUSABLE, UNUSABLE),
+    # unit or group identity
+    ("unit absent", _set("unit", _GONE), UNUSABLE, UNUSABLE),
+    ("unit null", _set("unit", None), UNUSABLE, UNUSABLE),
+    ("unit wrong type", _set("unit", 7), UNUSABLE, UNUSABLE),
+    ("unit blank", _set("unit", ""), UNUSABLE, UNUSABLE),
+    ("unit padded", _set("unit", " ou:root"), UNUSABLE, UNUSABLE),
+    ("unit malformed", _set("unit", "ou:"), UNUSABLE, UNUSABLE),
+    ("unit nested", _set("unit", "ou:root/group:g1"), UNUSABLE, UNUSABLE),
+    ("group malformed", _set("unit", "group:"), UNUSABLE, UNUSABLE),
+    ("group upper case", _set("unit", "GROUP:g1"), UNUSABLE, UNUSABLE),
+    ("unit a deleted OU", _set("unit", "ou:deleted"), NOT_MET, MET),
+    ("unit a group on an OU-only setting", _set("unit", "group:g1"), NOT_MET, MET),
+    # application
+    ("application absent", _set("application", _GONE), MET, NOT_MET),
+    ("application null", _set("application", None), MET, NOT_MET),
+    ("application wrong type", _set("application", 7), SHAPE, SHAPE),
+    ("application blank", _set("application", ""), UNUSABLE, UNUSABLE),
+    ("application padded", _set("application", " Gmail"), UNUSABLE, UNUSABLE),
+]
+
+
+@pytest.mark.parametrize(("label", "change", "probe_a", "probe_b"), FIELD_WALK, ids=[row[0] for row in FIELD_WALK])
+def test_r2_field_walk_never_confirms_on_unreadable_evidence(label, change, probe_a, probe_b):
+    older_bad, older_good = _event(S13, "true", time=T1), _event(S13, "false", time=T1)
+    assert _answer("GWS.GMAIL.13.1v1", [older_bad] + change(_event(S13, "false", time=T2))) == probe_a
+    assert _answer("GWS.GMAIL.13.1v1", [older_good] + change(_event(S13, "true", time=T2))) == probe_b
+
+
+def test_r2_field_walk_controls():
+    # The unaltered probes read as written.
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "true", time=T1), _event(S13, "false", time=T2)]) == MET
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time=T1), _event(S13, "true", time=T2)]) == NOT_MET
+
+
+@pytest.mark.parametrize(("change", "expected"), [
+    (_set("event", " TOGGLE_CAA_ENABLEMENT"), UNUSABLE),
+    (_set("event", "toggle_caa_enablement"), UNUSABLE),
+    (_set("application", ""), UNUSABLE),
+    (_set("time", "2026-10-01T10:00:00+00:60"), UNUSABLE),
+    (_set("new_value", None), UNUSABLE),
+    (_set("new_value", "PAUSED"), UNUSABLE),
+    (_tie, UNUSABLE),
+    (_set("unit", "ou:deleted"), NOT_MET),  # read with no unit: the toggle is tenant-wide
+])
+def test_r2_field_walk_on_the_event_named_row(change, expected):
+    caa = "TOGGLE_CAA_ENABLEMENT"
+    evs = [_event(None, "ENABLED", unit=None, name=caa, time=T1)] + change(
+        _event(None, "DISABLED", unit=None, name=caa, time=T2))
+    assert _answer("GWS.COMMONCONTROLS.2.1v1", evs) == expected
+
+
+@pytest.mark.parametrize(("unit", "expected"), [
+    ("group:g1", NOT_MET), ("group:", UNUSABLE), ("group:g 1", UNUSABLE), ("group:g1/x", UNUSABLE),
+    (" group:g1", UNUSABLE), ("group:g1 ", UNUSABLE), (None, UNUSABLE),
+])
+def test_r2_field_walk_group_identity_on_a_group_scoped_row(unit, expected):
+    meet = "MeetGenAiSmartNotesDocAccessProto manage_smart_notes_doc_access"
+    assert _answer("GWS.MEET.6.1v1", [_event(meet, "false", time=T1), _event(meet, "true", unit=unit)]) == expected
