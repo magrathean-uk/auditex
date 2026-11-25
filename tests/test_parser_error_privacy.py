@@ -73,6 +73,7 @@ SCRIPT_BUILDERS = [
     ("generate-explainer.py", "main"),
     ("generate-gws-scuba-catalogue.py", "main"),
     ("generate-rule-packs.py", "main"),
+    ("scuba-parity.py", "main"),
 ]
 
 

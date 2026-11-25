@@ -1,0 +1,399 @@
+{
+  "schema_version": "2026-11-22",
+  "run_id": "parity-fixture",
+  "model_name": "rules-only",
+  "policies": [
+    {
+      "policy_id": "GWS.GMAIL.7.5v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": false,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_code": "parity_fixture_not_met",
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "GWS.COMMONCONTROLS.1.4v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": false,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_code": "parity_fixture_not_met",
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "GWS.CHAT.5.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": false,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_code": "parity_fixture_not_met",
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "GWS.CALENDAR.1.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "unknown",
+          "value": null,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_code": "data_unavailable_no_setting_event",
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "GWS.MEET.1.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": true,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_code": "parity_fixture_met",
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "GWS.DRIVEDOCS.1.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": false,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_code": "parity_fixture_not_met",
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "GWS.ASSUREDCONTROLS.1.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "unknown",
+          "value": null,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_code": "data_unavailable_setting_absent",
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "GWS.ASSUREDCONTROLS.1.2v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "unknown",
+          "value": null,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_code": "data_unavailable_policy_read_incomplete",
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    }
+  ]
+}

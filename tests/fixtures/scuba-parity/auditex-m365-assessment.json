@@ -1,0 +1,749 @@
+{
+  "schema_version": "2026-11-22",
+  "run_id": "parity-fixture",
+  "model_name": "rules-only",
+  "policies": [
+    {
+      "policy_id": "MS.AAD.7.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": true,
+          "evidence_ids": [
+            "e0",
+            "e1"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.AAD.7.1v1.priv_users",
+        "section": [
+          "privileged_users"
+        ],
+        "cell": "ga_count_in_range",
+        "reason_code": "ga_count_in_range",
+        "reason_text": "Requirement met: two to eight users hold the Global Administrator role.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.AAD.7.2v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": true,
+          "evidence_ids": [
+            "e0",
+            "e1"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.AAD.7.2v1.priv_users",
+        "section": [
+          "privileged_users"
+        ],
+        "cell": "least_privilege_ok",
+        "reason_code": "least_privilege_ok",
+        "reason_text": "Requirement met: Global Administrators do not outnumber the privileged users without that role.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.AAD.7.3v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": false,
+          "evidence_ids": [
+            "e0",
+            "e1"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [
+        "review_policy_against_baseline_text"
+      ],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.AAD.7.3v1.priv_users",
+        "section": [
+          "privileged_users"
+        ],
+        "cell": "federated_admin_found",
+        "reason_code": "federated_admin_found",
+        "reason_text": "Requirement not met: a privileged user has an on-premises identity (OnPremisesImmutableId is set).",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.AAD.7.4v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": true,
+          "evidence_ids": [
+            "e0",
+            "e1",
+            "e2",
+            "e3"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.AAD.7.4v1.priv_roles",
+        "section": [
+          "privileged_roles",
+          "scuba_config",
+          "service_plans"
+        ],
+        "cell": "all_clear",
+        "reason_code": "no_violation_found",
+        "reason_text": "Requirement met: no role has a permanent active assignment beyond the configured exclusions.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.AAD.7.5v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "unknown",
+          "value": null,
+          "evidence_ids": [
+            "e0",
+            "e1"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [
+        "evidence_unusable",
+        "evidence_unusable:privileged_roles:absent"
+      ],
+      "recommendations": [
+        "recollect_unusable_evidence"
+      ],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.AAD.7.5v1.priv_roles",
+        "section": [
+          "privileged_roles"
+        ],
+        "cell": "no_usable_items",
+        "reason_code": "data_unavailable_section_empty",
+        "reason_text": "Data unavailable: privileged_roles holds no objects; the policy was not assessed.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.AAD.7.6v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "unknown",
+          "value": null,
+          "evidence_ids": [
+            "e0",
+            "e1"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [
+        "evidence_unusable",
+        "evidence_unusable:privileged_roles:absent"
+      ],
+      "recommendations": [
+        "recollect_unusable_evidence"
+      ],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.AAD.7.6v1.priv_roles",
+        "section": [
+          "privileged_roles"
+        ],
+        "cell": "no_usable_items",
+        "reason_code": "data_unavailable_section_empty",
+        "reason_text": "Data unavailable: privileged_roles holds no objects; the policy was not assessed.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.AAD.3.3v2",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "inferred",
+          "value": true,
+          "evidence_ids": [
+            "e0",
+            "e1",
+            "e2",
+            "e3"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [
+        "policy_not_applicable"
+      ],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.AAD.3.3v2.am_context",
+        "section": [
+          "authentication_method"
+        ],
+        "cell": "closed_gate",
+        "reason_code": "policy_not_applicable_authenticator_disabled",
+        "reason_text": "Not applicable: the policy applies only when Microsoft Authenticator is enabled; it is disabled.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.AAD.7.8v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": true,
+          "evidence_ids": [
+            "e0",
+            "e1",
+            "e2"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.AAD.7.8v1.priv_roles",
+        "section": [
+          "privileged_roles",
+          "service_plans"
+        ],
+        "cell": "all_clear",
+        "reason_code": "no_violation_found",
+        "reason_text": "Requirement met: every rule the policy reads is set as required.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.EXO.1.1v2",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": true,
+          "evidence_ids": [
+            "e0",
+            "e1",
+            "e2"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.EXO.1.1v2.exo_forwarding",
+        "section": [
+          "remote_domains",
+          "scuba_config"
+        ],
+        "cell": "all_clear",
+        "reason_code": "no_violation_found",
+        "reason_text": "Requirement met: no object in remote_domains shows that automatic forwarding is enabled.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.EXO.2.2v3",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": false,
+          "evidence_ids": [
+            "e0",
+            "e1"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Shall",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [
+        "review_policy_against_baseline_text"
+      ],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.EXO.2.2v3.bool_list",
+        "section": [
+          "spf_records"
+        ],
+        "cell": "flag_bad",
+        "reason_code": "violation_found",
+        "reason_text": "Requirement not met: a domain has a non-compliant SPF policy (found in spf_records).",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "fail",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.EXO.3.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "unknown",
+          "value": null,
+          "evidence_ids": [
+            "e0",
+            "e1",
+            "e2",
+            "e3"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Should",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [
+        "evidence_unusable",
+        "evidence_unusable:dkim_config:absent",
+        "evidence_unusable:dkim_records:absent",
+        "evidence_unusable:spf_records:absent"
+      ],
+      "recommendations": [
+        "recollect_unusable_evidence"
+      ],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.EXO.3.1v1.parser",
+        "section": [
+          "dkim_config",
+          "dkim_records",
+          "spf_records"
+        ],
+        "cell": "domain_unusable.dkim_rdata_empty",
+        "reason_code": "data_unavailable_dns_answer_empty",
+        "reason_text": "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed (a DMARC entry whose every lookup step is a recorded NXDomain reads no record instead); the policy was not assessed.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.EXO.4.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "unknown",
+          "value": null,
+          "evidence_ids": []
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "unknown",
+      "reason": "rule_not_implemented",
+      "reason_text": "Not assessed: Auditex has no rule for this policy yet.",
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.EXO.5.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": true,
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": null,
+      "latency_ms": 0,
+      "attempts": 1,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.EXO.6.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "unknown",
+          "value": null,
+          "evidence_ids": [
+            "e0"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "SHALL",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "absent_section",
+        "rule_id": "synthetic",
+        "section": [
+          "synthetic_section"
+        ],
+        "cell": null,
+        "reason_text": "Synthetic.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": null,
+        "result": "not_assessed"
+      }
+    },
+    {
+      "policy_id": "MS.TEAMS.1.1v1",
+      "claims": [
+        {
+          "id": "requirement_met",
+          "status": "confirmed",
+          "value": true,
+          "evidence_ids": [
+            "e0",
+            "e1"
+          ]
+        },
+        {
+          "id": "policy_criticality",
+          "status": "confirmed",
+          "value": "Should",
+          "evidence_ids": [
+            "e0"
+          ]
+        }
+      ],
+      "limitations": [],
+      "recommendations": [],
+      "validation_status": "valid",
+      "reason": "rule_precheck",
+      "rule_precheck": {
+        "class": "value_rule",
+        "rule_id": "MS.TEAMS.1.1v1.any_flag",
+        "section": [
+          "meeting_policies"
+        ],
+        "cell": "all_clear",
+        "reason_code": "no_violation_found",
+        "reason_text": "Requirement met: no object in meeting_policies shows that external participants can give or request control.",
+        "field": null,
+        "value": null
+      },
+      "latency_ms": 0,
+      "attempts": 0,
+      "prompt_sha256": null,
+      "response_sha256": null,
+      "thinking_disabled": false,
+      "thinking_stripped": false,
+      "comparison": {
+        "baseline_status": null,
+        "baseline_match": "none",
+        "model_status": "pass",
+        "result": "not_assessed"
+      }
+    }
+  ]
+}
