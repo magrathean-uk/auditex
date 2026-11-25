@@ -70,6 +70,11 @@ from .collectors import (
     replay_scuba_payload,
     scuba_probe_rows,
 )
+from .customer_id import (
+    CustomerIdWithheldCollector,
+    bundle_customer_id,
+    withhold_customer_ids,
+)
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
     DEFAULT_STALE_USER_DAYS,
@@ -100,8 +105,9 @@ def _merged_fixture_provenance(
                 merged[key] = value
     return fixture_provenance_for_bundle(merged) or None
 # --doh-endpoint: a DoH resolver URL path can carry an account token.
+# ``--customer-id`` is not a secret, but no customer id may enter a bundle (PRIV-CUSTOMER-ID).
 _SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache",
-                            "--doh-endpoint"}
+                            "--doh-endpoint", "--customer-id"}
 
 
 @dataclass(frozen=True)
@@ -182,7 +188,7 @@ def build_google_auth_context_payload(config: GoogleRunConfig, auth_config: Goog
         ),
         "subject": auth_config.subject,
         "workspace_domain": config.domain,
-        "customer_id": config.customer_id,
+        "customer_id": bundle_customer_id(config.customer_id),
         "scope_count": len(auth_config.scopes),
         "scopes": list(auth_config.scopes),
         "service_account_key_present": auth_summary["service_account_key_present"],
@@ -530,7 +536,7 @@ def _write_google_bundle(
         run_id=writer.run_id,
         collector_payloads=collector_payloads,
         domain=config.domain,
-        customer_id=config.customer_id,
+        customer_id=bundle_customer_id(config.customer_id),
         diagnostics=diagnostics,
         result_rows=result_rows,
         coverage_rows=coverage_rows,
@@ -564,7 +570,7 @@ def _write_google_bundle(
             "platform": "google_workspace",
             "tenant_name": config.tenant_name,
             "workspace_domain": config.domain,
-            "customer_id": config.customer_id,
+            "customer_id": bundle_customer_id(config.customer_id),
             "run_id": writer.run_id,
             "finding_count": len(findings),
             "collector_count": len(result_rows),
@@ -592,7 +598,7 @@ def _write_google_bundle(
         writer=writer,
         plan=ProviderFinalizePlan(
             tenant_name=config.tenant_name,
-            tenant_id=config.customer_id,
+            tenant_id=bundle_customer_id(config.customer_id),
             executed_by="auditex_google_workspace",
             selected_collectors=[row["name"] for row in result_rows],
             overall_status=overall_status,
@@ -613,7 +619,7 @@ def _write_google_bundle(
                 "until": config.until,
                 "platform": "google_workspace",
                 "workspace_domain": config.domain,
-                "customer_id": config.customer_id,
+                "customer_id": bundle_customer_id(config.customer_id),
                 "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path is not None else None,
                 "command_line": scrub_google_command_line(command_line or []),
                 "coverage_count": len(coverage_rows),
@@ -756,6 +762,9 @@ def run_google_offline(
     # Resolver diagnostics in the sample are untrusted (a full resolver URL may carry user info, a path token or a
     # query): every copy below (raw payloads, coverage, diagnostics, normalised records) sees only the safe form.
     sample = sanitise_resolver_fields(sample)
+    # A captured sample can carry the customer id (a ``customerId`` field, a policy's ``customer`` name, an error's
+    # request URL): no copy of it reaches the bundle (PRIV-CUSTOMER-ID).
+    sample = withhold_customer_ids(sample, customer_id)
     fixture_provenance = _merged_fixture_provenance(
         sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
         fixture_provenance_override,
@@ -916,7 +925,10 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     writer.log_event(
         "run.started",
         "Google Workspace live run started",
-        {"platform": "google_workspace", "domain": config.domain, "customer_id": config.customer_id, "auth": safe_auth_summary(auth_config)},
+        {
+            "platform": "google_workspace", "domain": config.domain,
+            "customer_id": bundle_customer_id(config.customer_id), "auth": safe_auth_summary(auth_config),
+        },
     )
     if doh_endpoint is not None:
         notice = google_dns_notice(doh_endpoint)
@@ -934,7 +946,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     diagnostics: list[dict[str, Any]] = []
     for name in selected:
         output = runner.run(
-            REGISTRY[name],
+            CustomerIdWithheldCollector(REGISTRY[name], config.customer_id),
             CollectorRunContext(
                 client=_collector_client(client, name),
                 top=config.top,
@@ -1054,6 +1066,11 @@ def _write_google_probe_bundle(
     dependency_status: dict[str, Any],
     command_line: list[str] | None,
 ) -> None:
+    # The probe result repeats the doctor's target and the preflight errors: neither carries the customer id into the
+    # bundle (PRIV-CUSTOMER-ID). The console copy the caller prints keeps the operator's own target.
+    payload = withhold_customer_ids(payload, config.customer_id)
+    if isinstance(payload.get("target"), dict):
+        payload["target"]["customer_id"] = bundle_customer_id(config.customer_id)
     preflight_rows = [dict(row) for row in payload.get("preflight", []) if isinstance(row, dict)]
     capability_rows = [dict(row) for row in payload.get("capability_matrix", []) if isinstance(row, dict)]
     if not capability_rows:
@@ -1077,7 +1094,7 @@ def _write_google_probe_bundle(
     writer.log_event(
         "probe.started",
         "Google Workspace probe started",
-        {"platform": "google_workspace", "domain": config.domain, "customer_id": config.customer_id},
+        {"platform": "google_workspace", "domain": config.domain, "customer_id": bundle_customer_id(config.customer_id)},
     )
     for row in _google_probe_summary_rows(selected, preflight_rows):
         writer.write_summary(row)
@@ -1102,7 +1119,7 @@ def _write_google_probe_bundle(
             "tenant_name": config.tenant_name,
             "run_id": writer.run_id,
             "workspace_domain": config.domain,
-            "customer_id": config.customer_id,
+            "customer_id": bundle_customer_id(config.customer_id),
             "collector_count": len(selected),
             "coverage_row_count": len(preflight_rows),
             "blocker_count": sum(1 for row in preflight_rows if row.get("status") != "ok"),
@@ -1144,7 +1161,7 @@ def _write_google_probe_bundle(
         writer=writer,
         plan=ProviderFinalizePlan(
             tenant_name=config.tenant_name,
-            tenant_id=config.customer_id,
+            tenant_id=bundle_customer_id(config.customer_id),
             executed_by="auditex_google_probe",
             selected_collectors=selected,
             overall_status=overall_status,
@@ -1182,7 +1199,7 @@ def _write_google_probe_bundle(
                 "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)),
                 "platform": "google_workspace",
                 "workspace_domain": config.domain,
-                "customer_id": config.customer_id,
+                "customer_id": bundle_customer_id(config.customer_id),
                 "collector_preset": config.collector_preset,
                 "top_limit": config.top,
             },

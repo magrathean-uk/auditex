@@ -23,6 +23,7 @@ from .auth import (
     POLICIES_SCOPE,
     user_delegated_credentials,
 )
+from .customer_id import withhold_customer_text
 
 # Per-user services kept at once. The Gmail collector reads one user at a time, so a few are enough;
 # the bound keeps a 10,000-user run from holding 10,000 discovery clients.
@@ -288,6 +289,13 @@ def _error_reasons(exc: Exception) -> set[str]:
 
 
 def classify_google_error(exc: Exception) -> tuple[str, str]:
+    """Class and text of a Google error. The library's text names the request URL, whose path or query holds the
+    customer id: it is replaced by a marker, so no coverage row, blocker or log carries it (PRIV-CUSTOMER-ID)."""
+    error_class, message = _classify_google_error(exc)
+    return error_class, withhold_customer_text(message)
+
+
+def _classify_google_error(exc: Exception) -> tuple[str, str]:
     status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
     message = str(exc)
     if isinstance(exc, PolicyReadError) and exc.error_class:

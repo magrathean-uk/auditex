@@ -664,8 +664,15 @@ Credential masking in the shareable profiles covers:
   authorization, assertion, private key, shared key), including numbered or `...Value` forms;
 - lists and mappings under such keys, except mappings under a `...Credential` key, which hold credential metadata.
 
-Google customer ids (under `tenant_id` and `customer_id` keys) are masked as `Id <pseudonym>` in shareable output;
-local output keeps the real id.
+The Google Workspace customer id never enters a run bundle (PRIV-CUSTOMER-ID). The configured `--customer-id` is
+used for the API calls only: the manifest, snapshot, `ai_safe/run_summary.json`, `auth-context.json`, the probe result
+and the tenant identity record the `my_customer` alias as it is and any other configured value as `null`, and the
+recorded command line redacts `--customer-id`. A customer id the API returns (a `customerId` field, a Cloud Identity
+policy's `customer` name) or an error text quotes (the request URL of a failed read) becomes the marker
+`<customer-id>` before it reaches a raw file, coverage row, blocker, checkpoint or log. Google runs therefore carry no
+tenant id: compare and drift match them on the workspace domain, and shareable SARIF and OSCAL dedup ids are scoped
+to the run. Bundles written before this change still load and validate; their customer ids (under `tenant_id` and
+`customer_id` keys) are masked as `Id <pseudonym>` in shareable output.
 
 Shareable SARIF and OSCAL exports withhold a waiver's free-text `reason` altogether: pattern matching cannot be
 trusted to find every spelling of an identifier an operator types (a customer id inside `workspace_<id>_rollout`, a

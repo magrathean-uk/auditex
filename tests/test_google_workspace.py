@@ -124,7 +124,7 @@ def test_google_offline_run_writes_valid_contract_and_findings(tmp_path: Path) -
 
     assert manifest["platform"] == "google_workspace"
     assert manifest["workspace_domain"] == "example.com"
-    assert manifest["customer_id"] == "C123"
+    assert manifest.get("customer_id") is None  # PRIV-CUSTOMER-ID: the configured id never enters the bundle
     assert manifest["data_handling_path"] == "data-handling.json"
     assert data_handling["platform"] == "google_workspace"
     assert data_handling["read_only"] is True
@@ -238,7 +238,7 @@ def test_google_live_writes_provider_auth_context(tmp_path: Path, monkeypatch) -
     assert auth_context["auth_mode"] == "domain-delegation"
     assert auth_context["subject"] == "admin@example.com"
     assert auth_context["workspace_domain"] == "example.com"
-    assert auth_context["customer_id"] == "C123"
+    assert auth_context["customer_id"] is None
     assert auth_context["scopes"] == ["scope://directory.readonly"]
     assert "service-account.json" not in json.dumps(auth_context)
     assert live_readiness["trust_level"] == "live_verified"
