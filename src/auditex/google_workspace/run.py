@@ -5,7 +5,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,7 +73,7 @@ from .findings import (
     DEFAULT_STALE_USER_DAYS,
     build_google_findings,
 )
-from .normalize import build_google_normalized_snapshot
+from .normalize import build_google_normalized_snapshot, unplaced_policy_count
 
 LOG = logging.getLogger("auditex.google_workspace")
 _OFFLINE_SAMPLE_METADATA_KEYS = frozenset({"_fixture_provenance"})
@@ -509,6 +509,7 @@ def _write_google_bundle(
     data_handling_notices: list[str] | None = None,
     doh_endpoint: str | None = None,
 ) -> int:
+    evaluated_at = as_of or datetime.now(UTC)
     normalized_snapshot = build_google_normalized_snapshot(
         tenant_name=config.tenant_name,
         run_id=writer.run_id,
@@ -519,14 +520,14 @@ def _write_google_bundle(
         result_rows=result_rows,
         coverage_rows=coverage_rows,
         top_limit=config.top or None,
-        as_of=as_of,
+        as_of=evaluated_at,
     )
     findings = build_google_findings(
         normalized_snapshot,
         diagnostics=diagnostics,
         stale_user_days=config.stale_user_days,
         stale_device_days=config.stale_device_days,
-        now=as_of,
+        now=evaluated_at,
     )
     if waiver_rows:
         # Same semantics as Microsoft 365: AND matching, finding_id or rule_id required, expired rows ignored.
@@ -647,6 +648,34 @@ def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict
     return rows
 
 
+def _record_policy_placement(
+    writer: AuditWriter,
+    collector_payloads: dict[str, dict[str, Any]],
+    result_rows: list[dict[str, Any]],
+    coverage_rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    count = unplaced_policy_count(collector_payloads, coverage_rows)
+    if not count:
+        return None
+    row = {
+        "collector": "google_policies",
+        "type": "derived",
+        "name": "policyPlacement",
+        "status": "partial",
+        "item_count": 0,
+        "error_class": "malformed_response",
+        "error": f"{count} policies target organisational units absent from the complete Directory read.",
+        "policy_row_validation": True,
+    }
+    coverage_rows.append(row)
+    summary = next(item for item in result_rows if item["name"] == "google_policies")
+    if summary["status"] == "ok":
+        summary["status"] = "partial"
+    summary["coverage_rows"] += 1
+    writer.write_checkpoint("google_policies", summary)
+    return row
+
+
 def run_google_offline(
     *,
     sample_path: Path,
@@ -752,9 +781,12 @@ def run_google_offline(
             "coverage_rows": len(replayed),
         }
         result_rows.append(row)
-        writer.write_summary(row)
         writer.write_checkpoint(name, row)
         writer.write_raw(name, payload)
+    if placement := _record_policy_placement(writer, collector_payloads, result_rows, coverage_rows):
+        diagnostics.append(placement)
+    for row in result_rows:
+        writer.write_summary(row)
     writer.write_index_records(coverage_rows)
     if diagnostics:
         writer.write_diagnostics(diagnostics)
@@ -877,9 +909,12 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
             name=name,
         )
         result_rows.append(dict(output.result_row))
-        writer.write_summary(dict(output.result_row))
         coverage_rows.extend(output.coverage_rows)
         collector_payloads[name] = output.result.payload
+    if placement := _record_policy_placement(writer, collector_payloads, result_rows, coverage_rows):
+        writer.write_index_records([placement])
+    for row in result_rows:
+        writer.write_summary(row)
     name_missing_scopes(client, coverage_rows)
     diagnostics = [dict(row) for row in coverage_rows if row.get("status") != "ok"]
     capability_rows = _capability_rows(

@@ -867,11 +867,12 @@ class GoogleWorkspaceClient:
                 # read a setting, and one where only some can be read is not a complete read.
                 from .collectors import policy_row_readable
 
-                unreadable = sum(1 for row in rows if not policy_row_readable(row))
-                if rows and unreadable == len(rows):
+                readable = [row for row in rows if policy_row_readable(row)]
+                if not readable:
                     raise policy_malformed_error(later_page=False)
-                if unreadable and rows.page_error is None:
+                if len(readable) < len(rows) and rows.page_error is None:
                     rows.page_error = PolicyReadError(POLICY_UNREADABLE_ROWS_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
+                rows[:] = readable
         except Exception as exc:
             raise policy_read_error(exc) from None
         if rows.page_error is not None:

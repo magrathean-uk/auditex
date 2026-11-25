@@ -25,8 +25,8 @@ Cloud Identity Policy API settings (``minimise_policy_settings``) are admin conf
 values are text an admin typed (a custom user message, a rule name, a description, Gmail address lists) and a
 policy's CEL query can name units and groups. A policy is projected onto the fields the audit reads: its type, its
 targets and order, the parsed scope of its query (``query_scope``, never the query) and its setting's type and
-value. Within a value only fixed vocabulary survives (enum names, Booleans, numbers, durations, timestamps, IP
-ranges, opaque ids in id fields and Google's own system alert names); any other string becomes ``redacted:text``.
+value. Each setting has a field allow-list with typed fields and fixed enum membership. Administrator text and
+unrecognised fields are discarded. An unreadable allow-listed value remains marked as unknown.
 Each Gmail address list becomes its id, its entry count and its count of domain-shaped entries
 (``^[^@]+\\.[^@]+$``, ScubaGoggles' own test). A list whose entries or id cannot be read keeps ``None`` counts
 (unknown), never zero.
@@ -36,11 +36,19 @@ input and are idempotent.
 """
 from __future__ import annotations
 
-import ipaddress
+import math
 import re
-from typing import Any
+import sys
+from typing import Any, Literal
 
 from .collection_gaps import REASON_UNKNOWN, TRUNCATION_REASONS, section_was_cut
+from .google_policy_schema import (
+    CUSTOMER_ID,
+    POLICY_VALUE_SCHEMAS,
+    RequiredPolicyField,
+    policy_reference,
+    policy_scalar,
+)
 
 VACATION_TEXT_FIELDS = ("responseSubject", "responseBodyPlainText", "responseBodyHtml")
 SEND_AS_TEXT_FIELDS = ("signature",)
@@ -146,44 +154,16 @@ def minimise_gmail_settings(payload: dict[str, Any]) -> dict[str, Any]:
 # (``policyQuery.orgUnit``, ``group`` and ``sortOrder``), the scope its CEL ``query`` was parsed into
 # (``policyQuery.query_scope``, never the query text) and its setting's ``type`` and projected ``value``. The tenant's
 # customer id, the policy resource name and every other field are dropped.
-POLICY_DROPPED_FIELDS = ("customer", "name")
-# The containers of one Gmail address list's entries (an allow list or a block list).
 POLICY_ADDRESS_LIST_KEYS = ("addressList", "blockedAddressList")
-# Gmail setting types whose entries carry an admin-written description.
-POLICY_DESCRIBED_LIST_TYPES = ("settings/gmail.blocked_sender_lists", "settings/gmail.spam_override_lists")
-POLICY_ADDRESS_LISTS_TYPE = "settings/gmail.email_address_lists"
-POLICY_SYSTEM_ALERTS_TYPE = "settings/rule.system_defined_alerts"
 POLICY_SETTING_TYPE = re.compile(r"settings/[a-z0-9_]+(?:\.[a-z0-9_]+)+")
 POLICY_UNIT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+POLICY_TYPES = ("ADMIN", "SYSTEM", "POLICY_TYPE_UNSPECIFIED")
 POLICY_QUERY_MAX = 4_096
-# Google's system groups: their ids carry no ``groups/`` prefix (Policy API concepts, "System Groups").
 POLICY_SYSTEM_GROUPS = frozenset({"WORKSPACE_ALL_ADMIN_GROUP", "UNCONSENTED_CHILD_GROUP"})
-# What a policy's CEL query was parsed into: the scope its targets say, a scope they cannot represent (another unit
-# or group, an exception, a licence or any other condition), or a query that cannot be read.
-POLICY_QUERY_SCOPES = ("targets", "other", "unreadable")
-# An RFC 3339 timestamp with a zone and up to nine fractional digits (ProtoJSON ``Timestamp``).
-POLICY_TIMESTAMP_TEXT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})")
-REDACTED_ADDRESS = "redacted:address"
-REDACTED_PATH = "redacted:path"
-REDACTED_TEXT = "redacted:text"
-_REDACTED_TEXTS = frozenset({REDACTED_ADDRESS, REDACTED_PATH, REDACTED_TEXT})
-_REDACTED_KEY = re.compile(r"redacted:(?:address|path|key):\d+")
-_ADDRESS = re.compile(r"[^@\s]+@[^@\s]+")
+POLICY_QUERY_SCOPES = ("targets", "licences", "other", "unreadable")
 _DOMAIN_ENTRY = re.compile(r"^[^@]+\.[^@]+$")
-# An absolute local path anywhere in a string: POSIX (``/a/b``, ``~/a``), Windows drive or UNC, or a file URL.
-_LOCAL_PATH = re.compile(r"(?:^|[\s\"'(=,;])(?:~?/[^/\s]+/|~/|[A-Za-z]:[\\/]|\\\\[^\\\s]+\\)|file:/", re.IGNORECASE)
-# The strings a setting value keeps: fixed vocabulary the API writes itself (enum names, durations, timestamps,
-# int64 numbers, IP addresses and ranges), and opaque ids in id fields. Any other string an admin may have typed (a
-# custom message, a rule name, a description) becomes ``redacted:text``, which no rule reads as a value.
-_ENUM_TEXT = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
-_DURATION_TEXT = re.compile(r"-?\d{1,12}(?:\.\d{1,9})?s")
-_INTEGER_TEXT = re.compile(r"-?\d{1,20}")
-_FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
-_ID_TEXT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:+=/-]{0,255}")
-# A Google customer id (``C0`` and letters or digits) is never kept as a value, whatever field holds it.
-_CUSTOMER_ID = re.compile(r"C0[0-9A-Za-z]{5,}")
 # The names of Google's system-defined alert rules (ScubaGoggles v1.1.0, parsers/system_rules_parser.py): the only
-# rule names kept; a rule an admin created and named is reduced to ``redacted:text``.
+# rule names kept. Unknown names produce an unreadable value.
 POLICY_SYSTEM_ALERT_NAMES = frozenset(
     {
         "Account suspension warning",
@@ -220,99 +200,15 @@ POLICY_SYSTEM_ALERT_NAMES = frozenset(
 )
 
 
-def _ip_text(text: str) -> bool:
-    if len(text) > 64 or not any(mark in text for mark in ".:"):
-        return False
-    try:
-        ipaddress.ip_network(text, strict=False)
-    except ValueError:
-        return False
-    return True
+def finite_policy_number(value: Any) -> bool:
+    """Check an API double without converting a potentially out-of-range integer."""
+    if type(value) is int:
+        return -sys.float_info.max <= value <= sys.float_info.max
+    return isinstance(value, float) and math.isfinite(value)
 
 
-def _fixed_text(text: str) -> bool:
-    """A string of the API's own fixed vocabulary: an enum name, a duration, a timestamp, a number or an IP range."""
-    if _CUSTOMER_ID.fullmatch(text):
-        return False
-    return bool(
-        _ENUM_TEXT.fullmatch(text)
-        or _DURATION_TEXT.fullmatch(text)
-        or POLICY_TIMESTAMP_TEXT.fullmatch(text)
-        or _INTEGER_TEXT.fullmatch(text)
-        or _ip_text(text)
-    )
-
-
-def _id_field(key: Any) -> bool:
-    return isinstance(key, str) and (key == "id" or key.endswith(("Id", "Ids")))
-
-
-def _clean_id(value: Any) -> bool:
-    """An opaque id that can be kept as it is: no blank, address, local path, customer id or earlier redaction."""
-    return (
-        isinstance(value, str)
-        and bool(_ID_TEXT.fullmatch(value))
-        and not value.startswith("redacted:")
-        and not _ADDRESS.search(value)
-        and not _LOCAL_PATH.search(value)
-        and not _CUSTOMER_ID.fullmatch(value)
-    )
-
-
-def _project_text(text: str, key: Any, setting_type: Any) -> str:
-    """One string of a policy: kept only when it is fixed vocabulary (see above), else a constant."""
-    if text == "" or text in _REDACTED_TEXTS:
-        return text
-    if _ADDRESS.search(text):
-        return REDACTED_ADDRESS
-    if _LOCAL_PATH.search(text):
-        return REDACTED_PATH
-    if _fixed_text(text) or (_id_field(key) and _clean_id(text)):
-        return text
-    if setting_type == POLICY_SYSTEM_ALERTS_TYPE and key == "displayName" and text in POLICY_SYSTEM_ALERT_NAMES:
-        return text
-    return REDACTED_TEXT
-
-
-def _project_key(key: Any, index: int) -> Any:
-    """A mapping key: a field name is kept; any other key is a constant numbered by its position."""
-    if not isinstance(key, str) or _FIELD_NAME.fullmatch(key) or _REDACTED_KEY.fullmatch(key):
-        return key
-    if _ADDRESS.search(key):
-        return f"{REDACTED_ADDRESS}:{index}"
-    if _LOCAL_PATH.search(key):
-        return f"{REDACTED_PATH}:{index}"
-    return f"redacted:key:{index}"
-
-
-def _project_value(value: Any, setting_type: Any = None, key: Any = None) -> Any:
-    """A setting value with only fixed-vocabulary strings and field-name keys left; other scalars are kept."""
-    if isinstance(value, str):
-        return _project_text(value, key, setting_type)
-    if isinstance(value, list):
-        return [_project_value(item, setting_type, key) for item in value]
-    if not isinstance(value, dict):
-        return value
-    if any(name in value for name in POLICY_ADDRESS_LIST_KEYS):
-        return _address_list_summary(value, setting_type, keep_siblings=True)
-    return {_project_key(name, index): _project_value(item, setting_type, name) for index, (name, item) in enumerate(value.items())}
-
-
-def _project_scalar(value: Any) -> Any:
-    """A policy field that must be a scalar: an enum string, number, Boolean or null is kept; text and containers are
-    reduced to a constant or an empty container of the same kind (still the wrong type, so still a problem)."""
-    if isinstance(value, str):
-        return value if value == "" or (_ENUM_TEXT.fullmatch(value) and not _CUSTOMER_ID.fullmatch(value)) else REDACTED_TEXT
-    if isinstance(value, list):
-        return []
-    if isinstance(value, dict):
-        return {}
-    return value
-
-
-def _clean_list_id(value: Any) -> bool:
-    """A list id that can be kept as it is (an earlier ``redacted:`` sentinel is not one)."""
-    return _clean_id(value)
+def policy_unit_id(value: Any) -> bool:
+    return isinstance(value, str) and bool(POLICY_UNIT_ID.fullmatch(value)) and CUSTOMER_ID.search(value) is None
 
 
 def _address_entries(container: Any) -> list[str] | None:
@@ -334,73 +230,85 @@ def _address_entries(container: Any) -> list[str] | None:
     return texts
 
 
-_SUMMARY_FIELDS = ("id", "name", "entry_count", "domain_entry_count", *POLICY_ADDRESS_LIST_KEYS)
-
-
-def _address_list_summary(entry: dict[str, Any], setting_type: Any = None, *, keep_siblings: bool = False) -> dict[str, Any]:
-    """One Gmail address list as ``{id, entry_count, domain_entry_count}``; unreadable entries give ``None`` counts.
-
-    ``keep_siblings`` keeps the entry's other fields (projected), for an address list met outside
-    ``gmail.email_address_lists``; the list's name is dropped either way.
-    """
-    list_id = entry.get("id")
-    id_readable = _clean_list_id(list_id)
-    summary: dict[str, Any] = {"id": list_id if id_readable else None}
-    if keep_siblings:
-        for index, (key, item) in enumerate(entry.items()):
-            if key not in _SUMMARY_FIELDS:
-                summary[_project_key(key, index)] = _project_value(item, setting_type, key)
-    if not id_readable and (not keep_siblings or "id" in entry):
-        # A list is referenced by its id: with no id, or one that had to be redacted (which could no longer tell two
-        # lists apart, including an earlier ``redacted:`` placeholder), its counts mean nothing, so they are unknown.
-        summary.update(id=None, entry_count=None, domain_entry_count=None)
-        return summary
-    if "entry_count" in entry and not any(key in entry for key in POLICY_ADDRESS_LIST_KEYS):
-        # Already minimised: keep the counts only when they are consistent counts, else both are unknown.
-        total, domains = entry.get("entry_count"), entry.get("domain_entry_count")
-        consistent = all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in (total, domains))
-        consistent = consistent and domains <= total
-        summary["entry_count"] = total if consistent else None
-        summary["domain_entry_count"] = domains if consistent else None
-        return summary
+def _address_list_summary(entry: Any) -> dict[str, Any]:
+    """Keep a usable list ID and counts, or unknown counts when any entries cannot be read."""
+    unknown = {"id": None, "entry_count": None, "domain_entry_count": None}
+    if not isinstance(entry, dict) or not policy_reference(entry.get("id")):
+        return unknown
+    unknown["id"] = entry["id"]
     containers = [entry[key] for key in POLICY_ADDRESS_LIST_KEYS if key in entry]
-    texts: list[str] | None = [] if containers else None
+    if not containers:
+        # A previously minimised list needs both consistent counts.
+        total, domains = entry.get("entry_count"), entry.get("domain_entry_count")
+        if type(total) is int and type(domains) is int and 0 <= domains <= total:
+            return {"id": entry["id"], "entry_count": total, "domain_entry_count": domains}
+        return unknown
+    texts: list[str] = []
     for container in containers:
-        read = _address_entries(container)
-        if read is None or texts is None:
-            texts = None
-            break
-        texts.extend(read)
-    summary["entry_count"] = len(texts) if texts is not None else None
-    summary["domain_entry_count"] = sum(1 for text in texts if _DOMAIN_ENTRY.match(text)) if texts is not None else None
-    return summary
+        entries = _address_entries(container)
+        if entries is None:
+            return unknown
+        texts.extend(entries)
+    return {
+        "id": entry["id"],
+        "entry_count": len(texts),
+        "domain_entry_count": sum(1 for text in texts if _DOMAIN_ENTRY.fullmatch(text)),
+    }
 
 
-def _drop_descriptions(value: Any) -> Any:
-    if isinstance(value, list):
-        return [_drop_descriptions(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _drop_descriptions(item) for key, item in value.items() if key != "description"}
-    return value
+_CAMEL_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _snake_policy_field(key: str) -> str:
+    return _CAMEL_BOUNDARY.sub("_", key).lower()
+
+
+def _project_policy_object(value: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, field in schema.items():
+        alias = _snake_policy_field(key)
+        # The legacy 2SV aliases have their own checked keys in the schema.
+        if alias in schema:
+            alias = key
+        if key in value or alias in value:
+            projected = _project_policy_field(value.get(key, value.get(alias)), field)
+            if key != alias and key in value and alias in value and projected != _project_policy_field(value[alias], field):
+                projected = None
+            result[key] = projected
+        elif isinstance(field, RequiredPolicyField) and (
+            field.when is None or value.get(field.when, value.get(_snake_policy_field(field.when))) is True
+        ):
+            result[key] = None
+    return result
+
+
+def _project_policy_field(value: Any, schema: Any) -> Any:
+    if isinstance(schema, RequiredPolicyField):
+        return _project_policy_field(value, schema.schema)
+    if isinstance(schema, dict):
+        return _project_policy_object(value, schema) if isinstance(value, dict) else None
+    if isinstance(schema, list):
+        return [_project_policy_field(item, schema[0]) for item in value] if isinstance(value, list) else None
+    if schema == "address-lists":
+        return [_address_list_summary(item) for item in value] if isinstance(value, list) else None
+    if schema == "system-alert-name":
+        return value if isinstance(value, str) and value in POLICY_SYSTEM_ALERT_NAMES else None
+    return policy_scalar(value, schema)
+
+
+def policy_value_schema(setting_type: Any) -> dict[str, Any] | None:
+    if isinstance(setting_type, str) and setting_type.startswith("settings/"):
+        return POLICY_VALUE_SCHEMAS.get(setting_type.removeprefix("settings/"))
+    return None
 
 
 def minimise_policy_value(setting_type: Any, value: Any) -> Any:
-    """One Policy API setting value: address lists reduced to counts, no list description and only fixed-vocabulary text."""
-    if setting_type == POLICY_ADDRESS_LISTS_TYPE and isinstance(value, dict) and "emailAddressList" in value:
-        lists = value["emailAddressList"]
-        unreadable = {"id": None, "entry_count": None, "domain_entry_count": None}
-        # A list that is not a list of objects is unreadable: its content is dropped and its counts are unknown.
-        value = {
-            **value,
-            "emailAddressList": [
-                _address_list_summary(item) if isinstance(item, dict) else dict(unreadable) for item in lists
-            ]
-            if isinstance(lists, list)
-            else None,
-        }
-    if setting_type in POLICY_DESCRIBED_LIST_TYPES:
-        value = _drop_descriptions(value)
-    return _project_value(value, setting_type)
+    """Project only named fields of the setting's schema; nulls preserve read failures on replay."""
+    schema = policy_value_schema(setting_type)
+    if schema is not None and setting_type == "settings/rule.system_defined_alerts" and isinstance(value, dict) and "rules" in value:
+        # Older widened samples can carry the alert entries in a single list.
+        schema = {"rules": schema["rules"]}
+    return _project_policy_field(value, schema) if schema is not None else None
 
 
 # What a Google policies section may carry besides its rows: the outcome markers of the read, with fixed values only.
@@ -441,16 +349,18 @@ def minimise_policy_section(name: str, section: dict[str, Any]) -> dict[str, Any
     return result
 
 
-def _bare_target(value: Any, prefix: str) -> str | None:
-    """A sound target's bare id (a system group keeps its own id); ``None`` for anything else."""
-    if not isinstance(value, str):
+def policy_target(value: Any, prefix: str) -> str | None | Literal[False]:
+    """A target's bare ID, None for the unset string, or False for an invalid target."""
+    if value == "":
         return None
+    if not isinstance(value, str):
+        return False
     if prefix == "groups/" and value in POLICY_SYSTEM_GROUPS:
         return value
     if not value.startswith(prefix):
-        return None
+        return False
     bare = value[len(prefix) :]
-    return bare if POLICY_UNIT_ID.fullmatch(bare) else None
+    return bare if policy_unit_id(bare) else False
 
 
 # The CEL terms a policy query may hold and still be represented by its ``orgUnit`` and ``group`` fields alone. The
@@ -461,6 +371,11 @@ _QUERY_ORG_UNIT_TERM = re.compile(
 _QUERY_GROUP_TERM = re.compile(
     r"entity\.groups\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.group_id\s*==\s*groupId\(\s*'([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
 )
+_LICENCE_SKU = r"(?:/product/[A-Za-z0-9-]+/sku/[A-Za-z0-9-]+|CHROMEBOOK-SOFTWARE|GOOGLE-IDENTITY)"
+_LICENCE_TERM = re.compile(
+    r"(!)?\s*entity\.licenses\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\2\s+in\s*"
+    rf"\[\s*'{_LICENCE_SKU}'(?:\s*,\s*'{_LICENCE_SKU}')*\s*\]\s*\)"
+)
 
 
 def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
@@ -468,15 +383,17 @@ def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
 
     ``targets``: a conjunction (``&&``) of at most one org-unit membership term naming the ``orgUnit`` field's unit
     and at most one group membership term naming the ``group`` field's group, with the group term present exactly
-    when the field is. ``other``: anything else (a term naming another unit or group, a negation, a disjunction, a
-    licence or any other condition), a scope the targets cannot show. ``unreadable``: not a string of bounded length.
+    when the field is. ``licences``: matching targets with Google's include/exclude SKU clauses. The evidence is
+    conditional. ``other``: any scope beyond these forms or inconsistent with the helpers.
+    ``unreadable``: not a string of bounded length.
     Only this word is kept; the query text never leaves the minimiser.
     """
     if not isinstance(query, str) or len(query) > POLICY_QUERY_MAX:
         return "unreadable"
-    org_id, group_id = _bare_target(org_unit, "orgUnits/"), _bare_target(group, "groups/")
+    org_id, group_id = policy_target(org_unit, "orgUnits/"), policy_target(group, "groups/")
     org_ids: list[str] = []
     group_ids: list[str] = []
+    licence_polarities: set[bool] = set()
     for term in query.split("&&"):
         term = term.strip()
         while term.startswith("(") and term.endswith(")") and _QUERY_ORG_UNIT_TERM.fullmatch(term) is None:
@@ -485,52 +402,65 @@ def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
             org_ids.append(match.group(2))
         elif match := _QUERY_GROUP_TERM.fullmatch(term):
             group_ids.append(match.group(2))
+        elif licence := _LICENCE_TERM.fullmatch(term):
+            negated = licence.group(1) is not None
+            if negated in licence_polarities:
+                return "other"
+            licence_polarities.add(negated)
         else:
             return "other"
     if len(org_ids) > 1 or (org_ids and org_ids[0] != org_id):
         return "other"
-    if group_id is not None:
-        return "targets" if group_ids == [group_id] else "other"
-    return "targets" if not group_ids and org_ids else "other"
+    if group_ids != ([group_id] if isinstance(group_id, str) else []):
+        return "other"
+    if not org_ids and not group_ids and not licence_polarities:
+        return "other"
+    return "licences" if licence_polarities else "targets"
 
 
 def _minimise_target(value: Any, prefix: str) -> Any:
     """A target field: a sound target, ``""`` (unset) or null as read; any other text a constant (still invalid)."""
-    if value is None or value == "" or _bare_target(value, prefix) is not None:
+    if value is None or policy_target(value, prefix) is not False:
         return value
-    return _project_scalar(value)
+    return "redacted:text"
+
+
+def policy_query_classification(query: dict[str, Any]) -> str | None:
+    """Classify raw CEL or retain the fixed classification from minimised evidence."""
+    if "query" in query and query["query"] != "":
+        scope = policy_query_scope(query["query"], query.get("orgUnit"), query.get("group"))
+        return "unreadable" if "query_scope" in query and scope != query["query_scope"] else scope
+    if "query_scope" in query:
+        value = query["query_scope"]
+        return value if value in POLICY_QUERY_SCOPES else "unreadable"
+    return None
 
 
 def _minimise_policy_query(query: Any) -> Any:
     """``policyQuery`` with its targets and order and the parsed scope of its CEL query; nothing else."""
     if not isinstance(query, dict):
-        return _project_scalar(query)
+        return None
     result: dict[str, Any] = {}
     for key, prefix in (("orgUnit", "orgUnits/"), ("group", "groups/")):
         if key in query:
             result[key] = _minimise_target(query[key], prefix)
     if "sortOrder" in query:
-        result["sortOrder"] = _project_scalar(query["sortOrder"])
-    if "query" in query:
-        if query["query"] != "":  # proto3 JSON's unset string: no query
-            result["query_scope"] = policy_query_scope(query["query"], query.get("orgUnit"), query.get("group"))
-    elif "query_scope" in query:
-        # Already minimised: a known word is kept, anything else cannot be read.
-        result["query_scope"] = query["query_scope"] if query["query_scope"] in POLICY_QUERY_SCOPES else "unreadable"
+        result["sortOrder"] = query["sortOrder"] if finite_policy_number(query["sortOrder"]) else None
+    if (scope := policy_query_classification(query)) is not None:
+        result["query_scope"] = scope
     return result
 
 
 def _minimise_setting(setting: Any) -> Any:
     """``setting`` with its type and projected value only."""
     if not isinstance(setting, dict):
-        return _project_scalar(setting)
+        return None
     result: dict[str, Any] = {}
     setting_type = setting.get("type")
     if "type" in setting:
-        sound = isinstance(setting_type, str) and POLICY_SETTING_TYPE.fullmatch(setting_type)
-        result["type"] = setting_type if sound else _project_scalar(setting_type)
+        result["type"] = setting_type if policy_value_schema(setting_type) is not None else None
     if "value" in setting:
-        result["value"] = minimise_policy_value(result.get("type"), setting["value"])
+        result["value"] = minimise_policy_value(setting_type, setting["value"])
     return result
 
 
@@ -547,24 +477,26 @@ def minimise_policy_settings(policies: Any) -> Any:
     """Cloud Identity policies projected onto the fields the audit reads: no ``customer``, ``name`` or free text.
 
     Each policy keeps ``type``, ``policyQuery`` (``orgUnit``, ``group``, ``sortOrder`` and ``query_scope``) and
-    ``setting`` (``type`` and the projected ``value``). A field holding the wrong kind of value keeps a constant of the
-    same wrong kind, and a row that is not an object is kept projected, so the normaliser still counts it as malformed
-    instead of the read looking complete.
+    ``setting`` (``type`` and the projected ``value``). Unreadable fields or rows remain invalid after projection.
     """
     if not isinstance(policies, list):
-        return _project_value(policies)
+        return None
     result: list[Any] = []
     for policy in policies:
         if not isinstance(policy, dict):
-            result.append(_project_value(policy))
+            result.append(None)
             continue
         kept: dict[str, Any] = {}
         if "type" in policy:
-            kept["type"] = _project_scalar(policy["type"])
+            kept["type"] = policy["type"] if policy["type"] in POLICY_TYPES else None
         if "policyQuery" in policy:
             kept["policyQuery"] = _minimise_policy_query(policy["policyQuery"])
         if "setting" in policy:
             kept["setting"] = _minimise_setting(policy["setting"])
+            if isinstance(kept["setting"], dict) and any(
+                key in policy and not isinstance(policy[key], str) for key in ("name", "customer")
+            ):
+                kept["setting"]["value"] = None
         result.append(kept)
     return result
 

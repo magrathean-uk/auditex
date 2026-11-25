@@ -119,7 +119,7 @@ def _rows() -> list[dict[str, Any]]:
             "policyQuery": {"orgUnit": "orgUnits/sales", "sortOrder": 2},
             "setting": {
                 "type": "settings/gmail.spam_override_lists",
-                "value": {"spamOverride": [{"ruleId": "list-1", "description": "Ask ops@example.net", "bypassSelectedSenders": True}]},
+                "value": {"spamOverride": [{"ruleId": "list-1", "description": "Ask ops@example.net", "bypassSelectedSenders": True, "bypassSenderAllowlist": ["list-1"]}]},
             },
             "type": "ADMIN",
         },
@@ -129,7 +129,7 @@ def _rows() -> list[dict[str, Any]]:
             "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1},
             "setting": {
                 "type": "settings/rule.system_defined_alerts",
-                "value": {"displayName": "Leaked password", "action": {"recipients": ["alerts@example.com"]}},
+                "value": {"displayName": "Leaked password", "state": "ACTIVE", "action": {"recipients": ["alerts@example.com"]}},
             },
             "type": "SYSTEM",
         },
@@ -220,14 +220,14 @@ def test_one_read_fills_the_unchanged_two_step_payload_and_a_minimised_settings_
             },
             {
                 "policyQuery": {"orgUnit": "orgUnits/sales", "sortOrder": 2},
-                "setting": {"type": "settings/gmail.spam_override_lists", "value": {"spamOverride": [{"ruleId": "list-1", "bypassSelectedSenders": True}]}},
+                "setting": {"type": "settings/gmail.spam_override_lists", "value": {"spamOverride": [{"ruleId": "list-1", "bypassSelectedSenders": True, "bypassSenderAllowlist": ["list-1"]}]}},
                 "type": "ADMIN",
             },
             {
                 "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1},
                 "setting": {
                     "type": "settings/rule.system_defined_alerts",
-                    "value": {"displayName": "Leaked password", "action": {"recipients": ["redacted:address"]}},
+                    "value": {"displayName": "Leaked password", "state": "ACTIVE"},
                 },
                 "type": "SYSTEM",
             },
@@ -250,7 +250,7 @@ def test_the_normalised_settings_hold_sections_units_and_values_and_no_address()
     service = _Policies(_rows())
     result = GooglePoliciesCollector().run({"client": _client(service)})
 
-    normalized = _normalise(result.payload, result.status, result.coverage)
+    normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
 
     records = normalized["google_policy_settings"]["records"]
     assert [(r["section"], r["unit_kind"], r.get("org_unit"), r.get("group"), r.get("sort_order"), r.get("policy_type")) for r in records[:-1]] == [
@@ -282,7 +282,7 @@ def test_the_normalised_settings_hold_sections_units_and_values_and_no_address()
     assert not any(address in text for address in ADDRESSES)
     assert "customers/" not in text and "C123" not in text and "policies/" not in text
     # The 2-step verification view is the one it was before the widening.
-    assert normalized["snapshot"]["two_step_policy_status"] == "unknown"  # no org unit list: root unknown
+    assert normalized["snapshot"]["two_step_policy_status"] == "enforcing"
     assert [r["setting_type"] for r in normalized["google_two_step_policies"]["records"]] == ["security.two_step_verification_enforcement"]
 
 
@@ -332,7 +332,10 @@ def test_the_operator_top_never_cuts_the_policies_read_so_two_step_matches_the_u
     # Four SCuBA settings first, then the shipped sample's three 2-step verification policies, read two per page with
     # ``--top 1``: the read must still finish, and the 2SV records and finding must be those of the uncut read on main.
     sample = json.loads(Path("examples/google_workspace_sample.json").read_text(encoding="utf-8"))
-    service = _Policies(_rows()[1:] + sample["google_policies"]["twoStepVerificationPolicies"]["value"])
+    widened = _rows()[1:]
+    for policy in widened:
+        policy["policyQuery"]["orgUnit"] += "-ou"
+    service = _Policies(widened + sample["google_policies"]["twoStepVerificationPolicies"]["value"])
     result = GooglePoliciesCollector().run({"client": _client(service, page_size=2), "top": 1})
 
     assert result.status == "ok"
@@ -538,6 +541,7 @@ def test_a_replayed_bundle_holds_no_policy_address_or_list_name_in_any_file(tmp_
 
     sample = json.loads(Path("examples/google_workspace_sample.json").read_text(encoding="utf-8"))
     sample["google_policies"] = _widened(_rows())  # both payloads of one read, as the collector writes them
+    sample["google_directory"]["orgUnits"] = _SALES_DIRECTORY["orgUnits"]
     path = tmp_path / "sample.json"
     path.write_text(json.dumps(sample), encoding="utf-8")
 
@@ -576,8 +580,7 @@ def test_lens_fixes_unknown_keys_addresses_outside_values_and_kept_siblings() ->
     # setting field other than its type and value is dropped.
     assert odd_out == {
         "policyQuery": {"group": "redacted:text", "orgUnit": "orgUnits/root"},
-        "setting": {"type": "settings/chat.chat_file_sharing", "value": {
-            "a": {"id": None, "enabled": True, "entry_count": 1, "domain_entry_count": 0}}},
+        "setting": {"type": "settings/chat.chat_file_sharing", "value": {}},
     }
     # The writer's pass drops customer and name from a replayed policySettings section too.
     written = minimise_user_text({"policySettings": {"value": [odd]}})
@@ -698,15 +701,18 @@ def test_b1_an_items_list_is_not_a_policies_answer_and_an_empty_read_is_not_comp
     assert _read_state(_normalise({"policySettings": {"value": []}}, "ok", []))["complete"] is False
 
 
-def _replay(tmp_path: Path, policies: Any) -> tuple[int, Path]:
+def _replay(
+    tmp_path: Path, policies: Any, *, directory: dict[str, Any] | None = None, as_of: datetime | None = None,
+) -> tuple[int, Path]:
     from auditex.google_workspace.run import run_google_offline
 
     sample = json.loads(Path("examples/google_workspace_sample.json").read_text(encoding="utf-8"))
     sample["google_policies"] = policies
+    sample["google_directory"]["orgUnits"] = (directory if directory is not None else _SALES_DIRECTORY)["orgUnits"]
     tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / "sample.json"
     path.write_text(json.dumps(sample), encoding="utf-8")
-    rc = run_google_offline(sample_path=path, out=tmp_path / "out", tenant_name="E", run_name="g", domain="example.com", customer_id="C123")
+    rc = run_google_offline(sample_path=path, out=tmp_path / "out", tenant_name="E", run_name="g", domain="example.com", customer_id="C123", as_of=as_of)
     return rc, tmp_path / "out" / "E-g"
 
 
@@ -755,15 +761,15 @@ def test_b2_a_malformed_or_null_policies_section_fails_the_run_and_is_not_absent
 
 def test_b3_unknown_precedence_or_a_missing_value_makes_the_setting_unusable() -> None:
     rows = [
-        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": {"position": 5}}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enabled": True}}},
-        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enabled": False}}},
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": {"position": 5}}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enableAutoForwarding": True}}},
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enableAutoForwarding": False}}},
         {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1}, "setting": {"type": "settings/gmail.imap_access"}},
         {"policyQuery": {"orgUnit": "orgUnits/sales"}, "setting": {"type": "settings/chat.chat_history", "value": {"historyOnByDefault": True}}},
         {"policyQuery": {"orgUnit": "orgUnits/sales"}, "setting": {"type": "settings/chat.chat_history", "value": {"historyOnByDefault": False}}},
         {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 2.5}, "setting": {"type": "settings/meet.safety_access", "value": {}}},
     ]
 
-    records = _normalise({"policySettings": {"value": rows}}, "ok", [{"collector": "google_policies", "name": "policySettings", "status": "ok"}])[
+    records = _normalise({"policySettings": {"value": rows}}, "ok", [{"collector": "google_policies", "name": "policySettings", "status": "ok"}], _SALES_DIRECTORY)[
         "google_policy_settings"
     ]["records"]
 
@@ -783,10 +789,10 @@ def test_b4_a_query_with_an_exception_is_never_unconditional_org_unit_evidence()
     exception = "entity.org_units.exists(o, o.org_unit_id == orgUnitId('root')) && !entity.groups.exists(g, g.group_id == groupId('g1'))"
     plain = "entity.org_units.exists(o, o.org_unit_id == orgUnitId('root'))"
     rows = [
-        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query": exception}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enabled": False}}},
-        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query": plain}, "setting": {"type": "settings/gmail.imap_access", "value": {"enabled": False}}},
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query": exception}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enableAutoForwarding": False}}},
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query": plain}, "setting": {"type": "settings/gmail.imap_access", "value": {"enableImapAccess": False}}},
     ]
-    state = _read_state(_normalise({"policySettings": {"value": rows}}, "ok", [{"collector": "google_policies", "name": "policySettings", "status": "ok"}]))
+    state = _read_state(_normalise({"policySettings": {"value": rows}}, "ok", [{"collector": "google_policies", "name": "policySettings", "status": "ok"}], _SALES_DIRECTORY))
     assert (state["complete"], state["record_count"], state["unusable_sections"]) == (False, 1, [])
     assert state["unusable_scopes"] == [{"section": "gmail_auto_forwarding", "org_unit": "root", "group": None}]
 
@@ -829,7 +835,7 @@ def test_b5_no_customer_id_policy_id_or_local_path_in_either_raw_section_or_the_
     assert "C0example01" not in text and "sample-resource" not in text
     assert "/srv/" not in text and "D:\\\\example" not in text
     assert '"example.com"' not in text and '"example.org"' not in text
-    assert result.payload["policySettings"]["value"][1]["setting"]["value"] == {"friendlyName": "redacted:path", "other": "redacted:path"}
+    assert result.payload["policySettings"]["value"][1]["setting"]["value"] == {}
     assert result.payload["policySettings"]["value"][2]["setting"]["value"] == {"emailAddressList": None}
     assert result.payload["policySettings"]["value"][3]["setting"]["value"] == {
         "emailAddressList": [{"id": None, "entry_count": None, "domain_entry_count": None}]
@@ -847,7 +853,8 @@ def test_b5_no_customer_id_policy_id_or_local_path_in_either_raw_section_or_the_
         }
     }
     # Replaying the shipped sample (whose 2SV rows carry a customer id and resource names) writes neither.
-    rc, run_dir = _replay(tmp_path, json.loads(Path("examples/google_workspace_sample.json").read_text(encoding="utf-8"))["google_policies"])
+    sample = json.loads(Path("examples/google_workspace_sample.json").read_text(encoding="utf-8"))
+    rc, run_dir = _replay(tmp_path, sample["google_policies"], directory=sample["google_directory"])
     assert rc == 0
     for relative in ("raw/google_policies.json", "normalized/google_two_step_policies.json", "findings/findings.json"):
         written = (run_dir / relative).read_text(encoding="utf-8")
@@ -1118,9 +1125,9 @@ def test_r2_b4_no_local_path_reaches_a_raw_or_normalised_policy_file(tmp_path: P
     assert rc == 1  # the factor set cannot be read
     assert "/srv/synthetic" not in _bundle_text(run_dir)
     raw = json.loads((run_dir / "raw" / "google_policies.json").read_text(encoding="utf-8"))
-    assert json.dumps(raw).count("redacted:path") >= 2
+    assert [row["setting"]["value"] for row in raw["policySettings"]["value"]] == [{}, {"allowedSignInFactorSet": None}]
     records = json.loads((run_dir / "normalized" / "google_policy_settings.json").read_text(encoding="utf-8"))["records"]
-    assert [r["value"] for r in records if r["id"] != "read_state"] == [{"redacted:path:0": True}]
+    assert [r["value"] for r in records if r["id"] != "read_state"] == [{}]
     assert not (run_dir / "normalized" / "google_two_step_policies.json").exists()
 
 
@@ -1353,7 +1360,7 @@ def test_r2_a_query_scope_the_targets_cannot_represent_is_unsupported() -> None:
         policy = _gmail_row(**targets, query=query)
         if "orgUnit" not in targets:
             policy["policyQuery"].pop("orgUnit")
-        state = _read_state(_normalise({"policySettings": {"value": [policy]}}, "ok", _OK_COVERAGE))
+        state = _read_state(_normalise({"policySettings": {"value": [policy]}}, "ok", _OK_COVERAGE, _SALES_DIRECTORY))
         assert (state["record_count"], bool(state["unusable_scopes"])) == ((1, False) if supported else (0, True)), (targets, query)
 
 
@@ -1391,25 +1398,26 @@ def test_r3_b1_admin_written_setting_text_and_queries_never_reach_raw_or_normali
     }
     result, _service = _collect([{"policies": [message, alerts]}])
 
-    assert result.status == "ok"
+    assert result.status == "partial"
     (written_message, written_alerts) = result.payload["policySettings"]["value"]
     assert written_message == {
         "type": "ADMIN",
         "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query_scope": "targets"},
-        "setting": {"type": "settings/api_controls.custom_user_message", "value": {"errorText": "redacted:text"}},
+        "setting": {"type": "settings/api_controls.custom_user_message", "value": {}},
     }
     assert written_alerts["setting"]["value"] == {
-        "rules": [{"displayName": "Leaked password", "state": "ACTIVE"}, {"displayName": "redacted:text", "state": "ACTIVE"}]
+        "rules": [{"displayName": "Leaked password", "state": "ACTIVE"}, {"displayName": None, "state": "ACTIVE"}]
     }
-    normalized = _normalise(result.payload, result.status, result.coverage)
-    assert ("api_controls_custom_user_message", "org_unit", "root", None, 1, {"errorText": "redacted:text"}) in _policy_records(normalized)
+    normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
+    assert ("api_controls_custom_user_message", "org_unit", "root", None, 1, {}) in _policy_records(normalized)
 
     rc, run_dir = _replay(tmp_path, json.loads(json.dumps(result.payload)))
+    assert rc == 1  # The unrecognised alert name is unreadable.
     text = _bundle_text(run_dir)
     for secret in ("C0SyntheticPolicyRef", "Contact support", "Night shift", "entity.org_units", "orgUnitId("):
         assert secret not in text, secret
     raw = json.loads((run_dir / "raw" / "google_policies.json").read_text(encoding="utf-8"))
-    assert '"errorText": "redacted:text"' in json.dumps(raw)
+    assert "errorText" not in json.dumps(raw)
 
 
 def test_r3_b1_the_query_is_kept_only_as_its_parsed_scope() -> None:
@@ -1443,10 +1451,10 @@ def test_r3_b2_a_policy_for_a_deleted_unit_never_confirms_organisation_enforceme
     assert [r["policy_scope"] for r in normalized["google_two_step_policies"]["records"]] == ["organisation", "unclassified"]
     assert normalized["snapshot"]["two_step_policy_status"] == "unknown"
 
-    # A tenant with only the root unit still has its one named unit as the root.
+    # Only Directory evidence can identify the root even with one policy target.
     normalized = _normalise(_widened([_two_step("orgUnits/root", _ENFORCED)]), "ok", _OK_COVERAGE, empty_tree)
-    assert [r["policy_scope"] for r in normalized["google_two_step_policies"]["records"]] == ["organisation"]
-    assert normalized["snapshot"]["two_step_policy_status"] == "enforcing"
+    assert [r["policy_scope"] for r in normalized["google_two_step_policies"]["records"]] == ["unclassified"]
+    assert normalized["snapshot"]["two_step_policy_status"] == "unknown"
 
 
 def test_r3_b3_a_system_group_policy_keeps_its_group_and_the_root_policy() -> None:
@@ -1465,7 +1473,7 @@ def test_r3_b3_a_system_group_policy_keeps_its_group_and_the_root_policy() -> No
     assert result.status == "ok"
     (row,) = result.coverage
     assert row["status"] == "ok"
-    normalized = _normalise(result.payload, result.status, result.coverage)
+    normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
     assert _policy_records(normalized) == [
         ("chat_space_history", "org_unit", "root", None, 1, {"historyState": "HISTORY_ALWAYS_ON"}),
         ("chat_space_history", "group", "root", "WORKSPACE_ALL_ADMIN_GROUP", 2, {"historyState": "DEFAULT_HISTORY_ON"}),
@@ -1581,3 +1589,169 @@ def test_r3_m5_legacy_two_step_evidence_needs_a_placed_root_and_an_uncut_section
 
     cut = {"twoStepVerificationPolicies": {"value": [_two_step("orgUnits/root", _ENFORCED)], "collection_truncated": True}}
     assert _normalise(cut, "ok", _OK_COVERAGE, _SALES_DIRECTORY)["snapshot"]["two_step_policy_status"] == "unknown"
+
+
+def test_structural_b1_enum_shaped_admin_text_never_reaches_policy_artifacts(tmp_path: Path) -> None:
+    message = {
+        "type": "ADMIN",
+        "customer": "customers/C0SYNTH731",
+        "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1},
+        "setting": {
+            "type": "settings/api_controls.custom_user_message",
+            "value": {"errorText": "INTERNAL_INCIDENT_731", "error_text": "INCIDENT_C0SYNTH731"},
+        },
+    }
+    rc, run_dir = _replay(tmp_path, _widened([message]), directory=_SALES_DIRECTORY)
+    assert rc == 0
+    for name in ("raw/google_policies.json", "normalized/google_policy_settings.json"):
+        artifact = (run_dir / name).read_text(encoding="utf-8")
+        for text in ("INTERNAL_INCIDENT_731", "C0SYNTH731", "errorText", "error_text"):
+            assert text not in artifact
+
+
+def test_structural_b2_one_deleted_unit_cannot_supply_an_empty_tree_root(tmp_path: Path) -> None:
+    rows = [_two_step("orgUnits/deleted", _ENFORCED)]
+    empty_tree = {"orgUnits": {"value": []}}
+    rc, run_dir = _replay(tmp_path, _widened(rows), directory=empty_tree)
+    assert (_bundle_two_step_status(run_dir), rc, _bundle_state(run_dir)["complete"]) == ("unknown", 1, False)
+    assert _bundle_state(run_dir)["unusable_scopes"] == [
+        {"section": "security_two_step_verification_enforcement", "org_unit": "deleted", "group": None},
+    ]
+
+
+def test_structural_b3_gmail_spam_bypass_references_join_to_the_list_summary(tmp_path: Path) -> None:
+    list_id = "a1234-synthetic012:00synthetic03"
+    rule_id = "b1234-synthetic012:00synthetic04"
+    rows = [
+        _policy_setting("gmail.email_address_lists", {"emailAddressList": [
+            {"id": list_id, "addressList": {"address": [{"address": "domain.example"}]}},
+        ]}),
+        _policy_setting("gmail.rule_states", {"ruleStates": [{"ruleId": rule_id, "enabled": True}]}),
+        _policy_setting("gmail.spam_override_lists", {"spamOverride": [
+            {"ruleId": rule_id, "bypassSelectedSenders": True, "bypassSenderAllowlist": [list_id]},
+        ]}),
+    ]
+    result, _service = _collect([{"policies": rows}])
+    rc, run_dir = _replay(tmp_path, result.payload, directory=_SALES_DIRECTORY)
+    assert (rc, _bundle_state(run_dir)["complete"]) == (0, True)
+    assert "domain.example" not in _bundle_text(run_dir)
+    raw = json.loads((run_dir / "raw/google_policies.json").read_text())
+    normalized = json.loads((run_dir / "normalized/google_policy_settings.json").read_text())
+    expected = [
+        {"emailAddressList": [{"id": "a1234-synthetic012:00synthetic03", "entry_count": 1, "domain_entry_count": 1}]},
+        {"ruleStates": [{"ruleId": "b1234-synthetic012:00synthetic04", "enabled": True}]},
+        {"spamOverride": [{"ruleId": "b1234-synthetic012:00synthetic04", "bypassSelectedSenders": True,
+                          "bypassSenderAllowlist": ["a1234-synthetic012:00synthetic03"]}]},
+    ]
+    assert [row["setting"]["value"] for row in raw["policySettings"]["value"]] == expected
+    assert [row["value"] for row in normalized["records"] if row["id"] != "read_state"] == expected
+
+
+def _policy_setting(section: str, value: dict[str, Any], **query: Any) -> dict[str, Any]:
+    return {
+        "type": "SYSTEM",
+        "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, **query},
+        "setting": {"type": f"settings/{section}", "value": value},
+    }
+
+
+def test_structural_b4_licence_qualifier_does_not_suppress_readable_2sv() -> None:
+    gmail = _policy_setting(
+        "gmail.confidential_mode", {"enableConfidentialMode": True},
+        query="entity.org_units.exists(o, o.org_unit_id == orgUnitId('root')) && "
+        "entity.licenses.exists(license, license in ['/product/Google-Apps/sku/1010020020'])",
+    )
+    rows = [_two_step("orgUnits/root", {}), _two_step("orgUnits/sales", _ENFORCED), gmail]
+    result, _service = _collect([{"policies": rows}])
+    normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
+    assert normalized["snapshot"]["two_step_policy_status"] == "partial"
+    assert any(f["rule_id"] == "google.org_2sv_policy_not_enforced" for f in build_google_findings(normalized))
+    state = _read_state(normalized)
+    assert state["complete"] is False
+    assert state["unusable_scopes"] == [{"section": "gmail_confidential_mode", "org_unit": "root", "group": None}]
+
+
+def test_structural_b5_nanosecond_after_as_of_is_scheduled(tmp_path: Path) -> None:
+    rows = [_two_step(value={"enforcedFrom": "2026-11-25T12:00:00.000000001Z"})]
+    rc, run_dir = _replay(tmp_path, _widened(rows), directory=_SALES_DIRECTORY, as_of=datetime(2026, 11, 25, 12, tzinfo=UTC))
+    assert (rc, _bundle_two_step_status(run_dir)) == (0, "scheduled")
+
+
+def test_structural_m1_empty_legacy_policy_evidence_has_no_finding_and_fails(tmp_path: Path) -> None:
+    rc, run_dir = _replay(tmp_path, {"twoStepVerificationPolicies": {"value": []}})
+    assert (rc, _bundle_two_step_status(run_dir)) == (1, "unknown")
+    assert "google.org_2sv_policy_not_enforced" not in (run_dir / "findings/findings.json").read_text(encoding="utf-8")
+
+
+def test_structural_m2_probe_counts_only_readable_rows() -> None:
+    from auditex.google_workspace.run import _preflight_call
+
+    client = _client(_ScriptedPolicies([{"policies": [_gmail_row(), {}]}]))
+    probe = _preflight_call("google_policies", "policySettings", lambda: client.list_policies(limit=5))
+    assert (probe["status"], probe["error_class"], probe["item_count"]) == ("partial", "malformed_response", 1)
+
+
+def test_policy_allow_list_marks_unreadable_typed_fields_partial() -> None:
+    cases = [
+        ("gmail.auto_forwarding", {"enableAutoForwarding": "false"}, {"enableAutoForwarding": None}),
+        ("meet.safety_access", {"meetingsAllowedToJoin": "INCIDENT_1234"}, {"meetingsAllowedToJoin": None}),
+        ("security.password", {"minimumLength": True}, {"minimumLength": None}),
+        ("security.password", {"minimumLength": 10**30}, {"minimumLength": None}),
+        ("security.password", {"expirationDuration": []}, {"expirationDuration": None}),
+        ("gmail.email_spam_filter_ip_allowlist", {"allowedIpAddresses": [None]}, {"allowedIpAddresses": [None]}),
+        ("gmail.rule_states", {"ruleStates": [{}]}, {"ruleStates": [{"ruleId": None, "enabled": None}]}),
+        ("gmail.auto_forwarding", {"enableAutoForwarding": True, "enable_auto_forwarding": False}, {"enableAutoForwarding": None}),
+        ("gmail.spam_override_lists", {"spamOverride": [
+            {"rule_id": "rule-1", "bypass_selected_senders": True},
+        ]}, {"spamOverride": [
+            {"ruleId": "rule-1", "bypassSelectedSenders": True, "bypassSenderAllowlist": None},
+        ]}),
+        ("api_controls.google_services", {"services": {}}, {"services": None}),
+        ("gmail.spam_override_lists", {"spamOverride": [
+            {"ruleId": "rule-1", "bypassSelectedSenders": True, "bypassSenderAllowlist": ["ref-C0SYNTH731"]},
+        ]}, {"spamOverride": [
+            {"ruleId": "rule-1", "bypassSelectedSenders": True, "bypassSenderAllowlist": [None]},
+        ]}),
+    ]
+    for section, supplied, expected in cases:
+        result, _ = _collect([{"policies": [_policy_setting(section, supplied)]}])
+        assert result.status == "partial", section
+        assert result.payload["policySettings"]["value"][0]["setting"]["value"] == expected, section
+        state = _read_state(_normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY))
+        assert (state["record_count"], state["malformed_count"], state["complete"]) == (0, 1, False), section
+
+
+def test_licence_inclusion_and_exclusion_are_conditional_on_replay(tmp_path: Path) -> None:
+    gmail = _policy_setting(
+        "gmail.confidential_mode", {"enableConfidentialMode": True},
+        query="entity.org_units.exists(o, o.org_unit_id == orgUnitId('root')) && "
+        "entity.licenses.exists(lic, lic in ['/product/Google-Apps/sku/1010020020', 'GOOGLE-IDENTITY']) && "
+        "!entity.licenses.exists(lic, lic in ['/product/Google-Apps/sku/1010060005'])",
+    )
+    result, _ = _collect([{"policies": [_two_step(), _two_step("orgUnits/sales", _ENFORCED), gmail]}])
+    assert result.payload["policySettings"]["value"][2]["policyQuery"]["query_scope"] == "licences"
+    rc, run_dir = _replay(tmp_path, result.payload)
+    assert (rc, _bundle_two_step_status(run_dir)) == (1, "partial")
+    for sku in ("1010020020", "GOOGLE-IDENTITY", "1010060005"):
+        assert sku not in _bundle_text(run_dir)
+
+
+def test_two_step_finding_excludes_a_scope_scheduled_one_nanosecond_ahead() -> None:
+    directory = {"orgUnits": {"value": [
+        {"orgUnitId": "id:sales", "parentOrgUnitId": "id:root", "parentOrgUnitPath": "/"},
+        {"orgUnitId": "id:eng", "parentOrgUnitId": "id:root", "parentOrgUnitPath": "/"},
+    ]}}
+    instant = datetime(2026, 11, 25, 12, tzinfo=UTC)
+    policies = _widened([
+        _two_step(), _two_step("orgUnits/sales", {"enforcedFrom": "2026-11-25T13:30:00+01:30"}),
+        _two_step("orgUnits/eng", {"enforcedFrom": "2026-11-25T13:30:00.000000001+01:30"}),
+    ])
+    snapshot = build_google_normalized_snapshot(
+        tenant_name="T", run_id="r1", collector_payloads={"google_directory": directory, "google_policies": policies},
+        result_rows=[{"name": "google_policies", "status": "ok"}], coverage_rows=_OK_COVERAGE, as_of=instant,
+    )
+    (finding,) = [f for f in build_google_findings(snapshot, now=instant) if f["rule_id"] == "google.org_2sv_policy_not_enforced"]
+    assert finding["returned_value"]["enforced_scopes"] == [
+        {"scope": "org_unit", "org_unit": "orgUnits/sales", "enforced_from": "2026-11-25T12:00:00Z"},
+    ]
+    assert snapshot["google_two_step_policies"]["records"][2]["enforced_from"] == "2026-11-25T12:00:00.000000001Z"

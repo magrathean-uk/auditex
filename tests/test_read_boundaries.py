@@ -220,6 +220,9 @@ _TEXT_EXPOSURES: tuple[dict[str, Any], ...] = (
     {"id": "G10", "file": "src/azure_tenant_audit/collectors/intune_depth.py",
      "needle": "\"endpoint\": \"/deviceManagement/deviceConfigurations\",\n                    \"params\": {},",
      "fields": ("payload",), "disposition": "discarded"},  # discarded after receipt by minimise_device_configurations
+    {"id": "G11", "file": "src/auditex/google_workspace/client.py", "needle": "policies().list(",
+     "fields": ("name", "customer", "policyQuery.query", "setting.value.errorText", "setting.value.description"),
+     "disposition": "discarded"},  # typed policy projection in data_minimisation.py and test_google_policy_settings.py
 )
 
 

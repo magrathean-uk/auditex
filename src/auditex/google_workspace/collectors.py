@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import json
-import math
-import re
-import sys
 import time
 from collections.abc import Callable
-from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from azure_tenant_audit.collection_gaps import (
     REASON_OPERATOR_LIMIT,
@@ -21,14 +17,15 @@ from azure_tenant_audit.collectors.base import (
     record_truncation,
 )
 from azure_tenant_audit.data_minimisation import (
-    POLICY_QUERY_MAX,
     POLICY_SETTING_TYPE,
-    POLICY_SYSTEM_GROUPS,
-    POLICY_TIMESTAMP_TEXT,
-    POLICY_UNIT_ID,
+    POLICY_TYPES,
+    finite_policy_number,
     minimise_policy_section,
     minimise_policy_settings,
     minimise_policy_value,
+    policy_query_classification,
+    policy_target,
+    policy_value_schema,
 )
 from azure_tenant_audit.dns_lookup import (
     DNS_POSTURE_COLLECTORS,
@@ -40,6 +37,7 @@ from azure_tenant_audit.dns_lookup import (
     safe_resolver_diagnostic,
     unknown_posture,
 )
+from azure_tenant_audit.google_policy_schema import TWO_STEP_VALUE_FIELDS
 from azure_tenant_audit.offline_replay import OFFLINE_ROW_TYPE
 
 from .auth import POLICIES_SCOPE
@@ -620,7 +618,7 @@ POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 # Every field the collector and the normaliser read from a Policy API policy, and what makes it unreadable. A row
 # with any problem is never complete or unconditional evidence: the collector and a replay mark the read partial,
 # the normaliser leaves the affected setting out (``unusable_scopes`` or ``unusable_sections``) and the read
-# incomplete, and the 2-step verification status becomes unknown. ``""`` is proto3 JSON's unset string, so an empty
+# incomplete, and an affected 2-step verification status becomes unknown. ``""`` is proto3 JSON's unset string, so an empty
 # ``orgUnit``, ``group`` or ``query`` is the field left out; a key that is present and holds null is not left out, it
 # is the wrong type. A minimised policy carries ``query_scope`` (see ``policy_query_scope``) in place of ``query``.
 #
@@ -628,79 +626,22 @@ POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 # |-----------------------------|---------------------|-------------------|--------------------------------------------|
 # | policy                      | -                   | policy_invalid    | -                                          |
 # | name, customer (dropped)    | fine                | name_invalid      | -                                          |
-# | type                        | fine (unspecified)  | policy_type_invalid | not ADMIN or SYSTEM                      |
+# | type                        | fine (unspecified)  | policy_type_invalid | not a PolicyType enum member                      |
 # | setting                     | setting_invalid     | setting_invalid   | -                                          |
 # | setting.type                | setting_type_invalid| same              | not ``settings/<a>.<b>``; outside the filter: setting_type_not_requested |
-# | setting.value               | value_missing       | value_invalid     | an address list whose counts are unknown: value_unreadable |
+# | setting.value               | value_missing       | value_invalid     | unreadable schema field or address list: value_unreadable |
 # | policyQuery                 | query_object_invalid| same              | -                                          |
 # | policyQuery.orgUnit, group  | fine (one required: target_missing) | org_unit_invalid / group_invalid | not ``orgUnits/<id>`` / ``groups/<id>`` or a system group id |
 # | policyQuery.sortOrder       | fine (proto3 0)     | sort_order_invalid| NaN, infinite or outside the double range  |
 # | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL that the targets cannot represent is unsupported scope (collector partial, normaliser unusable scope) |
-# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets`` or ``other``              |
+# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets``, ``licences`` or ``other``              |
 # | 2SV enforcedFrom            | fine (not enforced) | two_step_value_invalid | blank or not an RFC 3339 timestamp    |
 # | 2SV allowEnrollment         | fine                | two_step_value_invalid | not a Boolean                         |
-# | 2SV allowedSignInFactorSet  | fine                | two_step_value_invalid | not an upper-case enum name           |
+# | 2SV allowedSignInFactorSet  | fine                | two_step_value_invalid | not a documented enum member           |
 # | 2SV enrollmentGracePeriod   | fine                | two_step_value_invalid | not a ``<seconds>s`` duration         |
 # | 2SV camelCase vs snake_case | -                   | -                 | both present and different: two_step_value_conflict |
 
-POLICY_TYPES = ("ADMIN", "SYSTEM")
-_DOUBLE_MAX = sys.float_info.max
-_DURATION = re.compile(r"\d{1,12}(?:\.\d{1,9})?s")
-_ENUM = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
-
-
-def finite_number(value: Any) -> bool:
-    """A JSON number that is not a Boolean, NaN or infinite and fits the API's double (``sortOrder``).
-
-    A JSON integer is checked by comparison, never converted: ``1`` followed by 400 zeroes is out of range, not an
-    ``OverflowError``.
-    """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    if isinstance(value, int):
-        return -_DOUBLE_MAX <= value <= _DOUBLE_MAX
-    return math.isfinite(value)
-
-
-def policy_timestamp(value: Any) -> bool:
-    """An RFC 3339 timestamp with a zone and up to nine fractional digits, as the Policy API writes ``enforcedFrom``."""
-    if not isinstance(value, str) or not POLICY_TIMESTAMP_TEXT.fullmatch(value):
-        return False
-    try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    return True
-
-
-# The 2-step verification value fields the normaliser reads: (camelCase, snake_case, check).
-TWO_STEP_VALUE_FIELDS: tuple[tuple[str, str, Callable[[Any], bool]], ...] = (
-    ("enforcedFrom", "enforced_from", policy_timestamp),
-    ("allowEnrollment", "allow_enrollment", lambda value: isinstance(value, bool)),
-    ("allowedSignInFactorSet", "allowed_sign_in_factor_set", lambda value: isinstance(value, str) and bool(_ENUM.fullmatch(value))),
-    ("enrollmentGracePeriod", "enrollment_grace_period", lambda value: isinstance(value, str) and bool(_DURATION.fullmatch(value))),
-)
-
-
-def policy_target(value: Any, prefix: str) -> str | None | bool:
-    """A policy target's bare id; ``None`` when unset (``""``); ``False`` when null or not ``<prefix><id>``.
-
-    A Google system group (``WORKSPACE_ALL_ADMIN_GROUP``, ``UNCONSENTED_CHILD_GROUP``) has no ``groups/`` prefix and
-    keeps its own id as its bare id.
-    """
-    if value == "":
-        return None
-    if not isinstance(value, str):
-        return False
-    if prefix == "groups/" and value in POLICY_SYSTEM_GROUPS:
-        return value
-    if not value.startswith(prefix):
-        return False
-    bare = value[len(prefix) :]
-    return bare if POLICY_UNIT_ID.fullmatch(bare) else False
-
-
-def policy_query_target(query: dict[str, Any], key: str) -> str | None | bool:
+def policy_query_target(query: dict[str, Any], key: str) -> str | None | Literal[False]:
     """``policy_target`` of ``policyQuery[key]``: ``None`` when the key is left out, ``False`` when it holds null."""
     if key not in query:
         return None
@@ -708,25 +649,19 @@ def policy_query_target(query: dict[str, Any], key: str) -> str | None | bool:
 
 
 def policy_value_unreadable(value: Any) -> bool:
-    """Whether a minimised value holds a part the minimiser could not read (an address list with unknown counts)."""
+    """A null in the typed projection records a field whose value could not be read."""
+    if isinstance(value, dict):
+        return any(policy_value_unreadable(item) for item in value.values())
     if isinstance(value, list):
         return any(policy_value_unreadable(item) for item in value)
-    if not isinstance(value, dict):
-        return False
-    if "emailAddressList" in value and not isinstance(value["emailAddressList"], list):
-        return True
-    if ("entry_count" in value or "domain_entry_count" in value) and (
-        value.get("entry_count") is None or value.get("domain_entry_count") is None
-    ):
-        return True
-    return any(policy_value_unreadable(item) for item in value.values())
+    return value is None
 
 
 def _two_step_value_problems(value: dict[str, Any]) -> list[str]:
     problems: list[str] = []
-    for camel, snake, check in TWO_STEP_VALUE_FIELDS:
+    for camel, snake in TWO_STEP_VALUE_FIELDS.items():
         present = [value[name] for name in (camel, snake) if name in value]
-        if any(not check(item) for item in present):
+        if any(item is None for item in present):
             problems.append("two_step_value_invalid")
         elif len(present) == 2 and present[0] != present[1]:
             problems.append("two_step_value_conflict")
@@ -736,8 +671,7 @@ def _two_step_value_problems(value: dict[str, Any]) -> list[str]:
 def policy_problems(policy: Any) -> tuple[str, ...]:
     """The fixed problem codes of one Policy API policy (raw or minimised); ``()`` when every read field is sound.
 
-    See the table above. The CEL ``query`` is only checked for type and length here; whether the targets can
-    represent it is the normaliser's scope check.
+    A well-formed CEL expression may be unplaceable. Its setting and target still identify the affected scope.
     """
     if not isinstance(policy, dict):
         return ("policy_invalid",)
@@ -755,16 +689,18 @@ def policy_problems(policy: Any) -> tuple[str, ...]:
             problems.append("setting_type_invalid")
         elif not POLICY_TYPE_ALLOWED.fullmatch(setting_type):
             problems.append("setting_type_not_requested")
+        elif policy_value_schema(setting_type) is None:
+            problems.append("setting_type_unknown")
         if "value" not in setting:
             problems.append("value_missing")
         elif not isinstance(setting["value"], dict):
             problems.append("value_invalid")
-        else:
-            value = setting["value"]
-            if policy_value_unreadable(minimise_policy_value(setting_type, value)):
+        elif policy_value_schema(setting_type) is not None:
+            projected = minimise_policy_value(setting_type, setting["value"])
+            if setting_type.startswith(TWO_STEP_SETTING_PREFIX):
+                problems.extend(_two_step_value_problems(projected))
+            if policy_value_unreadable(projected) and "two_step_value_invalid" not in problems:
                 problems.append("value_unreadable")
-            if isinstance(setting_type, str) and setting_type.startswith(TWO_STEP_SETTING_PREFIX):
-                problems.extend(_two_step_value_problems(value))
     query = policy.get("policyQuery")
     if not isinstance(query, dict):
         problems.append("query_object_invalid")
@@ -777,17 +713,15 @@ def policy_problems(policy: Any) -> tuple[str, ...]:
             problems.append("group_invalid")
         if org_unit is None and group is None:
             problems.append("target_missing")
-        if "sortOrder" in query and not finite_number(query["sortOrder"]):
+        if "sortOrder" in query and not finite_policy_number(query["sortOrder"]):
             problems.append("sort_order_invalid")
-        if "query" in query and (not isinstance(query["query"], str) or len(query["query"]) > POLICY_QUERY_MAX):
-            problems.append("query_invalid")
-        if "query_scope" in query and query["query_scope"] not in ("targets", "other"):
+        if policy_query_classification(query) == "unreadable":
             problems.append("query_invalid")
     return tuple(sorted(set(problems)))
 
 
 # Problems that leave a policy's setting section unknown, and ones that leave its targets unknown.
-POLICY_SECTION_PROBLEMS = frozenset({"policy_invalid", "setting_invalid", "setting_type_invalid", "setting_type_not_requested"})
+POLICY_SECTION_PROBLEMS = frozenset({"policy_invalid", "setting_invalid", "setting_type_invalid", "setting_type_not_requested", "setting_type_unknown"})
 POLICY_TARGET_PROBLEMS = frozenset({"query_object_invalid", "org_unit_invalid", "group_invalid", "target_missing"})
 
 
@@ -801,8 +735,7 @@ def policy_scope_unrepresentable(policy: Any) -> bool:
     exception or any other condition): its setting for that unit is unknown, so the read is not complete."""
     if not isinstance(policy, dict) or not isinstance(policy.get("policyQuery"), dict):
         return False
-    (minimised,) = minimise_policy_settings([{"policyQuery": policy["policyQuery"]}])
-    return minimised["policyQuery"].get("query_scope") == "other"
+    return policy_query_classification(policy["policyQuery"]) in ("licences", "other")
 
 
 def _scope_policy_error(count: int, total: int) -> str:
@@ -889,7 +822,7 @@ def policy_replay_rows(collector: str, payload: Any) -> list[dict[str, Any]]:
         if isinstance(section, dict) and (section.get("error") or section.get("error_class") or section_was_cut(section)):
             continue
         values = section.get("value") if isinstance(section, dict) else None
-        if not isinstance(values, list) or (name == "policySettings" and not values):
+        if not isinstance(values, list) or (not values and (name == "policySettings" or "policySettings" not in payload)):
             status, item_count, error = "failed", 0, f"google_policies.{name}: the offline sample holds no readable policies in this section."
         else:
             bad = sum(1 for policy in values if not policy_row_readable(policy))
@@ -912,6 +845,7 @@ def policy_replay_rows(collector: str, payload: Any) -> list[dict[str, Any]]:
                 "item_count": item_count,
                 "error_class": POLICY_MALFORMED_ERROR_CLASS,
                 "error": error,
+                "policy_row_validation": status == "partial",
                 "message": "Replayed from an offline sample whose policies section cannot be read.",
             }
         )
@@ -980,11 +914,11 @@ class GooglePoliciesCollector:
         bad = sum(1 for policy in policies if not policy_row_readable(policy))
         unscoped = sum(1 for policy in policies if policy_row_readable(policy) and policy_scope_unrepresentable(policy))
         if bad and row.get("status") == "ok":
-            row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_malformed_policy_error(bad, len(policies)))
+            row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_malformed_policy_error(bad, len(policies)), policy_row_validation=True)
         elif unscoped and row.get("status") == "ok":
             # A query naming another unit or holding a condition: that unit's setting is unknown, so the read is
             # partial and the run says so, as the normaliser's read state does.
-            row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_scope_policy_error(unscoped, len(policies)))
+            row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_scope_policy_error(unscoped, len(policies)), policy_row_validation=True)
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(
             self.name,
