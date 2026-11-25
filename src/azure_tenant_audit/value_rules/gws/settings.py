@@ -22,8 +22,9 @@ default), so a sub-unit that switches the service on under a non-compliant top v
 rows never inherit. A service state that is absent, unreadable or non-ASCII (``dıſabled``) in any unit is
 unknown (D3, D12) and never confirms met; a positively read violation in a unit whose service is on still wins. A
 supplied service-status record without a readable ``serviceState`` is unusable, not absent (review B3). A policy
-record for one of the rule's sections whose unit is not ``ou:<id>`` (or ``ou:<id>/group:<pseudonym>`` for a group,
-design 7) cannot be placed: the section shape is unusable (review B4).
+record for one of the rule's sections whose unit key ``reduce`` cannot place (not ``ou:<id>`` or
+``ou:<id>/group:<pseudonym>`` in printable ASCII, design 7, or an OU a complete topology does not hold) makes the
+section shape unusable (review B4, rounds 2 and 3).
 
 Decision order, the first rule that applies decides: the shared section gate (``gws.assess``); a wrong-shaped
 envelope; an incomplete read; the service off in every unit; no unit known to be on while a state is unknown; a
@@ -52,8 +53,6 @@ from .reduce import (
 )
 
 _DURATION = re.compile(r"([0-9]+)([smhdSMHD])")
-_OU_UNIT = re.compile(r"ou:[^/\s]+")
-_GROUP_UNIT = re.compile(r"ou:[^/\s]+/group:[^/\s]+")
 _NAMES = {"section", "field", "fields", "op", "value", "service", "scope", "known", "source", "case"}
 
 
@@ -197,18 +196,6 @@ def _inherited(units: Any, unit: str, section: str, fields: tuple[str, ...]) -> 
     return found[0]
 
 
-def _placeable(sections: dict, keys: list[str]) -> bool:
-    """Every policy record for the rule's sections names a well-formed unit (design 7): ``ou:<id>`` for an OU and
-    ``ou:<id>/group:<pseudonym>`` for a group (review B4). Records for other sections are not read (keep-finding 4).
-    Runs after ``effective_units``, which has already refused an envelope of the wrong shape."""
-    for entry in sections["gws_policies"]["policies"]:
-        if entry["section"] in keys:
-            pattern = _GROUP_UNIT if entry["unit_kind"] == "group" else _OU_UNIT
-            if not pattern.fullmatch(entry["unit"]):
-                return False
-    return True
-
-
 def _service(units: Any, unit: str, service: str) -> str:
     """``reduce.service_on``, except that the state record it decides on must hold ASCII text: Python's ``upper``
     folds ``dıſabled`` to ``DISABLED``, an unknown state that D12 keeps unknown (review B2)."""
@@ -233,7 +220,7 @@ def setting(policy_id: str, row: dict, sections: dict) -> dict:
         units = effective_units(sections, keys)
     except Unusable:
         return _answer(policy_id, row, "section_shape_unusable")
-    if not _placeable(sections, keys):
+    if units.unplaced:
         return _answer(policy_id, row, "section_shape_unusable")
     if not units.complete:
         return _answer(policy_id, row, "policy_read_incomplete")

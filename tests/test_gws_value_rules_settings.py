@@ -12,6 +12,7 @@ import pytest
 
 from azure_tenant_audit import value_rules
 from azure_tenant_audit.value_rules import gws
+from azure_tenant_audit.value_rules.gws import reduce as R
 from azure_tenant_audit.value_rules.gws import settings as S
 from azure_tenant_audit.value_rules.gws.catalogue import catalogue
 
@@ -539,3 +540,106 @@ def test_m1_malformed_vocabulary_parameters_are_a_programming_error(change):
 def test_l1_the_duration_grammar_takes_any_digit_count():
     assert S._violates("duration_gt", "1000000000000000s", "12h") is True
     assert S._violates("duration_gt", "0000000000000000000043200s", "12h") is False
+
+
+# --- review round 3: B4 at its root in the shared reducer, and the L02 follow-ups (NaN, depth) -----------------------
+
+def _attachment(unit, kind="org_unit", value=True, sort_order=1):
+    return {"unit": unit, "unit_kind": kind, "section": SE, "sort_order": sort_order, "value": {FIELD: value}}
+
+
+@pytest.mark.parametrize("unit, kind", [
+    ("ou:a\u0000", "org_unit"), ("ou:root/group:g\u0000", "group"), ("ou:ghost", "org_unit"),
+    ("ou:ghost/group:g1", "group"), ("ou:a\u00e9", "org_unit"), ("ou:a\u0007", "org_unit"),
+    ("ou:root/group:g\u00e9", "group"), ("not-an-ou", "org_unit"),
+])
+def test_b4_round3_a_malformed_or_unknown_unit_key_never_answers_met(unit, kind):
+    sections = _sections([ON, GOOD, _attachment(unit, kind)])
+    assert _answer("GWS.GMAIL.5.1v1", sections) == ("not_assessed", "section_shape_unusable")
+
+
+@pytest.mark.parametrize("unit, kind", [
+    ("ou:a\u0000", "org_unit"), ("ou:ghost", "org_unit"), ("ou:root/group:g\u0000", "group"), ("not-an-ou", "org_unit"),
+])
+def test_b4_round3_the_reducer_marks_an_unplaced_unit_and_section_unusable(unit, kind):
+    units = R.effective_units(_sections([ON, GOOD, _attachment(unit, kind)]), [SE, "gmail_service_status"])
+    assert units.unplaced == frozenset({SE})
+    assert units.values[unit] == {SE: R.UNUSABLE}
+    assert R.effective(units, unit, SE, FIELD) is R.UNUSABLE
+    assert units.values["ou:root"][SE] == {FIELD: True}
+
+
+def test_b4_round3_an_unknown_ou_in_a_service_status_record_is_unknown_not_off():
+    off = _p("ou:ghost", "gmail_service_status", {"serviceState": "DISABLED"})
+    units = R.effective_units(_sections([ON, GOOD, off]), [SE, "gmail_service_status"])
+    assert units.unplaced == frozenset({"gmail_service_status"})
+    assert R.service_on(units, "ou:ghost", "gmail") == "unknown"
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, GOOD, off])) == ("not_assessed", "section_shape_unusable")
+
+
+def test_b4_round3_known_units_and_groups_of_a_complete_topology_still_place():
+    sections = _sections([ON, GOOD, _attachment("ou:a"), _attachment("ou:a/group:g1", "group")])
+    assert R.effective_units(sections, [SE]).unplaced == frozenset()
+    assert _answer("GWS.GMAIL.5.1v1", sections) == ("met", "no_unit_violates")
+
+
+def test_b4_round3_an_ou_a_partial_topology_does_not_list_is_an_incomplete_read_not_a_shape_error():
+    tenant = dict(TENANT, complete=False)
+    sections = _sections([ON, GOOD, _attachment("ou:ghost")], tenant=tenant)
+    assert R.effective_units(sections, [SE]).unplaced == frozenset()
+    assert _answer("GWS.GMAIL.5.1v1", sections) == ("not_assessed", "policy_read_incomplete")
+
+
+def test_b4_round3_an_unknown_ou_in_an_unrelated_section_never_reaches_the_rule():
+    stray = _p("ou:ghost", "gmail_pop_access", {"enablePopAccess": True})
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, GOOD, stray])) == ("met", "no_unit_violates")
+
+
+@pytest.mark.parametrize("odd", [float("nan"), float("inf"), float("-inf"), 10 ** 5000, {1: True}, {"k": object()}],
+                         ids=["nan", "inf", "-inf", "huge-int", "int-key", "object"])
+def test_l02_a_non_plain_value_is_unusable_never_met(odd):
+    entry = _p("ou:root", SE, {FIELD: True, "extra": odd})
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, entry])) == ("not_assessed", "setting_value_unusable")
+
+
+@pytest.mark.parametrize("odd", [float("nan"), float("inf"), 10 ** 5000], ids=["nan", "inf", "huge-int"])
+@pytest.mark.parametrize("first", [True, False])
+def test_l02_a_non_finite_value_never_hides_an_equal_rank_tie(odd, first):
+    # Two equal-ranked policies disagree on the field (D11); a NaN beside it once made both look equal, so the read
+    # order picked the answer.
+    a = _p("ou:root", SE, {FIELD: first, "extra": odd})
+    b = _p("ou:root", SE, {FIELD: not first, "extra": odd})
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, a, b])) == ("not_assessed", "setting_value_unusable")
+
+
+@pytest.mark.parametrize("rank", [float("nan"), float("inf"), float("-inf")])
+def test_l02_a_non_finite_sort_order_is_unusable_and_never_ranks(rank):
+    low = _p("ou:root", SE, {FIELD: True}, sort_order=1)
+    odd = _p("ou:root", SE, {FIELD: True}, sort_order=rank)
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, low, odd])) == ("not_assessed", "setting_value_unusable")
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, odd, low])) == ("not_assessed", "setting_value_unusable")
+
+
+def _nested(depth):
+    value: dict = {}
+    for _ in range(depth):
+        value = {"n": value}
+    return value
+
+
+@pytest.mark.parametrize("depth", [64, 5000])
+def test_l02_a_deeply_nested_value_is_unusable_not_a_recursion_error(depth):
+    entry = _p("ou:root", SE, {FIELD: True, "extra": _nested(depth)})
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, entry])) == ("not_assessed", "setting_value_unusable")
+
+
+def test_l02_a_self_referencing_value_is_unusable_not_a_hang():
+    loop: dict = {}
+    loop["self"] = loop
+    entry = _p("ou:root", SE, {FIELD: True, "extra": loop})
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, entry])) == ("not_assessed", "setting_value_unusable")
+
+
+def test_l02_ordinary_nesting_still_reduces():
+    entry = _p("ou:root", SE, {FIELD: True, "extra": _nested(62)})
+    assert _answer("GWS.GMAIL.5.1v1", _sections([ON, entry])) == ("met", "no_unit_violates")
