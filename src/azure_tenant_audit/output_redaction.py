@@ -1948,6 +1948,18 @@ def _without_local_proof(record: Mapping[Any, Any]) -> Mapping[Any, Any]:
     return out
 
 
+def _policy_value_key(record: Mapping[Any, Any]) -> str | None:
+    """Two Policy API names are structural only inside their own setting's value."""
+    setting = record.get("type")
+    if record.get("kind") == "google_policy_setting":
+        setting = record.get("section")
+    if setting in ("settings/data_regions.data_at_rest_region", "data_regions_data_at_rest_region"):
+        return "region"
+    if setting in ("settings/drive_and_docs.file_security_update", "drive_and_docs_file_security_update"):
+        return "securityUpdate"
+    return None
+
+
 class _Redactor:
     def __init__(self, context: RedactionContext, value: Any, markup: bool) -> None:
         self.markup = markup
@@ -2090,7 +2102,7 @@ class _Redactor:
         return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.key, self.id_canonical.get(match["hit"].lower(), match["hit"]))
 
     # -- structure ----------------------------------------------------------------------------------------
-    def walk(self, value: Any, controlled: bool = False) -> Any:
+    def walk(self, value: Any, controlled: bool = False, *, policy_key: str | None = None) -> Any:
         if isinstance(value, str):
             return self.text(value)
         if not isinstance(value, (Mapping, list, tuple, set, frozenset)):
@@ -2100,7 +2112,7 @@ class _Redactor:
             if self.depth > MAX_DEPTH:
                 raise RedactionDepthError(f"value is nested more than {MAX_DEPTH} levels")
             if isinstance(value, Mapping):
-                return self.mapping(value, controlled)
+                return self.mapping(value, controlled, policy_key=policy_key)
             if isinstance(value, list):
                 return [self.walk(item, controlled) for item in value]
             if isinstance(value, tuple):
@@ -2123,7 +2135,7 @@ class _Redactor:
                 parts[key] = item
         return self.walk(parts, controlled)
 
-    def mapping(self, record: Mapping[Any, Any], controlled: bool = False) -> dict[Any, Any]:
+    def mapping(self, record: Mapping[Any, Any], controlled: bool = False, *, policy_key: str | None = None) -> dict[Any, Any]:
         record = _without_local_proof(record)
         normed = {_norm(k): v for k, v in record.items()}
         person = _person(normed) if _is_directory_person(normed) else None
@@ -2169,9 +2181,12 @@ class _Redactor:
             elif person is not None and norm == "name" and isinstance(item, Mapping):
                 item = self._name_parts(item, person[0], controlled)
             else:
-                item = self.walk(item, controlled or norm in _CONTROLLED_KEYS)
+                item = self.walk(item, controlled or norm in _CONTROLLED_KEYS,
+                                 policy_key=_policy_value_key(record) if key == "value" else None)
             if self.blank and isinstance(key, str) and key:
                 new_key = TEXT_PLACEHOLDER
+            elif policy_key is not None and key == policy_key:
+                new_key = key
             else:
                 new_key = self.text(key, key=True) if isinstance(key, str) and key else key
             rows.append((key, new_key, item))
@@ -2315,11 +2330,11 @@ agent agentidrisklevels agentriskhigh aggregateaddresses aggregateaddressesinval
 agreementcounts agreementpaircount agreements agrees aicontext aicontextpath alertmissingordisabled alertpolicies alerts
 alertsapiansweredlicensingnotread alertsapianswerednodefenderevidence alertstateunusable algorithm alias aliases
 aliaseserrors allalertsenabled allclear allcloudonly allcompliant alldisabled allenvironmentscovered
-allenvironmentspolicy allfindingshighconfidence alllocationscovered allow allowanonymoususerstostartmeeting
-allowcloudrecording allowedapplist allowedcombinations alloweddomain alloweddomaincount alloweddomains
-alloweddomainsasalist alloweddomainsstate allowedsenderdomains allowedtocreateapps allowedvalues allowemailintochannel
-allowexternalparticipantgiverequestcontrol allowfederatedusers allowinvitesfrom allowlabresponse allowlist
-allowlistunusable allowpstnuserstobypasslobby allowpublicusers allowteamsconsumer allowteamsconsumerinbound allowwrite
+allenvironmentspolicy allfindingshighconfidence alllocationscovered allow allowaccess allowallinternalapps allowanonymoususerstostartmeeting
+allowcloudrecording allowcontentmanagerstosharefolders allowcustomdelegateattribution allowcustomdisplaynames allowdrivefordesktop allowedapplist allowedaudience allowedcallers allowedcombinations alloweddomain alloweddomaincount alloweddomains
+alloweddomainsasalist alloweddomainsstate allowedforall allowedforwardingdestination allowedipaddresses allowedpartiesfordistributingcontent allowedpartiesfordownloadprintcopy allowedpasskeystype allowedsenderdomains allowedsigninfactorset allowedstrength allowedtocreateapps allowedvalues allowemailintochannel allowenrollment allowexternalchat
+allowexternalparticipantgiverequestcontrol allowexternaluseraccess allowfederatedusers allowinvitesfrom allowlabresponse allowlesssecureapps allowlist
+allowlistunusable allowmanagerstooverridesettings allownongoogleinvites allownongoogleinvitesinallowlisteddomains allownonmemberaccess allowpstnuserstobypasslobby allowpublicusers allowpublishingfiles allowrealtimepresence allowreceivingexternalfiles allowreceivingfilesoutsideallowlisteddomains allowreuse allowserviceforoauth2access allowsha1globallyinsmimesignature allowshareddrivecreation allowsitescreation allowsitesmodification allowteamsconsumer allowteamsconsumerinbound allowtrustingdevice allowusermodification allowuserstomanageupdate allowuserstouseexternalsmtpservers allowusertouploadcertificates allowwrite
 allqualifier allrulesblock allrulesnotify alltypesprotected alongside also alsoreachablefrom alternatesetupsteps
 amcontext amlow analyzereport android androidcompliancepolicy androiddeviceownercompliancepolicy
 androidmanagedappprotections androidworkprofilecompliancepolicy annotateduser annotations anonymous anonymousaccess
@@ -2376,9 +2391,9 @@ azureclientsecret azuretenantaudit azuretenantid b2bcollaborationinboundaccess b
 b2bdirectconnectinboundaccess b2bdirectconnectoutboundaccess backoffseconds badrequest badvalues banners barlow barlow400
 barlow600 barlowcondensed600 baseline baselinealignment baselineattribution baselinecompleted baselinediff baselinematch
 baselinepin baselinerundir baselines baselinesourcesha256 baselinestatus baselinesteps baselinetext basis basissummary
-batch batchinnerrequests batchrequests bccmessage bearer because before beta betacalls bimi blastradius block
-blockaccess blockaccessscope blocked blockedapplist blockedcollectors blockedconnectorcount blockeddomaincount
-blockeddomains blockedgatecount blockedpermission blockedwithexclusions blockercount blockerhint blockerkind
+batch batchinnerrequests batchrequests bccmessage bearer because before beta betacalls billingdisabled bimi blastradius block
+blockaccess blockaccessscope blockallthirdpartyapiaccess blocked blockedaddresslist blockedapplist blockedcollectors blockedconnectorcount blockeddomaincount
+blockeddomains blockedgatecount blockedpermission blockedsenders blockedwithexclusions blockercount blockerhint blockerkind
 blockerreason blockers blockerspath blockersummary blockflagunusable blockingpolicies blocklegacyauthentication
 blocklist blocksplitacrosspolicies body bodycontains bodyorfilecontentreads bodyorsubjectcontains bodypreview boolean
 boollist bootstrap bootstrapseed boundedsample boundedsamples bounds breached breaches breakglass breakglassaccounts
@@ -2394,8 +2409,8 @@ case caseid caseorspace cases casmailboxsmtpauth catalogue catalogverifiedon cat
 cell cellid cellinventory cells cellsfor cellsourcefile ceplusassessortest ceplustest certificateauthorityrefused
 certificatebasedauth certificatefilerefused certificatekeyunreadable certificatenotvalid certificatepasswordenv
 certificatepasswordfile certificatepasswordunavailable certificatepath certificatesourceinoutput certificatethumbprint
-certificatethumbprintinvalid certificatethumbprintmismatch certificatetokenfailed chain changed changedin changedout
-changedpaths changes channels charsfull charskept check checkedcount checkedfilecount checkedgws checkid checkids
+certificatethumbprintinvalid certificatethumbprintmismatch certificatetokenfailed chain changeapplicationsetting changed changedin changedocssetting changedout
+changedpaths changeemailsetting changegmailsetting changes channels charsfull charskept check checkedcount checkedfilecount checkedgws checkid checkids
 checklicenceorpermissions checkpointentries checkpointresume checkpointresumed checkpointstate checkpointstatepath
 checks checksumlinecount checksumssha256 choice chromeosdevices chunkcount chunkcounts chunkfiles chunkpaths chunks
 chunkwriter cisascuba cism365v3 cism365v7 citation citationcount citations citationsomitted citationsummary
@@ -2427,8 +2442,8 @@ copilotchatenabledusers copilotgovernance copilotusageobjects copilotusagereport
 coresecurity count countambiguous counted countinrange countoutofrange counts countsatorabovethreshold countsbyopenseverity countsbyseverity countunusable coverage
 coveragecount coveragegap coveragegapcount coveragegaps coveragegapweight coverageledger coverageledgeronly
 coverageledgerpath coveragenote coveragepath coveragereason coveragerowcount coveragerows coveragestatus
-coveragestatuscounts covered coveredbypolicyids coveredexclusions coversonlysomeadministratorroles created createdat
-createddatetime createdtime createdusing createdutc creators cred credential credentialrecord criteria critical
+coveragestatuscounts covered coveredbypolicyids coveredexclusions coversonlysomeadministratorroles createapplicationsetting created createdat
+createddatetime createdtime createdusing createdutc creategroupsaccesslevel createtime creators cred credential credentialrecord criteria critical
 criticality crosstenantaccess crosstenantaccessobjects crosstenantaccesspolicy crosstenantdefaultobjects
 crosstenantpartnerobjects current currentcompleted currentriskscore currentrundir currentscore custom
 customauthenticationfactors customauthfactors customcoverscompliant customerid customerpack customerpackredaction
@@ -2450,7 +2465,7 @@ defaultuserrolepermissions defender defenderalertapi defenderalertsobserved defe
 defenderavsummary defendercloudapps defendercloudappsconsentobjects defenderdlplicense defenderincidents defenderlicense
 defenderrequired defenderserviceplanpresent deferrallimitdays delayseconds delegated delegatedclientsigninactivity
 delegatedlogin delegatedpermissionclassifications delegatedprobe delegatedresourcesigninactivity delegatedroles
-delegatedrun delegatedscopes delegates delegateserror delete deleteaction deleted deleteditems delivermessageafterscan
+delegatedrun delegatedscopes delegates delegateserror delete deleteaction deleteapplicationsetting deleted deleteditems delivermessageafterscan
 demo demotenant denied dependencies dependencyavailable dependencytext dependencyunavailable dependson derivedfanout
 derivedfrom description desklesspack detafter detail detailkind details detbefore detection detectioncoverage
 detectionsignalobjects device devicebasedpush devicecompliancepolicies devicecompliancepolicyassignments
@@ -2462,7 +2477,7 @@ digestversion direct directactive direction directory directoryauditlogs directo
 directoryrelationshipcoverage directoryrelationshipobjects directoryrelationships directoryscopeid directorysettings
 disabled disabledtier0principals disableenvironmentcreationbynonadminusers disableportalscreationbynonadminusers
 disablesharewitheveryone disabletrialenvironmentcreationbynonadminusers disagree disagreement disagreementpaircount
-disagreements disclaimer discoveredgroupcount discoverystatus displayconcealednames displayname disposition dkim
+disagreements disallowserviceforoauth2access disclaimer discoveredgroupcount discoverystatus displayconcealednames displayname disposition dkim
 dkimconfig dkimenabled dkimnotenabled dkimrecords dkimsigningconfig dkimstatus dlpcompliancepolicies dlpcompliancerules
 dlplicencenotdetected dlplicense dlppolicies dlppolicyscopes dlppolicyunusable dlprules dlpstructureunusable dmarc dmarcagencycontact
 dmarcagencycontacts dmarccisacontact dmarcdhsrua dmarcpublished dmarcrecords dmarcreject dnsposture dnsposturefailed dnspostureobjects
@@ -2488,7 +2503,7 @@ enrolled enrolledat enrollmenttype enterprisehandoff enterprisepack enterprisepr
 entry entrycount entrymissing enum environmentambiguous environmentcreation environmentgate environmentlist environmentlistunusable
 environmentname environments environmentsku environmenttype environmentunknown environmentwithoutpolicy eoponly
 eopprotectionpolicyrules error errorclass errorclasses errorcode errorcount errornonexistentmailbox errors errortype
-estimatedriskreduction evaluated evaluatedscope event eventnames eventreadincomplete events eventvalueunusable everyfindinghasevidence everyone everything evidence
+estimatedriskreduction evaluated evaluatedscope event eventnames eventparameters eventreadincomplete events eventtime eventvalueunusable everyfindinghasevidence everyone everything evidence
 evidencecount evidencedbpath evidencedepth evidencefree evidencegates evidenceids evidenceindexpath evidencekind evidencelimits
 evidencemissing evidencemissingomitted evidencepathcount evidencepaths evidenceref evidencerefgenerated evidencerefindex
 evidencerefs evidencescope evidencesource evidenceunusable exact examples exceptifrecipientdomainis exceptifsentto
@@ -2550,8 +2565,8 @@ googlecalendaraclerrors googlecalendaracls googlecalendarposture googlecalendarr
 googlechromeosdevices googledevices googledirectory googlednsposture googledoctor googledomains googledrivefiles
 googledriveposture googlegmailsettings googlegroupmembererrors googlegroupmembers googlegroups googlegroupsettingerrors
 googlegroupsettings googlegroupssettings googlemailboxsettings googlemobiledevices googleoauthgranterrors
-googleoauthgrants googleoauthtokens googleorgunits googlepolicies googlepolicysettings googlereports googleroleassignments googlerunconfig
-googleshareddrives googletransient googletwosteppolicies googleuser googleusers googleworkspace googleworkspacebaseline
+googleoauthgrants googleoauthtokens googleorgunits googlepolicies googlepolicysettings googlereports googleroleassignments googlerunconfig googlesettingevents
+googleshareddrives googlessoassignments googletransient googletwosteppolicies googleuser googleusers googleworkspace googleworkspacebaseline
 googleworkspacelibraries googleworkspacesample governance governanceobjects grade grant grantanydevice grantcontrols
 grantdevices grantnotevaluable grants grantsunusable granttype graph graphcommand graphdocs graphfallback graphid
 graphmetadataandsettingsonly graphoutputsample graphpermissions graphpermissionscsv graphscopes graphtransient graudit
@@ -2566,7 +2581,7 @@ hostedcontents href html http httpclient httperror https httpstatus humanreviewe
 identitybasis identitycontrolverdict identitycontrolverdicts identitygovernance identityonly identityprotection
 identityprotectionobjects identityprotectionriskdetection identityref identitysecuritydefaultsenforcementpolicy
 identitysource identityusers identityverified idformat idtoken ignored ignoredfailures ignoredfields imap immutableid
-immutableids impact implementationstatus implemented importap importsupported improvedcount improvedfindings
+immutableids impact implementationstatus implemented importap importsupported improvedcount improvedfindings inboundssoassignments
 inboundtrustcompliantdeviceaccepted inboundtrusthybridaadjoinedaccepted inboundtrustmfaaccepted inboxruleobjects
 incidents include includeagentidserviceprincipals includeall includeapplications
 includeauthenticationcontextclassreferences includeauthenticationcontexts includeblocked includedapplications
@@ -2630,8 +2645,8 @@ moduleincompatible modulename modulenotfound moduleversion monkey365 moot mootad
 morefields mostpermissivecapability movetofolder movetojmf mssecurescore msstatus mszerotrust mtasts multiplerecords
 multitenantapp mutatingcalls mycustomer name namearguments namedenumsv1 namedlocation namedlocations nearmissexclusions need
 negatedquery neither nestedgroup network networkinspectionsystemenabled never neverconfigured newaccepted
-newacceptedcount newatorabovethreshold newcount newcountatorabovethreshold newest newfindings newlyassessed
-newlyassessedcount newlyassessedfindings newmailboxexportrequest next nextactions nextexpiry nextlinkrefused nextstep
+newacceptedcount newatorabovethreshold newcount newcountatorabovethreshold newest newfindings newgroupsarehidden newlyassessed
+newlyassessedcount newlyassessedfindings newmailboxexportrequest newvalue next nextactions nextexpiry nextlinkrefused nextstep
 nis2 nist80053 noaccountsidentified noaction noanswer nobaselinetext nobypassassociations nocontentreads nodata node
 nodecount nodefaultpolicy nodkimrecordentry nodlppolicies nodomains nodomainviolates noenabledalertpolicies noenabledriskpolicies noevidence
 nofullprotectionrule noglobalpolicy noisesuppression noletters nolock nomailbox nomanageddomain nomanifest nomfa
@@ -2662,7 +2677,7 @@ operatorinputrequired operatorinputs operatorlimit operatoror optional optionala
 optionalcollection optionalcommands optionalgraphpermissions optionalgraphscopenotes optionalgraphscopes
 optionalpermissionnotes optionalpermissions optionalsections ordinaryuser organisation organisationlevel organization
 organizationauditconfig organizationlinkcount organizationonly organizations orgconfig orgpolicy orgsettingnone
-orgsettingnotnone orgsettingvalueunusable orgunit orgunitinvalid orgunits orientationunitsdropped originalerrorclass orphaned orphanedsite
+orgsettingnotnone orgsettingvalueunusable orgunit orgunitfornewshareddrives orgunitinvalid orgunitname orgunits orientationunitsdropped originalerrorclass orphaned orphanedsite
 orphansubdomain oscal oscalversion osfamily oslifecycle oslifecycleeditiondependent oslifecycleevaluatedon
 oslifecyclenotcovered oslifecycletableverifiedon oslifecycleunknown oslifecycleunknownreasons osversion osversionmissing
 osversionunparsable other otheractivationalert otherroleids outcome outdir outlook outnull output outputdir outputpath
@@ -2768,8 +2783,8 @@ sectiongapcollectors sectiongaps sectionnotalist sectionnotcollected sectionnots
 sectionshapeunusable sectionspruned sectionstats secure securebootrequired secureconfiguration securemissing securescore
 securescorecontrolprofiles securescores security securityalerts securitydefaults securitydirectoryauditevents
 securityonly securityreader securityscorecontrolprofiles securityscores securitysigninevents securitysuite
-securitysuiteunsuccessfulcommands securityupdatemanagement seen select selected selectedcollectors selection
-selectobject selector selector1 selector2 selectordetails selectorsmissing selectorspresent selectorsunresolved sendas
+securitysuiteunsuccessfulcommands securitytwostepverification securityupdatemanagement seen select selected selectedcollectors selection
+selectobject selector selector1 selector2 selectordetails selectorsmissing selectorspresent selectorsunresolved sendas senderblocklist
 sendercontains sendnotification sensitiveruleunusable sensitiveusers sensitiveusersbinding sentences sentinelxdr
 sentinelxdralertobjects sentinelxdrincidentobjects sentto senttomemberof separator sequence servererror servfail service
 serviceabsent serviceaccount serviceaccountkey serviceaccountkeypresent servicehealth servicehealthobjects serviceissues
@@ -2779,7 +2794,7 @@ serviceprincipalfilter serviceprincipalid serviceprincipalname serviceprincipalo
 serviceprincipalrisklevels serviceprincipals serviceprincipaltype services servicesources
 servicestartedwithoutmalwareprotection servicestatusabsent serviceunavailable serving session sessioncontext sessioncontextpath
 sessioncontrols sessionnotconnected setting settingabsent settingandcertconflict settingcascade settingduplicated
-settingentryduplicated settingentrymissing settingevent settinginvalid settingname settingnames settings settingsempty settingslots settingsmulti settingsnotalist
+settingentryduplicated settingentrymissing settingevent settingevents settinginvalid settingname settingnames settings settingsempty settingslots settingsmulti settingsnotalist
 settingsnotread settingsshapeunusable settingtypeinvalid settingtypenotrequested settingtypeunknown settingvalue settingvalueunusable setupnotices setuponly setupsteps severity severitybefore
 severitycounts sha256 shall shallnotmet shareable shared sharedcontrolcount shareddrives sharedexceptions sharedkey
 sharedreasons shareofsiteswithanyonelinks sharepoint sharepointaccess sharepointadmin sharepointadminaccessdenied
@@ -2792,7 +2807,7 @@ sharepointsitepostureobjects sharepointsiteusagedetail sharepointstandard sharep
 sharingalloweddomainlist sharingblockeddomainlist sharingcapability sharingcapabilityfromsites sharingcapabilitysource
 sharingdomainrestrictionmode sharingpolicy short shortdescription should show shown shownstepscutbeforeurlstep shows
 siemlogexport signals signature signaturestate signatureupdateoverdue signatureversion signinaudience
-signindataavailable signinlogs signinlogsreadable signinriskhigh signinrisklevels signins simulatedbestscore
+signindataavailable signinlogs signinlogsreadable signinonlythirdpartyapiaccess signinriskhigh signinrisklevels signins signoutdatadeletionenforced simulatedbestscore
 simulatedscoreafter since singlepolicyverdict singles sink site sitecollection siteid sitekind sitename
 sitepermissionsapponlynotread sitepermissionsbysite sitepermissionsfanout sites sitesexceedingtenantsetting
 siteslistedtruncated siteswithanyonelinks siteswithguestsharing sitevalues size sizebytes skillsappreadonlyescalation
@@ -2803,7 +2818,7 @@ snapshot soc2 softwareoath sortobject sortorder source sourceartifactcount sourc
 sourceid sourceintegritystatus sourcelinks sourcename sourcepath sourcereferences sources sourcesection sourcesha256
 sourcetype sourceurl sourceversion spamaction spamcascade specificpeople specversion spee3 spee3usgovdod
 spee3usgovgcchigh spee5 spef1 spfrecords spgated spoempty spoexternalsharingmanaged sponotsingleton sposhapeunusable
-spotenant spscalar ssoreadincomplete stage stagecount stale staleacceptedriskcount staleacceptedriskcountatorabovethreshold
+spotenant spscalar ssomode ssoreadincomplete stage stagecount stale staleacceptedriskcount staleacceptedriskcountatorabovethreshold
 staleacceptedrisks staleacceptedrisksatorabovethreshold staleaccountdays staleafterdays stalecount staledevicedays
 staleguestdays stalesyncdays staleuserdays standard standardcoverscompliant standardpack
 standardpresetcoversallrecipientscompliant start startdatetime starthere startswith starttime starttlsused state
@@ -2817,8 +2832,8 @@ supplementarypolicies supplied support supported supportedactions supportedauthm
 supportedeffectiverole supportedequivalentscope supportedexactscope supportedprofiles supportedproofrows supporting
 supportingevidenceonly supportssyntheticevidence suppressed suppressedchanged suppressedobjectkinds suppressedpathcounts
 suppressedreasoncounts suppressions surface surfacecount surfacecoverage surfaces surname symlinkcount symlinkpaths
-symlinks syncsampleusers syntaxok synthesis synthetic system systempromptsha256 t1098 t1114 t1199 t1528 t1552 t1566
-tables tags tamperprotectionenabled target targetdir targeteddomainprotectionaction targeteddomainstoprotect
+symlinks syncsampleusers syntaxok synthesis synthetic system systemdefinedruleupdated systempromptsha256 t1098 t1114 t1199 t1528 t1552 t1566
+tables tags takeoutstatus tamperprotectionenabled target targetdir targeteddomainprotectionaction targeteddomainstoprotect
 targeteduserprotectionaction targeteduserscoverage targeteduserscoveragebinding targeteduserstoprotect targetid
 targetlist targetmissing targetname targetresources targettype tasks team teamgroups teamid teams teams1 teamsadminrest teamsbyteam
 teamslocation teamspolicy teamspolicyobjects teamspowershellnotsupported teamstokenunavailable technicalappendix
@@ -2829,15 +2844,15 @@ tenantidunusable tenantisolation tenantkey tenantname tenantpolicy tenantregions
 tenantsettings termsofuse test testing text that theme themes then thinkingdisabled thinkingstripped third thirdparty
 thirdpartyapp threads threatintelligence threatprotectionrequired thresholddays thresholdfindings thresholdpercent
 throttlemode thumbprint tier0 tier0principallabels tier0principals tier0targets timeline timeout timestamp timewindow
-title tlsrpt tlsverificationrelaxed todo toid token tokencache tokencachepresent tokenclaims tokenfailed tokenfile
+title tlsrpt tlsverificationrelaxed todo togglecaaenablement toggleserviceenabled toid token tokencache tokencachepresent tokenclaims tokenfailed tokenfile
 tokenpath tokenpreview tokenrequests tokensucceeded tokenuri tokenurl tolower tool toolchain toolchaincount toolchainreadiness
 toolchainreadinesspath toolchains toolchainunavailable tooldependencies toolrequirements tools toomanytokens tooshort topdelete
 topfindings toplimit topopenfindings toseverity tostatus tostring total totals totype toupper traceback trackclicks
 tracked training transfermethods transformed transformedsourceartifacts translationcatalog translationcatalogcount
 transportauditlog transportconfig transporterror transportrule trim true truncated truncatedlists truncatedsections
-truncationreason trustedcollectors trustedgatecount trustlevel tsutc twoflag twosteppolicystatus
-twostepverificationpolicies twosv type types typesmissing ultrasafe unassignedpolicycount unauthenticated unauthorizedclient
-unavailable unbackedstatuscount uncataloguedrequirementids unclassified uncompromised uncoveredroles undecidable
+truncationreason trustdomainownedoauth2apps trustedcollectors trustedgatecount trustinternalapps trustlevel tsutc twoflag twosteppolicystatus
+twostepverificationpolicies twosv type types typesmissing ultrasafe unassignedpolicycount unauthenticated unauthenticatedemailconsequence unauthenticatedemailquarantineid unauthorized unauthorizedclient
+unavailable unbackedstatuscount unblockallthirdpartyapiaccess uncataloguedrequirementids unclassified uncompromised unconsentedchildgroup uncoveredroles undecidable
 unencrypted unexpandedgroupcount unexpected unexpectedcount unexpectedpaths unexpectedshape unifiedauditlog
 unifiedauditlogingestionenabled unionpossible uniquebody uniqueitems units unitviolates unknown unknownaction unknownfuturevalue
 unknownidentitycount unless unlisted unlistedcount unlistedpaths unmappable unmappedfindings unmet unmetpreconditions
@@ -2845,7 +2860,7 @@ unreachable unreadable unreadablemanifest unreadablerule unreadableschedule unre
 unrecognisedvalues unresolved unresolvedaccounts unresolvedoperatoraccounts unresolvedreason unresolvedreference
 unresolvedusercount unrestrictedpolicies unsanctionedexclusioncount unsanctionedexclusions unseenenumvalue unseenshape
 unsuccessful unsuccessfulcount unsupported unsupportedclaimcount unsupportedclaims unsupportedconditions
-unsupportedenvironment unsupportedquery until unusable unusablescopes unusablesections unverified unverifiedbatchrequests unverifiedcollectors
+unsupportedenvironment unsupportedquery until untrustdomainownedoauth2apps unusable unusablescopes unusablesections unverified unverifiedbatchrequests unverifiedcollectors
 unverifiedexclusiongroups unverifiedpolicies unwritable updatedat updatedtime updatemanagementobjects
 updatemanagementsummary updateprofile updatering updaterings urllib3 urls usagereportobjects usagereportsettingobjects
 useazureclitoken user useraccesscontrol useragent useraudithistory userconsent userdisplaynames useremail userid userkey
@@ -2854,13 +2869,13 @@ userriskhigh userrisklevels users usersettings usersigninactivity usertype uuid 
 validated validateobject validation validationmode validationpath validationstatus validationsummary validitydays value
 valuecompliant valueconflict valuemembership valuenoncompliant valueoutsideset values valuesource valuetype
 valueunusable variant variantcount venv verdict verdicts verdictsource verdictstate verification verificationlevels
-verified verifiedon verifiedpublisherslowriskpermissions verifycustomerpack version viadomainscope viagroup view
-vocabulary voice waitedseconds waitseconds waived waiver waiverapplied waiverfile waiverpath warn warning warningcount
-warnings warningwindowdays weak weaknesses weakownership weburl what whattocollect whereobject which whocanpostmessage
-wholeexport wholeobjectuse whyitmatters windefatp windows windows10compliancepolicy windows365 windows81compliancepolicy
+verified verifiedon verifiedpublisherslowriskpermissions verifycustomerpack version viadomainscope viagroup view viewtopicsdefaultaccesslevel
+vocabulary voice waitedseconds waitseconds waived waiver waiverapplied waiverfile waiverpath warn warnforexternalsharing warnforsharingoutsideallowlisteddomains warning warningcount
+warnings warningwindowdays warnoninvite weak weaknesses weakownership websessionduration weburl what whattocollect whereobject which whichclassescanusersjoin whocancreateclasses whocanjoinclasses whocanmanageguardianaccess whocanpostmessage whocanunenrollstudents
+wholeexport wholeobjectuse whyitmatters windefatp windowend windows windows10compliancepolicy windows365 windows81compliancepolicy
 windowsfeatureupdateprofileassignments windowsfeatureupdateprofiles windowshelloforbusiness windowsphone
 windowsphone81compliancepolicy windowsprotectionstates windowsqualityupdateprofileassignments
-windowsqualityupdateprofiles windowsupdateforbusinessconfiguration windowsupdateringassignments windowsupdaterings
+windowsqualityupdateprofiles windowsupdateforbusinessconfiguration windowsupdateringassignments windowsupdaterings windowstart
 withexchange withmcp without withoutexpirycount withoutownercount withoutreasoncount withpwsh wordingfile workload
 worksfromsavedbundle workspace workspacedomain worsenedcount worsenedfindings writeactions writeanswer writecalls
 writecapable writecapablescopes writecapablescopesusedforreadonlymethods writeenterprisehandoffpack writeexplorer
