@@ -285,7 +285,7 @@ def setting_event(policy_id: str, row: dict, sections: dict) -> dict:
     slots = _slots(params)
     service = params.get("service")
     try:
-        top, topology_complete, _ = _topology(sections.get("gws_tenant"))
+        top, topology_complete, _, _ = _topology(sections.get("gws_tenant"))
         org_units = sections["gws_tenant"]["org_units"]
         events = _events(sections.get("gws_setting_events"))
         units = effective_units(sections, [f"{service}_service_status"]) if service else None
