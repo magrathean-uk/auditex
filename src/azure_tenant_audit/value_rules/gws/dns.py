@@ -11,7 +11,8 @@ Follows SG:scubagoggles/rego/Gmail.rego:117-430, with the unknown-is-not-safe ch
   ``p=reject`` (4.2). 4.3 wants the CISA reporting address in the record. 4.4 wants exactly one ``rua`` and one
   ``ruf`` tag, with at least two ``rua`` and one ``ruf`` ``mailto:`` addresses.
 - A domain with ``resolver_error`` is unknown, never compliant. A positively read violation wins over unknown
-  domains. A cut read, a malformed section or entry, and an empty domain list are unknown too.
+  domains, and over a cut read: the domains that were read keep their violation whatever the unread ones hold (lead,
+  25 Nov 2026). A cut read with no violation, a malformed section or entry, and an empty domain list are unknown.
 
 Only the fields a row reads are checked, so one domain's bad DKIM data never weakens its SPF answer. No domain name,
 record or address ever enters an answer: every text is the catalogued constant of the row's cell.
@@ -147,8 +148,6 @@ def gws_dns(policy_id: str, row: dict, sections: dict) -> dict[str, Any]:
     if (not isinstance(domains, list) or not isinstance(section.get("complete"), bool)
             or any(not isinstance(entry, dict) for entry in domains)):
         return _answer(policy_id, row, "section_shape_unusable")
-    if section["complete"] is not True:
-        return _answer(policy_id, row, "dns_read_incomplete")
     violates = unusable = unknown = covered = False
     for entry in domains:
         alias, error = entry.get("alias"), entry.get("resolver_error")
@@ -168,6 +167,8 @@ def gws_dns(policy_id: str, row: dict, sections: dict) -> dict[str, Any]:
             unusable = True
     if violates:
         return _answer(policy_id, row, "domain_violates")
+    if section["complete"] is not True:
+        return _answer(policy_id, row, "dns_read_incomplete")
     if unusable:
         return _answer(policy_id, row, "domain_record_unusable")
     if not covered:
