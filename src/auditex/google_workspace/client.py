@@ -16,10 +16,20 @@ from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credenti
 # the bound keeps a 10,000-user run from holding 10,000 discovery clients.
 SUBJECT_SERVICE_CACHE_SIZE = 8
 
-# Cloud Identity Policy API filter for the 2-step verification settings. It is a CEL string, and CEL needs
-# the regex escape written as two backslashes (the API's own examples read ``gmail\\..*``), so this raw
-# string holds two backslashes. Every ``security.two_step_verification_*`` policy matches.
-_TWO_STEP_POLICY_FILTER = r"setting.type.matches('^settings/security\\.two_step_verification_.*$')"
+# Cloud Identity Policy API filter: an allow-list of the setting-type service prefixes the SCuBA Google Workspace
+# baselines read, plus the one system rule type they read. It is a CEL string, and CEL needs the
+# regex escape written as two backslashes (the API's own examples read ``gmail\\..*``), so this raw string holds
+# two backslashes before every dot. ``settings/rule.dlp`` is never requested: DLP rule bodies can hold sensitive
+# patterns, so ``rule`` is not a prefix and only ``rule.system_defined_alerts`` is named in full. Every
+# ``security.two_step_verification_*`` policy matches, so the 2-step verification read is a subset of this one.
+_POLICY_SETTINGS_FILTER = (
+    r"setting.type.matches('^settings/((gmail|security|drive_and_docs|calendar|chat|meet|classroom|"
+    r"groups_for_business|sites|takeout|blogger_user_takeout|books_user_takeout|location_history_user_takeout|"
+    r"maps_user_takeout|pay_user_takeout|photos_user_takeout|play_user_takeout|play_console_user_takeout|"
+    r"youtube_user_takeout|data_regions|workspace_marketplace|api_controls|provisioning|multi_party_approval|"
+    r"enterprise_service_restrictions|early_access_apps|gemini_app|access_approval|access_management)\\..*|"
+    r"rule\\.system_defined_alerts)$')"
+)
 
 # Fields read from the device lists. Naming them keeps the telemetry the FULL projection also returns
 # (installed apps, recent users, active time ranges, disk and CPU reports) out of the bundle.
@@ -640,7 +650,12 @@ class GoogleWorkspaceClient:
         )
 
     def list_policies(self, *, top: int | None = None) -> list[dict[str, Any]]:
-        """Cloud Identity policies for the 2-step verification settings (read-only policies scope)."""
+        """Cloud Identity policies for the SCuBA setting types (read-only policies scope).
+
+        One paged read of every allow-listed setting type (``_POLICY_SETTINGS_FILTER``). The operator's ``--top``
+        still bounds it; a read cut there or by a later page error comes back marked, and the collector records it
+        as incomplete.
+        """
         service = self._service("cloudidentity", "v1", scopes=(POLICIES_SCOPE,))
         policies = getattr(service, "policies", None)
         if policies is None:
@@ -649,7 +664,7 @@ class GoogleWorkspaceClient:
                 surface="policies",
             )
         page_size = min(self.page_size, top or self.page_size, 100)
-        policy_filter = f'customer == "customers/{self.customer}" && {_TWO_STEP_POLICY_FILTER}'
+        policy_filter = f'customer == "customers/{self.customer}" && {_POLICY_SETTINGS_FILTER}'
         return self._collect_pages(
             lambda page_token: policies().list(pageSize=page_size, pageToken=page_token, filter=policy_filter),
             "policies",

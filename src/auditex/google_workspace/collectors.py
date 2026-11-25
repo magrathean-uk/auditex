@@ -14,6 +14,7 @@ from azure_tenant_audit.collectors.base import (
     context_limit,
     record_truncation,
 )
+from azure_tenant_audit.data_minimisation import minimise_policy_settings
 from azure_tenant_audit.dns_lookup import (
     DNS_POSTURE_COLLECTORS,
     DohClient,
@@ -589,9 +590,21 @@ class GoogleDevicesCollector:
         )
 
 
+# The 2-step verification setting types, kept in today's ``twoStepVerificationPolicies`` shape.
+TWO_STEP_SETTING_PREFIX = "settings/security.two_step_verification_"
+
+
+def _is_two_step_policy(policy: Any) -> bool:
+    setting = policy.get("setting") if isinstance(policy, dict) else None
+    return isinstance(setting, dict) and str(setting.get("type") or "").startswith(TWO_STEP_SETTING_PREFIX)
+
+
 class GooglePoliciesCollector:
     name = "google_policies"
-    description = "Google Workspace Cloud Identity policies: the organisation's 2-step verification enforcement."
+    description = (
+        "Google Workspace Cloud Identity policies: the setting types the SCuBA baselines read, "
+        "including the organisation's 2-step verification enforcement."
+    )
     required_scopes = (POLICIES_SCOPE,)
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
@@ -602,19 +615,27 @@ class GooglePoliciesCollector:
         if client is None:
             row = _coverage(self.name, "client", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
             return CollectorResult(self.name, "partial", {}, 0, "Google client unavailable", coverage=[row])
+        # One read of every allow-listed setting type. Its coverage row (``policySettings``) is the completeness
+        # signal for both payloads: an operator ``--top`` cut or a later page error makes it partial.
         policies = _call(
             collector=self.name,
-            name="twoStepVerificationPolicies",
+            name="policySettings",
             coverage=coverage,
             log_event=log_event,
             endpoint="cloudidentity.policies.list",
             func=lambda: client.list_policies(top=top),
         )
+        # The 2-step verification subset keeps its raw shape, so its records and finding do not change; the
+        # SCuBA payload drops the customer id and policy name and reduces Gmail address lists to counts.
+        two_step = [policy for policy in policies if _is_two_step_policy(policy)]
         partial = any(row.get("status") != "ok" for row in coverage)
         return CollectorResult(
             self.name,
             "partial" if partial else "ok",
-            {"twoStepVerificationPolicies": {"value": policies}},
+            {
+                "twoStepVerificationPolicies": {"value": two_step},
+                "policySettings": {"value": minimise_policy_settings(list(policies))},
+            },
             len(policies),
             coverage=coverage,
         )
@@ -957,7 +978,7 @@ COLLECTOR_SECTIONS: dict[str, tuple[str, ...]] = {
     "google_directory": ("users", "groups", "domains", "roles", "roleAssignments", "groupMembers", "orgUnits", "oauthGrants"),
     "google_reports": ("loginActivities", "adminActivities"),
     "google_alert_center": ("alerts",),
-    "google_policies": ("twoStepVerificationPolicies",),
+    "google_policies": ("twoStepVerificationPolicies", "policySettings"),
     "google_gmail_settings": ("mailboxSettings",),
     "google_devices": ("mobileDevices", "chromeosDevices"),
     "google_dns_posture": ("domains", "domainPosture"),

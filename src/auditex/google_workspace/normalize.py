@@ -10,9 +10,13 @@ from azure_tenant_audit.collection_gaps import (
     bounded_sample_records,
     collection_gap_records,
     list_truncations,
+    section_was_cut,
     truncations_from_payloads,
 )
-from azure_tenant_audit.data_minimisation import minimise_gmail_settings
+from azure_tenant_audit.data_minimisation import (
+    minimise_gmail_settings,
+    minimise_policy_settings,
+)
 
 from .collectors import (
     SUBJECT_SCOPE_ADMIN,
@@ -195,6 +199,159 @@ def _policy_scope(record: dict[str, Any], *, root_known: bool, root_ids: set[str
     return "organisation" if not root_ids or unit in root_ids else "org_unit"
 
 
+_POLICY_READ_ROWS = ("twoStepVerificationPolicies", "policySettings")
+
+
+def _read_complete(
+    collector: str,
+    section: Any,
+    result_rows: list[dict[str, Any]] | None,
+    coverage_rows: list[dict[str, Any]],
+    *,
+    names: tuple[str, ...] | None = None,
+) -> bool:
+    """Whether a collector's read of one section is complete: no coverage row failed or cut, no section marker.
+
+    With ``result_rows`` the collector's own row must also be ``ok``; without one the read cannot be shown
+    complete, so it is not. ``names`` limits the coverage rows to the ones of this section.
+    """
+    if result_rows is not None:
+        statuses = [row.get("status") for row in result_rows if isinstance(row, dict) and row.get("name") == collector]
+        if not statuses or any(status != "ok" for status in statuses):
+            return False
+    if any(
+        row.get("status") not in (None, "ok") or row.get("collection_truncated") is True
+        for row in coverage_rows
+        if row.get("collector") == collector and (names is None or row.get("name") in names)
+    ):
+        return False
+    return isinstance(section, dict) and not section_was_cut(section) and not (section.get("error") or section.get("error_class"))
+
+
+def _policy_section(setting_type: Any) -> str | None:
+    """``settings/gmail.auto_forwarding`` -> ``gmail_auto_forwarding``; ``None`` for anything else."""
+    if not isinstance(setting_type, str) or not setting_type.startswith(_POLICY_PREFIX):
+        return None
+    section = setting_type.removeprefix(_POLICY_PREFIX).replace(".", "_")
+    return section or None
+
+
+def _policy_setting_records(
+    payload: dict[str, Any] | None, result_rows: list[dict[str, Any]], coverage_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """``google_policy_settings``: one record per Policy API policy plus one read-state record.
+
+    Absent (empty list) when the run holds no ``policySettings`` section, so an older bundle is not read as an
+    empty but complete read. A policy without a readable setting type, value or target counts as malformed and
+    makes the read incomplete: unknown is never safe.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("policySettings"), dict):
+        return []
+    section = payload["policySettings"]
+    values = section.get("value")
+    items = minimise_policy_settings(values) if isinstance(values, list) else None
+    records: list[dict[str, Any]] = []
+    malformed = 0 if items is not None else 1
+    seen: Counter[str] = Counter()
+    for item in items or []:
+        setting = item.get("setting") if isinstance(item, dict) else None
+        query = item.get("policyQuery") if isinstance(item, dict) else None
+        setting_section = _policy_section(setting.get("type")) if isinstance(setting, dict) else None
+        value = setting.get("value", {}) if isinstance(setting, dict) else None
+        if not isinstance(query, dict):
+            query = {}
+        raw_unit, raw_group = query.get("orgUnit"), query.get("group")
+        org_unit = _org_unit_key(raw_unit) or None if isinstance(raw_unit, str) else None
+        group = raw_group.strip().removeprefix("groups/") or None if isinstance(raw_group, str) else None
+        sort_order = query.get("sortOrder")
+        wrong_type = any(item is not None and not isinstance(item, str) for item in (raw_unit, raw_group))
+        if setting_section is None or not isinstance(value, dict) or not (org_unit or group) or wrong_type:
+            malformed += 1
+            continue
+        key = f"{setting_section}|{org_unit or ''}|{group or ''}|{sort_order if sort_order is not None else ''}"
+        seen[key] += 1
+        record = _record(
+            "google_policy_setting",
+            "google_policies.policySettings",
+            key if seen[key] == 1 else f"{key}#{seen[key]}",
+            section=setting_section,
+            unit_kind="group" if group else "org_unit",
+            org_unit=org_unit,
+            group=group,
+            sort_order=sort_order if isinstance(sort_order, (int, float)) and not isinstance(sort_order, bool) else None,
+            policy_type=item.get("type") if isinstance(item.get("type"), str) else None,
+        )
+        record["value"] = value  # kept even when empty: an empty value is a setting at its defaults, not a gap
+        records.append(record)
+    complete = malformed == 0 and _read_complete("google_policies", section, result_rows, coverage_rows)
+    records.append(
+        {
+            "kind": "google_policy_settings_read_state",
+            "source": "google_policies.policySettings",
+            "id": "read_state",
+            "key": "google_policy_settings_read_state:read_state",
+            "complete": complete,
+            "record_count": len(records),
+            "malformed_count": malformed,
+        }
+    )
+    return records
+
+
+def _org_unit_records(
+    directory: dict[str, Any] | None, result_rows: list[dict[str, Any]], coverage_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """``google_org_units``: ``id``, ``parent_id`` and ``is_root`` per unit plus one read-state record.
+
+    The OU path and name are never kept (they can be personal). The root has no row of its own in the Directory
+    list, so it is added as the parent of the top-level units. Absent when the run holds no ``orgUnits`` section.
+    """
+    if not isinstance(directory, dict) or not isinstance(directory.get("orgUnits"), dict):
+        return []
+    section = directory["orgUnits"]
+    values = section.get("value")
+    units = values if isinstance(values, list) else None
+    malformed = 0 if units is not None else 1
+    records: list[dict[str, Any]] = []
+    roots: set[str] = set()
+    seen: dict[str, str] = {}
+    for unit in units or []:
+        unit_id = _org_unit_key(unit.get("orgUnitId")) if isinstance(unit, dict) else ""
+        parent_id = _org_unit_key(unit.get("parentOrgUnitId")) if isinstance(unit, dict) else ""
+        if not unit_id or not parent_id:
+            malformed += 1
+            continue
+        if str(unit.get("parentOrgUnitPath") or "") == "/":
+            roots.add(parent_id)
+        if unit_id in seen:
+            if seen[unit_id] != parent_id:
+                malformed += 1  # one unit listed under two parents: the tree cannot be trusted
+            continue
+        seen[unit_id] = parent_id
+        records.append({"kind": "google_org_unit", "source": "google_directory.orgUnits", "id": unit_id, "key": f"google_org_unit:{unit_id}", "parent_id": parent_id, "is_root": False})
+    if len(roots) > 1 or (records and not roots) or roots & set(seen):
+        # Two roots, units with no top-level unit among them, or a root that is also listed: no single root.
+        malformed += 1
+    for root in sorted(roots - set(seen)):
+        records.append({"kind": "google_org_unit", "source": "google_directory.orgUnits", "id": root, "key": f"google_org_unit:{root}", "parent_id": None, "is_root": True})
+    # Only the orgUnits read counts here: another directory list failing does not make the unit tree unknown.
+    # A complete, empty list means the root is the only unit; its id is then not in this list (``root_id_known``).
+    complete = malformed == 0 and _read_complete("google_directory", section, None, coverage_rows, names=("orgUnits",))
+    records.append(
+        {
+            "kind": "google_org_units_read_state",
+            "source": "google_directory.orgUnits",
+            "id": "read_state",
+            "key": "google_org_units_read_state:read_state",
+            "complete": complete,
+            "root_id_known": len(roots) == 1 and malformed == 0,
+            "record_count": len(records),
+            "malformed_count": malformed,
+        }
+    )
+    return records
+
+
 def _two_step_policy_status(
     payload: dict[str, Any] | None,
     records: list[dict[str, Any]],
@@ -212,7 +369,9 @@ def _two_step_policy_status(
     if not isinstance(payload, dict) or not isinstance(payload.get("twoStepVerificationPolicies"), dict):
         return "unknown"
     rows = [row for row in coverage_rows if row.get("collector") == "google_policies"]
-    if any(row.get("status") not in (None, "ok") and row.get("name") == "twoStepVerificationPolicies" for row in rows):
+    # Since the SCuBA widening the one Policy API read is recorded as ``policySettings``; older bundles name it
+    # ``twoStepVerificationPolicies``. Either failing leaves the 2-step verification status unknown.
+    if any(row.get("status") not in (None, "ok") and row.get("name") in _POLICY_READ_ROWS for row in rows):
         return "unknown"
     truncated = any(row.get("collection_truncated") is True for row in rows)
     enforcement = [record for record in records if record.get("setting_type") == "security.two_step_verification_enforcement"]
@@ -351,6 +510,8 @@ def build_google_normalized_snapshot(
     for record in policy_records:
         # organisation (root unit, no group), org_unit, group, or unclassified when the root unit is unknown
         record["policy_scope"] = _policy_scope(record, root_known=root_known, root_ids=root_ids)
+    policy_setting_records = _policy_setting_records(collector_payloads.get("google_policies"), result_rows, coverage_rows)
+    org_unit_records = _org_unit_records(collector_payloads.get("google_directory"), result_rows, coverage_rows)
     groups = [
         _record(
             "google_group",
@@ -687,6 +848,8 @@ def build_google_normalized_snapshot(
         "google_users": users,
         "google_domains": domain_records,
         "google_two_step_policies": policy_records,
+        "google_policy_settings": policy_setting_records,
+        "google_org_units": org_unit_records,
         "google_groups": groups,
         "google_group_members": group_members,
         "google_group_member_errors": group_member_errors,

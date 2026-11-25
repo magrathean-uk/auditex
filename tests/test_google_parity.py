@@ -910,13 +910,23 @@ def test_the_policies_collector_and_client_read_the_cloud_identity_policies(fake
     assert result.status == "ok" and len(result.payload["twoStepVerificationPolicies"]["value"]) == 3
     assert len(service.calls) == 2  # two pages
     # CEL takes the regex escape as two backslashes inside the string, as the API's own examples write it.
+    # The allow-list of SCuBA setting-type services; ``rule`` is not a prefix, so ``rule.dlp`` is never read.
     two_backslashes = "\\" * 2
     expected = (
         'customer == "customers/C123" && '
-        "setting.type.matches('^settings/security" + two_backslashes + ".two_step_verification_.*$')"
+        "setting.type.matches('^settings/((gmail|security|drive_and_docs|calendar|chat|meet|classroom|"
+        "groups_for_business|sites|takeout|blogger_user_takeout|books_user_takeout|location_history_user_takeout|"
+        "maps_user_takeout|pay_user_takeout|photos_user_takeout|play_user_takeout|play_console_user_takeout|"
+        "youtube_user_takeout|data_regions|workspace_marketplace|api_controls|provisioning|multi_party_approval|"
+        "enterprise_service_restrictions|early_access_apps|gemini_app|access_approval|access_management)"
+        + two_backslashes
+        + "..*|rule"
+        + two_backslashes
+        + ".system_defined_alerts)$')"
     )
     assert service.calls[0]["filter"] == expected
-    assert service.calls[0]["filter"].count("\\") == 2 and "\\." not in service.calls[0]["filter"].replace(two_backslashes + ".", "")
+    assert service.calls[0]["filter"].count("\\") == 4 and "\\." not in service.calls[0]["filter"].replace(two_backslashes + ".", "")
+    assert "dlp" not in service.calls[0]["filter"]
     assert GooglePoliciesCollector.required_scopes == (google_auth.POLICIES_SCOPE,)
 
     # The service for this API is built on credentials narrowed to its own scope.

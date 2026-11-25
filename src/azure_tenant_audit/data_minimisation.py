@@ -21,11 +21,19 @@ and ``payloadFileName`` labels, so ``payload`` becomes ``payloadLength`` and ``h
 labels are dropped, from every record of the section and before any chunk callback sees the rows
 (``minimise_device_configurations``).
 
+Cloud Identity Policy API settings (``minimise_policy_settings``) are admin configuration, but a few Gmail
+setting types carry address lists an admin typed in (``gmail.email_address_lists``) and free-text list
+descriptions. No rule needs an address: each address list becomes its id, its entry count and its count of
+domain-shaped entries (``^[^@]+\\.[^@]+$``, ScubaGoggles' own test), list names and descriptions are dropped,
+and any other string in a setting value that holds an address is replaced by a constant. A list whose entries
+cannot be read keeps ``None`` counts (unknown), never zero.
+
 They never mutate their
 input and are idempotent.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 VACATION_TEXT_FIELDS = ("responseSubject", "responseBodyPlainText", "responseBodyHtml")
@@ -128,6 +136,153 @@ def minimise_gmail_settings(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+# Policy API objects: the tenant's customer id and the opaque policy resource name are dropped from the
+# SCuBA settings payload; neither is read by a rule.
+POLICY_DROPPED_FIELDS = ("customer", "name")
+# The containers of one Gmail address list's entries (an allow list or a block list).
+POLICY_ADDRESS_LIST_KEYS = ("addressList", "blockedAddressList")
+# Gmail setting types whose entries carry an admin-written description.
+POLICY_DESCRIBED_LIST_TYPES = ("settings/gmail.blocked_sender_lists", "settings/gmail.spam_override_lists")
+POLICY_ADDRESS_LISTS_TYPE = "settings/gmail.email_address_lists"
+REDACTED_ADDRESS = "redacted:address"
+_ADDRESS = re.compile(r"[^@\s]+@[^@\s]+")
+_DOMAIN_ENTRY = re.compile(r"^[^@]+\.[^@]+$")
+
+
+def _scrub_addresses(value: Any) -> Any:
+    """``value`` with every string (and mapping key) that holds an address replaced by a constant."""
+    if isinstance(value, str):
+        return REDACTED_ADDRESS if _ADDRESS.search(value) else value
+    if isinstance(value, list):
+        return [_scrub_addresses(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if any(key in value for key in POLICY_ADDRESS_LIST_KEYS):
+        return _address_list_summary(value, keep_siblings=True)
+    result: dict[str, Any] = {}
+    for index, (key, item) in enumerate(value.items()):
+        name = f"{REDACTED_ADDRESS}:{index}" if isinstance(key, str) and _ADDRESS.search(key) else key
+        result[name] = _scrub_addresses(item)
+    return result
+
+
+def _address_entries(container: Any) -> list[str] | None:
+    """The entries of one address-list container, or ``None`` when it cannot be read."""
+    if not isinstance(container, dict) or any(key != "address" for key in container):
+        # An unknown key may be the entries under a new name: unreadable, not empty. ``{}`` is an empty list
+        # (proto3 JSON omits an empty repeated field).
+        return None
+    entries = container.get("address", [])
+    if not isinstance(entries, list):
+        return None
+    texts: list[str] = []
+    for entry in entries:
+        text = entry.get("address") if isinstance(entry, dict) else entry
+        if not isinstance(text, str):
+            return None
+        texts.append(text)
+    return texts
+
+
+_SUMMARY_FIELDS = ("id", "name", "entry_count", "domain_entry_count", *POLICY_ADDRESS_LIST_KEYS)
+
+
+def _address_list_summary(entry: dict[str, Any], *, keep_siblings: bool = False) -> dict[str, Any]:
+    """One Gmail address list as ``{id, entry_count, domain_entry_count}``; unreadable entries give ``None`` counts.
+
+    ``keep_siblings`` keeps the entry's other fields (scrubbed), for an address list met outside
+    ``gmail.email_address_lists``; the list's name is dropped either way.
+    """
+    list_id = entry.get("id")
+    summary: dict[str, Any] = {"id": _scrub_addresses(list_id) if isinstance(list_id, (str, int)) else None}
+    if keep_siblings:
+        for index, (key, item) in enumerate(entry.items()):
+            if key not in _SUMMARY_FIELDS:
+                name = f"{REDACTED_ADDRESS}:{index}" if isinstance(key, str) and _ADDRESS.search(key) else key
+                summary[name] = _scrub_addresses(item)
+    if "entry_count" in entry and not any(key in entry for key in POLICY_ADDRESS_LIST_KEYS):
+        # Already minimised: keep the counts only when they are counts.
+        for field in ("entry_count", "domain_entry_count"):
+            count = entry.get(field)
+            summary[field] = count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else None
+        return summary
+    containers = [entry[key] for key in POLICY_ADDRESS_LIST_KEYS if key in entry]
+    texts: list[str] | None = [] if containers else None
+    for container in containers:
+        read = _address_entries(container)
+        if read is None or texts is None:
+            texts = None
+            break
+        texts.extend(read)
+    summary["entry_count"] = len(texts) if texts is not None else None
+    summary["domain_entry_count"] = sum(1 for text in texts if _DOMAIN_ENTRY.match(text)) if texts is not None else None
+    return summary
+
+
+def _drop_descriptions(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_drop_descriptions(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _drop_descriptions(item) for key, item in value.items() if key != "description"}
+    return value
+
+
+def minimise_policy_value(setting_type: Any, value: Any) -> Any:
+    """One Policy API setting value with address lists reduced to counts and no address or list description left."""
+    if setting_type == POLICY_ADDRESS_LISTS_TYPE and isinstance(value, dict) and isinstance(value.get("emailAddressList"), list):
+        lists = value["emailAddressList"]
+        value = {
+            **value,
+            "emailAddressList": [_address_list_summary(item) if isinstance(item, dict) else item for item in lists],
+        }
+    if setting_type in POLICY_DESCRIBED_LIST_TYPES:
+        value = _drop_descriptions(value)
+    return _scrub_addresses(value)
+
+
+def _minimise_policy(policy: dict[str, Any]) -> dict[str, Any]:
+    """A Policy API object with its setting value minimised (``customer`` and ``name`` are left to the caller)."""
+    setting = policy.get("setting")
+    if not isinstance(setting, dict) or "value" not in setting:
+        return policy
+    return {**policy, "setting": {**setting, "value": minimise_policy_value(setting.get("type"), setting["value"])}}
+
+
+def _is_policy(value: dict[str, Any]) -> bool:
+    setting = value.get("setting")
+    return isinstance(setting, dict) and isinstance(setting.get("type"), str) and setting["type"].startswith("settings/") and "policyQuery" in value
+
+
+def minimise_policy_settings(policies: Any) -> Any:
+    """Cloud Identity policies for the SCuBA settings payload: no ``customer``, no ``name``, no address.
+
+    A row that is not an object is kept with its addresses scrubbed, so the normaliser can still count it as
+    malformed instead of the read looking complete.
+    """
+    if not isinstance(policies, list):
+        return _scrub_addresses(policies)
+    result: list[Any] = []
+    for policy in policies:
+        if not isinstance(policy, dict):
+            result.append(_scrub_addresses(policy))
+            continue
+        kept = {
+            key: item if key == "setting" else _scrub_addresses(item)
+            for key, item in policy.items()
+            if key not in POLICY_DROPPED_FIELDS
+        }
+        setting = kept.get("setting")
+        if isinstance(setting, dict):
+            # The setting's type and value are kept as read; any other setting field is scrubbed like the rest.
+            kept["setting"] = {key: item if key in ("type", "value") else _scrub_addresses(item) for key, item in setting.items()}
+            if "value" in setting:
+                kept = _minimise_policy(kept)
+        elif setting is not None:
+            kept["setting"] = _scrub_addresses(setting)
+        result.append(kept)
+    return result
+
+
 def minimise_mailbox_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """Graph mailbox settings without the automatic-reply message bodies."""
     result = dict(settings)
@@ -165,6 +320,12 @@ def minimise_user_text(value: Any) -> Any:
     if isinstance(result.get("conditions"), dict) and isinstance(result.get("actions"), dict):
         # A Graph inbox rule: the words it matches on are the owner's, the actions and addresses are what is judged.
         result["conditions"] = strip_word_lists(result["conditions"], RULE_CONDITION_WORD_FIELDS)
+    if _is_policy(result):
+        # A Cloud Identity policy, wherever it sits: Gmail address lists become counts and no address is kept.
+        result = _minimise_policy(result)
+    if isinstance(result.get("policySettings"), dict) and isinstance(result["policySettings"].get("value"), list):
+        # The Google SCuBA settings payload, replayed or written: no customer id or policy name either.
+        result["policySettings"] = {**result["policySettings"], "value": minimise_policy_settings(result["policySettings"]["value"])}
     if isinstance(result.get("criteria"), dict) and isinstance(result.get("action"), dict):
         # A Gmail filter: its search terms are the owner's; the forward target and labels are what is judged.
         result["criteria"] = strip_text_fields(result["criteria"], GMAIL_FILTER_TEXT_FIELDS, keep_presence=False)
