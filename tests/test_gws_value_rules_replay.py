@@ -1,7 +1,8 @@
 """GWS vectors replay and coverage (design M13 section 10.1), generic over every fragment's vector file.
 
 Each line of ``tests/fixtures/gws-value-rules/*.jsonl`` is ``{"vector_id", "policy", "sections", "verdict", "cell",
-"reason_code"}`` with literal expectations. Every vector replays through ``gws.assess`` (which applies
+"reason_code"}`` with literal expectations; a not_assessed vector also names its literal pack ``limitations`` and
+``recommendations``, which vary by reason. Every vector replays through ``gws.assess`` (which applies
 ``checked_gws``), ``checked_gws`` again and ``as_pack_response``. Every cell of every catalogued kind is reached by a
 vector of a policy using that kind, and every policy with a row has met, not_met and not_assessed vectors; an
 evidence-free kind (the manual checks) is exempt from met and not_met.
@@ -16,15 +17,14 @@ import pytest
 
 from azure_tenant_audit.value_rules import gws
 from azure_tenant_audit.value_rules.gws.catalogue import catalogue
-from azure_tenant_audit.value_rules.record import (
-    LIMIT_UNUSABLE,
-    REC_BY_KIND,
-    SECTION_NOT_COLLECTED,
-)
 
 VECTOR_DIR = Path(__file__).parent / "fixtures" / "gws-value-rules"
 _KEYS = {"vector_id", "policy", "sections", "verdict", "cell", "reason_code"}
-_OPTIONAL = {"divergence", "note"}
+_OPTIONAL = {"divergence", "note", "limitations", "recommendations"}
+# The pack claim each answered verdict must carry, as literals (review M13-L02 low finding).
+_CLAIM = {"met": ("confirmed", True, [], []),
+          "not_met": ("confirmed", False, [], ["review_policy_against_baseline_text"]),
+          "not_applicable": ("inferred", True, ["policy_not_applicable"], [])}
 
 
 def _vectors() -> list[dict]:
@@ -49,6 +49,9 @@ def test_vector_files_are_well_formed():
         keys = set(vector) - {"_where"}
         assert _KEYS <= keys and not keys - _KEYS - _OPTIONAL, vector["_where"]
         assert isinstance(vector["sections"], dict), vector["_where"]
+        pack = {"limitations", "recommendations"} & keys
+        assert pack == ({"limitations", "recommendations"} if vector["verdict"] == "not_assessed" else set()), \
+            vector["_where"]
 
 
 @pytest.mark.parametrize("vector", VECTORS, ids=[vector["vector_id"] for vector in VECTORS])
@@ -61,17 +64,13 @@ def test_vector_replays(vector):
     row = catalogue()["policies"][vector["policy"]]
     response = gws.as_pack_response(record, "SHOULD", list(row["sections"]))
     claim = response["claims"][0]
+    assert claim["id"] == "requirement_met"
     if record["verdict"] == "not_assessed":
-        entry = row["cells"][record["cell"]]
-        assert claim["status"] == "unknown" and claim["value"] is None
-        if entry["evidence_kind"] is None:
-            assert response["limitations"] == [SECTION_NOT_COLLECTED]
-        else:
-            assert response["limitations"] == [LIMIT_UNUSABLE]
-            assert response["recommendations"] == [REC_BY_KIND[entry["evidence_kind"]]]
-            assert response["recommendations"] == entry["recommendations"]
+        expected = ("unknown", None, vector["limitations"], vector["recommendations"])
     else:
-        assert claim["status"] in {"confirmed", "inferred"}
+        expected = _CLAIM[record["verdict"]]
+    assert (claim["status"], claim["value"], response["limitations"], response["recommendations"]) == expected, \
+        vector["_where"]
     assert response["claims"][1]["value"] == "SHOULD"
 
 

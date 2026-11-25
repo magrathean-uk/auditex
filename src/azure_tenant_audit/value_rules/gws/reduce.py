@@ -4,22 +4,27 @@
   ``max`` keeps the winner; ``merge`` fills fields the winner lacks from lower policies (:1042-1067); ``list`` keeps
   every value (:1069-1095); ``max_map`` merges list entries by primary key (:973-1040).
 - A group-scoped unit (``ou:<id>/group:<pseudonym>``) is its own unit, never ranked against an OU (:784-825).
-- Pinned defaults fill the top unit only (:1097-1170), and only when the read is complete. ScubaGoggles' "absent
-  service status is DISABLED" is not copied: ``service_on`` answers ``unknown`` (divergence D3).
-- Unknown is not safe: an envelope that cannot be placed raises ``Unusable``; a value that cannot be reduced, or two
-  different values at the winning sort order, reduces to ``UNUSABLE`` for that (unit, section) only.
+- Pinned defaults fill the top unit only (:1097-1170), and only when both the policy read and the tenant topology
+  are complete and the topology holds the top unit as its one root. ScubaGoggles' "absent service status is DISABLED"
+  is not copied: ``service_on`` answers ``unknown`` (divergence D3).
+- Unknown is not safe: an envelope that cannot be placed raises ``Unusable``; a value that cannot be reduced reduces
+  to ``UNUSABLE`` for that (unit, section) only. So does a tie (D11): two policies at the rank that decides a value
+  disagreeing on it. The deciding rank is the winner's for ``max``, and each field's (``merge``) or each map item
+  field's (``max_map``) own highest rank, so the read order of equal-ranked policies never changes the answer.
 """
 from __future__ import annotations
 
 import copy
 import json
 import math
+import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from .catalogue import section_semantics
 
 ON, OFF, UNKNOWN = "on", "off", "unknown"
+_OU = re.compile(r"ou:[^/\s]+")
 
 
 class Unusable(ValueError):
@@ -46,17 +51,44 @@ class Units:
     explicit: dict[str, frozenset[tuple[str, str]]]
 
 
+class _Placed(NamedTuple):
+    unit: str
+    section: str
+    rank: float
+    value: Any
+
+
 def _sort_order(value: Any) -> bool:
     return (isinstance(value, int) and not isinstance(value, bool)
             or isinstance(value, float) and math.isfinite(value))
 
 
-def _entries(sections: dict, keys: set[str]) -> tuple[str, bool, list[dict]]:
+def _topology(tenant: Any) -> tuple[str, bool]:
+    """The top unit and whether the tenant topology is complete (design 7: ``top_unit``, ``org_units``,
+    ``complete``). A top unit that is not an OU, or an ``org_units`` map of the wrong shape, cannot be placed. A
+    complete topology must hold the top unit as its only root; a partial one is carried through as incomplete, so no
+    default is applied on a root the read never confirmed."""
+    if not isinstance(tenant, dict) or not isinstance(tenant.get("top_unit"), str) \
+            or not _OU.fullmatch(tenant["top_unit"]):
+        raise Unusable("gws_tenant has no top unit")
+    top, org_units = tenant["top_unit"], tenant.get("org_units")
+    if not isinstance(org_units, dict) or any(
+            not isinstance(unit, str) or not _OU.fullmatch(unit)
+            or parent is not None and (not isinstance(parent, str) or not _OU.fullmatch(parent))
+            for unit, parent in org_units.items()):
+        raise Unusable("gws_tenant has no usable org unit map")
+    complete = tenant.get("complete") is True
+    roots = [unit for unit, parent in org_units.items() if parent is None]
+    if complete and roots != [top]:
+        raise Unusable("gws_tenant does not hold its top unit as the root")
+    return top, complete
+
+
+def _entries(sections: Any, keys: set[str]) -> tuple[str, bool, list[_Placed]]:
     if not isinstance(sections, dict):
         raise Unusable("sections is not a mapping")
-    tenant, read = sections.get("gws_tenant"), sections.get("gws_policies")
-    if not isinstance(tenant, dict) or not isinstance(tenant.get("top_unit"), str) or not tenant["top_unit"]:
-        raise Unusable("gws_tenant has no top unit")
+    top, tenant_complete = _topology(sections.get("gws_tenant"))
+    read = sections.get("gws_policies")
     if not isinstance(read, dict) or not isinstance(read.get("policies"), list):
         raise Unusable("gws_policies is not a policy list")
     kept = []
@@ -67,65 +99,14 @@ def _entries(sections: dict, keys: set[str]) -> tuple[str, bool, list[dict]]:
             continue
         unit, kind = entry.get("unit"), entry.get("unit_kind")
         if (not isinstance(unit, str) or not unit or not isinstance(kind, str) or kind not in {"org_unit", "group"}
-                or (kind == "group") != ("/group:" in unit) or unit == tenant["top_unit"] and kind == "group"):
+                or (kind == "group") != ("/group:" in unit) or unit == top and kind == "group"):
             raise Unusable("gws_policies holds an entry that cannot be placed")
         # Placed but unrankable or valueless: only this (unit, section) becomes unusable.
-        kept.append(entry if _sort_order(entry.get("sort_order")) and "value" in entry
-                    else {**entry, "sort_order": math.inf, "value": UNUSABLE})
-    return tenant["top_unit"], read.get("complete") is True, kept
-
-
-def _max(ranked: list[dict]) -> Any:
-    winner = ranked[0]
-    if not isinstance(winner["value"], dict):
-        return UNUSABLE
-    return copy.deepcopy(winner["value"])
-
-
-def _merge(ranked: list[dict]) -> Any:
-    if any(not isinstance(entry["value"], dict) for entry in ranked):
-        return UNUSABLE
-    merged = copy.deepcopy(ranked[0]["value"])
-    for entry in ranked[1:]:
-        for field, value in entry["value"].items():
-            merged.setdefault(field, copy.deepcopy(value))
-    return merged
-
-
-def _list(ranked: list[dict]) -> Any:
-    if any(not isinstance(entry["value"], dict) for entry in ranked):
-        return UNUSABLE
-    return [copy.deepcopy(entry["value"]) for entry in ranked]
-
-
-def _max_map(ranked: list[dict], field: str, key: str) -> Any:
-    def usable(value):
-        return (isinstance(value, dict) and isinstance(value.get(field), list)
-                and all(isinstance(item, dict) and isinstance(item.get(key), str | int) and not isinstance(
-                    item.get(key), bool) for item in value[field]))
-    if any(not usable(entry["value"]) for entry in ranked):
-        return UNUSABLE
-    if any(len({item[key] for item in entry["value"][field]}) != len(entry["value"][field]) for entry in ranked):
-        return UNUSABLE
-    merged = copy.deepcopy(ranked[0]["value"])
-    by_key = {item[key]: item for item in merged[field]}
-    for entry in ranked[1:]:
-        for item in entry["value"][field]:
-            if item[key] in by_key:
-                for name, value in item.items():
-                    by_key[item[key]].setdefault(name, copy.deepcopy(value))
-            else:
-                by_key[item[key]] = copy.deepcopy(item)
-                merged[field].append(by_key[item[key]])
-    return merged
-
-
-def _tied(ranked: list[dict], reducer: str) -> bool:
-    """Two different values share the winning sort order: which one Google applies is unknown."""
-    if reducer == "list":
-        return False
-    top = [_canonical(entry["value"]) for entry in ranked if entry["sort_order"] == ranked[0]["sort_order"]]
-    return any(value != top[0] for value in top[1:])
+        rank = entry.get("sort_order")
+        usable = _sort_order(rank) and "value" in entry
+        kept.append(_Placed(unit, entry["section"], rank if usable else math.inf,
+                            entry["value"] if usable else UNUSABLE))
+    return top, tenant_complete and read.get("complete") is True, kept
 
 
 def _canonical(value: Any) -> str:
@@ -138,20 +119,91 @@ def _canonical(value: Any) -> str:
         return "\0unusable"
 
 
-def _reduce(section: str, group: list[dict]) -> Any:
+def _tiers(group: list[_Placed]) -> list[list[Any]]:
+    """The values by rank, highest first; within a rank in canonical order, never in read order."""
+    ranks = sorted({entry.rank for entry in group}, reverse=True)
+    return [sorted((entry.value for entry in group if entry.rank == rank), key=_canonical) for rank in ranks]
+
+
+class _Tie(Exception):
+    pass
+
+
+def _decided(tiers: list[list[dict]]) -> dict[str, Any]:
+    """Each field from the highest rank that holds it; equal-ranked values that disagree on it are a tie (D11)."""
+    merged: dict[str, Any] = {}
+    for tier in tiers:
+        for name in sorted({name for value in tier for name in value} - set(merged)):
+            candidates = [value[name] for value in tier if name in value]
+            if any(_canonical(candidate) != _canonical(candidates[0]) for candidate in candidates[1:]):
+                raise _Tie
+            merged[name] = copy.deepcopy(candidates[0])
+    return merged
+
+
+def _max(tiers: list[list[Any]]) -> Any:
+    top = tiers[0]
+    if any(not isinstance(value, dict) for value in top):
+        return UNUSABLE
+    if any(_canonical(value) != _canonical(top[0]) for value in top[1:]):
+        return UNUSABLE
+    return copy.deepcopy(top[0])
+
+
+def _merge(tiers: list[list[Any]]) -> Any:
+    if any(not isinstance(value, dict) for tier in tiers for value in tier):
+        return UNUSABLE
+    try:
+        return _decided(tiers)
+    except _Tie:
+        return UNUSABLE
+
+
+def _list(tiers: list[list[Any]]) -> Any:
+    if any(not isinstance(value, dict) for tier in tiers for value in tier):
+        return UNUSABLE
+    return [copy.deepcopy(value) for tier in tiers for value in tier]
+
+
+def _max_map(tiers: list[list[Any]], field: str, key: str) -> Any:
+    def usable(value):
+        return (isinstance(value, dict) and isinstance(value.get(field), list)
+                and all(isinstance(item, dict) and isinstance(item.get(key), str | int) and not isinstance(
+                    item.get(key), bool) for item in value[field])
+                and len({item[key] for item in value[field]}) == len(value[field]))
+    if any(not usable(value) for tier in tiers for value in tier):
+        return UNUSABLE
+    try:
+        # Fields beside the map merge as ``merge`` does; each map item merges field by field at its own rank.
+        merged = _decided([[{name: part for name, part in value.items() if name != field} for value in tier]
+                           for tier in tiers])
+        first: dict[Any, tuple[int, str]] = {}
+        for index, tier in enumerate(tiers):
+            for value in tier:
+                for item in value[field]:
+                    first.setdefault(item[key], (index, _canonical(item[key])))
+        items = [_decided([[item for value in tier for item in value[field] if item[key] == item_key]
+                           for tier in tiers])
+                 for item_key in sorted(first, key=first.__getitem__)]
+    except _Tie:
+        return UNUSABLE
+    merged[field] = items
+    return merged
+
+
+def _reduce(section: str, group: list[_Placed]) -> Any:
     semantics = section_semantics(section)
     reducer = semantics["reducer"]
-    # Stable sort, highest first: equal sort orders keep the read order, as sorted(reverse=True) does in ScubaGoggles.
-    ranked = sorted(group, key=lambda entry: entry["sort_order"], reverse=True)
-    if any(entry["value"] is UNUSABLE for entry in ranked) or _tied(ranked, reducer):
+    if any(entry.value is UNUSABLE for entry in group):
         return UNUSABLE
+    tiers = _tiers(group)
     if reducer == "merge":
-        return _merge(ranked)
+        return _merge(tiers)
     if reducer == "list":
-        return _list(ranked)
+        return _list(tiers)
     if reducer == "max_map":
-        return _max_map(ranked, next(iter(semantics["fields"])), semantics["key"])
-    return _max(ranked)
+        return _max_map(tiers, next(iter(semantics["fields"])), semantics["key"])
+    return _max(tiers)
 
 
 def effective_units(sections: dict, section_keys: list[str] | tuple[str, ...]) -> Units:
@@ -164,9 +216,9 @@ def effective_units(sections: dict, section_keys: list[str] | tuple[str, ...]) -
     for key in keys:
         section_semantics(key)
     top, complete, entries = _entries(sections, keys)
-    grouped: dict[tuple[str, str], list[dict]] = {}
+    grouped: dict[tuple[str, str], list[_Placed]] = {}
     for entry in entries:
-        grouped.setdefault((entry["unit"], entry["section"]), []).append(entry)
+        grouped.setdefault((entry.unit, entry.section), []).append(entry)
     values: dict[str, dict[str, Any]] = {top: {}}
     explicit: dict[str, set[tuple[str, str]]] = {top: set()}
     for (unit, section), group in grouped.items():
@@ -206,8 +258,10 @@ def effective(units: Units, unit: str, section: str, field: str) -> Any:
 
 
 def _state(units: Units, unit: str, section: str) -> str | None:
+    """None only when the unit has no status record at all; a record without a readable ``serviceState`` (``{}``, an
+    unrelated field, an unknown state) is ``unknown``, never inherited."""
     value = units.values.get(unit, {}).get(section, MISSING)
-    if value is MISSING or isinstance(value, dict) and "serviceState" not in value:
+    if value is MISSING:
         return None
     state = value.get("serviceState") if isinstance(value, dict) else None
     if not isinstance(state, str) or state.upper() not in {"ENABLED", "DISABLED"}:
@@ -218,8 +272,9 @@ def _state(units: Units, unit: str, section: str) -> str | None:
 def service_on(units: Units, unit: str, service: str) -> str:
     """``AppEnabled`` (SG:scubagoggles/rego/Utils.rego:605-625): the unit's explicit state, else the top unit's.
 
-    ``on``, ``off`` or ``unknown``. An absent top-level status is ``unknown``, not DISABLED (D3); an unreadable or
-    unknown state is ``unknown`` at either level. ``<service>_service_status`` must be among the reduced keys.
+    ``on``, ``off`` or ``unknown``. Only an absent status record inherits. An absent top-level status is ``unknown``,
+    not DISABLED (D3); a supplied record without a readable or known state is ``unknown`` at either level.
+    ``<service>_service_status`` must be among the reduced keys.
     """
     section = f"{service}_service_status"
     own = _state(units, unit, section)

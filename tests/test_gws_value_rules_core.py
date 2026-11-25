@@ -1,10 +1,12 @@
 """GWS value-rule engine core (design M13 sections 5.1, 5.3, 8.1, 8.2): loader, registry, gate, reducers, manual kind.
 
-Synthetic data only; every expected value is a literal.
+Synthetic data only; every expected value is a literal. Loader and dispatch cases run on a controlled catalogue (the
+shipped main file with empty fragments), so a later lane adding valid kinds and rows to a fragment never breaks them.
 """
 from __future__ import annotations
 
 import json
+import traceback
 from pathlib import Path
 
 import pytest
@@ -29,10 +31,31 @@ MANUAL_TEXT = ("Data unavailable: no read-only Google Workspace API exposes this
                "Admin console against the baseline text.")
 
 
+FRAGMENTS = [f"configs/scuba-gws-rules-{name}.json" for name in (
+    "setting-core", "setting-collab", "multi", "identity", "lists", "events", "dns")]
+UNIMPLEMENTED = "GWS.GMAIL.1.1v1"  # no row in the controlled catalogue
+
+
 def _files() -> dict[str, dict]:
-    paths = [MAIN, *(f"configs/scuba-gws-rules-{name}.json" for name in (
-        "setting-core", "setting-collab", "multi", "identity", "lists", "events", "dns"))]
-    return {path: json.loads((ROOT / path).read_text(encoding="utf-8")) for path in paths}
+    """The controlled catalogue: the shipped main file and an empty stub for every fragment."""
+    files = {path: {"kinds": {}, "policies": {}} for path in FRAGMENTS}
+    files[MAIN] = json.loads((ROOT / MAIN).read_text(encoding="utf-8"))
+    return files
+
+
+def _sem(files: dict, section: str) -> dict:
+    return next(entry for entry in files[MAIN]["section_semantics"] if entry["section"] == section)
+
+
+def _field(files: dict, section: str, name: str) -> dict:
+    return next(field for field in _sem(files, section)["fields"] if field["name"] == name)
+
+
+@pytest.fixture
+def controlled(monkeypatch):
+    data = _load(_files())
+    monkeypatch.setattr(gws_catalogue, "catalogue", lambda: data)
+    return data
 
 
 def _load(files: dict[str, dict]) -> dict:
@@ -64,14 +87,41 @@ def test_shipped_catalogue_loads_with_pins():
     assert data["scubagoggles_version"] == "v1.1.0"
     assert data["scubagoggles_commit"] == "08a08ce145178582284d81ab1f3625987f3ad66b"
     assert len(data["policy_ids"]) == 138
+    assert "manual_only" in data["kinds"]
+    assert {pid for pid, row in data["policies"].items() if row["kind"] == "manual_only"} == MANUAL_IDS
+    assert set(data["policies"]) <= set(data["policy_ids"])
+
+
+def test_controlled_catalogue_is_the_manual_subset():
+    data = _load(_files())
     assert set(data["kinds"]) == {"manual_only"}
     assert set(data["policies"]) == MANUAL_IDS
 
 
-def test_shipped_fragments_are_stubs_today():
-    for name in ("setting-core", "setting-collab", "multi", "identity", "lists", "events", "dns"):
-        path = ROOT / f"configs/scuba-gws-rules-{name}.json"
-        assert set(json.loads(path.read_text(encoding="utf-8"))) == {"kinds", "policies"}
+def test_shipped_fragments_have_the_fragment_shape():
+    for path in FRAGMENTS:
+        assert set(json.loads((ROOT / path).read_text(encoding="utf-8"))) == {"kinds", "policies"}
+
+
+def test_gws_configs_keep_section_and_setting_names_out_of_mapping_keys():
+    # Review B1: a Google section or setting name (``securityUpdate``, ``region``) as a config key would become a
+    # product field name the shareable redaction keeps when a person or group has that name.
+    names = {entry["section"] for entry in _files()[MAIN]["section_semantics"]}
+    names |= {field["name"] for entry in _files()[MAIN]["section_semantics"] for field in entry["fields"]}
+    assert {"drive_and_docs_file_security_update", "securityUpdate", "region", "serviceState"} <= names
+    keys: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            keys.update(node)
+            for item in node.values():
+                walk(item)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+    for path in [MAIN, *FRAGMENTS]:
+        walk(json.loads((ROOT / path).read_text(encoding="utf-8")))
+    assert sorted(keys & names) == []
 
 
 def _mutate(target, fn):
@@ -90,7 +140,7 @@ def _mutate(target, fn):
      "Invalid GWS value-rule shared reasons"),
     (lambda f: f[MAIN]["policy_ids"].pop(), "Invalid GWS value-rule policy ids"),
     (lambda f: f[MAIN]["policy_ids"].append("GWS.GMAIL.99.1v1"), "Invalid GWS value-rule policy ids"),
-    (lambda f: f[MAIN]["fragments"].pop(), "Invalid GWS value-rule fragments"),
+    (lambda f: f[MAIN]["fragment_files"].pop(), "Invalid GWS value-rule fragments"),
     (lambda f: f[FRAGMENT].update(extra={}), "Invalid GWS value-rule fragment"),
     (lambda f: f[MAIN]["policies"].update({"MS.AAD.1.1v1": dict(f[MAIN]["policies"]["GWS.MEET.6.3v1"],
                                                                 rule_id="MS.AAD.1.1v1.manual_only")}),
@@ -129,13 +179,20 @@ def _mutate(target, fn):
      "Invalid value-rule evidence limitations"),
     (lambda f: f[MAIN]["kinds"]["manual_only"].update(evidence_free=False), "Invalid GWS value-rule kind gate"),
     (lambda f: f[MAIN]["kinds"]["manual_only"].update(extra=1), "Invalid GWS value-rule kind"),
-    (lambda f: f[MAIN]["section_semantics"]["gmail_pop_access"].update(reducer="min"),
+    (lambda f: _sem(f, "gmail_pop_access").update(reducer="min"), "Invalid GWS section semantics"),
+    (lambda f: _sem(f, "gmail_pop_access").pop("src"), "Invalid GWS section semantics"),
+    (lambda f: _sem(f, "gmail_rule_states").pop("key"), "Invalid GWS section semantics"),
+    (lambda f: _field(f, "gmail_rule_states", "ruleStates").update(type="list_strings"),
      "Invalid GWS section semantics"),
-    (lambda f: f[MAIN]["section_semantics"]["gmail_pop_access"].pop("src"), "Invalid GWS section semantics"),
-    (lambda f: f[MAIN]["section_semantics"]["gmail_rule_states"].pop("key"), "Invalid GWS section semantics"),
-    (lambda f: f[MAIN]["section_semantics"]["gmail_mail_delegation"].pop("default_src"),
-     "Invalid GWS section default"),
-    (lambda f: f[MAIN]["section_semantics"]["gmail_mail_delegation"].update(default={"other": 1}),
+    (lambda f: _sem(f, "gmail_pop_access")["fields"].append({"name": "enablePopAccess", "type": "bool"}),
+     "Invalid GWS section semantics"),
+    (lambda f: f[MAIN]["section_semantics"].append(dict(_sem(f, "gmail_pop_access"))),
+     "Invalid GWS section semantics"),
+    (lambda f: _field(f, "gmail_pop_access", "enablePopAccess").update(other=1), "Invalid GWS section semantics"),
+    (lambda f: f[MAIN].update(section_semantics={}), "Invalid GWS section semantics"),
+    (lambda f: _sem(f, "gmail_mail_delegation").pop("default_src"), "Invalid GWS section default"),
+    (lambda f: _field(f, "gmail_pop_access", "enablePopAccess").update(default=False), "Invalid GWS section default"),
+    (lambda f: _sem(f, "gmail_rule_states").update(default_src="SG:scubagoggles/policy_api.py:1"),
      "Invalid GWS section default"),
 ])
 def test_loader_refuses(change, message):
@@ -143,15 +200,16 @@ def test_loader_refuses(change, message):
 
 
 @pytest.mark.parametrize("change", [
-    lambda f: f[MAIN]["section_semantics"]["gmail_pop_access"].update(reducer=["max"]),
-    lambda f: f[MAIN]["section_semantics"]["gmail_pop_access"].update(fields={"enablePopAccess": ["bool"]}),
+    lambda f: _sem(f, "gmail_pop_access").update(reducer=["max"]),
+    lambda f: _sem(f, "gmail_pop_access").update(fields={"enablePopAccess": "bool"}),
+    lambda f: _field(f, "gmail_pop_access", "enablePopAccess").update(type=["bool"]),
     lambda f: f[MAIN]["kinds"]["manual_only"]["cells"]["manual_check"].update(verdict=["not_assessed"]),
     lambda f: f[MAIN]["kinds"]["manual_only"]["cells"]["manual_check"].update(cited=[["gws_tenant"]]),
     lambda f: f[MAIN]["policies"]["GWS.MEET.6.3v1"].update(kind=["manual_only"]),
     lambda f: f[MAIN]["policies"]["GWS.MEET.6.3v1"].update(sections=[["gws_tenant"]]),
     lambda f: f[MAIN]["kinds"]["manual_only"].update(evidence_free=1),
     lambda f: f[MAIN].update(schema_version=True),
-    lambda f: f[MAIN]["section_semantics"]["gmail_pop_access"].update(outside_expected_table=1),
+    lambda f: _sem(f, "gmail_pop_access").update(outside_expected_table=1),
     lambda f: f.update({FRAGMENT: ["kinds", "policies"]}),
     lambda f: f[FRAGMENT].update(policies={"GWS.GMAIL.1.1v1": "row"}),
 ])
@@ -187,6 +245,61 @@ def test_loader_resolves_cells_through_the_kind():
         "Data unavailable: required evidence section(s) not collected: gws_tenant."]
 
 
+_DUPLICATED_ROW = '"GWS.MEET.6.3v1": {"kind": "manual_only", "rule_id": "GWS.MEET.6.3v1.manual_only", ' \
+    '"sections": ["gws_tenant"], "params": {}}, '
+
+
+@pytest.mark.parametrize("path, old, new", [
+    # Review M1: the same policy twice in one file, identical but for params; the last one must not silently win.
+    (MAIN, '"GWS.MEET.6.3v1": {', _DUPLICATED_ROW.replace('"params": {}', '"params": {"changed": true}')
+     + '"GWS.MEET.6.3v1": {'),
+    (MAIN, '"manual_only": {"cells"', '"manual_only": {"cells": {}}, "manual_only": {"cells"'),
+    (MAIN, '"reducer": "max"', '"reducer": "merge", "reducer": "max"'),
+    (FRAGMENTS[0], '"kinds": {}', '"kinds": {}, "kinds": {}'),
+])
+def test_loader_refuses_a_member_repeated_in_one_file(path, old, new):
+    files = _files()
+    texts = {name: json.dumps(data) for name, data in files.items()}
+    assert old in texts[path]
+    texts[path] = texts[path].replace(old, new, 1)
+    with pytest.raises(ValueError, match="GWS value-rule catalogue repeats a member: scuba-gws-"):
+        gws_catalogue._load(texts.__getitem__)
+
+
+def _resource_root(tmp_path: Path, omit: str) -> Path:
+    for path, data in _files().items():
+        if not path.endswith(omit):
+            (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / path).write_text(json.dumps(data), encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.parametrize("omit", ["scuba-gws-rules-dns.json", "scuba-gws-value-rules.json"])
+def test_an_unreadable_resource_is_named_without_its_path(tmp_path, monkeypatch, omit):
+    # Review B5: the error and its displayed chain name the shipped file only, never the resolved resource root.
+    root = _resource_root(tmp_path / "synthetic-resource-root", omit)
+    monkeypatch.setattr(gws_catalogue, "open_text_resource", lambda path: (root / path).read_text(encoding="utf-8"))
+    gws_catalogue.catalogue.cache_clear()
+    try:
+        with pytest.raises(ValueError) as caught:
+            gws.assess("GWS.MEET.6.3v1", {})
+    finally:
+        gws_catalogue.catalogue.cache_clear()
+    assert str(caught.value) == f"GWS value-rule catalogue resource is unreadable: {omit}"
+    shown = "".join(traceback.format_exception(caught.value))
+    assert "synthetic-resource-root" not in shown and str(tmp_path) not in shown
+
+
+def test_undecodable_resource_is_named_without_its_path():
+    files = _files()
+    texts = {name: json.dumps(data) for name, data in files.items()}
+    texts[FRAGMENTS[-1]] = "{"
+    with pytest.raises(ValueError) as caught:
+        gws_catalogue._load(texts.__getitem__)
+    assert str(caught.value) == "GWS value-rule catalogue resource is not valid JSON: scuba-gws-rules-dns.json"
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__ is True
+
+
 def test_section_semantics_cover_the_pinned_tables():
     semantics = gws_catalogue.catalogue()["section_semantics"]
     assert len(semantics) == 104
@@ -217,7 +330,7 @@ def test_section_semantics_cover_the_pinned_tables():
 # --- registry and dispatch ------------------------------------------------------------------------------------------
 
 def test_registries_are_disjoint():
-    assert set(gws._registry()) == {"manual_only"}
+    assert "manual_only" in gws._registry()
     assert set(gws._registry()).isdisjoint(value_rules._registry())
     assert not hasattr(gws, "KINDS")
     assert set(gws_catalogue.catalogue()["kinds"]) <= set(gws._registry())
@@ -227,7 +340,11 @@ def test_cross_platform_ids_answer_none():
     assert value_rules.assess("GWS.MEET.6.3v1", {}) is None
     assert value_rules.assess("GWS.GMAIL.1.1v1", {}) is None
     assert gws.assess("MS.AAD.1.1v1", {}) is None
-    assert gws.assess("GWS.GMAIL.1.1v1", {}) is None
+
+
+def test_a_policy_without_a_row_answers_none(controlled):
+    assert UNIMPLEMENTED in controlled["policy_ids"]
+    assert gws.assess(UNIMPLEMENTED, {}) is None
 
 
 def test_m365_catalogue_never_uses_the_manual_code():
@@ -252,7 +369,7 @@ def test_manual_policies_answer_the_fixed_reason(policy_id):
         "review_policy_against_baseline_text"]
 
 
-def test_checked_gws_refuses_off_inventory_answers():
+def test_checked_gws_refuses_off_inventory_answers(controlled):
     good = gws.assess("GWS.MEET.6.3v1", {})
     for change in ({"reason_text": "Data unavailable: other."}, {"verdict": "not_met"}, {"cell": "met"},
                    {"cited_sections": ["gws_policies"]}, {"reason_code": "data_unavailable_other"},
@@ -261,7 +378,7 @@ def test_checked_gws_refuses_off_inventory_answers():
             checked_gws({**good, **change})
 
 
-def test_rule_failure_is_a_shared_reason():
+def test_rule_failure_is_a_shared_reason(controlled):
     record = rule_failure_gws("GWS.MEET.6.3v1")
     assert checked_gws(record) is record
     assert (record["cell"], record["reason_code"], record["cited_sections"]) == (
@@ -269,7 +386,7 @@ def test_rule_failure_is_a_shared_reason():
     with pytest.raises(ValueError):
         checked_gws({**record, "cited_sections": []})
     with pytest.raises(ValueError):
-        rule_failure_gws("GWS.GMAIL.1.1v1")
+        rule_failure_gws(UNIMPLEMENTED)
 
 
 def test_gate_runs_before_a_gated_kind(monkeypatch):
@@ -504,6 +621,137 @@ def test_service_on_top_unit_and_unreadable_values():
                     _p("ou:c", "gmail_service_status", 1, None)], ["gmail_service_status"])
     assert R.service_on(units, "ou:root", "gmail") == "on"
     assert R.service_on(units, "ou:root/group:g1", "gmail") == "off"
-    assert R.service_on(units, "ou:b", "gmail") == "on"
+    assert R.service_on(units, "ou:b", "gmail") == "unknown"  # a supplied record without a status never inherits
     assert R.service_on(units, "ou:c", "gmail") == "unknown"
     assert R.service_on(units, "ou:a", "chat") == "unknown"
+
+
+@pytest.mark.parametrize("unit_value", [{}, {"other": 1}, {"serviceState": None}, {"serviceState": ""}])
+def test_service_status_record_without_a_status_is_unknown_not_inherited(unit_value):
+    # Review B3: an explicit unreadable override at ou:a never takes the top unit's off (the all-off service gate).
+    units = _units([_p("ou:root", "gmail_service_status", 1, _status("DISABLED")),
+                    _p("ou:a", "gmail_service_status", 1, unit_value)], ["gmail_service_status"])
+    assert R.service_on(units, "ou:root", "gmail") == "off"
+    assert R.service_on(units, "ou:a", "gmail") == "unknown"
+    assert R.service_on(units, "ou:b", "gmail") == "off"  # no record at all still inherits
+
+
+def test_top_unit_status_record_without_a_status_is_unknown():
+    units = _units([_p("ou:root", "gmail_service_status", 1, {})], ["gmail_service_status"])
+    assert R.service_on(units, "ou:root", "gmail") == "unknown"
+    assert R.service_on(units, "ou:a", "gmail") == "unknown"
+
+
+# --- equal ranks (D11 at the deciding rank of each field or map item; review B2) -----------------------------------
+
+_INTEROP = [_p("ou:root", "calendar_interoperability", 8, {"enableFullEventDetails": True}),
+            _p("ou:root", "calendar_interoperability", 7, {"enableInteroperability": False}),
+            _p("ou:root", "calendar_interoperability", 7, {"enableInteroperability": True})]
+
+
+@pytest.mark.parametrize("policies", [_INTEROP, [_INTEROP[0], _INTEROP[2], _INTEROP[1]],
+                                      [_INTEROP[2], _INTEROP[1], _INTEROP[0]]])
+def test_merge_field_tied_at_its_own_rank_is_unusable_in_any_order(policies):
+    units = _units([*policies, _p("ou:a", "calendar_interoperability", 1, {"enableInteroperability": False})],
+                   ["calendar_interoperability"])
+    assert units.complete is True
+    assert units.values["ou:root"]["calendar_interoperability"] is R.UNUSABLE
+    assert R.effective(units, "ou:root", "calendar_interoperability", "enableInteroperability") is R.UNUSABLE
+    assert units.values["ou:a"] == {"calendar_interoperability": {"enableInteroperability": False}}
+
+
+@pytest.mark.parametrize("order", [(0, 1, 2), (2, 1, 0), (1, 0, 2)])
+def test_merge_equal_ranked_fields_that_agree_or_do_not_overlap_merge(order):
+    policies = [_p("ou:a", "calendar_interoperability", 7, {"enableInteroperability": False}),
+                _p("ou:a", "calendar_interoperability", 7, {"enableInteroperability": False,
+                                                              "enableFullEventDetails": True}),
+                _p("ou:a", "calendar_interoperability", 7, {"enableExchangeRoomBooking": True})]
+    units = _units([policies[index] for index in order], ["calendar_interoperability"])
+    assert units.values["ou:a"]["calendar_interoperability"] == {
+        "enableInteroperability": False, "enableFullEventDetails": True, "enableExchangeRoomBooking": True}
+
+
+def test_merge_higher_rank_decides_a_field_tied_lower_down():
+    units = _units([_p("ou:a", "calendar_interoperability", 9, {"enableInteroperability": True}),
+                    _p("ou:a", "calendar_interoperability", 7, {"enableInteroperability": False}),
+                    _p("ou:a", "calendar_interoperability", 7, {"enableInteroperability": True,
+                                                              "enableFullEventDetails": False})],
+                   ["calendar_interoperability"])
+    assert units.values["ou:a"]["calendar_interoperability"] == {
+        "enableInteroperability": True, "enableFullEventDetails": False}
+
+
+_RULES = [_p("ou:root", "gmail_rule_states", 8, {"ruleStates": [{"ruleId": "other", "state": "ACTIVE"}]}),
+          _p("ou:root", "gmail_rule_states", 7, {"ruleStates": [{"ruleId": "r1", "state": "ACTIVE"}]}),
+          _p("ou:root", "gmail_rule_states", 7, {"ruleStates": [{"ruleId": "r1", "state": "INACTIVE"}]})]
+
+
+@pytest.mark.parametrize("policies", [_RULES, [_RULES[0], _RULES[2], _RULES[1]], [_RULES[2], _RULES[1], _RULES[0]]])
+def test_max_map_item_tied_at_its_own_rank_is_unusable_in_any_order(policies):
+    units = _units([*policies, _p("ou:a", "gmail_rule_states", 1, {"ruleStates": [{"ruleId": "r1", "state": "ACTIVE"}]})],
+                   ["gmail_rule_states"])
+    assert units.values["ou:root"]["gmail_rule_states"] is R.UNUSABLE
+    assert units.values["ou:a"] == {"gmail_rule_states": {"ruleStates": [{"ruleId": "r1", "state": "ACTIVE"}]}}
+
+
+@pytest.mark.parametrize("order", [(0, 1, 2), (2, 1, 0)])
+def test_max_map_equal_ranked_items_that_agree_or_differ_in_key_merge(order):
+    policies = [_p("ou:a", "gmail_rule_states", 7, {"ruleStates": [{"ruleId": "r2", "state": "ACTIVE"}]}),
+                _p("ou:a", "gmail_rule_states", 7, {"ruleStates": [{"ruleId": "r1", "state": "INACTIVE"}]}),
+                _p("ou:a", "gmail_rule_states", 7, {"ruleStates": [{"ruleId": "r1", "state": "INACTIVE",
+                                                                      "note": "n"}]})]
+    units = _units([policies[index] for index in order], ["gmail_rule_states"])
+    assert units.values["ou:a"]["gmail_rule_states"] == {"ruleStates": [
+        {"ruleId": "r1", "state": "INACTIVE", "note": "n"}, {"ruleId": "r2", "state": "ACTIVE"}]}
+
+
+def test_list_reducer_is_independent_of_read_order_at_equal_rank():
+    first = _p("ou:root", "rule_system_defined_alerts", 1, {"displayName": "c", "state": "ACTIVE"})
+    second = _p("ou:root", "rule_system_defined_alerts", 1, {"displayName": "a", "state": "ACTIVE"})
+    for policies in ([first, second], [second, first]):
+        units = _units(policies, ["rule_system_defined_alerts"])
+        assert units.values["ou:root"]["rule_system_defined_alerts"] == [
+            {"displayName": "a", "state": "ACTIVE"}, {"displayName": "c", "state": "ACTIVE"}]
+
+
+# --- tenant topology (review B4) -----------------------------------------------------------------------------------
+
+def _with_tenant(tenant, keys=("gmail_mail_delegation",)):
+    return R.effective_units({"gws_tenant": tenant, "gws_policies": {"complete": True, "policies": []}}, list(keys))
+
+
+@pytest.mark.parametrize("tenant", [
+    {"top_unit": "ou:root", "org_units": {}, "complete": False},
+    {"top_unit": "ou:root", "org_units": {"ou:root": None}, "complete": False},
+    {"top_unit": "ou:root", "org_units": {"ou:root": None}},
+    {"top_unit": "ou:root", "org_units": {"ou:root": None}, "complete": "true"},
+])
+def test_partial_tenant_topology_is_incomplete_and_gets_no_default(tenant):
+    units = _with_tenant(tenant)
+    assert units.complete is False
+    assert units.values == {"ou:root": {}}
+    assert R.effective(units, "ou:root", "gmail_mail_delegation", "enableMailDelegation") is R.MISSING
+
+
+@pytest.mark.parametrize("tenant", [
+    {"top_unit": "not-an-ou", "org_units": {}, "complete": True},
+    {"top_unit": "not-an-ou", "org_units": {"not-an-ou": None}, "complete": True},
+    {"top_unit": "ou:", "org_units": {"ou:": None}, "complete": True},
+    {"top_unit": "ou:root", "org_units": {}, "complete": True},
+    {"top_unit": "ou:root", "org_units": {"ou:a": None}, "complete": True},
+    {"top_unit": "ou:root", "org_units": {"ou:root": "ou:a", "ou:a": None}, "complete": True},
+    {"top_unit": "ou:root", "org_units": {"ou:root": None, "ou:a": None}, "complete": True},
+    {"top_unit": "ou:root", "org_units": None, "complete": True},
+    {"top_unit": "ou:root", "complete": False},
+    {"top_unit": "ou:root", "org_units": {"ou:root": None, "x": "ou:root"}, "complete": False},
+    {"top_unit": "ou:root", "org_units": {"ou:root": None, "ou:a": 7}, "complete": False},
+])
+def test_invalid_root_binding_is_unusable_never_a_compliant_default(tenant):
+    with pytest.raises(R.Unusable):
+        _with_tenant(tenant)
+
+
+def test_complete_tenant_and_read_apply_the_default():
+    units = _with_tenant({"top_unit": "ou:root", "org_units": {"ou:root": None, "ou:a": "ou:root"}, "complete": True})
+    assert units.complete is True
+    assert units.values == {"ou:root": {"gmail_mail_delegation": {"enableMailDelegation": False}}}
