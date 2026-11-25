@@ -27,12 +27,14 @@ from azure_tenant_audit.google_policy_schema import policy_enforced_at
 from .collectors import (
     POLICY_SECTION_PROBLEMS,
     POLICY_TARGET_PROBLEMS,
+    SCUBA_READ_SECTIONS,
     SUBJECT_SCOPE_ADMIN,
     SUBJECT_SCOPE_USER,
     SUBJECT_SCOPED_COLLECTORS,
     policy_problems,
     policy_query_target,
     policy_row_readable,
+    scuba_read_rows,
     two_step_subset_differs,
 )
 
@@ -308,6 +310,70 @@ def _read_complete(
     ):
         return False
     return isinstance(section, dict) and not section_was_cut(section) and not (section.get("error") or section.get("error_class"))
+
+
+def _event_org_units(directory: dict[str, Any], unit_ids: set[str]) -> dict[str, str]:
+    """Resolve exact Reports OU names or paths against a complete Directory tree.
+
+    A short name is usable only when all units have names and it identifies one ID. An old or
+    ambiguous label stays unplaced rather than becoming an event for the root.
+    """
+    if not unit_ids:
+        return {}
+    units = _values(directory, "orgUnits")
+    seen_ids: set[str] = set()
+    named_ids: set[str] = set()
+    by_name: dict[str, set[str]] = defaultdict(set)
+    by_path: dict[str, set[str]] = defaultdict(set)
+    for unit in units:
+        unit_id = _org_unit_id(unit.get("orgUnitId"))
+        if unit_id in unit_ids:
+            if unit_id in seen_ids:
+                return {}
+            seen_ids.add(unit_id)
+            if isinstance(name := unit.get("name"), str) and name and name == name.strip():
+                by_name[name].add(unit_id)
+                named_ids.add(unit_id)
+            if isinstance(path := unit.get("orgUnitPath"), str) and path.startswith("/") and path == path.strip():
+                by_path[path].add(unit_id)
+    if named_ids == unit_ids:
+        for label, ids in by_name.items():
+            by_path[label].update(ids)
+    return {label: next(iter(ids)) for label, ids in by_path.items() if len(ids) == 1}
+
+
+def _scuba_read_records(
+    collector: str, payloads: dict[str, dict[str, Any]], result_rows: list[dict[str, Any]],
+    coverage_rows: list[dict[str, Any]], *, event_org_units: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    if collector not in payloads and not any(row.get("name") == collector for row in result_rows):
+        return []
+    section_name = SCUBA_READ_SECTIONS[collector]
+    source = f"{collector}.{section_name}"
+    section = payloads.get(collector, {}).get(section_name)
+    rows, readable = scuba_read_rows(section.get("value") if isinstance(section, dict) else None, collector)
+    complete = readable and _read_complete(collector, section, result_rows, coverage_rows)
+    records = []
+    if collector == "google_setting_events":
+        event_org_units = event_org_units or {}
+        for activity in rows:
+            for event in activity["events"]:
+                params = {parameter["name"]: parameter["value"] for parameter in event["parameters"]}
+                group = params.get("GROUP_EMAIL")
+                records.append(_record(
+                    "google_setting_event", source, str(len(records) + 1), time=activity["id"]["time"],
+                    event=event["name"], setting=params.get("SETTING_NAME"), new_value=params.get("NEW_VALUE"),
+                    org_unit=None if group else event_org_units.get(params.get("ORG_UNIT_NAME", "")), group_email=group,
+                    application=params.get("APPLICATION_NAME"),
+                ))
+    else:
+        for row in rows:
+            records.append(_record(
+                "google_sso_assignment", source, str(len(records) + 1), target_org_unit=row.get("targetOrgUnit"),
+                target_group=row.get("targetGroup"), sso_mode=row["ssoMode"],
+            ))
+    records.append(_record(f"{collector}_read_state", source, "read_state", complete=complete, record_count=len(records)))
+    return records
 
 
 def _policy_section(setting_type: Any) -> str | None:
@@ -1074,6 +1140,11 @@ def build_google_normalized_snapshot(
         "google_domains": domain_records,
         "google_two_step_policies": policy_records,
         "google_policy_settings": policy_setting_records,
+        "google_setting_events": _scuba_read_records(
+            "google_setting_events", collector_payloads, result_rows, coverage_rows,
+            event_org_units=_event_org_units(collector_payloads.get("google_directory", {}), root_ids | unit_ids),
+        ),
+        "google_sso_assignments": _scuba_read_records("google_sso_assignments", collector_payloads, result_rows, coverage_rows),
         "google_org_units": org_unit_records,
         "google_groups": groups,
         "google_group_members": group_members,

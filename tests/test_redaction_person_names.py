@@ -791,7 +791,8 @@ def _product_field_names() -> set[str]:
 def test_every_product_field_name_is_exempt_from_whole_key_masking() -> None:
     exempt = redaction._D5_FIELD_NAMES
     assert all(redaction._norm(name) == name for name in exempt)
-    missing = sorted(_product_field_names() - exempt)
+    # These Google fields are structural inside their own policy values. Elsewhere they can be people.
+    missing = sorted(_product_field_names() - exempt - {"region", "securityupdate"})
     assert not missing, "regenerate _D5_FIELD_NAMES in src/azure_tenant_audit/output_redaction.py; missing: " + " ".join(missing)
 
 
@@ -1009,3 +1010,13 @@ def test_gws_setting_words_as_mapping_keys_are_masked_in_the_shareable_json_prev
     assert f'"{_id(_key(root), "Security Update")}": 1' in content  # an identifier-shaped key keeps its shape
     assert f'"{_prose(_key(root), "Region")}": 2' in content
     assert "securityupdate" not in redaction._D5_FIELD_NAMES and "region" not in redaction._D5_FIELD_NAMES
+
+
+def test_contextual_google_policy_fields_survive_in_their_own_setting() -> None:
+    source = [
+        {"type": "settings/data_regions.data_at_rest_region", "value": {"region": "EUROPE"}},
+        {"kind": "google_policy_setting", "section": "drive_and_docs_file_security_update",
+         "value": {"securityUpdate": "APPLY_TO_IMPACTED_FILES"}},
+    ]
+    redacted = redact_output(source, context=_people("Security Update", "Region"))
+    assert [item["value"] for item in redacted] == [{"region": "EUROPE"}, {"securityUpdate": "APPLY_TO_IMPACTED_FILES"}]

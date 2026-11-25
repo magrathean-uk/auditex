@@ -13,10 +13,16 @@ from azure_tenant_audit.collection_gaps import (
 )
 from azure_tenant_audit.data_minimisation import (
     POLICY_TYPE_PATTERN,
+    POLICY_UNIT_ID,
     minimise_gmail_settings,
 )
 
-from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credentials
+from .auth import (
+    GMAIL_SETTINGS_SCOPES,
+    INBOUND_SSO_SCOPE,
+    POLICIES_SCOPE,
+    user_delegated_credentials,
+)
 
 # Per-user services kept at once. The Gmail collector reads one user at a time, so a few are enough;
 # the bound keeps a 10,000-user run from holding 10,000 discovery clients.
@@ -34,6 +40,26 @@ _POLICY_SETTINGS_FILTER = "setting.type.matches('" + POLICY_TYPE_PATTERN.replace
 # the 2-step verification subset used to finish whatever ``--top`` said. This internal cap only stops a runaway read;
 # a read cut at it comes back marked as cut at the collector's safety cap, and the collector records it as incomplete.
 POLICY_SETTINGS_ROW_CAP = 20_000
+SCUBA_EVENT_LIMIT = 20_000
+# Union of ScubaGoggles v1.1.0 provider.py EVENTS, excluding the unfiltered "all" request.
+SCUBA_ADMIN_EVENTS = (
+    "ALLOW_SERVICE_FOR_OAUTH2_ACCESS",
+    "BLOCK_ALL_THIRD_PARTY_API_ACCESS",
+    "CHANGE_APPLICATION_SETTING",
+    "CHANGE_DOCS_SETTING",
+    "CHANGE_EMAIL_SETTING",
+    "CHANGE_GMAIL_SETTING",
+    "CREATE_APPLICATION_SETTING",
+    "DELETE_APPLICATION_SETTING",
+    "DISALLOW_SERVICE_FOR_OAUTH2_ACCESS",
+    "SIGN_IN_ONLY_THIRD_PARTY_API_ACCESS",
+    "SYSTEM_DEFINED_RULE_UPDATED",
+    "TOGGLE_CAA_ENABLEMENT",
+    "TOGGLE_SERVICE_ENABLED",
+    "TRUST_DOMAIN_OWNED_OAUTH2_APPS",
+    "UNBLOCK_ALL_THIRD_PARTY_API_ACCESS",
+    "UNTRUST_DOMAIN_OWNED_OAUTH2_APPS",
+)
 # Further bounds on the policies read: a read that needs more requests than this or repeats a page cursor is stopped
 # there and marked incomplete.
 POLICY_PAGE_BUDGET = 1_000
@@ -203,9 +229,9 @@ def policy_malformed_error(*, later_page: bool) -> PolicyReadError:
     return PolicyReadError(text, error_class=POLICY_MALFORMED_ERROR_CLASS)
 
 
-def policy_read_error(exc: Exception) -> Exception:
+def policy_read_error(exc: Exception, *, surface: str = "Cloud Identity policies") -> Exception:
     """``exc`` as a :class:`PolicyReadError` with a bounded message (a fixed actionable error is kept as it is)."""
-    if isinstance(exc, (PolicyReadError, GoogleWorkspaceError)):
+    if isinstance(exc, PolicyReadError) or (surface == "Cloud Identity policies" and isinstance(exc, GoogleWorkspaceError)):
         return exc
     error_class, message = classify_google_error(exc)
     status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
@@ -214,13 +240,13 @@ def policy_read_error(exc: Exception) -> Exception:
     reasons = tuple(sorted(reason for reason in _error_reasons(exc) if reason in POLICY_ERROR_REASONS))
     if is_token_refusal(message):
         text = (
-            "The token exchange for the Cloud Identity policies scope was refused (unauthorized_client): "
+            f"The token exchange for the {surface} scope was refused (unauthorized_client): "
             "the domain-wide delegation does not grant that scope."
         )
     else:
         detail = f"HTTP {status}" if status is not None else error_class
         named = f"; reason {', '.join(reasons)}" if reasons else ""
-        text = f"The Cloud Identity policies read failed ({detail}{named})."
+        text = f"The {surface} read failed ({detail}{named})."
     return PolicyReadError(text, status_code=status, reasons=reasons)
 
 
@@ -353,7 +379,9 @@ class CollectedRows(list):
         self.page_error = page_error
 
 
-def _policy_page(payload: Any) -> tuple[list[dict[str, Any]], str | None] | None:
+def _policy_page(
+    payload: Any, *, row_field: str = "policies", allow_empty: bool = False,
+) -> tuple[list[dict[str, Any]], str | None] | None:
     """One ``policies.list`` page as (policies, next cursor), or ``None`` when its shape cannot be read.
 
     Only ``policies`` holds rows (an ``items`` or ``value`` list is not a policies answer), as a list of objects. A
@@ -364,6 +392,14 @@ def _policy_page(payload: Any) -> tuple[list[dict[str, Any]], str | None] | None
     """
     if not isinstance(payload, dict):
         return None
+    if allow_empty:
+        envelope = {row_field, "nextPageToken"}
+        if row_field == "items":
+            envelope.update(("kind", "etag"))
+            if payload.get("kind", "admin#reports#activities") != "admin#reports#activities":
+                return None
+        if not payload.keys() <= envelope:
+            return None
     token: str | None = None
     if "nextPageToken" in payload:
         raw = payload["nextPageToken"]
@@ -371,17 +407,22 @@ def _policy_page(payload: Any) -> tuple[list[dict[str, Any]], str | None] | None
             if not isinstance(raw, str) or not raw.strip() or len(raw) > POLICY_CURSOR_MAX:
                 return None
             token = raw
-    if "policies" not in payload:
+    if row_field not in payload:
+        if allow_empty:
+            return [], token
         return ([], token) if token is not None and set(payload) == {"nextPageToken"} else None
-    values = payload["policies"]
+    values = payload[row_field]
     if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
         return None
-    if not values and token is None:
+    if not values and token is None and not allow_empty:
         return None
     return values, token
 
 
-def _collect_policy_pages(request_factory: Callable[[str | None], Any], *, cap: int, bounded: bool) -> CollectedRows:
+def _collect_policy_pages(
+    request_factory: Callable[[str | None], Any], *, cap: int, bounded: bool,
+    row_field: str = "policies", surface: str | None = None,
+) -> CollectedRows:
     """Page through ``policies.list`` with the shape checked on every page and every bound marked.
 
     ``bounded`` is a probe's own limit (a cut there is the operator-style limit); otherwise ``cap`` is the safety cap
@@ -401,15 +442,18 @@ def _collect_policy_pages(request_factory: Callable[[str | None], Any], *, cap: 
                 raise
             # A later page failed after its retries: keep what was read, recorded as a list cut short.
             return CollectedRows(rows, truncated=True, result_limit=cap if bounded else None, page_error=exc)
-        page = _policy_page(payload)
+        page = _policy_page(payload, row_field=row_field, allow_empty=surface is not None)
         if page is None:
+            error = (
+                policy_malformed_error(later_page=request > 0) if surface is None else
+                PolicyReadError(f"The {surface} read returned an unreadable page.", error_class=POLICY_MALFORMED_ERROR_CLASS)
+            )
             if request == 0:
-                raise policy_malformed_error(later_page=False)
-            error = policy_malformed_error(later_page=True)
+                raise error
             return CollectedRows(rows, truncated=True, result_limit=cap if bounded else None, page_error=error)
         values, token = page
         rows.extend(values)
-        if len(rows) >= cap:
+        if len(rows) > cap or (len(rows) == cap and (bounded or surface is None)):
             cut = len(rows) > cap or bool(token)
             result = CollectedRows(rows[:cap], truncated=cut, result_limit=cap if (bounded or cut) else None)
             if cut and not bounded:
@@ -447,7 +491,7 @@ class GoogleWorkspaceClient:
     customer_id: str | None = None
     page_size: int = 100
     delegated: bool = False
-    _services: dict[tuple[str, str], Any] | None = None
+    _services: dict[tuple[str, ...], Any] | None = None
     _subject_services: OrderedDict[tuple[str, str, str], Any] | None = None
 
     def __post_init__(self) -> None:
@@ -466,7 +510,9 @@ class GoogleWorkspaceClient:
         return bool(self.delegated) and hasattr(self.credentials, "with_subject")
 
     def _service(self, api: str, version: str, *, scopes: tuple[str, ...] | None = None) -> Any:
-        key = (api, version)
+        # Cloud Identity has two independently delegated reads. Keep their discovery clients on separate tokens,
+        # including when both methods are called directly on the same GoogleWorkspaceClient.
+        key = (api, version, INBOUND_SSO_SCOPE) if scopes == (INBOUND_SSO_SCOPE,) else (api, version)
         assert self._services is not None
         if key not in self._services:
             from googleapiclient.discovery import build
@@ -828,6 +874,49 @@ class GoogleWorkspaceClient:
             "items",
             limit=top,
         )
+
+    def list_admin_setting_events(self, event_name: str, *, limit: int | None = None) -> CollectedRows:
+        """Read one pinned Admin Reports event stream over its full retention, or sample it for probe."""
+        if event_name not in SCUBA_ADMIN_EVENTS:
+            raise ValueError("Unsupported SCuBA admin event.")
+        surface = "Admin Reports setting events"
+        cap = SCUBA_EVENT_LIMIT if limit is None else min(limit, SCUBA_EVENT_LIMIT)
+        try:
+            service = self._service("admin", "reports_v1")
+            rows = _collect_policy_pages(
+                lambda token: service.activities().list(
+                    userKey="all", applicationName="admin", eventName=event_name, pageToken=token,
+                    maxResults=min(self.page_size, cap, 1000), fields="kind,nextPageToken,items(id(time),events(name,parameters))",
+                ),
+                cap=cap, bounded=limit is not None, row_field="items", surface=surface,
+            )
+        except Exception as exc:
+            raise policy_read_error(exc, surface=surface) from None
+        if rows.page_error is not None:
+            rows.page_error = policy_read_error(rows.page_error, surface=surface)
+        return rows
+
+    def list_inbound_sso_assignments(self, *, limit: int | None = None) -> CollectedRows:
+        """Read Cloud Identity assignments on the inbound-SSO scope, or sample them for probe."""
+        surface = "Cloud Identity inbound SSO assignments"
+        if not POLICY_UNIT_ID.fullmatch(self.customer):
+            raise PolicyReadError("The Cloud Identity customer identifier is invalid.", error_class=POLICY_MALFORMED_ERROR_CLASS)
+        try:
+            service = self._service("cloudidentity", "v1", scopes=(INBOUND_SSO_SCOPE,))
+            rows = _collect_policy_pages(
+                lambda token: service.inboundSsoAssignments().list(
+                    filter=f'customer=="customers/{self.customer}"', pageToken=token,
+                    pageSize=min(self.page_size, limit or 100, 100),
+                    fields="nextPageToken,inboundSsoAssignments(targetOrgUnit,targetGroup,ssoMode)",
+                ),
+                cap=limit or POLICY_PAGE_BUDGET * 100, bounded=limit is not None,
+                row_field="inboundSsoAssignments", surface=surface,
+            )
+        except Exception as exc:
+            raise policy_read_error(exc, surface=surface) from None
+        if rows.page_error is not None:
+            rows.page_error = policy_read_error(rows.page_error, surface=surface)
+        return rows
 
     def list_policies(self, *, limit: int | None = None) -> list[dict[str, Any]]:
         """Cloud Identity policies for the SCuBA setting types (read-only policies scope).

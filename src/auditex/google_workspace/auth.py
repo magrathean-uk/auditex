@@ -33,7 +33,8 @@ DEFAULT_GOOGLE_SCOPES: tuple[str, ...] = (
 # in the shared scope set: with domain-wide delegation one unauthorised scope fails every call that
 # shares the token, so a tenant that has not added this scope loses only the policy read.
 POLICIES_SCOPE = "https://www.googleapis.com/auth/cloud-identity.policies.readonly"
-ISOLATED_GOOGLE_SCOPES: frozenset[str] = frozenset({POLICIES_SCOPE})
+INBOUND_SSO_SCOPE = "https://www.googleapis.com/auth/cloud-identity.inboundsso.readonly"
+ISOLATED_GOOGLE_SCOPES: frozenset[str] = frozenset({POLICIES_SCOPE, INBOUND_SSO_SCOPE})
 # The per-user Gmail settings reads need only this scope (every settings get and list the collector makes accepts
 # gmail.settings.basic; see the Gmail API users.settings reference). A user-impersonating token is narrowed to
 # it, so it never carries the shared set's other scopes (the Directory security scope among them).

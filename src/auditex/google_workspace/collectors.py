@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Any, Literal
 
 from azure_tenant_audit.collection_gaps import (
     REASON_OPERATOR_LIMIT,
     REASON_PAGINATION_FAILED,
+    REASON_PAGINATION_NOT_FOLLOWED,
     fanout_gap_row,
     section_was_cut,
 )
@@ -40,12 +43,17 @@ from azure_tenant_audit.dns_lookup import (
     safe_resolver_diagnostic,
     unknown_posture,
 )
-from azure_tenant_audit.google_policy_schema import TWO_STEP_VALUE_FIELDS
+from azure_tenant_audit.google_policy_schema import CUSTOMER_ID, TWO_STEP_VALUE_FIELDS
 from azure_tenant_audit.offline_replay import OFFLINE_ROW_TYPE
+from azure_tenant_audit.value_rules.gws.catalogue import catalogue
+from azure_tenant_audit.value_rules.gws.events import _categories, _time
 
-from .auth import POLICIES_SCOPE
+from .auth import INBOUND_SSO_SCOPE, POLICIES_SCOPE
 from .client import (
     POLICY_MALFORMED_ERROR_CLASS,
+    SCUBA_ADMIN_EVENTS,
+    CollectedRows,
+    PolicyReadError,
     classify_google_error,
     classify_page_error,
     gmail_settings_status,
@@ -931,6 +939,233 @@ class GooglePoliciesCollector:
         )
 
 
+_SCUBA_EVENT_PARAMETERS = frozenset({"SETTING_NAME", "NEW_VALUE", "ORG_UNIT_NAME", "GROUP_EMAIL", "APPLICATION_NAME"})
+_GROUP_EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+_=~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+_TARGET_PATH_OR_URI = re.compile(
+    r"(?:^[a-z][a-z0-9+.-]*:/|://|(?:^|\s)/(?:users|volumes|home|tmp|var|private)(?:/|$))",
+    re.IGNORECASE,
+)
+_SCUBA_APPLICATIONS = frozenset({
+    "Assured Controls", "Chat", "Context-Aware Access", "Data regions", "Drive and Docs", "Gemini app", "Gemini in Workspace",
+    "Gemini in Workspace apps", "Gmail", "Google Chat", "Google Meet", "Google Meet GenAI", "Security", "SSO",
+})
+SCUBA_READ_SECTIONS = {"google_setting_events": "settingEvents", "google_sso_assignments": "inboundSsoAssignments"}
+
+
+@lru_cache(maxsize=1)
+def _event_value_fields() -> dict[str, tuple[frozenset[str], bool]]:
+    fields: dict[str, tuple[frozenset[str], bool]] = {}
+    for row in catalogue()["policies"].values():
+        if row["kind"] == "setting_event":
+            for slot in row["params"]["setting_slots"]:
+                categories = "required_values" in slot
+                values = slot["required_values"] if categories else [*slot["good_values"], *slot["bad_values"]]
+                for name in slot.get("setting_names", slot.get("event_names", [])):
+                    fields[name] = frozenset(values), categories
+    return fields
+
+
+def _event_parameters(event: dict[str, Any]) -> dict[str, str | None] | None:
+    parameters = event.get("parameters", [])
+    if not isinstance(parameters, list):
+        return None
+    values: dict[str, str | None] = {}
+    for parameter in parameters:
+        if not isinstance(parameter, dict) or not isinstance(name := parameter.get("name"), str):
+            return None
+        if name not in _SCUBA_EVENT_PARAMETERS:
+            continue
+        value = parameter.get("value")
+        if (name in values or set(parameter) != {"name", "value"} or not isinstance(value, str)
+                or not value or len(value) > 2048 or value != value.strip()):
+            values[name] = None
+        else:
+            values[name] = value
+    return values
+
+
+def _scuba_group_email(value: str) -> bool:
+    return len(value) <= 254 and bool(_GROUP_EMAIL.fullmatch(value)) and CUSTOMER_ID.search(value) is None
+
+
+def _setting_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    values = _event_parameters(event)
+    if values is None:
+        return None
+    name = event["name"]
+    setting = values.get("SETTING_NAME")
+    if setting is None and ("SETTING_NAME" in values or name.endswith("_APPLICATION_SETTING")):
+        return None
+    if setting is not None and not setting.isprintable():
+        return None
+    fields = _event_value_fields()
+    allowed = fields.get(name) or fields.get(setting or "")
+    if allowed is None:
+        # Its name or readable setting proves this activity is outside the audited controls.
+        # Its value and target can be free text and cannot weaken unrelated SCuBA evidence.
+        parameters = [{"name": "SETTING_NAME", "value": "unrecognised"}] if setting is not None else []
+        return {"name": name, "parameters": parameters}
+    if None in values.values():
+        return None
+    org_unit, group = values.get("ORG_UNIT_NAME"), values.get("GROUP_EMAIL")
+    if org_unit is not None and (
+        not org_unit.isprintable() or len(org_unit) > 512 or any(part in ("..", ".") for part in org_unit.split("/"))
+        or _TARGET_PATH_OR_URI.search(org_unit) or CUSTOMER_ID.search(org_unit) or "\\" in org_unit
+    ):
+        return None
+    if group is not None and not _scuba_group_email(group):
+        return None
+    value = values.pop("NEW_VALUE", None)
+    if name == "DELETE_APPLICATION_SETTING":
+        if value is not None:
+            return None
+    else:
+        known, categories = allowed
+        if value is None or (_categories(value, known) is None if categories else value not in known):
+            return None
+        values["NEW_VALUE"] = value
+    if name != "TOGGLE_CAA_ENABLEMENT" and org_unit is None and group is None:
+        return None
+    if setting is not None and setting not in fields:
+        values["SETTING_NAME"] = "unrecognised"
+    if (application := values.get("APPLICATION_NAME")) is not None and application not in _SCUBA_APPLICATIONS:
+        if not application.isprintable():
+            return None
+        values["APPLICATION_NAME"] = "unrecognised"
+    return {"name": name, "parameters": [{"name": key, "value": values[key]} for key in sorted(values)]}
+
+
+def minimise_scuba_activity(item: Any, event_name: str | None = None) -> dict[str, Any] | None:
+    if not isinstance(item, dict) or not isinstance(identity := item.get("id"), dict):
+        return None
+    timestamp, events = identity.get("time"), item.get("events")
+    if _time(timestamp) is None or not isinstance(events, list) or not events:
+        return None
+    kept = []
+    for event in events:
+        if not isinstance(event, dict) or not isinstance(name := event.get("name"), str) or not name:
+            return None
+        if event_name is not None and name != event_name:
+            continue  # Reports can include sibling events from the same activity; their streams are queried separately.
+        if name not in SCUBA_ADMIN_EVENTS or (record := _setting_event(event)) is None:
+            return None
+        kept.append(record)
+    return {"id": {"time": timestamp}, "events": kept} if kept else None
+
+
+def minimise_scuba_assignment(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    targets = [key for key in ("targetOrgUnit", "targetGroup") if key in item]
+    mode = item.get("ssoMode")
+    if len(targets) != 1 or mode not in ("SSO_OFF", "SAML_SSO", "OIDC_SSO", "DOMAIN_WIDE_SAML_IF_ENABLED"):
+        # The API declares SSO_MODE_UNSPECIFIED invalid. Missing or blank mode cannot prove SSO_OFF.
+        return None
+    key = targets[0]
+    target = item[key]
+    prefix = "orgUnits/" if key == "targetOrgUnit" else "groups/"
+    if not policy_target(target, prefix) and not (
+        key == "targetGroup" and isinstance(target, str) and target.startswith(prefix) and _scuba_group_email(target[len(prefix):])
+    ):
+        return None
+    return {key: target, "ssoMode": mode}
+
+
+def scuba_read_rows(
+    values: Any, collector: str, *, event_name: str | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    if not isinstance(values, list):
+        return [], False
+    if collector == "google_setting_events":
+        kept = [row for item in values if (row := minimise_scuba_activity(item, event_name)) is not None]
+    else:
+        kept = [row for item in values if (row := minimise_scuba_assignment(item)) is not None]
+    return kept, len(kept) == len(values)
+
+
+def scuba_probe_rows(rows: CollectedRows, collector: str, *, event_name: str | None = None) -> CollectedRows:
+    kept, readable = scuba_read_rows(rows, collector, event_name=event_name)
+    if readable:
+        return rows
+    error = PolicyReadError("Google returned unreadable SCuBA evidence.", error_class=POLICY_MALFORMED_ERROR_CLASS)
+    if not kept and rows.page_error is None:
+        raise error
+    return CollectedRows(kept, page_error=rows.page_error or error)
+
+
+def replay_scuba_payload(collector: str, payload: Any) -> Any:
+    """Whitelist the new sections and their metadata before offline evidence reaches the bundle writer."""
+    section_name = SCUBA_READ_SECTIONS.get(collector)
+    if section_name is None or not isinstance(payload, dict) or not payload:
+        return payload
+    section = payload.get(section_name)
+    values = section.get("value") if isinstance(section, dict) else None
+    rows, readable = scuba_read_rows(values, collector)
+    out: dict[str, Any] = {"value": rows}
+    if isinstance(section, dict) and section_was_cut(section):
+        reason = section.get("truncation_reason")
+        out["collection_truncated"] = True
+        out["truncation_reason"] = (
+            reason if reason in (REASON_OPERATOR_LIMIT, REASON_PAGINATION_FAILED, REASON_PAGINATION_NOT_FOLLOWED)
+            else REASON_PAGINATION_NOT_FOLLOWED
+        )
+    if not readable or (isinstance(section, dict) and (
+        "error" in section or "error_class" in section
+        or ("collection_truncated" in section and type(section["collection_truncated"]) is not bool)
+        or ("collection_limit_reached" in section and type(section["collection_limit_reached"]) is not bool)
+    )):
+        out.update(error_class=POLICY_MALFORMED_ERROR_CLASS, error="The saved SCuBA read is incomplete or unreadable.")
+    return {section_name: out}
+
+
+def _scuba_read(
+    collector: str, context: dict[str, Any], requests: list[tuple[str, Callable[[], list[dict[str, Any]]]]],
+    *, endpoint: str,
+) -> CollectorResult:
+    coverage: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
+    section_name = SCUBA_READ_SECTIONS[collector]
+    for name, read in requests:
+        rows = _call(collector=collector, name=name, coverage=coverage, log_event=context.get("audit_logger"),
+                     func=read, endpoint=endpoint)
+        kept, readable = scuba_read_rows(rows, collector, event_name=name if collector == "google_setting_events" else None)
+        records.extend(kept)
+        if not readable and coverage[-1]["status"] == "ok":
+            coverage[-1].update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS,
+                                error="Some SCuBA evidence returned by Google could not be read.")
+    section: dict[str, Any] = {"value": records}
+    cut = next((row for row in coverage if row.get("collection_truncated") is True), None)
+    if cut is not None:
+        section.update(collection_truncated=True, truncation_reason=cut["truncation_reason"])
+    failures = [row for row in coverage if row["status"] != "ok"]
+    if error := next((row for row in failures if row.get("collection_truncated") is not True), None):
+        section.update(error_class=error.get("error_class"), error=error.get("error"))
+    status = "partial" if failures else "ok"
+    return CollectorResult(collector, status, {section_name: section}, len(records), coverage=coverage)
+
+
+class GoogleSettingEventsCollector:
+    name = "google_setting_events"
+    description = "Google Workspace admin setting-change events over the full Reports API retention window."
+    required_scopes = ("https://www.googleapis.com/auth/admin.reports.audit.readonly",)
+
+    def run(self, context: dict[str, Any]) -> CollectorResult:
+        client = context.get("client")
+        requests = [(name, lambda name=name: client.list_admin_setting_events(name)) for name in SCUBA_ADMIN_EVENTS]
+        return _scuba_read(self.name, context, requests, endpoint="activities.list")
+
+
+class GoogleSsoAssignmentsCollector:
+    name = "google_sso_assignments"
+    description = "Google Workspace Cloud Identity inbound SSO modes and their OU or group targets."
+    required_scopes = (INBOUND_SSO_SCOPE,)
+
+    def run(self, context: dict[str, Any]) -> CollectorResult:
+        client = context.get("client")
+        requests = [("inboundSsoAssignments", lambda: client.list_inbound_sso_assignments())]
+        return _scuba_read(self.name, context, requests, endpoint="inboundSsoAssignments.list")
+
+
 class GoogleDnsPostureCollector:
     name = "google_dns_posture"
     description = "Google Workspace DNS and email authentication posture."
@@ -1269,6 +1504,7 @@ COLLECTOR_SECTIONS: dict[str, tuple[str, ...]] = {
     "google_reports": ("loginActivities", "adminActivities"),
     "google_alert_center": ("alerts",),
     "google_policies": ("twoStepVerificationPolicies", "policySettings"),
+    **{collector: (section,) for collector, section in SCUBA_READ_SECTIONS.items()},
     "google_gmail_settings": ("mailboxSettings",),
     "google_devices": ("mobileDevices", "chromeosDevices"),
     "google_dns_posture": ("domains", "domainPosture"),
@@ -1282,6 +1518,8 @@ REGISTRY = {
     "google_reports": GoogleReportsCollector(),
     "google_alert_center": GoogleAlertCenterCollector(),
     "google_policies": GooglePoliciesCollector(),
+    "google_setting_events": GoogleSettingEventsCollector(),
+    "google_sso_assignments": GoogleSsoAssignmentsCollector(),
     "google_gmail_settings": GoogleGmailSettingsCollector(),
     "google_devices": GoogleDevicesCollector(),
     "google_dns_posture": GoogleDnsPostureCollector(),
@@ -1298,12 +1536,15 @@ PRESETS = {
         "google_reports",
         "google_alert_center",
         "google_policies",
+        "google_setting_events",
+        "google_sso_assignments",
         "google_gmail_settings",
         "google_devices",
         "google_dns_posture",
     ),
     "everything": tuple(REGISTRY.keys()),
-    "identity": ("google_directory", "google_reports", "google_alert_center", "google_policies"),
+    "identity": ("google_directory", "google_reports", "google_alert_center", "google_policies",
+                 "google_setting_events", "google_sso_assignments"),
     "mail": ("google_directory", "google_gmail_settings", "google_dns_posture"),
     "collaboration": ("google_directory", "google_drive_posture", "google_groups_settings", "google_calendar_posture"),
 }

@@ -505,7 +505,10 @@ def test_google_collector_selection_accepts_empty_exclude() -> None:
         exclude=None,
     )
 
-    assert _selected_collectors(config) == ["google_directory", "google_reports", "google_alert_center", "google_policies"]
+    assert _selected_collectors(config) == [
+        "google_directory", "google_reports", "google_alert_center", "google_policies",
+        "google_setting_events", "google_sso_assignments",
+    ]
 
 
 def test_google_command_line_scrubs_local_secret_paths() -> None:

@@ -67,6 +67,8 @@ from .collectors import (
     SUBJECT_SCOPED_COLLECTORS,
     policy_replay_rows,
     replay_policy_payload,
+    replay_scuba_payload,
+    scuba_probe_rows,
 )
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
@@ -451,6 +453,15 @@ def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None
         rows.append(_preflight_call(collector, "alerts", lambda: client.list_alerts(top=top)))
     elif collector == "google_policies":
         rows.append(_preflight_call(collector, "policySettings", lambda: client.list_policies(limit=top)))
+    elif collector == "google_setting_events":
+        event_name = "CHANGE_APPLICATION_SETTING"
+        rows.append(_preflight_call(collector, "settingEvents", lambda: scuba_probe_rows(
+            client.list_admin_setting_events(event_name, limit=top), collector, event_name=event_name,
+        )))
+    elif collector == "google_sso_assignments":
+        rows.append(_preflight_call(collector, "inboundSsoAssignments", lambda: scuba_probe_rows(
+            client.list_inbound_sso_assignments(limit=top), collector,
+        )))
     elif collector == "google_gmail_settings":
         def gmail_check() -> list[dict[str, Any]]:
             # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
@@ -744,7 +755,8 @@ def run_google_offline(
     # ``null``, a list or an empty object under a collector's name is a collector that delivered nothing, not one that is
     # absent from the sample: it stays in the run, with every section it should have carried recorded as absent.
     sample_collectors = {
-        str(key): replay_policy_payload(str(key), value) for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS
+        str(key): replay_scuba_payload(str(key), replay_policy_payload(str(key), value))
+        for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS
     }
     collector_payloads = {name: value for name, value in sample_collectors.items() if isinstance(value, dict)}
     result_rows: list[dict[str, Any]] = []
