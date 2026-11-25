@@ -64,7 +64,6 @@ _GROUP = re.compile(r"group:[^/\s]+")
 # RE2's ``\s`` (Chat.rego:415-423) is ASCII whitespace; a no-break space must not join a category.
 _SPACES = re.compile(r"\s+", re.ASCII)
 _ASCII_SPACE = " \t\n\r\f\v"
-_CATEGORY = re.compile(r"([A-Za-z_]+): [A-Za-z0-9_]+")
 # Hours 00-23 and minutes 00-59 in the clock and the offset (some Pythons roll 24:00 or +00:99 over); a fraction past
 # 18 digits is not a time any log writes. A leap second (60) parses here and fails in fromisoformat.
 _RFC3339 = re.compile(r"(\d{4}-\d{2}-\d{2})[Tt]((?:[01]\d|2[0-3]):[0-5]\d:(?:[0-5]\d|60))(?:\.(\d{1,18}))?"
@@ -170,10 +169,10 @@ def _value(event: dict, by_event: bool) -> Any:
     return value if isinstance(value, str) else _UNREADABLE
 
 
-def _categories(value: str, prefixes: frozenset[str]) -> frozenset[str] | None:
+def _categories(value: str, known: frozenset[str]) -> frozenset[str] | None:
     """A read category list (Chat.rego:415-447), bracketed or bare, or None when the payload is not one: empty,
-    unbalanced brackets, an empty item, or an item that is not ``prefix: CATEGORY`` under a field the required
-    categories use (``system_violation``); an unrelated field is not a category. ``[]`` is a read, empty list."""
+    unbalanced brackets, an empty item, or an item outside the pinned categories (``known``): an unrelated field
+    or an unrecognised category is never a readable value and never helps a verdict. ``[]`` is a read, empty list."""
     text = value.strip(_ASCII_SPACE)
     if text.startswith("["):
         if len(text) < 2 or not text.endswith("]"):
@@ -184,8 +183,7 @@ def _categories(value: str, prefixes: frozenset[str]) -> frozenset[str] | None:
     elif not text or text.endswith("]"):
         return None
     items = [_SPACES.sub(" ", part).strip(" ") for part in text.split(",")]
-    matches = [_CATEGORY.fullmatch(item) for item in items]
-    if not all(match is not None and match.group(1) in prefixes for match in matches):
+    if not all(item in known for item in items):
         return None
     return frozenset(items)
 
@@ -199,7 +197,7 @@ def _classify(slot: _Slot, value: Any, top: bool, top_delete: str) -> str:
     if value is _UNREADABLE:
         return "unusable"
     if slot.required is not None:
-        enabled = _categories(value, frozenset(item.split(":", 1)[0] for item in slot.required))
+        enabled = _categories(value, slot.required)
         if enabled is None:
             return "unusable"
         return "bad" if slot.required - enabled else "good"

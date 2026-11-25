@@ -303,7 +303,7 @@ def test_chat_5_1_needs_all_four_settings_at_the_top_unit():
     (ALL_CATEGORIES.replace(", ", ",   ").strip("[]"), MET),
     ("system_violation:   HARASSMENT, system_violation: DISCRIMINATION, system_violation: EXPLICIT_CONTENT, "
      "system_violation: SPAM, system_violation: CONFIDENTIAL_INFORMATION, system_violation: SENSITIVE_INFORMATION, "
-     "system_violation: OTHER, system_violation: NEW_CATEGORY", MET),
+     "system_violation: OTHER, system_violation: NEW_CATEGORY", UNUSABLE),
     (SIX_CATEGORIES, NOT_MET),
     ("[]", NOT_MET),
     ("[ ]", NOT_MET),
@@ -606,6 +606,15 @@ def test_r2_m2_malformed_offsets_and_oversized_fractions_are_unreadable():
     ALL_CATEGORIES.replace("system_violation: SPAM", "System_violation: SPAM"),
 ])
 def test_r2_m3_an_unrelated_field_is_not_a_reporting_category(value):
+    assert _answer("GWS.CHAT.5.2v1", [_event("ContentReportingProto report_types", value)]) == UNUSABLE
+
+
+@pytest.mark.parametrize("value", [
+    "[system_violation: 0]",
+    ALL_CATEGORIES[:-1] + ", system_violation: 0]",
+    ALL_CATEGORIES[:-1] + ", system_violation: NEW_CATEGORY]",
+])
+def test_r3_m3_an_unrecognised_category_is_unusable_never_met(value):
     assert _answer("GWS.CHAT.5.2v1", [_event("ContentReportingProto report_types", value)]) == UNUSABLE
 
 
