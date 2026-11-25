@@ -1491,10 +1491,11 @@ No list read drops its next-page link silently. `defender.secureScoreControlProf
 **Google Workspace DNS posture.** Each new normalised `google_domain_posture`
 record identifies an alias with `alias` and carries a Boolean `resolver_error`.
 Successful DMARC reads carry `records`, the selected policy's `query_name`
-and whether it was `inherited` from a parent. A completed walk with no policy
-has an empty record list and the author query name. Base domains also carry
-SPF `records` and a DKIM `selectors` map, with empty lists for answered
-selectors that published no matching record. Alias domains are read for DMARC.
+and whether it was `inherited` from a parent. When the walk selects no policy,
+`query_name` stays at the author domain's `_dmarc` name and `records` carries
+that name's TXT answers for the Google Workspace DMARC value rules. Base
+domains also carry SPF `records` and a DKIM `selectors` map, with empty lists
+for answered selectors that published no matching record. Alias domains are read for DMARC.
 Failed resolver reads leave record evidence unknown, and an incomplete
 Directory read marks the domain inventory partial.
 

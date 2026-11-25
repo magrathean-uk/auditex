@@ -13,6 +13,7 @@ from auditex.google_workspace.normalize import build_google_normalized_snapshot
 from azure_tenant_audit.data_handling import collector_activity_notices
 from azure_tenant_audit.dns_lookup import DohClient, DohError, dmarc_with_tree_walk
 from azure_tenant_audit.offline_replay import replay_coverage_rows
+from azure_tenant_audit.value_rules import gws
 
 
 class FakeResolver:
@@ -71,7 +72,7 @@ def test_dmarc_discards_multiple_at_a_node_then_tries_the_parent() -> None:
     assert inherited["records"] == ["v=DMARC1; p=reject; psd=n", "", "unrelated TXT"]
 
     absent = dmarc_with_tree_walk("example.com", FakeResolver({"_dmarc.example.com": multiple}))
-    assert (absent["present"], absent["multiple_records"], absent["records"]) == (False, True, [])
+    assert (absent["present"], absent["multiple_records"], absent["records"]) == (False, True, multiple)
 
 
 def test_dmarc_jumps_to_seven_labels_and_uses_psd_when_its_child_has_no_record() -> None:
@@ -94,6 +95,34 @@ def test_dmarc_author_match_does_not_query_a_parent() -> None:
         "_dmarc.mail.example.com", False, ["v=DMARC1;p=reject"],
     )
     assert resolver.names == ["_dmarc.mail.example.com"]
+
+
+@pytest.mark.parametrize(("record", "controls"), [
+    pytest.param("V=DMARC1; p=reject", (1, 2), id="uppercase-version-tag"),
+    pytest.param(
+        "v=DMARC1; p=reject; rua=mailto:reports@dmarc.cyber.dhs.gov?subject=DMARC,mailto:audit@example.com; "
+        "ruf=mailto:ops@example.com",
+        (1, 2, 3, 4), id="mailto-hfield",
+    ),
+])
+def test_unselected_author_dmarc_reaches_value_rules(record: str, controls: tuple[int, ...]) -> None:
+    author_records = ["unrelated author TXT", record]
+    resolver = FakeResolver({"_dmarc.example.com": author_records, "_dmarc.com": ["unrelated parent TXT"]})
+    result = GoogleDnsPostureCollector().run({"domain": "example.com", "dns_resolver": resolver})
+    assert result.status == "ok"
+    snapshot = build_google_normalized_snapshot(
+        tenant_name="Example", run_id="dns", collector_payloads={"google_dns_posture": result.payload},
+    )
+    domains = snapshot["google_dns_posture"]["records"]
+    evidence = {"gws_dns": {"complete": True, "domains": domains}}
+    verdicts = [gws.assess(f"GWS.GMAIL.4.{control}v1", evidence)["verdict"] for control in controls]
+    assert verdicts == ["met"] * len(controls)
+    (posture,) = domains
+    dmarc = posture["dmarc"]
+    assert (dmarc["query_name"], dmarc["inherited"], dmarc["records"]) == (
+        "_dmarc.example.com", False, author_records,
+    )
+    assert "google.dns_dmarc_monitor_only" not in {finding["rule_id"] for finding in build_google_findings(snapshot)}
 
 
 def test_domains_alias_and_selectors_reach_normalised_evidence() -> None:
@@ -162,7 +191,11 @@ def test_cut_inventory_keeps_all_the_aliases_of_a_read_domain_and_the_existing_d
     DohError("SERVFAIL for mail.example.com at https://dns.example.net/private-token"),
 ])
 def test_unreadable_parent_does_not_turn_into_record_absence(answer: Any) -> None:
-    resolver = FakeResolver({"_dmarc.example.com": answer, "_dmarc.com": ["v=DMARC1; p=reject"]})
+    resolver = FakeResolver({
+        "_dmarc.mail.example.com": ["V=DMARC1; p=reject"],
+        "_dmarc.example.com": answer,
+        "_dmarc.com": ["v=DMARC1; p=reject"],
+    })
     result = GoogleDnsPostureCollector().run({"domain": "mail.example.com", "dns_resolver": resolver})
     (posture,) = result.payload["domainPosture"]["value"]
     (row,) = result.coverage

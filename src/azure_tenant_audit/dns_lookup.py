@@ -534,7 +534,8 @@ def dmarc_with_tree_walk(domain: str, resolver: DnsResolver) -> dict[str, Any]:
     records = author_records
     if not tags:
         labels = domain.split(".")
-        selected_name, selected_records = author, []
+        # If the walk selects no policy, leave the author's TXT answers for the RFC value rules.
+        selected_name, selected_records = author, author_records
         previous_name, previous_records, previous_tags = author, records, tags
         for offset in range(max(1, len(labels) - 7), len(labels)):
             name = "_dmarc." + ".".join(labels[offset:])
@@ -550,11 +551,6 @@ def dmarc_with_tree_walk(domain: str, resolver: DnsResolver) -> dict[str, Any]:
             previous_name, previous_records, previous_tags = name, records, tags
         name, records = selected_name, selected_records
     summary = _summarize_dmarc(records)
-    if not records:
-        # Retain the existing duplicate-record diagnostic when there is no effective DMARC policy.
-        author_summary = _summarize_dmarc(author_records)
-        if author_summary.get("multiple_records"):
-            summary = author_summary
     return {**summary, "query_name": name, "inherited": name != author, "records": records}
 
 
