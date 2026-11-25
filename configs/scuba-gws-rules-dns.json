@@ -1,1 +1,177 @@
-{"kinds": {}, "policies": {}}
+{
+  "kinds": {
+    "gws_dns": {
+      "cells": {
+        "dns_read_incomplete": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_dns_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the DNS read was cut or incomplete, so domains may be missing."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_record_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_domain_record",
+          "reason_texts": [
+            "Data unusable: a domain's DNS evidence is not in the expected shape, so it cannot be checked."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_violates": {
+          "reason_code": "domain_violates",
+          "reason_texts": [
+            "Requirement not met: at least one domain the policy covers does not meet it."
+          ],
+          "verdict": "not_met"
+        },
+        "no_domain_violates": {
+          "reason_code": "no_domain_violates",
+          "reason_texts": [
+            "Requirement met: every domain the policy covers meets it."
+          ],
+          "verdict": "met"
+        },
+        "no_domains": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_no_domains",
+          "reason_texts": [
+            "Data unavailable: no domain the policy covers was collected."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "resolver_error": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_resolver_error",
+          "reason_texts": [
+            "Data unavailable: a DNS resolver error left at least one domain unchecked."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "evidence_kind": null,
+          "limitations": [
+            "required_evidence_section_not_collected",
+            "required_evidence_section_not_collected:<section>"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "recommendations": [
+            "collect_missing_evidence_section"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: the DNS evidence section is not in the expected shape."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        }
+      }
+    }
+  },
+  "policies": {
+    "GWS.GMAIL.2.1v1": {
+      "kind": "gws_dns",
+      "params": {
+        "check": "dkim",
+        "domains": "primary_and_secondary"
+      },
+      "rule_id": "GWS.GMAIL.2.1v1.gws_dns",
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.3.1v1": {
+      "kind": "gws_dns",
+      "params": {
+        "check": "spf",
+        "domains": "primary_and_secondary"
+      },
+      "rule_id": "GWS.GMAIL.3.1v1.gws_dns",
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.4.1v1": {
+      "kind": "gws_dns",
+      "params": {
+        "check": "dmarc_published",
+        "domains": "all"
+      },
+      "rule_id": "GWS.GMAIL.4.1v1.gws_dns",
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.4.2v1": {
+      "kind": "gws_dns",
+      "params": {
+        "check": "dmarc_reject",
+        "domains": "all"
+      },
+      "rule_id": "GWS.GMAIL.4.2v1.gws_dns",
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.4.3v1": {
+      "kind": "gws_dns",
+      "params": {
+        "check": "dmarc_cisa_contact",
+        "domains": "all"
+      },
+      "rule_id": "GWS.GMAIL.4.3v1.gws_dns",
+      "sections": [
+        "gws_dns"
+      ]
+    },
+    "GWS.GMAIL.4.4v1": {
+      "kind": "gws_dns",
+      "params": {
+        "check": "dmarc_agency_contact",
+        "domains": "all"
+      },
+      "rule_id": "GWS.GMAIL.4.4v1.gws_dns",
+      "sections": [
+        "gws_dns"
+      ]
+    }
+  }
+}
