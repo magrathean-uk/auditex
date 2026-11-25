@@ -731,7 +731,8 @@ def test_a_user_who_enrolled_but_is_not_forced_is_reported_as_not_enforced() -> 
             _user("forced@example.com", isEnrolledIn2Sv=True, isEnforcedIn2Sv=True, lastLoginTime=_ago(1)),
             _user("suspended@example.com", isEnforcedIn2Sv=False, suspended=True),
         ],
-        policies=[],
+        policies=[_policy("two_step_verification_enforcement")],
+        org_units=_WITH_SALES,
     )
 
     findings = build_google_findings(snapshot)
@@ -774,7 +775,7 @@ def _policy(
     }
 
 
-_ROOT_ONLY: list[dict[str, Any]] = []  # an org unit list that was read and is empty: the root is the only unit
+_ROOT_ONLY: list[dict[str, Any]] = []  # Directory omits the root ID when there are no child units
 _WITH_SALES = [{"orgUnitId": "id:sales", "parentOrgUnitId": "id:root", "parentOrgUnitPath": "/", "orgUnitPath": "/Sales"}]
 _ENFORCING = "2020-01-01T00:00:00Z"
 
@@ -782,11 +783,11 @@ _ENFORCING = "2020-01-01T00:00:00Z"
 @pytest.mark.parametrize(
     ("policies", "org_units", "status"),
     [
-        ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING)], _ROOT_ONLY, "enforcing"),
-        ([_policy("two_step_verification_enforcement", enforced_from="2099-01-01T00:00:00Z")], _ROOT_ONLY, "scheduled"),
-        ([_policy("two_step_verification_enforcement")], _ROOT_ONLY, "not_enforced"),
-        ([_policy("two_step_verification_enrollment", allowEnrollment=True)], _ROOT_ONLY, "not_enforced"),
-        ([], _ROOT_ONLY, "not_enforced"),
+        ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING)], _WITH_SALES, "enforcing"),
+        ([_policy("two_step_verification_enforcement", enforced_from="2099-01-01T00:00:00Z")], _WITH_SALES, "scheduled"),
+        ([_policy("two_step_verification_enforcement")], _WITH_SALES, "not_enforced"),
+        ([_policy("two_step_verification_enrollment", allowEnrollment=True)], _WITH_SALES, "unknown"),
+        ([], _WITH_SALES, "unknown"),
         # With sub-units the root is the parent of the top-level unit, and only its policy is organisation-wide.
         ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING, org_unit="orgUnits/root")], _WITH_SALES, "enforcing"),
         (
@@ -797,10 +798,11 @@ _ENFORCING = "2020-01-01T00:00:00Z"
             _WITH_SALES,
             "partial",
         ),
-        ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING, org_unit="orgUnits/sales")], _WITH_SALES, "partial"),
+        ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING, org_unit="orgUnits/sales")], _WITH_SALES, "unknown"),
         # A group-scoped policy at the root unit is not the organisation's.
-        ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING, group="groups/staff")], _ROOT_ONLY, "partial"),
-        # The root unit cannot be told without the org unit list, so an enforcing policy cannot be placed.
+        ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING, group="groups/staff")], _WITH_SALES, "unknown"),
+        # A missing or empty OU list supplies no root unit ID.
+        ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING)], _ROOT_ONLY, "unknown"),
         ([_policy("two_step_verification_enforcement", enforced_from=_ENFORCING)], None, "unknown"),
     ],
 )
@@ -865,13 +867,12 @@ def test_an_unreadable_or_absent_policy_read_is_unknown_not_not_enforced() -> No
 
 
 def test_the_policy_finding_cites_a_record_that_exists() -> None:
-    with_policy = build_google_findings(_snapshot(policies=[_policy("two_step_verification_enforcement")]))
-    without = build_google_findings(_snapshot(policies=[]))
+    with_policy = build_google_findings(_snapshot(policies=[_policy("two_step_verification_enforcement")], org_units=_WITH_SALES))
+    without = build_google_findings(_snapshot(policies=[], org_units=_WITH_SALES))
 
     (cited,) = _by_rule(with_policy, "google.org_2sv_policy_not_enforced")
-    (stand_in,) = _by_rule(without, "google.org_2sv_policy_not_enforced")
     assert cited["evidence_refs"][0]["artifact_path"] == "normalized/google_two_step_policies.json"
-    assert stand_in["evidence_refs"][0]["record_key"] == "coverage_ledger:google_policies"
+    assert not _by_rule(without, "google.org_2sv_policy_not_enforced")
     assert cited["severity"] == "high"
 
 
@@ -910,13 +911,18 @@ def test_the_policies_collector_and_client_read_the_cloud_identity_policies(fake
     assert result.status == "ok" and len(result.payload["twoStepVerificationPolicies"]["value"]) == 3
     assert len(service.calls) == 2  # two pages
     # CEL takes the regex escape as two backslashes inside the string, as the API's own examples write it.
-    two_backslashes = "\\" * 2
+    # The allow-list of SCuBA setting-type services; ``rule`` is not a prefix, so ``rule.dlp`` is never read.
     expected = (
         'customer == "customers/C123" && '
-        "setting.type.matches('^settings/security" + two_backslashes + ".two_step_verification_.*$')"
+        "setting.type.matches('^settings/((gmail|security|drive_and_docs|calendar|chat|meet|classroom|"
+        "groups_for_business|sites|takeout|data_regions|workspace_marketplace|api_controls|provisioning|multi_party_approval|"
+        "enterprise_service_restrictions|early_access_apps|gemini_app|access_approval|access_management)"
+        r"\\..*|blogger\\.user_takeout|books\\.user_takeout|location_history\\.user_takeout|maps\\.user_takeout|"
+        r"pay\\.user_takeout|photos\\.user_takeout|play\\.user_takeout|play_console\\.user_takeout|youtube\\.user_takeout|"
+        r"rule\\.system_defined_alerts)$')"
     )
     assert service.calls[0]["filter"] == expected
-    assert service.calls[0]["filter"].count("\\") == 2 and "\\." not in service.calls[0]["filter"].replace(two_backslashes + ".", "")
+    assert "dlp" not in service.calls[0]["filter"]
     assert GooglePoliciesCollector.required_scopes == (google_auth.POLICIES_SCOPE,)
 
     # The service for this API is built on credentials narrowed to its own scope.
@@ -1581,6 +1587,8 @@ class _EverythingClient:
             return [{"domainName": "example.com", "isPrimary": True, "verified": True, "domainAliases": [{"domainAliasName": "example.net"}]}]
         if resource == "groups":
             return [{"id": "g1", "email": "all@example.com"}]
+        if resource == "orgUnits":
+            return _WITH_SALES
         return []
 
     def list_group_members(self, group_email: str, **_k: Any) -> list[dict[str, Any]]:

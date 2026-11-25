@@ -4,6 +4,8 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from azure_tenant_audit.google_policy_schema import policy_enforced_at
+
 from .collectors import SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPED_COLLECTORS
 from .normalize import COMPROMISED, UNKNOWN_COMPROMISE, compromised_state
 
@@ -1265,12 +1267,12 @@ def build_google_findings(
             policy_section, policy_collector, policy_record = "google_two_step_policies", "google_policies", policy_records[0]
         else:
             policy_section, policy_collector = "coverage_ledger", "google_policies"
-            policy_record = {"id": "google_policies:twoStepVerificationPolicies", "key": "coverage_ledger:google_policies"}
+            policy_record = {"id": "google_policies:policySettings", "key": "coverage_ledger:google_policies"}
         enforcing = [
             record
             for record in policy_records
             if record.get("setting_type") == "security.two_step_verification_enforcement"
-            and (_parse_google_time(record.get("enforced_from")) or now + timedelta(days=1)) <= now
+            and policy_enforced_at(record.get("enforced_from"), now)
         ]
         partial = policy_status == "partial"
         findings.append(

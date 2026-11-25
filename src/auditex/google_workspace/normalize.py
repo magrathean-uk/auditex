@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections import Counter
-from datetime import UTC, datetime, timedelta
+from collections import Counter, defaultdict
+from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any
 
 from azure_tenant_audit.collection_gaps import (
@@ -10,14 +11,29 @@ from azure_tenant_audit.collection_gaps import (
     bounded_sample_records,
     collection_gap_records,
     list_truncations,
+    section_was_cut,
     truncations_from_payloads,
 )
-from azure_tenant_audit.data_minimisation import minimise_gmail_settings
+from azure_tenant_audit.data_minimisation import (
+    UNRECOGNISED_SYSTEM_ALERT_NAME,
+    finite_policy_number,
+    minimise_gmail_settings,
+    minimise_policy_settings,
+    policy_is_unrecognised,
+    policy_unit_id,
+)
+from azure_tenant_audit.google_policy_schema import policy_enforced_at
 
 from .collectors import (
+    POLICY_SECTION_PROBLEMS,
+    POLICY_TARGET_PROBLEMS,
     SUBJECT_SCOPE_ADMIN,
     SUBJECT_SCOPE_USER,
     SUBJECT_SCOPED_COLLECTORS,
+    policy_problems,
+    policy_query_target,
+    policy_row_readable,
+    two_step_subset_differs,
 )
 
 
@@ -150,49 +166,377 @@ def _policy_value(setting: dict[str, Any], *names: str) -> Any:
 
 
 def _org_unit_key(value: Any) -> str:
-    """An org unit id without the ``id:`` (Directory) or ``orgUnits/`` (Policy API) prefix."""
-    text = str(value or "").strip()
+    """An org unit id without the ``id:`` (Directory) or ``orgUnits/`` (Policy API) prefix; ``""`` unless a string."""
+    text = value.strip() if isinstance(value, str) else ""
     for prefix in ("orgUnits/", "id:"):
         if text.startswith(prefix):
             text = text[len(prefix) :]
     return text
 
 
-def _root_org_unit(directory: dict[str, Any] | None, coverage_rows: list[dict[str, Any]]) -> tuple[bool, set[str]]:
-    """Whether the root organisational unit can be told apart in the Directory org units, and its id.
+def _org_unit_topology(
+    directory: dict[str, Any] | None, coverage_rows: list[dict[str, Any]]
+) -> tuple[bool, dict[str, str], set[str], int] | None:
+    """The Directory org unit read as (complete, parents, root ids, malformed count); ``None`` without an ``orgUnits``.
 
-    The Directory list holds no row for the root: it is the parent of the top-level units. A list that
-    was read and is empty means the root is the only unit, so every unit-level policy is the root's.
-    Without the list (not collected, failed) the root is unknown and no policy can be called organisation-wide.
+    Every listed row counts, including ones that are not objects (``null``): the tree is checked on the list as read,
+    never on the rows that happen to be readable. A section whose ``value`` is not a list is one malformed read.
     """
     if not isinstance(directory, dict) or not isinstance(directory.get("orgUnits"), dict):
-        return False, set()
-    rows = [
-        row
-        for row in coverage_rows
-        if row.get("collector") == "google_directory" and row.get("name") == "orgUnits"
-    ]
-    if any(row.get("status") not in (None, "ok") for row in rows):
-        return False, set()
-    units = _values(directory, "orgUnits")
-    if not units:
-        return (not any(row.get("collection_truncated") is True for row in rows)), set()
-    roots = {
-        _org_unit_key(unit.get("parentOrgUnitId"))
-        for unit in units
-        if str(unit.get("parentOrgUnitPath") or "") == "/" and unit.get("parentOrgUnitId")
-    }
-    return bool(roots), roots
+        return None
+    section = directory["orgUnits"]
+    values = section.get("value")
+    units = values if isinstance(values, list) else None
+    parents, roots, malformed = _org_unit_tree(units or [])
+    if units is None:
+        malformed += 1
+    complete = malformed == 0 and _read_complete("google_directory", section, None, coverage_rows, names=("orgUnits",))
+    return complete, parents, roots, malformed
 
 
-def _policy_scope(record: dict[str, Any], *, root_known: bool, root_ids: set[str]) -> str:
-    """``group``, ``organisation`` (the root unit, no group), ``org_unit`` or ``unclassified`` (root unknown)."""
+def _policy_unit_tree(
+    directory: dict[str, Any] | None, coverage_rows: list[dict[str, Any]]
+) -> tuple[set[str], set[str]]:
+    """Root and child IDs from a complete Directory tree. An empty tree supplies no root ID."""
+    topology = _org_unit_topology(directory, coverage_rows)
+    if topology is None or not topology[0]:
+        return set(), set()
+    _, parents, roots, _ = topology
+    return roots, set(parents)
+
+
+def _org_unit_id(value: Any) -> str:
+    """A Directory org unit id (``id:<id>``) as its bare id; ``""`` unless it is a sound id."""
+    bare = _org_unit_key(value)
+    return bare if policy_unit_id(bare) else ""
+
+
+def _org_unit_tree(units: list[Any]) -> tuple[dict[str, str], set[str], int]:
+    """The units' parents, the root id(s) and how many units or tree checks failed.
+
+    Ids must be sound id strings. The root is listed at ``orgUnitPath`` ``/`` with no parent. Older reads identify
+    it as the parent of the top-level units (``parentOrgUnitPath`` ``/``). Every unit must reach the same root
+    without a cycle. A unit listed under two parents or a row that is not an object invalidates the read.
+    """
+    parents: dict[str, str] = {}
+    order: list[str] = []
+    roots: set[str] = set()
+    malformed = 0
+    for unit in units:
+        if not isinstance(unit, dict) or not (unit_id := _org_unit_id(unit.get("orgUnitId"))):
+            malformed += 1
+            continue
+        if unit.get("orgUnitPath") == "/":
+            if unit.get("parentOrgUnitId") not in (None, ""):
+                malformed += 1
+            else:
+                roots.add(unit_id)
+            continue
+        parent_id = _org_unit_id(unit.get("parentOrgUnitId"))
+        if not parent_id:
+            malformed += 1
+            continue
+        if unit.get("parentOrgUnitPath") == "/":
+            roots.add(parent_id)
+        if unit_id in parents:
+            if parents[unit_id] != parent_id:
+                malformed += 1  # one unit listed under two parents: the tree cannot be trusted
+            continue
+        parents[unit_id] = parent_id
+        order.append(unit_id)
+    if len(roots) > 1 or (parents and not roots) or roots & set(parents):
+        # Two roots, no root, or a root also listed with a parent: no single root.
+        return parents, roots, malformed + 1
+    for unit_id in order:
+        seen: set[str] = set()
+        node = unit_id
+        while node not in roots:
+            if node in seen or node not in parents:
+                malformed += 1  # an orphan (its parent is not listed) or a cycle: not under the root
+                break
+            seen.add(node)
+            node = parents[node]
+    return parents, roots, malformed
+
+
+def _query_scope_supported(query: dict[str, Any]) -> bool:
+    """Whether a minimised policy's CEL query applies to exactly what its ``orgUnit`` and ``group`` fields say.
+
+    No query (older evidence holds only the fields) or ``query_scope`` ``targets``; see
+    :func:`azure_tenant_audit.data_minimisation.policy_query_scope`. Anything else is a scope the fields cannot show,
+    so the policy is not unconditional evidence for that unit.
+    """
+    return query.get("query_scope") in (None, "targets")
+
+
+def _policy_scope(record: dict[str, Any], *, root_ids: set[str], unit_ids: set[str]) -> str:
+    """Place an unconditional policy against the independently read Directory tree."""
+    unit = _org_unit_key(record.get("org_unit"))
+    if record.get("scope_supported") is False or (unit and unit not in root_ids and unit not in unit_ids):
+        return "unclassified"
     if record.get("group"):
         return "group"
-    if not root_known:
-        return "unclassified"
-    unit = _org_unit_key(record.get("org_unit"))
-    return "organisation" if not root_ids or unit in root_ids else "org_unit"
+    if unit in root_ids:
+        return "organisation"
+    return "org_unit" if unit in unit_ids else "unclassified"
+
+
+_POLICY_READ_ROWS = ("twoStepVerificationPolicies", "policySettings")
+
+
+def _read_complete(
+    collector: str,
+    section: Any,
+    result_rows: list[dict[str, Any]] | None,
+    coverage_rows: list[dict[str, Any]],
+    *,
+    names: tuple[str, ...] | None = None,
+) -> bool:
+    """Whether a collector's read of one section is complete: no coverage row failed or cut, no section marker.
+
+    With ``result_rows`` the collector's own row must also be ``ok``; without one the read cannot be shown
+    complete, so it is not. ``names`` limits the coverage rows to the ones of this section.
+    """
+    if result_rows is not None:
+        statuses = [row.get("status") for row in result_rows if isinstance(row, dict) and row.get("name") == collector]
+        if not statuses or any(status != "ok" for status in statuses):
+            return False
+    if any(
+        row.get("status") not in (None, "ok") or row.get("collection_truncated") is True
+        for row in coverage_rows
+        if row.get("collector") == collector and (names is None or row.get("name") in names)
+    ):
+        return False
+    return isinstance(section, dict) and not section_was_cut(section) and not (section.get("error") or section.get("error_class"))
+
+
+def _policy_section(setting_type: Any) -> str | None:
+    """``settings/gmail.auto_forwarding`` -> ``gmail_auto_forwarding``; ``None`` for anything else."""
+    if not isinstance(setting_type, str) or not setting_type.startswith(_POLICY_PREFIX):
+        return None
+    section = setting_type.removeprefix(_POLICY_PREFIX).replace(".", "_")
+    return section or None
+
+
+def _policy_targets(policy: dict[str, Any]) -> tuple[str | None, str | None] | None:
+    """A readable policy's bare (org unit, group) ids; ``None`` when its targets cannot be read."""
+    query = policy.get("policyQuery")
+    if not isinstance(query, dict):
+        return None
+    org_unit, group = policy_query_target(query, "orgUnit"), policy_query_target(query, "group")
+    if org_unit is False or group is False or (org_unit is None and group is None):
+        return None
+    return org_unit, group
+
+
+def _unrecognised_system_alert(setting: Any) -> bool:
+    return (
+        isinstance(setting, dict)
+        and setting.get("type") == "settings/rule.system_defined_alerts"
+        and isinstance(value := setting.get("value"), dict)
+        and value.get("displayName") == UNRECOGNISED_SYSTEM_ALERT_NAME
+    )
+
+
+def unplaced_policy_count(payloads: dict[str, dict[str, Any]], coverage_rows: list[dict[str, Any]]) -> int:
+    """Count dangling OU targets in the one Policy API read or its legacy subset."""
+    payload = payloads.get("google_policies", {})
+    name = "policySettings" if "policySettings" in payload else "twoStepVerificationPolicies"
+    roots, units = _policy_unit_tree(payloads.get("google_directory"), coverage_rows)
+    known_units = roots | units
+    return sum(
+        1 for policy in _values(payload, name)
+        if not _unrecognised_system_alert(policy.get("setting"))
+        and (targets := _policy_targets(policy)) is not None and targets[0] is not None and targets[0] not in known_units
+    )
+
+
+# Policy sections whose evidence decides the organisation's 2-step verification status.
+_TWO_STEP_SECTION_PREFIX = "security_two_step_verification"
+
+
+def _policy_read_state(complete: bool, records: int, malformed: int, unusable: set[str], scopes: set[tuple[str, str, str]]) -> dict[str, Any]:
+    return {
+        "kind": "google_policy_settings_read_state",
+        "source": "google_policies.policySettings",
+        "id": "read_state",
+        "key": "google_policy_settings_read_state:read_state",
+        "complete": complete,
+        "record_count": records,
+        "malformed_count": malformed,
+        "unusable_sections": sorted(unusable),
+        "unusable_scopes": [
+            {"section": section, "org_unit": org_unit or None, "group": group or None}
+            for section, org_unit, group in sorted(scopes)
+        ],
+    }
+
+
+def _policy_values_by_identity(section: str, value: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """The comparable members of a readable, minimised policy value."""
+    match section:
+        case "rule_system_defined_alerts":
+            # The projection pins the names to Google's vocabulary. Older bundles put the rules in a list.
+            return [
+                (rule["displayName"], rule)
+                for rule in value.get("rules", [value])
+                if rule["displayName"] != UNRECOGNISED_SYSTEM_ALERT_NAME
+            ]
+        case "gmail_blocked_sender_lists":
+            field, identity = "blockedSenders", "ruleId"
+        case "gmail_email_address_lists":
+            field, identity = "emailAddressList", "id"
+        case "gmail_rule_states":
+            field, identity = "ruleStates", "ruleId"
+        case "gmail_spam_override_lists":
+            field, identity = "spamOverride", "ruleId"
+        case _:
+            return [("", value)]
+    return [(sha256(rule[identity].encode()).hexdigest(), rule) for rule in value.get(field, [])]
+
+
+def _policy_order_conflicts(policies: list[tuple[int | float | None, dict[str, Any]]]) -> bool:
+    """Different values for one identity need distinct, known orders."""
+    if any(order is None for order, _ in policies):
+        return any(value != policies[0][1] for _, value in policies[1:])
+    ranked: dict[int | float | None, dict[str, Any]] = {}
+    return any(ranked.setdefault(order, value) != value for order, value in policies)
+
+
+def _policy_settings_read(
+    payload: dict[str, Any] | None,
+    result_rows: list[dict[str, Any]],
+    coverage_rows: list[dict[str, Any]],
+    known_units: set[str],
+) -> tuple[list[dict[str, Any]], bool | None]:
+    """``google_policy_settings`` records and whether the read can decide the 2-step verification status.
+
+    The records are one per usable Policy API policy plus one read-state record, absent (empty list) when the run
+    holds no ``policySettings`` key, so an older bundle is not read as an empty but complete read; a key that holds
+    anything but an object is a malformed section, never absent. Each policy is checked with
+    :func:`policy_problems`:
+
+    - a policy whose section cannot be told is malformed for the whole read;
+    - one whose targets cannot be read makes its section unusable (``unusable_sections``, every record of it left out);
+    - one with any other problem, a scope its targets cannot represent (an exception or another unit in its query),
+      or conflicting values with no order between policies for the same identity, makes that unit's setting unusable
+      (``unusable_scopes``): those records are left out and every other unit's records are kept.
+
+    Any of these makes the read incomplete: unknown is never safe. The second value is ``None`` without a
+    ``policySettings`` key; otherwise whether the read is complete as far as the 2-step verification sections go.
+    """
+    if not isinstance(payload, dict) or "policySettings" not in payload:
+        return [], None
+    section = payload["policySettings"]
+    values = section.get("value") if isinstance(section, dict) else None
+    if not isinstance(values, list):
+        return [_policy_read_state(False, 0, 1, set(), set())], False
+    items = minimise_policy_settings(values)
+    malformed = unattributed = 0
+    unusable: set[str] = set()
+    scopes: set[tuple[str, str, str]] = set()
+    candidates: list[tuple[str, str | None, str | None, Any, dict[str, Any]]] = []
+    for item in items:
+        if policy_is_unrecognised(item):
+            continue
+        problems = set(policy_problems(item))
+        setting = item.get("setting") if isinstance(item, dict) else None
+        if not problems and _unrecognised_system_alert(setting):
+            continue
+        setting_section = None if problems & POLICY_SECTION_PROBLEMS else _policy_section(setting.get("type"))  # type: ignore[union-attr]
+        if setting_section is None:
+            malformed += 1
+            unattributed += 1
+            continue
+        targets = None if problems & POLICY_TARGET_PROBLEMS else _policy_targets(item)
+        if targets is None:
+            malformed += 1
+            unusable.add(setting_section)
+            continue
+        org_unit, group = targets
+        if problems:
+            malformed += 1
+        if problems or not _query_scope_supported(item["policyQuery"]) or (org_unit is not None and org_unit not in known_units):
+            scopes.add((setting_section, org_unit or "", group or ""))
+            continue
+        candidates.append((setting_section, org_unit, group, item["policyQuery"].get("sortOrder"), item))
+    by_identity: dict[tuple[str, str, str, str], list[tuple[int | float | None, dict[str, Any]]]] = defaultdict(list)
+    for setting_section, org_unit, group, sort_order, item in candidates:
+        for identity, value in _policy_values_by_identity(setting_section, item["setting"]["value"]):
+            by_identity[(setting_section, org_unit or "", group or "", identity)].append((sort_order, value))
+    for (setting_section, org_unit, group, _), policies in by_identity.items():
+        if _policy_order_conflicts(policies):
+            scopes.add((setting_section, org_unit, group))
+    records: list[dict[str, Any]] = []
+    seen: Counter[str] = Counter()
+    for setting_section, org_unit, group, sort_order, item in candidates:
+        if setting_section in unusable or (setting_section, org_unit or "", group or "") in scopes:
+            continue
+        key = f"{setting_section}|{org_unit or ''}|{group or ''}|{sort_order if sort_order is not None else ''}"
+        seen[key] += 1
+        record = _record(
+            "google_policy_setting",
+            "google_policies.policySettings",
+            key if seen[key] == 1 else f"{key}#{seen[key]}",
+            section=setting_section,
+            unit_kind="group" if group else "org_unit",
+            org_unit=org_unit,
+            group=group,
+            sort_order=sort_order if finite_policy_number(sort_order) else None,
+            policy_type=item.get("type"),
+        )
+        record["value"] = item["setting"]["value"]  # kept even when empty: an empty value is a setting at its defaults
+        records.append(record)
+    read_complete = bool(values) and _read_complete("google_policies", section, result_rows, coverage_rows)
+    complete = read_complete and malformed == 0 and not unusable and not scopes
+    records.append(_policy_read_state(complete, len(records), malformed, unusable, scopes))
+    # A policy whose section cannot be told may be a 2-step verification one; others weaken only their own section.
+    two_step_affected = any(name.startswith(_TWO_STEP_SECTION_PREFIX) for name in unusable | {scope[0] for scope in scopes})
+    # Transport failures may hide any setting. Row validation failures can be checked against
+    # the retained setting and scope, so an unreadable Gmail row need not hide readable 2SV.
+    transport_rows = [
+        row for row in coverage_rows
+        if not (row.get("collector") == "google_policies" and row.get("policy_row_validation") is True)
+    ]
+    expected_results = None if len(transport_rows) < len(coverage_rows) else result_rows
+    transport_complete = bool(values) and _read_complete("google_policies", section, expected_results, transport_rows)
+    return records, transport_complete and unattributed == 0 and not two_step_affected
+
+
+def _org_unit_records(
+    directory: dict[str, Any] | None, result_rows: list[dict[str, Any]], coverage_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """``google_org_units``: ``id``, ``parent_id`` and ``is_root`` per unit plus one read-state record.
+
+    The OU path and name are never kept (they can be personal). The Directory list supplies the root row, or
+    for a legacy read, the parent of the top-level units. Absent when the run holds no ``orgUnits`` section.
+    A unit tree that does not hang from one root (see :func:`_org_unit_tree`) is not a complete read.
+    """
+    topology = _org_unit_topology(directory, coverage_rows)
+    if topology is None:
+        return []
+    complete, parents, roots, malformed = topology
+    records: list[dict[str, Any]] = [
+        {"kind": "google_org_unit", "source": "google_directory.orgUnits", "id": unit_id, "key": f"google_org_unit:{unit_id}", "parent_id": parent_id, "is_root": False}
+        for unit_id, parent_id in parents.items()
+    ]
+    for root in sorted(roots - set(parents)):
+        records.append({"kind": "google_org_unit", "source": "google_directory.orgUnits", "id": root, "key": f"google_org_unit:{root}", "parent_id": None, "is_root": True})
+    # Only the orgUnits read counts here: another directory list failing does not make the unit tree unknown.
+    # A complete, empty list means the root is the only unit; its id is then not in this list (``root_id_known``).
+    records.append(
+        {
+            "kind": "google_org_units_read_state",
+            "source": "google_directory.orgUnits",
+            "id": "read_state",
+            "key": "google_org_units_read_state:read_state",
+            "complete": complete,
+            "root_id_known": len(roots) == 1 and malformed == 0,
+            "record_count": len(records),
+            "malformed_count": malformed,
+        }
+    )
+    return records
 
 
 def _two_step_policy_status(
@@ -200,33 +544,88 @@ def _two_step_policy_status(
     records: list[dict[str, Any]],
     coverage_rows: list[dict[str, Any]],
     now: datetime,
+    *,
+    widened_complete: bool | None = None,
 ) -> str:
     """Whether 2-step verification is enforced for the organisation.
 
     ``enforcing``: the organisation-level policy (root unit, no group) is in force. ``partial``: only
     some organisational units or groups are enforced, the organisation-level policy is not. ``scheduled``:
     every enforcement date is still ahead. ``not_enforced``: the read completed and no policy enforces.
-    ``unknown``: the read did not happen or is incomplete, or an enforcing policy cannot be placed in the
-    organisation because the root unit is unknown. Unknown is never read as not enforced.
+    ``unknown``: the read did not happen or is incomplete, a policy cannot be read, or an enforcing policy cannot be
+    placed in the organisation because the root unit is unknown. Unknown is never read as not enforced.
+
+    ``widened_complete`` is ``None`` for an older bundle without the widened read. With it, the widened read must be
+    complete for the 2-step verification sections, its 2-step verification list must be the subset of it, and
+    ``not_enforced`` or ``partial`` needs the organisation's own enforcement policy positively read as not in force:
+    the widened read returns every setting type at the root, so its absence means the read is not what was asked for.
     """
     if not isinstance(payload, dict) or not isinstance(payload.get("twoStepVerificationPolicies"), dict):
         return "unknown"
-    rows = [row for row in coverage_rows if row.get("collector") == "google_policies"]
-    if any(row.get("status") not in (None, "ok") and row.get("name") == "twoStepVerificationPolicies" for row in rows):
+    section = payload["twoStepVerificationPolicies"]
+    if not isinstance(section.get("value"), list) or not section["value"]:
         return "unknown"
-    truncated = any(row.get("collection_truncated") is True for row in rows)
+    if any(not policy_row_readable(item) for item in section["value"]):
+        return "unknown"
+    if widened_complete is False or (widened_complete is not None and two_step_subset_differs(payload)):
+        return "unknown"
+    names = _POLICY_READ_ROWS if widened_complete is None else ("twoStepVerificationPolicies",)
+    if not _read_complete("google_policies", section, None, coverage_rows, names=names):
+        return "unknown"
+
     enforcement = [record for record in records if record.get("setting_type") == "security.two_step_verification_enforcement"]
-    in_force = [record for record in enforcement if (_parse_timestamp(record.get("enforced_from")) or now + timedelta(days=1)) <= now]
+    if any(record.get("policy_scope") == "unclassified" for record in enforcement):
+        return "unknown"
+    if not any(record.get("policy_scope") == "organisation" for record in enforcement):
+        return "unknown"
+    in_force = [record for record in enforcement if policy_enforced_at(record.get("enforced_from"), now)]
+    if any(record.get("policy_scope") == "organisation" for record in in_force):
+        return "enforcing"
     if in_force:
-        scopes = {record.get("policy_scope") for record in in_force}
-        if "organisation" in scopes:
-            return "enforcing"
-        if scopes <= {"unclassified"}:
-            return "unknown"
         return "partial"
-    if any(_parse_timestamp(record.get("enforced_from")) is not None for record in enforcement):
-        return "scheduled"
-    return "unknown" if truncated else "not_enforced"
+    return "scheduled" if any("enforced_from" in record for record in enforcement) else "not_enforced"
+
+
+def _two_step_records(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """``google_two_step_policies``: one record per readable 2-step verification policy.
+
+    The policies are minimised first (no address or local path survives into a record) and must have no problem
+    (:func:`policy_problems`), so every field copied is a checked id, number, Boolean, enum, duration or timestamp.
+    The id is built from the setting type and targets, never from the policy's resource name. A policy that cannot be
+    read gives no record (the status is then unknown); one whose query names another unit or holds an exception gets
+    ``scope_supported`` false and is never placed in the organisation.
+    """
+    records: list[dict[str, Any]] = []
+    seen: Counter[str] = Counter()
+    section = (payload or {}).get("twoStepVerificationPolicies")
+    values = section.get("value") if isinstance(section, dict) else None
+    for item in minimise_policy_settings(values) if isinstance(values, list) else []:
+        if not policy_row_readable(item):
+            continue
+        setting, query = item["setting"], item["policyQuery"]
+        setting_type = setting["type"].removeprefix(_POLICY_PREFIX)
+        org_unit = query.get("orgUnit") or None
+        group = query.get("group") or None
+        base = ":".join(part for part in (setting_type, org_unit, group) if part)
+        seen[base] += 1
+        record = _record(
+            "google_two_step_policy",
+            "google_policies.twoStepVerificationPolicies",
+            base if seen[base] == 1 else f"{base}#{seen[base]}",
+            setting_type=setting_type or None,
+            policy_type=item.get("type"),
+            org_unit=org_unit,
+            group=group,
+            sort_order=query.get("sortOrder"),
+            enforced_from=_policy_value(setting, "enforcedFrom", "enforced_from"),
+            allow_enrollment=_policy_value(setting, "allowEnrollment", "allow_enrollment"),
+            allowed_sign_in_factor_set=_policy_value(setting, "allowedSignInFactorSet", "allowed_sign_in_factor_set"),
+            enrollment_grace_period=_policy_value(setting, "enrollmentGracePeriod", "enrollment_grace_period"),
+        )
+        if not _query_scope_supported(query):
+            record["scope_supported"] = False
+        records.append(record)
+    return records
 
 
 def build_google_normalized_snapshot(
@@ -329,28 +728,15 @@ def build_google_normalized_snapshot(
     else:
         internal_domains_status = "unknown"
         internal_domains_source = "none"
-    root_known, root_ids = _root_org_unit(collector_payloads.get("google_directory"), coverage_rows)
-    policy_records = [
-        _record(
-            "google_two_step_policy",
-            "google_policies.twoStepVerificationPolicies",
-            str(item.get("name") or f"{(item.get('setting') or {}).get('type')}:{(item.get('policyQuery') or {}).get('orgUnit')}"),
-            setting_type=str((item.get("setting") or {}).get("type") or "").removeprefix(_POLICY_PREFIX) or None,
-            policy_type=item.get("type"),
-            org_unit=(item.get("policyQuery") or {}).get("orgUnit"),
-            group=(item.get("policyQuery") or {}).get("group"),
-            sort_order=(item.get("policyQuery") or {}).get("sortOrder"),
-            enforced_from=_policy_value(item.get("setting") or {}, "enforcedFrom", "enforced_from"),
-            allow_enrollment=_policy_value(item.get("setting") or {}, "allowEnrollment", "allow_enrollment"),
-            allowed_sign_in_factor_set=_policy_value(item.get("setting") or {}, "allowedSignInFactorSet", "allowed_sign_in_factor_set"),
-            enrollment_grace_period=_policy_value(item.get("setting") or {}, "enrollmentGracePeriod", "enrollment_grace_period"),
-        )
-        for item in _values(collector_payloads.get("google_policies", {}), "twoStepVerificationPolicies")
-        if isinstance(item.get("setting"), dict)
-    ]
+    root_ids, unit_ids = _policy_unit_tree(collector_payloads.get("google_directory"), coverage_rows)
+    policy_records = _two_step_records(collector_payloads.get("google_policies"))
     for record in policy_records:
-        # organisation (root unit, no group), org_unit, group, or unclassified when the root unit is unknown
-        record["policy_scope"] = _policy_scope(record, root_known=root_known, root_ids=root_ids)
+        # organisation (root unit, no group), org_unit, group, or unclassified when it cannot be placed
+        record["policy_scope"] = _policy_scope(record, root_ids=root_ids, unit_ids=unit_ids)
+    policy_setting_records, two_step_widened = _policy_settings_read(
+        collector_payloads.get("google_policies"), result_rows, coverage_rows, root_ids | unit_ids,
+    )
+    org_unit_records = _org_unit_records(collector_payloads.get("google_directory"), result_rows, coverage_rows)
     groups = [
         _record(
             "google_group",
@@ -687,6 +1073,8 @@ def build_google_normalized_snapshot(
         "google_users": users,
         "google_domains": domain_records,
         "google_two_step_policies": policy_records,
+        "google_policy_settings": policy_setting_records,
+        "google_org_units": org_unit_records,
         "google_groups": groups,
         "google_group_members": group_members,
         "google_group_member_errors": group_member_errors,
@@ -759,7 +1147,7 @@ def build_google_normalized_snapshot(
         "internal_domains_status": internal_domains_status,
         "internal_domains_source": internal_domains_source,
         "two_step_policy_status": _two_step_policy_status(
-            collector_payloads.get("google_policies"), policy_records, coverage_rows, now
+            collector_payloads.get("google_policies"), policy_records, coverage_rows, now, widened_complete=two_step_widened
         ),
         "subject_scope": subject_scope,
         "mailbox_settings_skipped_suspended": sum(

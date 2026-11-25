@@ -8,7 +8,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
-from azure_tenant_audit.data_minimisation import minimise_gmail_settings
+from azure_tenant_audit.collection_gaps import (
+    REASON_PAGINATION_NOT_FOLLOWED,
+)
+from azure_tenant_audit.data_minimisation import (
+    POLICY_TYPE_PATTERN,
+    minimise_gmail_settings,
+)
 
 from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credentials
 
@@ -16,10 +22,63 @@ from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credenti
 # the bound keeps a 10,000-user run from holding 10,000 discovery clients.
 SUBJECT_SERVICE_CACHE_SIZE = 8
 
-# Cloud Identity Policy API filter for the 2-step verification settings. It is a CEL string, and CEL needs
-# the regex escape written as two backslashes (the API's own examples read ``gmail\\..*``), so this raw
-# string holds two backslashes. Every ``security.two_step_verification_*`` policy matches.
-_TWO_STEP_POLICY_FILTER = r"setting.type.matches('^settings/security\\.two_step_verification_.*$')"
+# Cloud Identity Policy API filter: an allow-list of the setting-type service prefixes the SCuBA Google Workspace
+# baselines read, plus the exact Takeout and system alert types they read. It is a CEL string, and CEL needs the
+# regex escape written as two backslashes (the API's own examples read ``gmail\\..*``), so the filter sends
+# two backslashes before every dot. ``settings/rule.dlp`` is never requested: DLP rule bodies can hold sensitive
+# patterns, so ``rule`` is not a prefix and only ``rule.system_defined_alerts`` is named in full. Every
+# ``security.two_step_verification_*`` policy matches, so the 2-step verification read is a subset of this one.
+_POLICY_SETTINGS_FILTER = "setting.type.matches('" + POLICY_TYPE_PATTERN.replace("\\", "\\\\") + "')"
+
+# The widened policies read takes no operator ``--top``: a SCuBA setting cut off by a row limit would be unknown, and
+# the 2-step verification subset used to finish whatever ``--top`` said. This internal cap only stops a runaway read;
+# a read cut at it comes back marked as cut at the collector's safety cap, and the collector records it as incomplete.
+POLICY_SETTINGS_ROW_CAP = 20_000
+# Further bounds on the policies read: a read that needs more requests than this or repeats a page cursor is stopped
+# there and marked incomplete.
+POLICY_PAGE_BUDGET = 1_000
+# The longest page cursor accepted; a longer one is a page that cannot be read.
+POLICY_CURSOR_MAX = 4_096
+# Error class of a policies read whose answer could not be read: a malformed page or no policies at all.
+POLICY_MALFORMED_ERROR_CLASS = "malformed_response"
+# Structured API reasons that may be named in a policies read error. Any other reason text is not copied: a reason
+# field is free text as far as this client can tell.
+POLICY_ERROR_REASONS = frozenset(
+    {
+        "badRequest",
+        "invalid",
+        "invalidParameter",
+        "required",
+        "notFound",
+        "forbidden",
+        "insufficientPermissions",
+        "accessNotConfigured",
+        "authError",
+        "unauthorized",
+        "domainPolicy",
+        "failedPrecondition",
+        "rateLimitExceeded",
+        "userRateLimitExceeded",
+        "quotaExceeded",
+        "dailyLimitExceeded",
+        "backendError",
+        "internalError",
+        "INVALID_ARGUMENT",
+        "FAILED_PRECONDITION",
+        "NOT_FOUND",
+        "PERMISSION_DENIED",
+        "UNAUTHENTICATED",
+        "RESOURCE_EXHAUSTED",
+        "RATE_LIMIT_EXCEEDED",
+        "INTERNAL",
+        "UNAVAILABLE",
+        "SERVICE_DISABLED",
+        "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+        "USER_PROJECT_DENIED",
+        "BILLING_DISABLED",
+        "CONSUMER_INVALID",
+    }
+)
 
 # Fields read from the device lists. Naming them keeps the telemetry the FULL projection also returns
 # (installed apps, recent users, active time ranges, disk and CPU reports) out of the bundle.
@@ -105,10 +164,64 @@ def classify_page_error(exc: Exception) -> tuple[str, str]:
     The library's text names the request URL, whose query carries the customer and the opaque page cursor, so it is
     never copied: only the HTTP status (when there is one) is kept.
     """
-    error_class, _message = classify_google_error(exc)
+    error_class, message = classify_google_error(exc)
+    if isinstance(exc, PolicyReadError) and exc.error_class:
+        return error_class, message  # a page that could not be read: its own fixed text
     status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
     detail = f"HTTP {status}" if isinstance(status, int) else error_class
     return error_class, f"A later page failed after its retries ({detail}); the rows read before it are kept."
+
+
+class PolicyReadError(RuntimeError):
+    """A Cloud Identity policies read that failed, with a fixed message.
+
+    The library's error text names the request URL, whose query holds the customer id (and could echo a path or a
+    token), so it is never copied. The HTTP status and the structured reasons are kept, so the error class and the
+    token-refusal check are those of the original error.
+    """
+
+    def __init__(
+        self, message: str, *, status_code: int | None = None, reasons: tuple[str, ...] = (), error_class: str | None = None
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_details = [{"reason": reason} for reason in reasons]
+        # Set for an answer whose shape could not be read (``malformed_response``); the class then is this one.
+        self.error_class = error_class
+
+
+POLICY_UNREADABLE_ROWS_TEXT = "Some policies returned by the Cloud Identity policies read cannot be read; the settings they hold are unknown."
+
+
+def policy_malformed_error(*, later_page: bool) -> PolicyReadError:
+    """A fixed error for a policies answer that cannot be read: no policies at all, or a page of the wrong shape."""
+    text = (
+        "A later page of the Cloud Identity policies read could not be read; the rows read before it are kept."
+        if later_page
+        else "The Cloud Identity policies read returned no readable policies, so no setting could be read."
+    )
+    return PolicyReadError(text, error_class=POLICY_MALFORMED_ERROR_CLASS)
+
+
+def policy_read_error(exc: Exception) -> Exception:
+    """``exc`` as a :class:`PolicyReadError` with a bounded message (a fixed actionable error is kept as it is)."""
+    if isinstance(exc, (PolicyReadError, GoogleWorkspaceError)):
+        return exc
+    error_class, message = classify_google_error(exc)
+    status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
+    status = status if isinstance(status, int) and not isinstance(status, bool) else None
+    # Structured reasons are API codes (``badRequest``, ``SERVICE_DISABLED``); anything else is not copied.
+    reasons = tuple(sorted(reason for reason in _error_reasons(exc) if reason in POLICY_ERROR_REASONS))
+    if is_token_refusal(message):
+        text = (
+            "The token exchange for the Cloud Identity policies scope was refused (unauthorized_client): "
+            "the domain-wide delegation does not grant that scope."
+        )
+    else:
+        detail = f"HTTP {status}" if status is not None else error_class
+        named = f"; reason {', '.join(reasons)}" if reasons else ""
+        text = f"The Cloud Identity policies read failed ({detail}{named})."
+    return PolicyReadError(text, status_code=status, reasons=reasons)
 
 
 class GoogleWorkspaceError(RuntimeError):
@@ -145,6 +258,8 @@ def _error_reasons(exc: Exception) -> set[str]:
 def classify_google_error(exc: Exception) -> tuple[str, str]:
     status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
     message = str(exc)
+    if isinstance(exc, PolicyReadError) and exc.error_class:
+        return exc.error_class, message
     if isinstance(exc, OSError) and (exc.filename or exc.filename2):
         # A local file failure can come from the discovery library as well as from sign-in.
         filename = re.split(r"[\\/]", str(exc.filename or exc.filename2))[-1]
@@ -219,6 +334,8 @@ class CollectedRows(list):
     result_limit: int | None = None
     page_error: Exception | None = None
     # Drive only: files whose permissions files.list left out and that were read one by one (see list_drive_files).
+    # Why the list was cut when that was not the operator's limit (for example a collector's own safety cap).
+    truncation_reason: str | None = None
     permission_reads: int = 0
     permission_errors: list[dict[str, Any]] | None = None
 
@@ -234,6 +351,79 @@ class CollectedRows(list):
         self.truncated = truncated
         self.result_limit = result_limit
         self.page_error = page_error
+
+
+def _policy_page(payload: Any) -> tuple[list[dict[str, Any]], str | None] | None:
+    """One ``policies.list`` page as (policies, next cursor), or ``None`` when its shape cannot be read.
+
+    Only ``policies`` holds rows (an ``items`` or ``value`` list is not a policies answer), as a list of objects. A
+    page may hold no rows and still carry a cursor (Google may return an empty page before the end of a list; proto3
+    JSON then leaves ``policies`` out, so ``{"nextPageToken": ...}`` alone is such a page): the read goes on. An empty
+    page with no cursor proves nothing and is not read as the end of a complete list. A cursor must be a non-blank
+    string of bounded length; ``""`` is proto3's unset cursor (the last page), an explicit null is not a cursor.
+    """
+    if not isinstance(payload, dict):
+        return None
+    token: str | None = None
+    if "nextPageToken" in payload:
+        raw = payload["nextPageToken"]
+        if raw != "":
+            if not isinstance(raw, str) or not raw.strip() or len(raw) > POLICY_CURSOR_MAX:
+                return None
+            token = raw
+    if "policies" not in payload:
+        return ([], token) if token is not None and set(payload) == {"nextPageToken"} else None
+    values = payload["policies"]
+    if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+        return None
+    if not values and token is None:
+        return None
+    return values, token
+
+
+def _collect_policy_pages(request_factory: Callable[[str | None], Any], *, cap: int, bounded: bool) -> CollectedRows:
+    """Page through ``policies.list`` with the shape checked on every page and every bound marked.
+
+    ``bounded`` is a probe's own limit (a cut there is the operator-style limit); otherwise ``cap`` is the safety cap
+    and a cut there is ``pagination_not_followed``. A first page that fails or cannot be read raises (a malformed one
+    as ``malformed_response``): nothing was read. An empty page with a new cursor is followed within the bounds. A
+    later page that fails or cannot be read keeps the rows read before it as a list cut by a page error. A repeated cursor or ``POLICY_PAGE_BUDGET`` requests stop the read as not
+    followed.
+    """
+    rows: list[dict[str, Any]] = []
+    token: str | None = None
+    seen_tokens: set[str] = set()
+    for request in range(POLICY_PAGE_BUDGET):
+        try:
+            payload = _execute(lambda token=token: request_factory(token).execute())
+        except Exception as exc:
+            if request == 0:
+                raise
+            # A later page failed after its retries: keep what was read, recorded as a list cut short.
+            return CollectedRows(rows, truncated=True, result_limit=cap if bounded else None, page_error=exc)
+        page = _policy_page(payload)
+        if page is None:
+            if request == 0:
+                raise policy_malformed_error(later_page=False)
+            error = policy_malformed_error(later_page=True)
+            return CollectedRows(rows, truncated=True, result_limit=cap if bounded else None, page_error=error)
+        values, token = page
+        rows.extend(values)
+        if len(rows) >= cap:
+            cut = len(rows) > cap or bool(token)
+            result = CollectedRows(rows[:cap], truncated=cut, result_limit=cap if (bounded or cut) else None)
+            if cut and not bounded:
+                result.truncation_reason = REASON_PAGINATION_NOT_FOLLOWED
+            return result
+        if not token:
+            return CollectedRows(rows, result_limit=None)
+        if token in seen_tokens:
+            break
+        seen_tokens.add(token)
+    # The page budget ran out or a cursor came back a second time: the read never ended.
+    result = CollectedRows(rows, truncated=True, result_limit=None)
+    result.truncation_reason = REASON_PAGINATION_NOT_FOLLOWED
+    return result
 
 
 def _cut(values: list[dict[str, Any]], limit: int | None) -> CollectedRows:
@@ -399,7 +589,7 @@ class GoogleWorkspaceClient:
                 limit=top,
             )
         if resource == "orgUnits":
-            payload = _execute(lambda: service.orgunits().list(customerId=self.customer, type="all").execute())
+            payload = _execute(lambda: service.orgunits().list(customerId=self.customer, type="allIncludingParent").execute())
             return _cut(payload.get("organizationUnits") or [], top)
         if resource == "domains":
             payload = _execute(lambda: service.domains().list(customer=self.customer).execute())
@@ -639,22 +829,48 @@ class GoogleWorkspaceClient:
             limit=top,
         )
 
-    def list_policies(self, *, top: int | None = None) -> list[dict[str, Any]]:
-        """Cloud Identity policies for the 2-step verification settings (read-only policies scope)."""
-        service = self._service("cloudidentity", "v1", scopes=(POLICIES_SCOPE,))
-        policies = getattr(service, "policies", None)
-        if policies is None:
-            raise GoogleWorkspaceError(
-                "the installed google-api-python-client has no cloudidentity v1 policies resource; upgrade it",
-                surface="policies",
+    def list_policies(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Cloud Identity policies for the SCuBA setting types (read-only policies scope).
+
+        One paged read of every allow-listed setting type (``_POLICY_SETTINGS_FILTER``). The operator's ``--top`` never
+        bounds it; only the preflight probe passes a ``limit``. Otherwise ``POLICY_SETTINGS_ROW_CAP``,
+        ``POLICY_PAGE_BUDGET`` and cursor repeat detection stop a runaway read. A read cut by any of them, by a later
+        page error or by a later page whose shape cannot be read comes back marked, so the collector and the probe
+        record it as incomplete. A first page that cannot be read, or no policies at all, raises ``malformed_response``.
+        Any error raised carries a fixed message (see :func:`policy_read_error`).
+        """
+        try:
+            service = self._service("cloudidentity", "v1", scopes=(POLICIES_SCOPE,))
+            policies = getattr(service, "policies", None)
+            if policies is None:
+                raise GoogleWorkspaceError(
+                    "the installed google-api-python-client has no cloudidentity v1 policies resource; upgrade it",
+                    surface="policies",
+                )
+            cap = limit or POLICY_SETTINGS_ROW_CAP
+            page_size = min(self.page_size, cap, 100)
+            policy_filter = f'customer == "customers/{self.customer}" && {_POLICY_SETTINGS_FILTER}'
+            rows = _collect_policy_pages(
+                lambda page_token: policies().list(pageSize=page_size, pageToken=page_token, filter=policy_filter),
+                cap=cap,
+                bounded=limit is not None,
             )
-        page_size = min(self.page_size, top or self.page_size, 100)
-        policy_filter = f'customer == "customers/{self.customer}" && {_TWO_STEP_POLICY_FILTER}'
-        return self._collect_pages(
-            lambda page_token: policies().list(pageSize=page_size, pageToken=page_token, filter=policy_filter),
-            "policies",
-            limit=top,
-        )
+            if limit is not None:
+                # The probe has no collector behind it to check the rows: a read whose rows cannot be read did not
+                # read a setting, and one where only some can be read is not a complete read.
+                from .collectors import policy_row_readable
+
+                readable = [row for row in rows if policy_row_readable(row)]
+                if not readable:
+                    raise policy_malformed_error(later_page=False)
+                if len(readable) < len(rows) and rows.page_error is None:
+                    rows.page_error = PolicyReadError(POLICY_UNREADABLE_ROWS_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
+                rows[:] = readable
+        except Exception as exc:
+            raise policy_read_error(exc) from None
+        if rows.page_error is not None:
+            rows.page_error = policy_read_error(rows.page_error)
+        return rows
 
     def list_devices(self, resource: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
