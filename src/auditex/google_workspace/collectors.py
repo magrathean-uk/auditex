@@ -4,6 +4,7 @@ import json
 import re
 import time
 from collections.abc import Callable
+from copy import copy
 from datetime import UTC, datetime, timedelta
 from fractions import Fraction
 from functools import lru_cache
@@ -37,14 +38,17 @@ from azure_tenant_audit.data_minimisation import (
 )
 from azure_tenant_audit.dns_lookup import (
     DNS_POSTURE_COLLECTORS,
+    DnsAnswer,
     DohClient,
     DohError,
     collect_domain_posture,
+    dmarc_with_tree_walk,
     doh_resolver_display,
     resolve_doh_endpoint,
     safe_resolver_diagnostic,
     unknown_posture,
 )
+from azure_tenant_audit.exposure_lookup import is_safe_domain_name
 from azure_tenant_audit.google_policy_schema import CUSTOMER_ID, TWO_STEP_VALUE_FIELDS
 from azure_tenant_audit.offline_replay import OFFLINE_ROW_TYPE
 from azure_tenant_audit.value_rules.gws.catalogue import catalogue
@@ -1227,6 +1231,161 @@ class GoogleDnsPostureCollector:
     name = "google_dns_posture"
     description = "Google Workspace DNS and email authentication posture."
     required_scopes = ("https://www.googleapis.com/auth/admin.directory.domain.readonly",)
+    _pinned_selectors = ("google", "selector1", "selector2")
+    _extra_selectors = ("s1", "s2", "default", "k1", "mail")
+
+    class _Txt:
+        """Keep one validated TXT answer per name for posture and SCuBA evidence."""
+
+        def __init__(self, resolver: Any) -> None:
+            self.resolver = resolver
+            self.answers: dict[str, list[str]] = {}
+
+        def query(self, name: str, record_type: str) -> list[str]:
+            if name not in self.answers:
+                detailed = getattr(self.resolver, "query_detailed", None)
+                if detailed is None:
+                    records = self.resolver.query(name, record_type)
+                else:
+                    answer = detailed(name, record_type)
+                    if not isinstance(answer, DnsAnswer) or answer.outcome not in ("answers", "empty", "nxdomain"):
+                        raise DohError("Unreadable DNS TXT response")
+                    records = answer.records
+                if not isinstance(records, list) or any(not isinstance(record, str) for record in records):
+                    raise DohError("Unreadable DNS TXT answers")
+                if detailed is not None:
+                    if not isinstance(answer.record_types, tuple) or (
+                        answer.record_types and (len(answer.record_types) != len(records)
+                                                 or any(type(kind) is not int for kind in answer.record_types))
+                    ):
+                        raise DohError("Unreadable DNS TXT response")
+                    if answer.record_types:
+                        records = [record for record, kind in zip(records, answer.record_types, strict=True) if kind == 16]
+                if detailed is not None and records and answer.outcome != "answers":
+                    raise DohError("Unreadable DNS TXT response")
+                self.answers[name] = records
+            return self.answers[name]
+
+    class _DohSession:
+        """Validate Google wire replies before the shared client can discard an invalid answer."""
+
+        class _Response:
+            def __init__(self, response: Any) -> None:
+                self.response = response
+
+            def raise_for_status(self) -> None:
+                self.response.raise_for_status()
+
+            def json(self) -> dict[str, Any]:
+                payload = self.response.json()
+                if (not isinstance(payload, dict) or type(payload.get("Status")) is not int
+                        or type(payload.get("TC", False)) is not bool):
+                    raise DohError("Unreadable DNS TXT response")
+                answers = payload.get("Answer", [])
+                if not isinstance(answers, list):
+                    raise DohError("Unreadable DNS TXT response")
+                for row in answers:
+                    if not isinstance(row, dict) or type(row.get("type")) is not int or not isinstance(row.get("data"), str):
+                        raise DohError("Unreadable DNS TXT response")
+                    text = row["data"]
+                    if row["type"] == 16 and (
+                        payload["Status"] == 3
+                        or ('"' in text and not re.fullmatch(r'(?:[ \t]*"(?:[^"\\]|\\.)*")+[ \t]*', text))
+                    ):
+                        raise DohError("Unreadable DNS TXT response")
+                return payload
+
+        def __init__(self, session: Any) -> None:
+            self.session = session
+
+        def get(self, *args: Any, **kwargs: Any) -> _Response:
+            return self._Response(self.session.get(*args, **kwargs))
+
+    @staticmethod
+    def _directories(rows: Any) -> tuple[list[dict[str, Any]], dict[str, tuple[bool, bool | None]], bool]:
+        """Minimise the Directory rows and identify the verified base domains and aliases."""
+        domains: list[dict[str, Any]] = []
+        base: dict[str, tuple[bool, bool | None]] = {}
+        aliases: dict[str, tuple[bool, bool | None]] = {}
+        if not isinstance(rows, list):
+            return domains, base, True
+        malformed = not rows
+        for row in rows:
+            if not isinstance(row, dict):
+                malformed = True
+                continue
+            name = row.get("domainName", row.get("domain"))
+            verified, primary = row.get("verified", True), row.get("isPrimary")
+            if not is_safe_domain_name(name) or type(verified) is not bool or (
+                "isPrimary" in row and type(primary) is not bool
+            ):
+                malformed = True
+                continue
+            if not verified:
+                continue
+            name = name.lower()
+            base[name] = (False, primary)
+            domain_aliases = row.get("domainAliases", [])
+            if not isinstance(domain_aliases, list):
+                malformed = True
+                domain_aliases = []
+            kept_aliases = []
+            for alias in domain_aliases:
+                alias_name = alias.get("domainAliasName") if isinstance(alias, dict) else None
+                if not is_safe_domain_name(alias_name) or type(alias.get("verified", True)) is not bool:
+                    malformed = True
+                    continue
+                if alias.get("verified", True):
+                    alias_name = alias_name.lower()
+                    aliases[alias_name] = (True, False)
+                    kept_aliases.append({"domainAliasName": alias_name, "verified": True})
+            kept = {"domainName": name, "verified": True, "domainAliases": kept_aliases}
+            if primary is not None:
+                kept["isPrimary"] = primary
+            domains.append(kept)
+        return domains, base | {name: flags for name, flags in aliases.items() if name not in base}, malformed
+
+    @staticmethod
+    def _list_domains(client: Any, top: int | None) -> list[dict[str, Any]]:
+        rows = client.list_directory("domains", top=top)
+        if not isinstance(rows, list):
+            raise PolicyReadError("The Google Workspace domains list is unreadable.",
+                                  error_class=POLICY_MALFORMED_ERROR_CLASS)
+        return rows
+
+    def _posture(self, domain: str, resolver: _Txt, *, alias: bool) -> dict[str, Any]:
+        if alias:
+            return {"domain": domain, "dmarc": dmarc_with_tree_walk(domain, resolver)}
+        posture = collect_domain_posture(
+            domain, resolver, dkim_selectors=self._pinned_selectors, dkim_fallback_selectors=self._extra_selectors,
+        )
+        if posture.get("resolver_error"):
+            return posture
+        # An injected posture helper can provide summary-only evidence.
+        if "spf" not in posture or "dkim" not in posture:
+            return posture
+        selectors = dict.fromkeys((*self._pinned_selectors, *posture["dkim"]["selectors_missing"],
+                                   *posture["dkim"]["selectors_present"]))
+        posture["dkim"]["selectors"] = {
+            selector: [record for record in resolver.query(f"{selector}._domainkey.{domain}", "TXT")
+                       if record.startswith("v=DKIM1;")]
+            for selector in selectors
+        }
+        posture["spf"]["records"] = [
+            record for record in resolver.query(domain, "TXT") if re.match(r"v=spf1(?: |$)", record, re.IGNORECASE)
+        ]
+        posture["dmarc"] = dmarc_with_tree_walk(domain, resolver)
+        return posture
+
+    @staticmethod
+    def _resolver_failure(origin: str | None, detail: str) -> str:
+        # Keep a bounded status from the transport; free text can repeat a domain, TXT data or the request URL.
+        code = re.search(r"\b(?:HTTP |: )([45][0-9]{2})\b", detail)
+        rcode = re.search(r": (SERVFAIL|REFUSED|FORMERR|NOTIMP)\Z", detail)
+        status = f" ({code[1]})" if code else f" ({rcode[1]})" if rcode else ""
+        # Coverage already records the sanitised origin for the gap summary. The error only needs its host.
+        host = f" at {origin.removeprefix('https://')}" if origin else ""
+        return f"DNS resolver could not answer{host}{status}."
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")
@@ -1246,79 +1405,99 @@ class GoogleDnsPostureCollector:
                                        "DNS-over-HTTPS endpoint is not valid", coverage=[row])
         else:
             endpoint = getattr(resolver, "endpoint", endpoint)
+        session = getattr(resolver, "session", None)
+        if callable(getattr(session, "get", None)):
+            # The injected resolver can be shared by other collectors. Only this copy uses strict Google decoding.
+            resolver = copy(resolver)
+            resolver.session = self._DohSession(session)
+        txt = self._Txt(resolver)
         resolver_origin = doh_resolver_display(endpoint)
         log_event: AuditLogger | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
-        domains: list[dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         if client is not None:
-            domains = _call(
+            rows = _call(
                 collector=self.name,
                 name="domains",
                 coverage=coverage,
                 log_event=log_event,
                 endpoint="admin.directory.domains.list",
-                func=lambda: client.list_directory("domains", top=top),
+                func=lambda: self._list_domains(client, top),
             )
+            if coverage[0]["status"] == "failed":
+                coverage[0]["error"] = "The Google Workspace domains list read failed."
+            elif coverage[0].get("error"):
+                coverage[0]["error"] = "The Google Workspace domains list could not be read in full."
+            if top is not None and len(rows) > top:
+                rows = rows[:top]
+                record_truncation(coverage[0], list_name="domains", rows=len(rows), limit=top)
+                coverage[0]["result_limit"] = top
         elif not domain:
             row = _coverage(self.name, "domains", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
             return CollectorResult(self.name, "partial", {"domains": {"value": []}, "domainPosture": {"value": []}}, 0, "Google client unavailable", coverage=[row])
-        # Every verified domain of the customer is assessed. The --domain label stands in only when the
-        # directory list could not be read, so a secondary domain is not skipped when it can be listed.
-        domains = [entry for entry in domains if entry.get("verified") is not False]
-        if domain and not domains:
-            domains.append({"domainName": domain, "verified": True, "isPrimary": True})
+        else:
+            rows = [{"domainName": domain, "verified": True, "isPrimary": True}]
+        domains, names, malformed = self._directories(rows)
+        if malformed and (not coverage or coverage[0]["status"] == "ok"):
+            coverage.append(_coverage(
+                self.name, "domains", status="partial", item_count=len(domains), duration_ms=0,
+                endpoint="admin.directory.domains.list", error_class="malformed_response",
+                error="The Google Workspace domains list contains no usable rows or contains unreadable rows.",
+            ))
 
         assessments: list[dict[str, Any]] = []
-        for entry in domains[:top]:
-            domain_name = str(entry.get("domainName") or entry.get("domain") or "").strip()
-            if not domain_name:
-                continue
+        for domain_name, (alias, primary) in names.items():
             start = time.perf_counter()
+            detail = None
             try:
-                posture = collect_domain_posture(
-                    domain_name,
-                    resolver,
-                    dkim_selectors=("google",),
-                    dkim_fallback_selectors=("s1", "s2", "default", "k1", "mail"),
-                )
-                posture["isPrimary"] = entry.get("isPrimary")
-                status = "ok"
-                error_class = None
-                error = None
-                if posture.get("resolver_error"):
-                    status = "failed"
-                    error_class = "dns_resolver_error"
-                    error = posture["resolver_error"]
+                posture = self._posture(domain_name, txt, alias=alias)
+                detail = posture.get("resolver_error")
             except DohError as exc:
-                error = safe_resolver_diagnostic(exc)
+                detail = str(exc) or "DNS read failed"
+            error = self._resolver_failure(resolver_origin, detail) if detail else None
+            if error:
                 posture = {
                     "domain": domain_name,
-                    "resolver_error": error,
-                    **unknown_posture(("google",)),
+                    "resolver_error": "DNS resolver could not answer.",
+                    **unknown_posture(() if alias else (*self._pinned_selectors, *self._extra_selectors)),
                 }
-                status = "failed"
-                error_class = "dns_resolver_error"
+            else:
+                posture["resolver_error"] = False
+            posture.update(alias=alias, isPrimary=primary)
             assessments.append(posture)
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
             row = _coverage(
                 self.name,
                 f"posture:{domain_name}",
-                status=status,
+                status="failed" if error else "ok",
                 item_count=1,
                 duration_ms=duration_ms,
                 surface_type="dns",
                 endpoint=f"doh://{domain_name}",
-                error_class=error_class,
+                error_class="dns_resolver_error" if error else None,
                 error=error,
             )
-            if resolver_origin and error_class == "dns_resolver_error":
+            if resolver_origin and error:
                 row["doh_endpoint"] = resolver_origin
             coverage.append(row)
         partial = any(row.get("status") != "ok" for row in coverage)
+        domain_section: dict[str, Any] = {"value": domains}
+        domain_gap = next((row for row in coverage if row["name"] == "domains" and row["status"] != "ok"), None)
+        if domain_gap:
+            domain_section["status"] = "partial"
+            if domain_gap.get("collection_truncated"):
+                for key in ("collection_truncated", "truncation_reason", "result_limit"):
+                    if key in domain_gap:
+                        domain_section[key] = domain_gap[key]
+            if not domain_gap.get("collection_truncated") or domain_gap.get("truncation_reason") == REASON_PAGINATION_FAILED:
+                domain_section.update(error_class=domain_gap.get("error_class"), error=domain_gap.get("error"))
+        elif client is None:
+            domain_section.update(status="partial", error_class="incomplete_evidence",
+                                  error="Only the supplied domain label was available.")
         return CollectorResult(
             self.name,
             "partial" if partial else "ok",
-            {"domains": {"value": domains}, "domainPosture": {"value": assessments}},
+            {"domains": domain_section, "domainPosture": {"value": assessments}},
             len(domains) + len(assessments),
             coverage=coverage,
         )

@@ -857,7 +857,8 @@ def _resolver_label(doh_endpoint: str) -> str:
 def google_dns_notice(doh_endpoint: str) -> str:
     """The data-handling notice for the Google DNS posture lookups, with how to turn them off."""
     return (
-        "Selected Google DNS posture collection sends the customer's verified domain names to "
+        "Selected Google DNS posture collection sends the customer's verified domain and alias names, "
+        "and may send their parent DNS names for DMARC, to "
         f"{_resolver_label(doh_endpoint)}. Only domain names, no user data, are sent to the resolver. "
         "Deselect it with --exclude google_dns_posture (the identity and collaboration presets omit it); "
         f"use --doh-endpoint or set {DOH_ENDPOINT_ENV} to use another DNS-over-HTTPS resolver."

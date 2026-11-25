@@ -1488,6 +1488,16 @@ Report and compare code can use this database as the durable lookup surface inst
 
 No list read drops its next-page link silently. `defender.secureScoreControlProfiles`, `defender.secureScores`, `licensing.subscribedSkus` and `identity.domains` were unpaged reads (the first returned 200 rows and a next link in a live run); they now go through the shared paging path without `$top` and are kept whole inline (the endpoint-spec flag `inline: true`), so an operator `--top` below the list length cuts them like any other list (below about 250 it makes `defender` partial). An unpaged response that still carries `@odata.nextLink` is a gap with `truncation_reason` `pagination_not_followed`, and the capability-gated list endpoints (`/security/incidents`, `/security/alerts_v2`, `/identityGovernance/appConsent/appConsentRequests`) follow the next link or record the same reason. A test fails the build when a collector reads a list with a direct `get_json`.
 
+**Google Workspace DNS posture.** Each new normalised `google_domain_posture`
+record identifies an alias with `alias` and carries a Boolean `resolver_error`.
+Successful DMARC reads carry `records`, the selected policy's `query_name`
+and whether it was `inherited` from a parent. A completed walk with no policy
+has an empty record list and the author query name. Base domains also carry
+SPF `records` and a DKIM `selectors` map, with empty lists for answered
+selectors that published no matching record. Alias domains are read for DMARC.
+Failed resolver reads leave record evidence unknown, and an incomplete
+Directory read marks the domain inventory partial.
+
 **DKIM CNAME parity.** For raw SCuBA records, a NOERROR CNAME-only answer is retained as `rdata`,
 matching the pinned ScubaGear DoH fallback, and stops the selector walk as a non-key answer.
 When the response instead carries NXDOMAIN (DoH `Status: 3`) with only CNAME answers, the walk

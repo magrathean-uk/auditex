@@ -392,10 +392,13 @@ request runs, the `urllib3` and `requests` loggers record nothing, so a
 DEBUG log never holds the resolver's path or query.
 
 Google Workspace runs with the `google_dns_posture` collector (in the
-`core-security`, `mail` and `everything` presets) send each verified domain
-name to the same resolver: SPF, DMARC, MTA-STS, TLS-RPT and BIMI TXT lookups
-and up to six DKIM selector names. Only domain names are sent, and a Google run
-makes no HTTPS read of the domains. A Google run takes the resolver from
+`core-security`, `mail` and `everything` presets) use the existing Directory
+domain list. They send TXT queries for SPF, DMARC, MTA-STS, TLS-RPT, BIMI and
+up to eight DKIM selectors for verified base domains. DMARC also uses verified
+alias names and, when needed, parent DNS names. Only DNS names and the TXT
+query type are sent to the resolver. A Google run makes no HTTPS read of the
+domains. Google Workspace resolver errors retain the resolver host and a
+recognised status. A Google run takes the resolver from
 `--doh-endpoint URL`, else `AUDITEX_DOH_ENDPOINT`, and names only its host in
 the notice and `data-handling.json`. Deselect the
 collector with `--exclude google_dns_posture`; the `identity` and

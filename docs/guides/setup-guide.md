@@ -126,13 +126,15 @@ Admin flow:
 5. Add the OAuth app ID and paste the generated comma-separated scopes. Enable the Cloud Identity API for the `cloud-identity.policies.readonly` and `cloud-identity.inboundsso.readonly` reads.
 6. Run the generated doctor and probe commands.
 
-Google DNS posture (`google_dns_posture`, in the `core-security`, `mail` and `everything` presets) sends the
-customer's verified domain names, and nothing else, to the public Cloudflare DNS-over-HTTPS resolver
-(`https://cloudflare-dns.com/dns-query`), or to the resolver named by `--doh-endpoint URL` or `AUDITEX_DOH_ENDPOINT`. The run prints this notice
+Google DNS posture (`google_dns_posture`, in the `core-security`, `mail` and `everything` presets) sends TXT
+queries for verified domains to the configured DNS-over-HTTPS resolver. DMARC also queries verified aliases
+and may query parent DNS names. The default resolver is Cloudflare (`https://cloudflare-dns.com/dns-query`).
+Use `--doh-endpoint URL` or `AUDITEX_DOH_ENDPOINT` to select another resolver. The run prints this notice
 on stderr before collection and writes it to `data-handling.json` and the report. Turn it off with
 `--exclude google_dns_posture`, or use the `identity` or `collaboration` preset.
 
 `--domain` is a label. Users and groups are listed for the whole customer, and the internal domains (primary, secondary and alias) come from the Directory domains list.
+DNS posture uses the Directory domain list to determine which domains to assess. If the list fails, DNS coverage is incomplete.
 
 Accepted risks go in a waiver file, the same JSON format as the Microsoft 365 run. Each waiver names a `finding_id` or a `rule_id` (a `collector` or `category` only narrows it), and an expired waiver is ignored. An invalid file stops the run before any API call:
 

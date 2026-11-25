@@ -507,6 +507,57 @@ def scuba_dmarc_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | N
     return {"domain": domain, "rdata": records, "log": log}
 
 
+def dmarc_with_tree_walk(domain: str, resolver: DnsResolver) -> dict[str, Any]:
+    """Google's DMARC record selection (ScubaGoggles v1.1.0, provider.py:445-569)."""
+    def read(name: str) -> tuple[list[str], dict[str, str]]:
+        records = resolver.query(name, "TXT")
+        if not isinstance(records, list) or any(not isinstance(record, str) for record in records):
+            raise DohError("Unreadable DNS TXT answers")
+        candidates = []
+        for record in records:
+            text = re.sub(r"[ \t]*([=;])[ \t]*", r"\1", record)
+            if text == "v=DMARC1" or text.startswith("v=DMARC1;"):
+                candidates.append(text)
+        tags: dict[str, str] = {}
+        if len(candidates) == 1:
+            for tag in filter(None, candidates[0].split(";")):
+                if tag.count("=") != 1:
+                    return records, {}
+                key, value = tag.split("=")
+                if key in tags:
+                    return records, {}
+                tags[key] = value
+        return records, tags
+
+    author = name = f"_dmarc.{domain}"
+    author_records, tags = read(author)
+    records = author_records
+    if not tags:
+        labels = domain.split(".")
+        selected_name, selected_records = author, []
+        previous_name, previous_records, previous_tags = author, records, tags
+        for offset in range(max(1, len(labels) - 7), len(labels)):
+            name = "_dmarc." + ".".join(labels[offset:])
+            records, tags = read(name)
+            if tags:
+                selected_name, selected_records = name, records
+            if tags.get("psd") == "n":
+                break
+            if tags.get("psd") == "y":
+                if previous_tags:
+                    selected_name, selected_records = previous_name, previous_records
+                break
+            previous_name, previous_records, previous_tags = name, records, tags
+        name, records = selected_name, selected_records
+    summary = _summarize_dmarc(records)
+    if not records:
+        # Retain the existing duplicate-record diagnostic when there is no effective DMARC policy.
+        author_summary = _summarize_dmarc(author_records)
+        if author_summary.get("multiple_records"):
+            summary = author_summary
+    return {**summary, "query_name": name, "inherited": name != author, "records": records}
+
+
 def parse_spf(record: str) -> dict[str, Any] | None:
     text = record.strip()
     if not text.lower().startswith("v=spf1"):
