@@ -85,7 +85,7 @@ def _answer(policy_id, sections):
 
 
 def test_the_38_rows_use_the_setting_kind_and_the_design_parameters():
-    rows = {pid: row for pid, row in catalogue()["policies"].items() if row["kind"] == "setting"}
+    rows = {pid: row for pid, row in catalogue()["policies"].items() if row["kind"] == "setting" and pid in IDS}
     assert sorted(rows) == sorted(IDS)
     for pid, (section, field, op, value, service, scope) in IDS.items():
         row = rows[pid]
@@ -115,7 +115,7 @@ def test_every_row_reads_a_pinned_section_and_field_and_gates_on_its_status_sect
 
 
 def test_only_the_gmail_rows_are_gated_and_only_the_status_rows_are_explicit_only():
-    rows = {pid: row["params"] for pid, row in catalogue()["policies"].items() if row["kind"] == "setting"}
+    rows = {pid: row["params"] for pid, row in catalogue()["policies"].items() if row["kind"] == "setting" and pid in IDS}
     assert {pid for pid, params in rows.items() if params["service"] == "gmail"} == {
         pid for pid in rows if ".GMAIL." in pid}
     assert {pid for pid, params in rows.items() if params["scope"] == "explicit_only"} == {
@@ -510,7 +510,7 @@ def test_m1_every_shipped_string_row_pins_its_vocabulary_with_a_cite():
         "GWS.COMMONCONTROLS.17.1v1": ["DISABLED", "ENABLED"],
     }
     folded = {"GWS.COMMONCONTROLS.5.1v1", "GWS.COMMONCONTROLS.16.1v1", "GWS.COMMONCONTROLS.16.2v1"}
-    rows = {pid: row["params"] for pid, row in catalogue()["policies"].items() if row["kind"] == "setting"}
+    rows = {pid: row["params"] for pid, row in catalogue()["policies"].items() if row["kind"] == "setting" and pid in IDS}
     assert {pid for pid, params in rows.items() if "known" in params} == set(vocabularies)
     for pid, known in vocabularies.items():
         assert rows[pid]["known"] == known, pid

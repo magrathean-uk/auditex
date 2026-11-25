@@ -1,1 +1,721 @@
-{"kinds": {}, "policies": {}}
+{
+  "kinds": {},
+  "policies": {
+    "GWS.DRIVEDOCS.1.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "drive_and_docs_external_sharing",
+        "field": "externalSharingMode",
+        "op": "not_in",
+        "value": [
+          "ALLOWLISTED_DOMAINS",
+          "DISALLOWED"
+        ],
+        "service": "drive_and_docs",
+        "scope": "all_units",
+        "known": [
+          "ALLOWED",
+          "ALLOWLISTED_DOMAINS",
+          "DISALLOWED"
+        ],
+        "source": "SG:scubagoggles/rego/Drive.rego:15-52"
+      },
+      "rule_id": "GWS.DRIVEDOCS.1.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.6v1": {
+      "kind": "setting",
+      "params": {
+        "section": "drive_and_docs_external_sharing",
+        "field": "accessCheckerSuggestions",
+        "op": "ne",
+        "value": "RECIPIENTS_ONLY",
+        "service": "drive_and_docs",
+        "scope": "all_units",
+        "known": [
+          "RECIPIENTS_ONLY",
+          "RECIPIENTS_OR_AUDIENCE",
+          "RECIPIENTS_OR_AUDIENCE_OR_PUBLIC"
+        ],
+        "source": "SG:scubagoggles/rego/Drive.rego:324-348"
+      },
+      "rule_id": "GWS.DRIVEDOCS.1.6v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.8v1": {
+      "kind": "setting",
+      "params": {
+        "section": "drive_and_docs_general_access_default",
+        "field": "defaultFileAccess",
+        "op": "ne",
+        "value": "PRIVATE_TO_OWNER",
+        "service": "drive_and_docs",
+        "scope": "all_units",
+        "known": [
+          "PRIVATE_TO_OWNER",
+          "PRIMARY_AUDIENCE_WITH_LINK",
+          "PRIMARY_AUDIENCE_WITH_LINK_OR_SEARCH",
+          "LINK_SHARING_PRIVATE"
+        ],
+        "source": "SG:scubagoggles/rego/Drive.rego:422-447; SG:scubagoggles/policy_api.py:403"
+      },
+      "rule_id": "GWS.DRIVEDOCS.1.8v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.1.9v1": {
+      "kind": "setting",
+      "params": {
+        "section": "drive_and_docs_external_file_warning",
+        "field": "highlightingEnabled",
+        "op": "ne",
+        "value": true,
+        "service": "drive_and_docs",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.DRIVEDOCS.1.9v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.2.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "drive_and_docs_shared_drive_creation",
+        "field": "allowManagersToOverrideSettings",
+        "op": "ne",
+        "value": false,
+        "service": "drive_and_docs",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.DRIVEDOCS.2.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.2.2v1": {
+      "kind": "setting",
+      "params": {
+        "section": "drive_and_docs_shared_drive_creation",
+        "field": "allowNonMemberAccess",
+        "op": "ne",
+        "value": true,
+        "service": "drive_and_docs",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.DRIVEDOCS.2.2v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.DRIVEDOCS.4.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "drive_and_docs_drive_sdk",
+        "field": "enableDriveSdkApiAccess",
+        "op": "ne",
+        "value": false,
+        "service": "drive_and_docs",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.DRIVEDOCS.4.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.1.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "calendar_primary_calendar_max_allowed_external_sharing",
+        "field": "maxAllowedExternalSharing",
+        "op": "ne",
+        "value": "EXTERNAL_FREE_BUSY_ONLY",
+        "service": "calendar",
+        "scope": "all_units",
+        "known": [
+          "EXTERNAL_FREE_BUSY_ONLY",
+          "EXTERNAL_ALL_INFO_READ_ONLY",
+          "EXTERNAL_ALL_INFO_READ_WRITE",
+          "EXTERNAL_ALL_INFO_READ_WRITE_MANAGE"
+        ],
+        "source": "SG:scubagoggles/rego/Calendar.rego:13-39"
+      },
+      "rule_id": "GWS.CALENDAR.1.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.1.2v1": {
+      "kind": "setting",
+      "params": {
+        "section": "calendar_secondary_calendar_max_allowed_external_sharing",
+        "field": "maxAllowedExternalSharing",
+        "op": "ne",
+        "value": "EXTERNAL_FREE_BUSY_ONLY",
+        "service": "calendar",
+        "scope": "all_units",
+        "known": [
+          "EXTERNAL_FREE_BUSY_ONLY",
+          "EXTERNAL_ALL_INFO_READ_ONLY",
+          "EXTERNAL_ALL_INFO_READ_WRITE",
+          "EXTERNAL_ALL_INFO_READ_WRITE_MANAGE"
+        ],
+        "source": "SG:scubagoggles/rego/Calendar.rego:13-39,59-78"
+      },
+      "rule_id": "GWS.CALENDAR.1.2v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.2.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "calendar_external_invitations",
+        "field": "warnOnInvite",
+        "op": "ne",
+        "value": true,
+        "service": "calendar",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.CALENDAR.2.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.3.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "calendar_interoperability",
+        "field": "enableInteroperability",
+        "op": "ne",
+        "value": false,
+        "service": "calendar",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.CALENDAR.3.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CALENDAR.4.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "calendar_appointment_schedules",
+        "field": "enablePayments",
+        "op": "ne",
+        "value": false,
+        "service": "calendar",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.CALENDAR.4.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.1.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "chat_chat_history",
+        "field": "historyOnByDefault",
+        "op": "eq",
+        "value": false,
+        "service": "chat",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.CHAT.1.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.1.2v1": {
+      "kind": "setting",
+      "params": {
+        "section": "chat_chat_history",
+        "field": "allowUserModification",
+        "op": "ne",
+        "value": false,
+        "service": "chat",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.CHAT.1.2v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.2.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "chat_chat_file_sharing",
+        "field": "externalFileSharing",
+        "op": "ne",
+        "value": "NO_FILES",
+        "service": "chat",
+        "scope": "all_units",
+        "known": [
+          "NO_FILES",
+          "ALL_FILES",
+          "IMAGES_ONLY",
+          "FILE_SHARING_OPTION_UNSPECIFIED"
+        ],
+        "source": "SG:scubagoggles/rego/Chat.rego:97-121"
+      },
+      "rule_id": "GWS.CHAT.2.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CHAT.3.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "chat_space_history",
+        "field": "historyState",
+        "op": "ne",
+        "value": "HISTORY_ALWAYS_ON",
+        "service": "chat",
+        "scope": "all_units",
+        "known": [
+          "HISTORY_ALWAYS_ON",
+          "HISTORY_ALWAYS_OFF",
+          "DEFAULT_HISTORY_OFF",
+          "DEFAULT_HISTORY_ON",
+          "HISTORY_STATE_UNSPECIFIED"
+        ],
+        "source": "SG:scubagoggles/rego/Chat.rego:145-174"
+      },
+      "rule_id": "GWS.CHAT.3.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.1.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "meet_meet_joining",
+        "field": "allowedAudience",
+        "op": "not_in",
+        "value": [
+          "TRUSTED",
+          "RESTRICTED"
+        ],
+        "service": "meet",
+        "scope": "all_units",
+        "known": [
+          "TRUSTED",
+          "RESTRICTED",
+          "OPEN",
+          "ALLOWED_AUDIENCE_UNSPECIFIED"
+        ],
+        "source": "SG:scubagoggles/rego/Meet.rego:16-42"
+      },
+      "rule_id": "GWS.MEET.1.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.2.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "meet_safety_access",
+        "field": "meetingsAllowedToJoin",
+        "op": "not_in",
+        "value": [
+          "SAME_ORGANIZATION_ONLY",
+          "ANY_WORKSPACE_ORGANIZATION"
+        ],
+        "service": "meet",
+        "scope": "all_units",
+        "known": [
+          "SAME_ORGANIZATION_ONLY",
+          "ANY_WORKSPACE_ORGANIZATION",
+          "ALL"
+        ],
+        "source": "SG:scubagoggles/rego/Meet.rego:66-90"
+      },
+      "rule_id": "GWS.MEET.2.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.3.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "meet_safety_host_management",
+        "field": "enableHostManagement",
+        "op": "ne",
+        "value": true,
+        "service": "meet",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.MEET.3.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.4.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "meet_safety_external_participants",
+        "field": "enableExternalLabel",
+        "op": "ne",
+        "value": true,
+        "service": "meet",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.MEET.4.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.5.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "meet_automatic_recording",
+        "field": "enabled",
+        "op": "eq",
+        "value": true,
+        "service": "meet",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.MEET.5.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.MEET.5.2v1": {
+      "kind": "setting",
+      "params": {
+        "section": "meet_automatic_transcription",
+        "field": "enabled",
+        "op": "eq",
+        "value": true,
+        "service": "meet",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.MEET.5.2v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.1.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "groups_for_business_groups_sharing",
+        "field": "collaborationCapability",
+        "op": "ne",
+        "value": "DOMAIN_USERS_ONLY",
+        "service": "groups_for_business",
+        "scope": "all_units",
+        "known": [
+          "DOMAIN_USERS_ONLY",
+          "ANYONE_CAN_ACCESS"
+        ],
+        "source": "SG:scubagoggles/rego/Groups.rego:19-40"
+      },
+      "rule_id": "GWS.GROUPS.1.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.1.2v1": {
+      "kind": "setting",
+      "params": {
+        "section": "groups_for_business_groups_sharing",
+        "field": "ownersCanAllowExternalMembers",
+        "op": "ne",
+        "value": false,
+        "service": "groups_for_business",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.GROUPS.1.2v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.1.3v1": {
+      "kind": "setting",
+      "params": {
+        "section": "groups_for_business_groups_sharing",
+        "field": "ownersCanAllowIncomingMailFromPublic",
+        "op": "ne",
+        "value": false,
+        "service": "groups_for_business",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.GROUPS.1.3v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.2.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "groups_for_business_groups_sharing",
+        "field": "createGroupsAccessLevel",
+        "op": "ne",
+        "value": "ADMIN_ONLY",
+        "service": "groups_for_business",
+        "scope": "all_units",
+        "known": [
+          "ADMIN_ONLY",
+          "USERS_IN_DOMAIN",
+          "ANYONE_CAN_CREATE"
+        ],
+        "source": "SG:scubagoggles/rego/Groups.rego:134-157"
+      },
+      "rule_id": "GWS.GROUPS.2.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.GROUPS.3.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "groups_for_business_groups_sharing",
+        "field": "viewTopicsDefaultAccessLevel",
+        "op": "ne",
+        "value": "GROUP_MEMBERS",
+        "service": "groups_for_business",
+        "scope": "all_units",
+        "known": [
+          "OWNERS",
+          "MANAGERS",
+          "GROUP_MEMBERS",
+          "DOMAIN_USERS",
+          "ANYONE_CAN_VIEW_TOPICS"
+        ],
+        "source": "SG:scubagoggles/rego/Groups.rego:181-208"
+      },
+      "rule_id": "GWS.GROUPS.3.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.SITES.1.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "sites_service_status",
+        "field": "serviceState",
+        "op": "eq",
+        "value": "ENABLED",
+        "service": null,
+        "scope": "explicit_only",
+        "known": [
+          "DISABLED",
+          "ENABLED"
+        ],
+        "case": "fold",
+        "source": "SG:scubagoggles/rego/Sites.rego:11-65; SG:scubagoggles/rego/Utils.rego:605-637 (AppExplicitStatus folds case)"
+      },
+      "rule_id": "GWS.SITES.1.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.1.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "classroom_class_membership",
+        "field": "whoCanJoinClasses",
+        "op": "not_in",
+        "value": [
+          "ANYONE_IN_DOMAIN",
+          "ANYONE_IN_ALLOWLISTED_DOMAINS"
+        ],
+        "service": "classroom",
+        "scope": "all_units",
+        "known": [
+          "ANYONE_IN_DOMAIN",
+          "ANYONE_IN_ALLOWLISTED_DOMAINS",
+          "ANY_GOOGLE_WORKSPACE_USER",
+          "ANYONE"
+        ],
+        "source": "SG:scubagoggles/rego/Classroom.rego:13-39"
+      },
+      "rule_id": "GWS.CLASSROOM.1.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.1.2v1": {
+      "kind": "setting",
+      "params": {
+        "section": "classroom_class_membership",
+        "field": "whichClassesCanUsersJoin",
+        "op": "not_in",
+        "value": [
+          "CLASSES_IN_DOMAIN",
+          "CLASSES_IN_ALLOWLISTED_DOMAINS"
+        ],
+        "service": "classroom",
+        "scope": "all_units",
+        "known": [
+          "CLASSES_IN_DOMAIN",
+          "CLASSES_IN_ALLOWLISTED_DOMAINS",
+          "ANY_GOOGLE_WORKSPACE_CLASS"
+        ],
+        "source": "SG:scubagoggles/rego/Classroom.rego:61-85"
+      },
+      "rule_id": "GWS.CLASSROOM.1.2v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.2.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "classroom_api_data_access",
+        "field": "enableApiAccess",
+        "op": "ne",
+        "value": false,
+        "service": "classroom",
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.CLASSROOM.2.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.3.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "classroom_roster_import",
+        "field": "rosterImportOption",
+        "op": "ne",
+        "value": "OFF",
+        "service": "classroom",
+        "scope": "all_units",
+        "known": [
+          "OFF",
+          "ON_CLEVER"
+        ],
+        "source": "SG:scubagoggles/rego/Classroom.rego:160-181"
+      },
+      "rule_id": "GWS.CLASSROOM.3.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.4.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "classroom_student_unenrollment",
+        "field": "whoCanUnenrollStudents",
+        "op": "ne",
+        "value": "TEACHERS_ONLY",
+        "service": "classroom",
+        "scope": "all_units",
+        "known": [
+          "TEACHERS_ONLY",
+          "STUDENTS_AND_TEACHERS"
+        ],
+        "source": "SG:scubagoggles/rego/Classroom.rego:205-226"
+      },
+      "rule_id": "GWS.CLASSROOM.4.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.CLASSROOM.5.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "classroom_teacher_permissions",
+        "field": "whoCanCreateClasses",
+        "op": "ne",
+        "value": "VERIFIED_TEACHERS_ONLY",
+        "service": "classroom",
+        "scope": "all_units",
+        "known": [
+          "VERIFIED_TEACHERS_ONLY",
+          "ALL_PENDING_AND_VERIFIED_TEACHERS",
+          "ANYONE_IN_DOMAIN"
+        ],
+        "source": "SG:scubagoggles/rego/Classroom.rego:251-274"
+      },
+      "rule_id": "GWS.CLASSROOM.5.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.ASSUREDCONTROLS.1.1v1": {
+      "kind": "setting",
+      "params": {
+        "section": "access_approval_axa_user_scoping",
+        "field": "requiresCustomerApproval",
+        "op": "ne",
+        "value": true,
+        "service": null,
+        "scope": "all_units"
+      },
+      "rule_id": "GWS.ASSUREDCONTROLS.1.1v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    },
+    "GWS.ASSUREDCONTROLS.1.2v1": {
+      "kind": "setting",
+      "params": {
+        "section": "access_management_user_scoping",
+        "field": "accessManagementRegime",
+        "op": "not_in",
+        "value": [
+          "CJIS_IRS_1075_GOOGLE_STAFF",
+          "US_GOOGLE_STAFF"
+        ],
+        "service": null,
+        "scope": "all_units",
+        "known": [
+          "CJIS_IRS_1075_GOOGLE_STAFF",
+          "US_GOOGLE_STAFF",
+          "PREFERENCE_UNSPECIFIED",
+          "EU_GOOGLE_STAFF"
+        ],
+        "source": "SG:scubagoggles/rego/Assuredcontrols.rego:46-69"
+      },
+      "rule_id": "GWS.ASSUREDCONTROLS.1.2v1.setting",
+      "sections": [
+        "gws_tenant",
+        "gws_policies"
+      ]
+    }
+  }
+}
