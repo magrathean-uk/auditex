@@ -1,1 +1,511 @@
-{"kinds": {}, "policies": {}}
+{
+  "kinds": {
+    "setting_event": {
+      "cells": {
+        "section_not_collected": {
+          "verdict": "not_assessed",
+          "reason_code": "required_evidence_section_not_collected",
+          "evidence_kind": null,
+          "limitations": [
+            "required_evidence_section_not_collected",
+            "required_evidence_section_not_collected:<section>"
+          ],
+          "recommendations": [
+            "collect_missing_evidence_section"
+          ]
+        },
+        "section_shape_unusable": {
+          "verdict": "not_assessed",
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: the tenant topology, the setting-change events or the policy section has the wrong shape."
+          ],
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ]
+        },
+        "event_read_incomplete": {
+          "verdict": "not_assessed",
+          "reason_code": "data_unavailable_event_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the admin setting-change event read was cut or incomplete, so the last change per unit is not known."
+          ],
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ]
+        },
+        "policy_read_incomplete": {
+          "verdict": "not_assessed",
+          "reason_code": "data_unavailable_policy_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the policy read was cut or incomplete, so the service status is not known."
+          ],
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ]
+        },
+        "service_off_everywhere": {
+          "verdict": "not_applicable",
+          "reason_code": "service_off_everywhere",
+          "reason_texts": [
+            "Not applicable: the service is off in every unit."
+          ]
+        },
+        "service_status_absent": {
+          "verdict": "not_assessed",
+          "reason_code": "data_unavailable_service_status_absent",
+          "reason_texts": [
+            "Data unavailable: the top-level unit has no readable service status and no unit has the service explicitly on."
+          ],
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ]
+        },
+        "unit_violates": {
+          "verdict": "not_met",
+          "reason_code": "unit_violates",
+          "reason_texts": [
+            "Requirement not met: the last logged setting change for at least one unit sets a non-compliant value."
+          ]
+        },
+        "event_value_unusable": {
+          "verdict": "not_assessed",
+          "reason_code": "data_unusable_event_value",
+          "reason_texts": [
+            "Data unusable: a relevant setting-change event has a missing, unknown or unreadable value, time or unit, or two latest events disagree."
+          ],
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ]
+        },
+        "no_setting_event": {
+          "verdict": "not_assessed",
+          "reason_code": "data_unavailable_no_setting_event",
+          "reason_texts": [
+            "Data unavailable: the admin logs hold no current setting change at the top-level unit for every setting this policy reads; logs are kept about six months, and a reset to the default is not logged as a value."
+          ],
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ]
+        },
+        "no_unit_violates": {
+          "verdict": "met",
+          "reason_code": "no_unit_violates",
+          "reason_texts": [
+            "Requirement met: the top-level unit has a logged setting change for every setting this policy reads, and the last change for every unit is compliant."
+          ]
+        }
+      }
+    }
+  },
+  "policies": {
+    "GWS.ASSUREDCONTROLS.2.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.ASSUREDCONTROLS.2.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "CalendarNonRegionalizedFunctionalityStateSettingsProto state"
+            ],
+            "good_values": [
+              "DISABLED"
+            ],
+            "bad_values": [
+              "ENABLED"
+            ]
+          },
+          {
+            "setting_names": [
+              "DocsNonRegionalizedFunctionalityStateSettingsProto state"
+            ],
+            "good_values": [
+              "DISABLED"
+            ],
+            "bad_values": [
+              "ENABLED"
+            ]
+          },
+          {
+            "setting_names": [
+              "GmailNonRegionalizedFunctionalityStateSettingsProto state"
+            ],
+            "good_values": [
+              "DISABLED"
+            ],
+            "bad_values": [
+              "ENABLED"
+            ]
+          },
+          {
+            "setting_names": [
+              "ChatNonRegionalizedFunctionalityStateSettingsProto state"
+            ],
+            "good_values": [
+              "DISABLED"
+            ],
+            "bad_values": [
+              "ENABLED"
+            ]
+          },
+          {
+            "setting_names": [
+              "MeetNonRegionalizedFunctionalityStateSettingsProto state"
+            ],
+            "good_values": [
+              "DISABLED"
+            ],
+            "bad_values": [
+              "ENABLED"
+            ]
+          },
+          {
+            "setting_names": [
+              "GeminiNonRegionalizedFunctionalityStateSettingsProto state"
+            ],
+            "good_values": [
+              "DISABLED"
+            ],
+            "bad_values": [
+              "ENABLED"
+            ]
+          }
+        ],
+        "groups": true
+      }
+    },
+    "GWS.CHAT.5.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.CHAT.5.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "ContentReportingProto one_on_one_reporting"
+            ],
+            "good_values": [
+              "CONTENT_REPORTING_STATE_ENABLED"
+            ],
+            "bad_values": [
+              "CONTENT_REPORTING_STATE_DISABLED"
+            ]
+          },
+          {
+            "setting_names": [
+              "ContentReportingProto group_chat_reporting"
+            ],
+            "good_values": [
+              "CONTENT_REPORTING_STATE_ENABLED"
+            ],
+            "bad_values": [
+              "CONTENT_REPORTING_STATE_DISABLED"
+            ]
+          },
+          {
+            "setting_names": [
+              "ContentReportingProto room_reporting"
+            ],
+            "good_values": [
+              "CONTENT_REPORTING_STATE_ENABLED"
+            ],
+            "bad_values": [
+              "CONTENT_REPORTING_STATE_DISABLED"
+            ]
+          },
+          {
+            "setting_names": [
+              "ContentReportingProto room_restrictions"
+            ],
+            "good_values": [
+              "SPACE_RESTRICTIONS_NO_RESTRICTIONS"
+            ],
+            "bad_values": [
+              "SPACE_RESTRICTIONS_DISCOVERABLE_SPACES_ONLY"
+            ]
+          }
+        ],
+        "top_delete": "violates"
+      }
+    },
+    "GWS.CHAT.5.2v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.CHAT.5.2v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "ContentReportingProto report_types"
+            ],
+            "required_values": [
+              "system_violation: CONFIDENTIAL_INFORMATION",
+              "system_violation: DISCRIMINATION",
+              "system_violation: EXPLICIT_CONTENT",
+              "system_violation: HARASSMENT",
+              "system_violation: OTHER",
+              "system_violation: SENSITIVE_INFORMATION",
+              "system_violation: SPAM"
+            ]
+          }
+        ],
+        "top_delete": "violates"
+      }
+    },
+    "GWS.COMMONCONTROLS.2.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.COMMONCONTROLS.2.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "event_names": [
+              "TOGGLE_CAA_ENABLEMENT"
+            ],
+            "good_values": [
+              "ENABLED"
+            ],
+            "bad_values": [
+              "DISABLED"
+            ]
+          }
+        ]
+      }
+    },
+    "GWS.COMMONCONTROLS.3.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.COMMONCONTROLS.3.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "SsoPolicyProto challenge_selection_behavior"
+            ],
+            "good_values": [
+              "PERFORM_CHALLENGE_SELECTION"
+            ],
+            "bad_values": [
+              "BYPASS_ADDITIONAL_CHALLENGES"
+            ]
+          }
+        ]
+      }
+    },
+    "GWS.COMMONCONTROLS.3.2v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.COMMONCONTROLS.3.2v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "SsoPolicyProto sso_profile_challenge_selection_behavior"
+            ],
+            "good_values": [
+              "SSO_PROFILES_PERFORM_CHALLENGE_SELECTION"
+            ],
+            "bad_values": [
+              "SSO_PROFILES_BYPASS_ADDITIONAL_CHALLENGES"
+            ]
+          }
+        ]
+      }
+    },
+    "GWS.GEMINI.1.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.GEMINI.1.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_policies",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "BardNonDuetEnablementProto enable_bard_non_duet_access"
+            ],
+            "good_values": [
+              "false"
+            ],
+            "bad_values": [
+              "true"
+            ]
+          }
+        ],
+        "groups": true,
+        "service": "gemini_app"
+      }
+    },
+    "GWS.GEMINI.2.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.GEMINI.2.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "Beta Gemini Features Beta Features enabled",
+              "GenAiAlphaSettingsProto alpha_enabled"
+            ],
+            "good_values": [
+              "false"
+            ],
+            "bad_values": [
+              "true"
+            ]
+          }
+        ],
+        "groups": true
+      }
+    },
+    "GWS.GMAIL.13.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.GMAIL.13.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "OutOfDomainWarningProto disable_untrusted_recipient_warning"
+            ],
+            "good_values": [
+              "false"
+            ],
+            "bad_values": [
+              "true"
+            ]
+          }
+        ]
+      }
+    },
+    "GWS.GMAIL.16.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.GMAIL.16.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "AttachmentDeepScanningSettingsProto deep_scanning_enabled"
+            ],
+            "good_values": [
+              "true"
+            ],
+            "bad_values": [
+              "false"
+            ]
+          }
+        ]
+      }
+    },
+    "GWS.MEET.6.1v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.MEET.6.1v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "MeetGenAiSmartNotesDocAccessProto manage_smart_notes_doc_access"
+            ],
+            "good_values": [
+              "false"
+            ],
+            "bad_values": [
+              "true"
+            ]
+          }
+        ],
+        "groups": true
+      }
+    },
+    "GWS.MEET.6.2v1": {
+      "kind": "setting_event",
+      "rule_id": "GWS.MEET.6.2v1.setting_event",
+      "sections": [
+        "gws_tenant",
+        "gws_setting_events"
+      ],
+      "params": {
+        "setting_slots": [
+          {
+            "setting_names": [
+              "MeetGenAiSmartNotesDocAccessProto default_smart_notes_doc_access"
+            ],
+            "good_values": [
+              "HOSTS_AND_COHOSTS_ONLY",
+              "IN_DOMAIN"
+            ],
+            "bad_values": [
+              "EVERYONE"
+            ]
+          }
+        ],
+        "groups": true
+      }
+    }
+  }
+}
