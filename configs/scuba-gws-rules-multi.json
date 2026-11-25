@@ -1,1 +1,781 @@
-{"kinds": {}, "policies": {}}
+{
+ "kinds": {
+  "settings_multi": {
+   "cells": {
+    "section_not_collected": {
+     "evidence_kind": null,
+     "verdict": "not_assessed",
+     "reason_code": "required_evidence_section_not_collected",
+     "limitations": [
+      "required_evidence_section_not_collected",
+      "required_evidence_section_not_collected:<section>"
+     ],
+     "recommendations": [
+      "collect_missing_evidence_section"
+     ]
+    },
+    "section_shape_unusable": {
+     "evidence_kind": "unusable",
+     "limitations": [
+      "evidence_unusable",
+      "evidence_unusable:<section>:unusable"
+     ],
+     "recommendations": [
+      "recollect_unusable_evidence"
+     ],
+     "verdict": "not_assessed",
+     "reason_code": "data_unusable_section_shape",
+     "reason_texts": [
+      "Data unusable: the Google Workspace tenant or policy evidence has the wrong shape, so no unit can be placed."
+     ]
+    },
+    "policy_read_incomplete": {
+     "evidence_kind": "absent",
+     "limitations": [
+      "evidence_unusable",
+      "evidence_unusable:<section>:absent"
+     ],
+     "recommendations": [
+      "recollect_unusable_evidence"
+     ],
+     "verdict": "not_assessed",
+     "reason_code": "data_unavailable_policy_read_incomplete",
+     "reason_texts": [
+      "Data unavailable: the Google Workspace policy or organisational unit read is incomplete, so a unit may be missing."
+     ]
+    },
+    "service_off_everywhere": {
+     "verdict": "not_applicable",
+     "reason_code": "service_off_everywhere",
+     "reason_texts": [
+      "Not applicable: the service is turned off in every organisational unit and group."
+     ]
+    },
+    "service_status_absent": {
+     "evidence_kind": "absent",
+     "limitations": [
+      "evidence_unusable",
+      "evidence_unusable:<section>:absent"
+     ],
+     "recommendations": [
+      "recollect_unusable_evidence"
+     ],
+     "verdict": "not_assessed",
+     "reason_code": "data_unavailable_service_status_absent",
+     "reason_texts": [
+      "Data unavailable: a service status is absent or unreadable, so it is not known where the settings apply."
+     ]
+    },
+    "unit_violates": {
+     "verdict": "not_met",
+     "reason_code": "unit_violates",
+     "reason_texts": [
+      "Requirement not met: at least one organisational unit or group has a setting combination the baseline does not allow."
+     ]
+    },
+    "setting_value_unusable": {
+     "evidence_kind": "unusable",
+     "limitations": [
+      "evidence_unusable",
+      "evidence_unusable:<section>:unusable"
+     ],
+     "recommendations": [
+      "recollect_unusable_evidence"
+     ],
+     "verdict": "not_assessed",
+     "reason_code": "data_unusable_setting_value",
+     "reason_texts": [
+      "Data unusable: a setting the policy reads has the wrong type or an unknown value."
+     ]
+    },
+    "setting_absent": {
+     "evidence_kind": "absent",
+     "limitations": [
+      "evidence_unusable",
+      "evidence_unusable:<section>:absent"
+     ],
+     "recommendations": [
+      "recollect_unusable_evidence"
+     ],
+     "verdict": "not_assessed",
+     "reason_code": "data_unavailable_setting_absent",
+     "reason_texts": [
+      "Data unavailable: a setting the policy reads is absent at the top-level organisational unit and has no pinned default."
+     ]
+    },
+    "no_unit_violates": {
+     "verdict": "met",
+     "reason_code": "no_unit_violates",
+     "reason_texts": [
+      "Requirement met: no organisational unit or group has a setting combination the baseline does not allow."
+     ]
+    }
+   }
+  }
+ },
+ "policies": {
+  "GWS.GMAIL.5.5v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.GMAIL.5.5v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "own_any_bad",
+    "service": "gmail",
+    "required": "any",
+    "checks": [
+     {
+      "section": "gmail_email_attachment_safety",
+      "field": "anomalousAttachmentProtectionConsequence",
+      "good": [
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ],
+      "values": [
+       "WARNING",
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ]
+     },
+     {
+      "section": "gmail_email_attachment_safety",
+      "field": "encryptedAttachmentProtectionConsequence",
+      "good": [
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ],
+      "values": [
+       "WARNING",
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ]
+     },
+     {
+      "section": "gmail_email_attachment_safety",
+      "field": "attachmentWithScriptsProtectionConsequence",
+      "good": [
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ],
+      "values": [
+       "WARNING",
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ]
+     }
+    ]
+   }
+  },
+  "GWS.GMAIL.7.6v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.GMAIL.7.6v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "own_any_bad",
+    "service": "gmail",
+    "required": "any",
+    "checks": [
+     {
+      "section": "gmail_spoofing_and_authentication",
+      "field": "domainSpoofingConsequence",
+      "good": [
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ],
+      "values": [
+       "WARNING",
+       "SPAM_FOLDER",
+       "QUARANTINE",
+       "NO_ACTION"
+      ]
+     },
+     {
+      "section": "gmail_spoofing_and_authentication",
+      "field": "domainNameSpoofingConsequence",
+      "good": [
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ],
+      "values": [
+       "WARNING",
+       "SPAM_FOLDER",
+       "QUARANTINE",
+       "NO_ACTION"
+      ]
+     },
+     {
+      "section": "gmail_spoofing_and_authentication",
+      "field": "employeeNameSpoofingConsequence",
+      "good": [
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ],
+      "values": [
+       "WARNING",
+       "SPAM_FOLDER",
+       "QUARANTINE",
+       "NO_ACTION"
+      ]
+     },
+     {
+      "section": "gmail_spoofing_and_authentication",
+      "field": "groupsSpoofingConsequence",
+      "good": [
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ],
+      "values": [
+       "WARNING",
+       "SPAM_FOLDER",
+       "QUARANTINE",
+       "NO_ACTION"
+      ]
+     },
+     {
+      "section": "gmail_spoofing_and_authentication",
+      "field": "unauthenticatedEmailConsequence",
+      "good": [
+       "SPAM_FOLDER",
+       "QUARANTINE"
+      ],
+      "values": [
+       "WARNING",
+       "SPAM_FOLDER",
+       "QUARANTINE",
+       "NO_ACTION"
+      ]
+     }
+    ]
+   }
+  },
+  "GWS.GMAIL.9.1v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.GMAIL.9.1v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "own_any_bad",
+    "service": "gmail",
+    "required": "all",
+    "checks": [
+     {
+      "section": "gmail_imap_access",
+      "field": "enableImapAccess",
+      "good": [
+       false
+      ]
+     },
+     {
+      "section": "gmail_pop_access",
+      "field": "enablePopAccess",
+      "good": [
+       false
+      ]
+     }
+    ]
+   }
+  },
+  "GWS.DRIVEDOCS.1.2v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.DRIVEDOCS.1.2v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "sharing_mode",
+    "service": "drive_and_docs",
+    "mode": {
+     "section": "drive_and_docs_external_sharing",
+     "field": "externalSharingMode",
+     "values": [
+      "ALLOWED",
+      "ALLOWLISTED_DOMAINS",
+      "DISALLOWED"
+     ]
+    },
+    "checks": [
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "allowReceivingExternalFiles",
+      "good": [
+       false
+      ],
+      "mode": "DISALLOWED",
+      "scope": "own"
+     },
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "allowReceivingFilesOutsideAllowlistedDomains",
+      "good": [
+       false
+      ],
+      "mode": "ALLOWLISTED_DOMAINS",
+      "scope": "effective"
+     }
+    ]
+   }
+  },
+  "GWS.DRIVEDOCS.1.3v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.DRIVEDOCS.1.3v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "sharing_mode",
+    "service": "drive_and_docs",
+    "mode": {
+     "section": "drive_and_docs_external_sharing",
+     "field": "externalSharingMode",
+     "values": [
+      "ALLOWED",
+      "ALLOWLISTED_DOMAINS",
+      "DISALLOWED"
+     ]
+    },
+    "checks": [
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "warnForSharingOutsideAllowlistedDomains",
+      "good": [
+       true
+      ],
+      "mode": "ALLOWLISTED_DOMAINS",
+      "scope": "effective"
+     },
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "warnForExternalSharing",
+      "good": [
+       true
+      ],
+      "mode": "ALLOWED",
+      "scope": "effective"
+     }
+    ]
+   }
+  },
+  "GWS.DRIVEDOCS.1.4v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.DRIVEDOCS.1.4v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "sharing_mode",
+    "service": "drive_and_docs",
+    "mode": {
+     "section": "drive_and_docs_external_sharing",
+     "field": "externalSharingMode",
+     "values": [
+      "ALLOWED",
+      "ALLOWLISTED_DOMAINS",
+      "DISALLOWED"
+     ]
+    },
+    "checks": [
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "allowNonGoogleInvitesInAllowlistedDomains",
+      "good": [
+       false
+      ],
+      "mode": "ALLOWLISTED_DOMAINS",
+      "scope": "effective"
+     },
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "allowNonGoogleInvites",
+      "good": [
+       false
+      ],
+      "mode": "ALLOWED",
+      "scope": "effective"
+     }
+    ]
+   }
+  },
+  "GWS.DRIVEDOCS.1.5v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.DRIVEDOCS.1.5v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "sharing_mode",
+    "service": "drive_and_docs",
+    "mode": {
+     "section": "drive_and_docs_external_sharing",
+     "field": "externalSharingMode",
+     "values": [
+      "ALLOWED",
+      "ALLOWLISTED_DOMAINS",
+      "DISALLOWED"
+     ]
+    },
+    "checks": [
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "allowPublishingFiles",
+      "good": [
+       false
+      ],
+      "mode": "ALLOWED",
+      "scope": "effective"
+     },
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "allowPublishingFiles",
+      "good": [
+       false
+      ],
+      "mode": "ALLOWLISTED_DOMAINS",
+      "scope": "effective"
+     }
+    ]
+   }
+  },
+  "GWS.DRIVEDOCS.1.7v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.DRIVEDOCS.1.7v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "sharing_mode",
+    "service": "drive_and_docs",
+    "mode": {
+     "section": "drive_and_docs_external_sharing",
+     "field": "externalSharingMode",
+     "values": [
+      "ALLOWED",
+      "ALLOWLISTED_DOMAINS",
+      "DISALLOWED"
+     ]
+    },
+    "checks": [
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "allowedPartiesForDistributingContent",
+      "good": [
+       "NONE"
+      ],
+      "values": [
+       "ALL_ELIGIBLE_USERS",
+       "ELIGIBLE_INTERNAL_USERS",
+       "NONE"
+      ],
+      "mode": "ALLOWED",
+      "scope": "effective"
+     },
+     {
+      "section": "drive_and_docs_external_sharing",
+      "field": "allowedPartiesForDistributingContent",
+      "good": [
+       "NONE"
+      ],
+      "values": [
+       "ALL_ELIGIBLE_USERS",
+       "ELIGIBLE_INTERNAL_USERS",
+       "NONE"
+      ],
+      "mode": "ALLOWLISTED_DOMAINS",
+      "scope": "effective"
+     }
+    ]
+   }
+  },
+  "GWS.DRIVEDOCS.3.1v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.DRIVEDOCS.3.1v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "effective_any_bad",
+    "service": "drive_and_docs",
+    "checks": [
+     {
+      "section": "drive_and_docs_file_security_update",
+      "field": "allowUsersToManageUpdate",
+      "good": [
+       false
+      ]
+     },
+     {
+      "section": "drive_and_docs_file_security_update",
+      "field": "securityUpdate",
+      "good": [
+       "APPLY_TO_IMPACTED_FILES"
+      ],
+      "values": [
+       "APPLY_TO_IMPACTED_FILES",
+       "REMOVE_FROM_IMPACTED_FILES"
+      ]
+     }
+    ]
+   }
+  },
+  "GWS.DRIVEDOCS.5.1v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.DRIVEDOCS.5.1v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "effective_all_bad",
+    "service": "drive_and_docs",
+    "checks": [
+     {
+      "section": "drive_and_docs_drive_for_desktop",
+      "field": "allowDriveForDesktop",
+      "good": [
+       false
+      ]
+     },
+     {
+      "section": "drive_and_docs_drive_for_desktop",
+      "field": "restrictToAuthorizedDevices",
+      "good": [
+       true
+      ]
+     }
+    ]
+   }
+  },
+  "GWS.GROUPS.4.1v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.GROUPS.4.1v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "own_any_bad",
+    "service": "groups_for_business",
+    "required": "all",
+    "checks": [
+     {
+      "section": "groups_for_business_groups_sharing",
+      "field": "ownersCanHideGroups",
+      "good": [
+       false
+      ]
+     },
+     {
+      "section": "groups_for_business_groups_sharing",
+      "field": "newGroupsAreHidden",
+      "good": [
+       false
+      ]
+     }
+    ]
+   }
+  },
+  "GWS.CHAT.4.1v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.CHAT.4.1v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "effective_all_bad",
+    "service": "chat",
+    "checks": [
+     {
+      "section": "chat_external_chat_restriction",
+      "field": "allowExternalChat",
+      "good": [
+       false
+      ]
+     },
+     {
+      "section": "chat_external_chat_restriction",
+      "field": "externalChatRestriction",
+      "good": [
+       "TRUSTED_DOMAINS"
+      ],
+      "values": [
+       "NO_RESTRICTION",
+       "TRUSTED_DOMAINS"
+      ]
+     }
+    ]
+   }
+  },
+  "GWS.COMMONCONTROLS.11.1v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.COMMONCONTROLS.11.1v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "effective_any_bad",
+    "service": null,
+    "checks": [
+     {
+      "section": "workspace_marketplace_apps_access_options",
+      "field": "accessLevel",
+      "good": [
+       "ALLOW_LISTED_APPS",
+       "ALLOW_NONE"
+      ],
+      "values": [
+       "ALLOW_ALL",
+       "ALLOW_LISTED_APPS",
+       "ALLOW_NONE"
+      ]
+     },
+     {
+      "section": "workspace_marketplace_apps_access_options",
+      "field": "allowAllInternalApps",
+      "good": [
+       false
+      ]
+     }
+    ]
+   }
+  },
+  "GWS.COMMONCONTROLS.12.1v1": {
+   "kind": "settings_multi",
+   "rule_id": "GWS.COMMONCONTROLS.12.1v1.settings_multi",
+   "sections": [
+    "gws_tenant",
+    "gws_policies"
+   ],
+   "params": {
+    "kind": "own_any_bad",
+    "service": null,
+    "required": "all",
+    "checks": [
+     {
+      "section": "takeout_service_status",
+      "field": "serviceState",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "blogger_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "books_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "location_history_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "maps_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "pay_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "photos_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "play_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "play_console_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     },
+     {
+      "section": "youtube_user_takeout",
+      "field": "takeoutStatus",
+      "good": [
+       "DISABLED"
+      ],
+      "values": [
+       "ENABLED",
+       "DISABLED"
+      ]
+     }
+    ]
+   }
+  }
+ }
+}
