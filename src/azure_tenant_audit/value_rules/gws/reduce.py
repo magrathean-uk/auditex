@@ -97,9 +97,9 @@ def _topology(tenant: Any) -> tuple[str, bool, bool]:
     """The top unit, whether the tenant topology is complete, and whether units inherit the top unit's values
     (design 7: ``top_unit``, ``org_units``, ``complete``). A top unit that is not an OU, or an ``org_units`` map of
     the wrong shape, cannot be placed. A complete topology must hold the top unit as its only root; a partial one is
-    carried through as incomplete, so no default is applied on a root the read never confirmed. A cycle, or in a
-    complete topology a parent chain that does not reach the top unit, breaks the topology: incomplete, and no
-    inheritance (review B4)."""
+    carried through as incomplete, so no default is applied on a root the read never confirmed. A cycle, a second
+    root or a parent chain that does not reach the top unit breaks the topology, complete or not: incomplete, and no
+    inheritance (review B4, rounds 2 and 3)."""
     if not isinstance(tenant, dict) or not isinstance(tenant.get("top_unit"), str) \
             or not _OU.fullmatch(tenant["top_unit"]):
         raise Unusable("gws_tenant has no top unit")
@@ -114,7 +114,7 @@ def _topology(tenant: Any) -> tuple[str, bool, bool]:
     if complete and roots != [top]:
         raise Unusable("gws_tenant does not hold its top unit as the root")
     ends = _chains(org_units, top)
-    broken = "cycle" in ends or complete and ends != {"top"}
+    broken = ends != {"top"}
     return top, complete and not broken, not broken
 
 

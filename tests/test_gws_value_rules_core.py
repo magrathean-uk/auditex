@@ -800,13 +800,25 @@ def test_broken_topology_never_lends_the_top_unit_value(complete):
     {"ou:root": None, "ou:a": "ou:missing"},
     {"ou:root": None, "ou:a": "ou:root", "ou:b": "ou:gone"},
 ])
-def test_partial_topology_with_an_unread_parent_still_inherits(org_units):
+def test_partial_topology_with_an_unread_parent_does_not_inherit(org_units):
     units = R.effective_units({"gws_tenant": {"top_unit": "ou:root", "org_units": org_units, "complete": False},
+                               "gws_policies": {"complete": True, "policies": [
+                                   _p("ou:root", "gmail_mail_delegation", 1, {"enableMailDelegation": False}),
+                                   _p("ou:root", "gmail_service_status", 1, {"serviceState": "DISABLED"})]}},
+                              ["gmail_mail_delegation", "gmail_service_status"])
+    assert (units.complete, units.inherits) == (False, False)
+    assert R.effective(units, "ou:a", "gmail_mail_delegation", "enableMailDelegation") is R.UNUSABLE
+    assert R.service_on(units, "ou:a", "gmail") == "unknown"
+
+
+def test_partial_topology_with_a_second_root_does_not_inherit():
+    units = R.effective_units({"gws_tenant": {"top_unit": "ou:root", "org_units": {"ou:root": None, "ou:a": None},
+                                              "complete": False},
                                "gws_policies": {"complete": True, "policies": [
                                    _p("ou:root", "gmail_mail_delegation", 1, {"enableMailDelegation": False})]}},
                               ["gmail_mail_delegation"])
-    assert (units.complete, units.inherits) == (False, True)
-    assert R.effective(units, "ou:a", "gmail_mail_delegation", "enableMailDelegation") is False
+    assert (units.complete, units.inherits) == (False, False)
+    assert R.effective(units, "ou:a", "gmail_mail_delegation", "enableMailDelegation") is R.UNUSABLE
 
 
 def test_deep_complete_topology_applies_the_default_and_inherits():
