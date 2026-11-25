@@ -10,7 +10,13 @@
   the top unit's values, so a dangling or looping OU never borrows a compliant root value. ScubaGoggles' "absent service status is DISABLED"
   is not copied: ``service_on`` answers ``unknown`` (divergence D3).
 - Unknown is not safe: an envelope that cannot be placed raises ``Unusable``; a value that cannot be reduced reduces
-  to ``UNUSABLE`` for that (unit, section) only. So does a tie (D11): two policies at the rank that decides a value
+  to ``UNUSABLE`` for that (unit, section) only. A unit key outside the design 7 grammar (``ou:<id>`` or
+  ``ou:<id>/group:<pseudonym>``, each part printable ASCII without ``/``, so no NUL or other control character), or
+  naming an OU that a complete topology does not hold, cannot be placed (review B4, round 3): that (unit, section)
+  is ``UNUSABLE`` and the section is listed in ``Units.unplaced``, so it never inherits a compliant value. A value
+  that is not plain JSON data (NaN, an infinity, an integer over 1024 bits, a non-text key, a foreign type) or is
+  nested deeper than 64 levels is ``UNUSABLE`` too, before any comparison: it can neither hide a tie nor raise
+  ``RecursionError``. So does a tie (D11): two policies at the rank that decides a value
   disagreeing on it. The deciding rank is the winner's for ``max``, and each field's (``merge``) or each map item
   field's (``max_map``) own highest rank, so the read order of equal-ranked policies never changes the answer.
 """
@@ -26,7 +32,11 @@ from typing import Any, NamedTuple
 from .catalogue import section_semantics
 
 ON, OFF, UNKNOWN = "on", "off", "unknown"
-_OU = re.compile(r"ou:[^/\s]+")
+_ID = r"[\x21-\x2e\x30-\x7e]+"  # printable ASCII without space or "/"
+_OU = re.compile(rf"ou:{_ID}")
+_GROUP = re.compile(rf"(ou:{_ID})/group:{_ID}")
+_DEPTH = 64
+_INT_BITS = 1024
 
 
 class Unusable(ValueError):
@@ -52,6 +62,7 @@ class Units:
     values: dict[str, dict[str, Any]]
     explicit: dict[str, frozenset[tuple[str, str]]]
     inherits: bool = True
+    unplaced: frozenset[str] = frozenset()
 
 
 class _Placed(NamedTuple):
@@ -93,9 +104,10 @@ def _chains(org_units: dict[str, str | None], top: str) -> set[str]:
     return set(ends.values())
 
 
-def _topology(tenant: Any) -> tuple[str, bool, bool]:
+def _topology(tenant: Any) -> tuple[str, bool, bool, frozenset[str] | None]:
     """The top unit, whether the tenant topology is complete, and whether units inherit the top unit's values
-    (design 7: ``top_unit``, ``org_units``, ``complete``). A top unit that is not an OU, or an ``org_units`` map of
+    (design 7: ``top_unit``, ``org_units``, ``complete``), and the OUs a declared-complete topology holds (``None``
+    for a partial one, which may not name every OU). A top unit that is not an OU, or an ``org_units`` map of
     the wrong shape, cannot be placed. A complete topology must hold the top unit as its only root; a partial one is
     carried through as incomplete, so no default is applied on a root the read never confirmed. A cycle, a second
     root or a parent chain that does not reach the top unit breaks the topology, complete or not: incomplete, and no
@@ -115,17 +127,51 @@ def _topology(tenant: Any) -> tuple[str, bool, bool]:
         raise Unusable("gws_tenant does not hold its top unit as the root")
     ends = _chains(org_units, top)
     broken = ends != {"top"}
-    return top, complete and not broken, not broken
+    return top, complete and not broken, not broken, frozenset(org_units) if complete else None
 
 
-def _entries(sections: Any, keys: set[str]) -> tuple[str, bool, bool, list[_Placed]]:
+def _placed(unit: str, kind: str, known: frozenset[str] | None) -> bool:
+    """The unit key follows design 7 and its OU is one a complete topology holds (review B4, round 3)."""
+    match = (_GROUP if kind == "group" else _OU).fullmatch(unit)
+    if match is None:
+        return False
+    return known is None or (match.group(1) if kind == "group" else unit) in known
+
+
+def _plain(value: Any) -> bool:
+    """Plain JSON data within ``_DEPTH`` levels: text-keyed objects, lists, text, booleans, null, finite numbers and
+    integers up to ``_INT_BITS`` bits. Iterative, so a deep or cyclic value is refused, never a ``RecursionError``."""
+    stack = [(value, 0)]
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, dict | list):
+            if depth >= _DEPTH:
+                return False
+            if isinstance(item, dict):
+                if any(not isinstance(key, str) for key in item):
+                    return False
+                stack.extend((part, depth + 1) for part in item.values())
+            else:
+                stack.extend((part, depth + 1) for part in item)
+        elif isinstance(item, float):
+            if not math.isfinite(item):
+                return False
+        elif isinstance(item, int):
+            if item.bit_length() > _INT_BITS:
+                return False
+        elif item is not None and not isinstance(item, str):
+            return False
+    return True
+
+
+def _entries(sections: Any, keys: set[str]) -> tuple[str, bool, bool, list[_Placed], frozenset[str]]:
     if not isinstance(sections, dict):
         raise Unusable("sections is not a mapping")
-    top, tenant_complete, inherits = _topology(sections.get("gws_tenant"))
+    top, tenant_complete, inherits, known = _topology(sections.get("gws_tenant"))
     read = sections.get("gws_policies")
     if not isinstance(read, dict) or not isinstance(read.get("policies"), list):
         raise Unusable("gws_policies is not a policy list")
-    kept = []
+    kept, unplaced = [], set()
     for entry in read["policies"]:
         if not isinstance(entry, dict) or not isinstance(entry.get("section"), str):
             raise Unusable("gws_policies holds an entry without a section")
@@ -135,22 +181,29 @@ def _entries(sections: Any, keys: set[str]) -> tuple[str, bool, bool, list[_Plac
         if (not isinstance(unit, str) or not unit or not isinstance(kind, str) or kind not in {"org_unit", "group"}
                 or (kind == "group") != ("/group:" in unit) or unit == top and kind == "group"):
             raise Unusable("gws_policies holds an entry that cannot be placed")
-        # Placed but unrankable or valueless: only this (unit, section) becomes unusable.
+        # A malformed or unknown unit key, or an unrankable, valueless or non-plain value: only this (unit, section)
+        # becomes unusable, and an unplaced key also marks its section (review B4, round 3).
+        placed = _placed(unit, kind, known)
+        if not placed:
+            unplaced.add(entry["section"])
         rank = entry.get("sort_order")
-        usable = _sort_order(rank) and "value" in entry
+        usable = placed and _sort_order(rank) and "value" in entry and _plain(entry["value"])
         kept.append(_Placed(unit, entry["section"], rank if usable else math.inf,
                             entry["value"] if usable else UNUSABLE))
-    return top, tenant_complete and read.get("complete") is True, inherits, kept
+    return top, tenant_complete and read.get("complete") is True, inherits, kept, frozenset(unplaced)
+
+
+class _Tie(Exception):
+    pass
 
 
 def _canonical(value: Any) -> str:
-    """Type-aware equality: ``true`` and ``1`` differ, as they do in the evidence."""
-    if value is UNUSABLE:
-        return "\0unusable"
+    """Type-aware equality: ``true`` and ``1`` differ, as they do in the evidence. ``_entries`` admits only plain
+    values; one that still cannot be written is undecidable (``_Tie``), never equal to another such value."""
     try:
         return json.dumps(value, sort_keys=True, allow_nan=False)
-    except (TypeError, ValueError):
-        return "\0unusable"
+    except (TypeError, ValueError, RecursionError) as error:
+        raise _Tie from error
 
 
 def _tiers(group: list[_Placed]) -> list[list[Any]]:
@@ -160,10 +213,6 @@ def _tiers(group: list[_Placed]) -> list[list[Any]]:
     for entry in group:
         by_rank.setdefault(entry.rank, []).append(entry.value)
     return [sorted(by_rank[rank], key=_canonical) for rank in sorted(by_rank, reverse=True)]
-
-
-class _Tie(Exception):
-    pass
 
 
 def _decided(tiers: list[list[dict]]) -> dict[str, Any]:
@@ -240,14 +289,17 @@ def _reduce(section: str, group: list[_Placed]) -> Any:
     reducer = semantics["reducer"]
     if any(entry.value is UNUSABLE for entry in group):
         return UNUSABLE
-    tiers = _tiers(group)
-    if reducer == "merge":
-        return _merge(tiers)
-    if reducer == "list":
-        return _list(tiers)
-    if reducer == "max_map":
-        return _max_map(tiers, next(iter(semantics["fields"])), semantics["key"])
-    return _max(tiers)
+    try:
+        tiers = _tiers(group)
+        if reducer == "merge":
+            return _merge(tiers)
+        if reducer == "list":
+            return _list(tiers)
+        if reducer == "max_map":
+            return _max_map(tiers, next(iter(semantics["fields"])), semantics["key"])
+        return _max(tiers)
+    except _Tie:
+        return UNUSABLE
 
 
 def effective_units(sections: dict, section_keys: list[str] | tuple[str, ...]) -> Units:
@@ -259,7 +311,7 @@ def effective_units(sections: dict, section_keys: list[str] | tuple[str, ...]) -
     keys = set(section_keys)
     for key in keys:
         section_semantics(key)
-    top, complete, inherits, entries = _entries(sections, keys)
+    top, complete, inherits, entries, unplaced = _entries(sections, keys)
     grouped: dict[tuple[str, str], list[_Placed]] = {}
     for entry in entries:
         grouped.setdefault((entry.unit, entry.section), []).append(entry)
@@ -282,7 +334,8 @@ def effective_units(sections: dict, section_keys: list[str] | tuple[str, ...]) -
             elif isinstance(current, dict):
                 for field, value in default.items():
                     current.setdefault(field, copy.deepcopy(value))
-    return Units(top, complete, values, {unit: frozenset(fields) for unit, fields in explicit.items()}, inherits)
+    return Units(top, complete, values, {unit: frozenset(fields) for unit, fields in explicit.items()}, inherits,
+                 unplaced)
 
 
 def effective(units: Units, unit: str, section: str, field: str) -> Any:

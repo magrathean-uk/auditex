@@ -1,1 +1,156 @@
-{"kinds": {}, "policies": {}}
+{
+  "kinds": {
+    "setting": {
+      "cells": {
+        "no_unit_violates": {
+          "reason_code": "no_unit_violates",
+          "reason_texts": [
+            "Requirement met: no organisational unit or group holds a value that violates the setting."
+          ],
+          "verdict": "met"
+        },
+        "policy_read_incomplete": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_policy_read_incomplete",
+          "reason_texts": [
+            "Data unavailable: the Google Workspace policy read is incomplete; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "evidence_kind": null,
+          "limitations": [
+            "required_evidence_section_not_collected",
+            "required_evidence_section_not_collected:<section>"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "recommendations": [
+            "collect_missing_evidence_section"
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: the Google Workspace policy evidence has an unexpected shape; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "service_off_everywhere": {
+          "reason_code": "service_off_everywhere",
+          "reason_texts": [
+            "Not applicable: the Google Workspace service this policy covers is turned off in every organisational unit."
+          ],
+          "verdict": "not_applicable"
+        },
+        "service_status_absent": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_service_status_absent",
+          "reason_texts": [
+            "Data unavailable: the status of the Google Workspace service this policy covers is absent or unreadable; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_absent": {
+          "evidence_kind": "absent",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:absent"
+          ],
+          "reason_code": "data_unavailable_setting_absent",
+          "reason_texts": [
+            "Data unavailable: the setting is absent from the collected policies and has no pinned default; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_value_unusable": {
+          "evidence_kind": "unusable",
+          "limitations": [
+            "evidence_unusable",
+            "evidence_unusable:<section>:unusable"
+          ],
+          "reason_code": "data_unusable_setting_value",
+          "reason_texts": [
+            "Data unusable: a unit holds a value for the setting that cannot be read as the expected type; the policy was not assessed."
+          ],
+          "recommendations": [
+            "recollect_unusable_evidence"
+          ],
+          "verdict": "not_assessed"
+        },
+        "unit_violates": {
+          "reason_code": "unit_violates",
+          "reason_texts": [
+            "Requirement not met: at least one organisational unit or group holds a value that violates the setting."
+          ],
+          "verdict": "not_met"
+        }
+      }
+    }
+  },
+  "policies": {
+    "GWS.COMMONCONTROLS.10.3v1": {"kind": "setting", "params": {"field": "trustInternalApps", "op": "eq", "scope": "all_units", "section": "api_controls_internal_apps", "service": null, "value": true}, "rule_id": "GWS.COMMONCONTROLS.10.3v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.10.4v1": {"kind": "setting", "params": {"field": "accessLevel", "known": ["ACCESS_LEVEL_UNSPECIFIED", "ALLOW_SIGN_IN_ONLY", "ALLOW_SIGN_IN_SCOPES_ONLY", "BLOCK_ALL", "BLOCK_ALL_SCOPES", "UNSPECIFIED_UBER_BLOCK"], "op": "not_in", "scope": "all_units", "section": "api_controls_unconfigured_third_party_apps", "service": null, "source": "SG:scubagoggles/rego/Commoncontrols.rego:1483-1491", "value": ["BLOCK_ALL", "BLOCK_ALL_SCOPES"]}, "rule_id": "GWS.COMMONCONTROLS.10.4v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.10.5v1": {"kind": "setting", "params": {"field": "allowLessSecureApps", "op": "ne", "scope": "all_units", "section": "security_less_secure_apps", "service": null, "value": false}, "rule_id": "GWS.COMMONCONTROLS.10.5v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.15.1v1": {"kind": "setting", "params": {"field": "region", "known": ["ANY_REGION", "EUROPE", "REGION_UNSPECIFIED", "US"], "op": "ne", "scope": "all_units", "section": "data_regions_data_at_rest_region", "service": null, "source": "SG:scubagoggles/rego/Commoncontrols.rego:1794-1804", "value": "US"}, "rule_id": "GWS.COMMONCONTROLS.15.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.15.2v1": {"kind": "setting", "params": {"field": "limitToStorageRegion", "op": "ne", "scope": "all_units", "section": "data_regions_data_processing_region", "service": null, "value": true}, "rule_id": "GWS.COMMONCONTROLS.15.2v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.16.1v1": {"kind": "setting", "params": {"case": "fold", "field": "serviceState", "known": ["DISABLED", "ENABLED"], "op": "ne", "scope": "explicit_only", "section": "enterprise_service_restrictions_service_status", "service": null, "source": "SG:scubagoggles/rego/Utils.rego:605-637 (AppExplicitStatus folds case)", "value": "ENABLED"}, "rule_id": "GWS.COMMONCONTROLS.16.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.16.2v1": {"kind": "setting", "params": {"case": "fold", "field": "serviceState", "known": ["DISABLED", "ENABLED"], "op": "eq", "scope": "explicit_only", "section": "early_access_apps_service_status", "service": null, "source": "SG:scubagoggles/rego/Utils.rego:605-637 (AppExplicitStatus folds case)", "value": "ENABLED"}, "rule_id": "GWS.COMMONCONTROLS.16.2v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.17.1v1": {"kind": "setting", "params": {"field": "multiPartyApprovalState", "known": ["DISABLED", "ENABLED"], "op": "ne", "scope": "all_units", "section": "multi_party_approval_require_approvals", "service": null, "source": "SG:scubagoggles/Testing/Unit/Rego/commoncontrols/commoncontrols_api17_test.rego:11,23", "value": "ENABLED"}, "rule_id": "GWS.COMMONCONTROLS.17.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.4.1v1": {"kind": "setting", "params": {"field": "webSessionDuration", "op": "duration_gt", "scope": "all_units", "section": "security_session_controls", "service": null, "value": "12h"}, "rule_id": "GWS.COMMONCONTROLS.4.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.5.1v1": {"kind": "setting", "params": {"case": "fold", "field": "allowedStrength", "known": ["STRONG", "WEAK"], "op": "ne", "scope": "all_units", "section": "security_password", "service": null, "source": "SG:scubagoggles/Testing/Unit/Rego/commoncontrols/commoncontrols_api05_test.rego:11,29; case folded as SG:scubagoggles/rego/Commoncontrols.rego:735", "value": "STRONG"}, "rule_id": "GWS.COMMONCONTROLS.5.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.5.2v1": {"kind": "setting", "params": {"field": "minimumLength", "op": "lt", "scope": "all_units", "section": "security_password", "service": null, "value": 12}, "rule_id": "GWS.COMMONCONTROLS.5.2v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.5.3v1": {"kind": "setting", "params": {"field": "minimumLength", "op": "lt", "scope": "all_units", "section": "security_password", "service": null, "value": 16}, "rule_id": "GWS.COMMONCONTROLS.5.3v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.5.4v1": {"kind": "setting", "params": {"field": "enforceRequirementsAtLogin", "op": "ne", "scope": "all_units", "section": "security_password", "service": null, "value": true}, "rule_id": "GWS.COMMONCONTROLS.5.4v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.5.5v1": {"kind": "setting", "params": {"field": "allowReuse", "op": "eq", "scope": "all_units", "section": "security_password", "service": null, "value": true}, "rule_id": "GWS.COMMONCONTROLS.5.5v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.5.6v1": {"kind": "setting", "params": {"field": "expirationDuration", "op": "duration_ne", "scope": "all_units", "section": "security_password", "service": null, "value": "0s"}, "rule_id": "GWS.COMMONCONTROLS.5.6v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.7.1v1": {"kind": "setting", "params": {"fields": ["option", "conflictingAccountsManagement"], "known": ["AUTOMATICALLY_SEND_INVITATIONS", "PRESERVE_CONFLICTING_ACCOUNT", "REPLACE_CONFLICTING_ACCOUNT"], "op": "ne", "scope": "all_units", "section": "provisioning_conflicting_accounts_management", "service": null, "source": "SG:scubagoggles/rego/Commoncontrols.rego:1176-1184,1197; SG:scubagoggles/Testing/Unit/Rego/commoncontrols/commoncontrols_api07_test.rego:11,23,35", "value": "REPLACE_CONFLICTING_ACCOUNT"}, "rule_id": "GWS.COMMONCONTROLS.7.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.8.1v1": {"kind": "setting", "params": {"field": "enableAccountRecovery", "op": "eq", "scope": "all_units", "section": "security_super_admin_account_recovery", "service": null, "value": true}, "rule_id": "GWS.COMMONCONTROLS.8.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.COMMONCONTROLS.8.2v1": {"kind": "setting", "params": {"field": "enableAccountRecovery", "op": "eq", "scope": "all_units", "section": "security_user_account_recovery", "service": null, "value": true}, "rule_id": "GWS.COMMONCONTROLS.8.2v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.1.1v1": {"kind": "setting", "params": {"field": "enableMailDelegation", "op": "eq", "scope": "all_units", "section": "gmail_mail_delegation", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.1.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.10.1v1": {"kind": "setting", "params": {"field": "enableGoogleWorkspaceSyncForMicrosoftOutlook", "op": "eq", "scope": "all_units", "section": "gmail_workspace_sync_for_outlook", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.10.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.11.1v1": {"kind": "setting", "params": {"field": "enableAutoForwarding", "op": "ne", "scope": "all_units", "section": "gmail_auto_forwarding", "service": "gmail", "value": false}, "rule_id": "GWS.GMAIL.11.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.12.1v1": {"kind": "setting", "params": {"field": "allowUsersToUseExternalSmtpServers", "op": "eq", "scope": "all_units", "section": "gmail_per_user_outbound_gateway", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.12.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.15.1v1": {"kind": "setting", "params": {"field": "enableImprovedSuspiciousContentDetection", "op": "ne", "scope": "all_units", "section": "gmail_enhanced_pre_delivery_message_scanning", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.15.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.5.1v1": {"kind": "setting", "params": {"field": "enableEncryptedAttachmentProtection", "op": "ne", "scope": "all_units", "section": "gmail_email_attachment_safety", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.5.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.5.2v1": {"kind": "setting", "params": {"field": "enableAttachmentWithScriptsProtection", "op": "ne", "scope": "all_units", "section": "gmail_email_attachment_safety", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.5.2v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.5.3v1": {"kind": "setting", "params": {"field": "enableAnomalousAttachmentProtection", "op": "ne", "scope": "all_units", "section": "gmail_email_attachment_safety", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.5.3v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.5.4v1": {"kind": "setting", "params": {"field": "applyFutureRecommendedSettingsAutomatically", "op": "ne", "scope": "all_units", "section": "gmail_email_attachment_safety", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.5.4v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.6.1v1": {"kind": "setting", "params": {"field": "enableShortenerScanning", "op": "ne", "scope": "all_units", "section": "gmail_links_and_external_images", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.6.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.6.2v1": {"kind": "setting", "params": {"field": "enableExternalImageScanning", "op": "ne", "scope": "all_units", "section": "gmail_links_and_external_images", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.6.2v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.6.3v1": {"kind": "setting", "params": {"field": "enableAggressiveWarningsOnUntrustedLinks", "op": "ne", "scope": "all_units", "section": "gmail_links_and_external_images", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.6.3v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.6.4v1": {"kind": "setting", "params": {"field": "applyFutureSettingsAutomatically", "op": "ne", "scope": "all_units", "section": "gmail_links_and_external_images", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.6.4v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.7.1v1": {"kind": "setting", "params": {"field": "detectDomainNameSpoofing", "op": "ne", "scope": "all_units", "section": "gmail_spoofing_and_authentication", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.7.1v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.7.2v1": {"kind": "setting", "params": {"field": "detectEmployeeNameSpoofing", "op": "ne", "scope": "all_units", "section": "gmail_spoofing_and_authentication", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.7.2v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.7.3v1": {"kind": "setting", "params": {"field": "detectDomainSpoofingFromUnauthenticatedSenders", "op": "ne", "scope": "all_units", "section": "gmail_spoofing_and_authentication", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.7.3v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.7.4v1": {"kind": "setting", "params": {"field": "detectUnauthenticatedEmails", "op": "ne", "scope": "all_units", "section": "gmail_spoofing_and_authentication", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.7.4v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.7.5v1": {"kind": "setting", "params": {"field": "detectGroupsSpoofing", "op": "ne", "scope": "all_units", "section": "gmail_spoofing_and_authentication", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.7.5v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.7.7v1": {"kind": "setting", "params": {"field": "applyFutureSettingsAutomatically", "op": "ne", "scope": "all_units", "section": "gmail_spoofing_and_authentication", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.7.7v1.setting", "sections": ["gws_tenant", "gws_policies"]},
+    "GWS.GMAIL.8.1v1": {"kind": "setting", "params": {"field": "enableMailAndContactsImport", "op": "eq", "scope": "all_units", "section": "gmail_user_email_uploads", "service": "gmail", "value": true}, "rule_id": "GWS.GMAIL.8.1v1.setting", "sections": ["gws_tenant", "gws_policies"]}
+  }
+}
