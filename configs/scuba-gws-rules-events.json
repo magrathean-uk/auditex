@@ -18,7 +18,7 @@
           "verdict": "not_assessed",
           "reason_code": "data_unusable_section_shape",
           "reason_texts": [
-            "Data unusable: the tenant topology, the setting-change events or the policy section has the wrong shape."
+            "Data unusable: the tenant topology is cut, broken or of the wrong shape, or the setting-change events, their log window or the policy section has the wrong shape."
           ],
           "evidence_kind": "unusable",
           "limitations": [

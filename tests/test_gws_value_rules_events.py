@@ -68,8 +68,8 @@ TEXT = {
                             "value, time or unit, or two latest events disagree.",
     "event_read_incomplete": "Data unavailable: the admin setting-change event read was cut or incomplete, so the "
                              "last change per unit is not known.",
-    "section_shape_unusable": "Data unusable: the tenant topology, the setting-change events or the policy section "
-                              "has the wrong shape.",
+    "section_shape_unusable": "Data unusable: the tenant topology is cut, broken or of the wrong shape, or the "
+                              "setting-change events, their log window or the policy section has the wrong shape.",
 }
 
 
@@ -103,6 +103,8 @@ MET = ("met", "no_unit_violates")
 NOT_MET = ("not_met", "unit_violates")
 NO_EVENT = ("not_assessed", "no_setting_event")
 UNUSABLE = ("not_assessed", "event_value_unusable")
+SHAPE = ("not_assessed", "section_shape_unusable")
+TOPOLOGY = SHAPE  # a cut or broken topology (review M13-L12 B1)
 
 
 def test_rows_are_the_twelve_log_based_policies():
@@ -160,8 +162,6 @@ def test_read_incomplete_is_not_assessed(policy):
 @pytest.mark.parametrize("policy", UNIT_ROWS)
 @pytest.mark.parametrize("value", [None, 1, "", "UNKNOWN_ENUM_VALUE"])
 def test_unusable_value_is_not_assessed(policy, value):
-    if policy == "GWS.CHAT.5.2v1" and value in {"", "UNKNOWN_ENUM_VALUE"}:
-        pytest.skip("a string is a category list for CHAT.5.2; see the CHAT.5.2 tests")
     evs = _good_top(policy, time=T1) + [_event(ROWS[policy][0][0][0], value, time=T2)]
     assert _answer(policy, evs) == UNUSABLE
 
@@ -219,8 +219,8 @@ def test_unreadable_time_is_unusable(time):
 def test_an_event_that_cannot_be_placed_never_answers_met(unit):
     assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false"), _event(S13, "true", unit=unit)]) == UNUSABLE
     assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false"), _event(S13, None, unit=unit)]) == UNUSABLE
-    # A compliant value there changes nothing.
-    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false"), _event(S13, "false", unit=unit)]) == MET
+    # Even a compliant value there leaves the stream ambiguous (review M13-L12 B2).
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false"), _event(S13, "false", unit=unit)]) == UNUSABLE
     # A delete there might be the top unit's (lens review): never met, whichever way the row counts it.
     assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false"), _delete(S13, unit=unit)]) == UNUSABLE
     chat = _good_top("GWS.CHAT.5.2v1") + [_delete("ContentReportingProto report_types", unit=unit)]
@@ -230,7 +230,7 @@ def test_an_event_that_cannot_be_placed_never_answers_met(unit):
 def test_deleted_ou_is_skipped_only_on_a_complete_topology():
     evs = [_event(S13, "false"), _event(S13, "true", unit="ou:gone")]
     assert _answer("GWS.GMAIL.13.1v1", evs) == MET
-    assert _answer("GWS.GMAIL.13.1v1", evs, tenant={**TENANT, "complete": False}) == UNUSABLE
+    assert _answer("GWS.GMAIL.13.1v1", evs, tenant={**TENANT, "complete": False}) == TOPOLOGY
 
 
 def test_violation_wins_over_unusable_values():
@@ -305,10 +305,17 @@ def test_chat_5_1_needs_all_four_settings_at_the_top_unit():
      "system_violation: SPAM, system_violation: CONFIDENTIAL_INFORMATION, system_violation: SENSITIVE_INFORMATION, "
      "system_violation: OTHER, system_violation: NEW_CATEGORY", MET),
     (SIX_CATEGORIES, NOT_MET),
-    ("", NOT_MET),
     ("[]", NOT_MET),
+    ("[ ]", NOT_MET),
     (None, UNUSABLE),
-    (ALL_CATEGORIES.replace("system_violation: SPAM", "system_violation:\u00a0SPAM"), NOT_MET),
+    # Not a category list: never a read value (review M13-L12 B4).
+    ("", UNUSABLE),
+    ("UNKNOWN", UNUSABLE),
+    (ALL_CATEGORIES + "[,,", UNUSABLE),
+    (ALL_CATEGORIES.replace("SPAM, ", "SPAM,, "), UNUSABLE),
+    (ALL_CATEGORIES.rstrip("]"), UNUSABLE),
+    ("[", UNUSABLE),
+    (ALL_CATEGORIES.replace("system_violation: SPAM", "system_violation:\u00a0SPAM"), UNUSABLE),
 ])
 def test_chat_5_2_needs_the_seven_categories(value, expected):
     assert _answer("GWS.CHAT.5.2v1", [_event("ContentReportingProto report_types", value)]) == expected
@@ -383,7 +390,7 @@ def test_gemini_1_1_service_gate():
     sections["gws_policies"] = {"complete": True, "policies": [on, _status("ou:a", "DISABLED"),
                                                                _status("ou:b", "DISABLED")]}
     record = gws.assess("GWS.GEMINI.1.1v1", sections)
-    assert (record["verdict"], record["cell"]) == UNUSABLE
+    assert (record["verdict"], record["cell"]) == TOPOLOGY
     # Off at the top, on at a child that could inherit the top's bad value.
     assert _gemini(bad_top, [off, _status("ou:a", "ENABLED")]) == UNUSABLE
     # Unknown at the top with a unit explicitly on: the top's bad value is unusable, the child's is a violation.
@@ -415,3 +422,123 @@ def test_gemini_1_1_group_event_needs_the_service_on_everywhere():
 def test_malformed_params_are_a_product_fault(params):
     with pytest.raises(ValueError):
         events._slots(params)
+
+
+# --- review M13-L12 repair --------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tenant", [
+    {**TENANT, "complete": False},
+    {key: value for key, value in TENANT.items() if key != "complete"},
+    {**TENANT, "org_units": {"ou:root": None, "ou:a": "ou:a"}},
+])
+def test_b1_a_cut_or_broken_topology_concludes_nothing(tenant):
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false")], tenant=tenant) == TOPOLOGY
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "true")], tenant=tenant) == TOPOLOGY
+
+
+def test_b1_gemini_universal_service_states_need_a_complete_topology():
+    partial = {**TENANT, "org_units": {"ou:root": None, "ou:a": "ou:root"}, "complete": False}
+
+    def run(evs, state):
+        sections = _sections(evs, "GWS.GEMINI.1.1v1", tenant=partial)
+        sections["gws_policies"] = {"complete": True, "policies": [_status("ou:root", state)]}
+        record = gws.assess("GWS.GEMINI.1.1v1", sections)
+        return record["verdict"], record["cell"]
+
+    assert run([_event(BARD, "false"), _event(BARD, "true", unit="group:g1")], "ENABLED") == TOPOLOGY
+    assert run([_event(BARD, "false")], "DISABLED") == TOPOLOGY
+
+
+def test_b2_an_unreadable_event_identity_never_confirms():
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", name="")]) == UNUSABLE
+    reset = {**_delete(S13), "setting": None}
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time=T1), reset]) == UNUSABLE
+    assert _answer("GWS.COMMONCONTROLS.2.1v1", [_event(None, "ENABLED", unit=None, name="TOGGLE_CAA_ENABLEMENT"),
+                                                _event(None, "DISABLED", unit=None, name="", time=T3)]) == UNUSABLE
+    # A later unplaced change might have superseded the child violation.
+    evs = [_event(S13, "false", time=T1), _event(S13, "true", unit="ou:a", time=T2),
+           _event(S13, "false", unit=None, time=T3)]
+    assert _answer("GWS.GMAIL.13.1v1", evs) == UNUSABLE
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false"), _event(S13, "false", unit=None,
+                                                                      time="broken time")]) == UNUSABLE
+
+
+def test_b2_isolation_and_proven_older_ambiguity_are_kept():
+    # A known other setting and a setting-less non-setting event never reach the rule.
+    toggle = _event(None, "DISABLED", unit=None, name="TOGGLE_CAA_ENABLEMENT", time=T3)
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false"), toggle]) == MET
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false"), _delete("SomeOtherProto field", unit=None)]) == MET
+    # An ambiguous change proven older than the violation cannot have superseded it.
+    evs = [_event(S13, "false", time=T2), _event(S13, "true", unit="ou:a", time=T3),
+           _event(S13, "false", unit=None, time=T1)]
+    assert _answer("GWS.GMAIL.13.1v1", evs) == NOT_MET
+
+
+def _windowed(evs, start, end):
+    sections = _sections(evs)
+    sections["gws_setting_events"].update(window_start=start, window_end=end)
+    for key in ("window_start", "window_end"):
+        if sections["gws_setting_events"][key] is None:
+            del sections["gws_setting_events"][key]
+    record = gws.assess("GWS.GMAIL.13.1v1", sections)
+    return record["verdict"], record["cell"]
+
+
+@pytest.mark.parametrize(("start", "end"), [
+    (None, None), ("2026-05-25T00:00:00Z", None), (None, "2026-11-25T00:00:00Z"),
+    ("2026-12-01T00:00:00Z", "2026-11-25T00:00:00Z"), ("2026-11-25T00:00:00Z", "2026-11-25T00:00:00Z"),
+    ("2026-05-25", "2026-11-25T00:00:00Z"), ("2026-05-25T00:00:00Z", "2026-11-25x00:00:00Z"),
+])
+def test_b3_a_missing_or_invalid_window_concludes_nothing(start, end):
+    assert _windowed([_event(S13, "false")], start, end) == SHAPE
+
+
+@pytest.mark.parametrize("time", ["2026-12-01T10:00:00Z", "2026-05-24T23:59:59Z", "2026-10-01x10:00:00+00:00",
+                                  "2026-10-01 10:00:00+00:00", "2026-10-01T10:00:00+0000", "2026-10-01T10:00:00.Z",
+                                  "2026-10-01T10:00:60Z", "\u0662026-10-01T10:00:00Z"])
+def test_b3_an_event_time_outside_the_window_or_not_rfc3339_is_unusable(time):
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time=time)]) == UNUSABLE
+
+
+@pytest.mark.parametrize("time", ["2026-05-25T00:00:00Z", "2026-11-25T00:00:00Z", "2026-10-01t10:00:00z",
+                                  "2026-10-01T12:00:00+02:00", "2026-10-01T10:00:00.123456789123Z"])
+def test_b3_rfc3339_times_inside_the_window_are_read(time):
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time=time)]) == MET
+
+
+def test_b5_chat_5_1_top_violation_needs_all_four_top_settings():
+    one = [_event("ContentReportingProto one_on_one_reporting", CR_OFF)]
+    assert _answer("GWS.CHAT.5.1v1", one) == NO_EVENT
+    assured = [_event("GmailNonRegionalizedFunctionalityStateSettingsProto state", "ENABLED")]
+    assert _answer("GWS.ASSUREDCONTROLS.2.1v1", assured) == NO_EVENT
+    # With all four present the top violation counts; a child violation counts on its own (D17, D19).
+    evs = _good_top("GWS.CHAT.5.1v1")
+    assert _answer("GWS.CHAT.5.1v1", evs[1:] + [_event("ContentReportingProto one_on_one_reporting", CR_OFF)]) \
+        == NOT_MET
+    assert _answer("GWS.CHAT.5.1v1", one + [_event("ContentReportingProto room_reporting", CR_OFF,
+                                                   unit="ou:a")]) == NOT_MET
+
+
+def test_m1_event_order_keeps_nanoseconds():
+    first, second = "2026-10-01T10:00:00.000000001Z", "2026-10-01T10:00:00.000000002Z"
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time=first), _event(S13, "true", time=second)]) \
+        == NOT_MET
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "true", time=first), _event(S13, "false", time=second)]) == MET
+    # Same instant in two spellings is still a tie.
+    assert _answer("GWS.GMAIL.13.1v1", [_event(S13, "false", time="2026-10-01T10:00:00.5Z"),
+                                        _event(S13, "true", time="2026-10-01T11:00:00.500+01:00")]) == UNUSABLE
+
+
+def test_m2_unreadable_value_in_a_proven_off_leaf_is_out_of_scope():
+    leaf = {**TENANT, "org_units": {"ou:root": None, "ou:a": "ou:root"}}
+    evs = [_event(BARD, "false"), _event(BARD, None, unit="ou:a", time=T3)]
+    sections = _sections(evs, "GWS.GEMINI.1.1v1", tenant=leaf)
+    sections["gws_policies"] = {"complete": True, "policies": [_status("ou:root", "ENABLED"),
+                                                               _status("ou:a", "DISABLED")]}
+    record = gws.assess("GWS.GEMINI.1.1v1", sections)
+    assert (record["verdict"], record["cell"]) == MET
+    # On, or off with a unit below that could inherit, it still weakens the answer.
+    sections["gws_policies"]["policies"][1] = _status("ou:a", "ENABLED")
+    record = gws.assess("GWS.GEMINI.1.1v1", sections)
+    assert (record["verdict"], record["cell"]) == UNUSABLE
+    assert _gemini(evs, [_status("ou:root", "ENABLED"), _status("ou:a", "DISABLED")]) == UNUSABLE

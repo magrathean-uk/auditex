@@ -6,22 +6,31 @@ for COMMONCONTROLS.2.1, its ``event_names``, read with no unit) and either ``goo
 ``top_delete`` is ``violates`` where the Rego counts a top-level delete as non-compliant (CHAT.5.x); ``service`` names
 the service gate (GEMINI.1.1).
 
-- The last event per (slot, unit) wins (SG:scubagoggles/rego/Utils.rego:230-234); names of one slot share one stream
-  (GEMINI.2.1, SG:scubagoggles/rego/Gemini.rego:90-105). Two last events at one time that disagree are unusable.
+- The tenant topology must be complete and unbroken, and the event read complete with a usable log window
+  (``window_start`` before ``window_end``); otherwise nothing is concluded, not even a violation or a service off
+  everywhere: a cut topology cannot tell a deleted OU from a live one.
+- The last event per (slot, unit) wins (SG:scubagoggles/rego/Utils.rego:230-234), compared at full RFC 3339 precision as
+  ``time.parse_rfc3339_ns`` does (Utils.rego:284-286); names of one slot share one stream (GEMINI.2.1,
+  SG:scubagoggles/rego/Gemini.rego:90-105). Two last events at one time that disagree are unusable. A time that is not
+  strict RFC 3339 with a zone, or lies outside the read's window, is unreadable.
 - ``DELETE_APPLICATION_SETTING`` is a value, as SG:scubagoggles/rego/Utils.rego:318-346 makes it. Below the top unit
   it hands the setting back to the parent, which is checked on its own. At the top unit it returns the setting to a
-  default no log shows, so it counts as no top-level event (D1) unless the row says it ``violates``.
-- An event for an OU outside a complete topology is for a deleted OU and is skipped, as ScubaGoggles' ``FilterEventsOU``
-  does (SG:scubagoggles/rego/Utils.rego:423-438). An event that cannot be placed otherwise (no unit, a malformed one,
-  an OU outside an incomplete topology) never answers met: a bad or unreadable value or a delete there is unusable.
-- A value outside the row's good and bad values, a null value or an unreadable time is unusable, never compliant.
-- One violation wins over unusable values elsewhere. With no violation, an unusable value answers not_assessed, then
-  a top unit lacking any slot's event answers not_assessed ``no_setting_event`` (D1), else met.
-- The service gate skips a bad value only where the service is off, the topology is complete and no unit that could
-  inherit the value has it on or unknown; a bad value under an unknown state is unusable.
+  default no log shows, so it counts as no top-level event (D1, D15) unless the row says it ``violates``.
+- An event for an OU outside the topology is for a deleted OU and is skipped, as ScubaGoggles' ``FilterEventsOU``
+  does (SG:scubagoggles/rego/Utils.rego:423-438). An event that might be the slot's but cannot be told (an empty event
+  name, a setting change with no setting, no unit or a malformed one) is ambiguous: it never answers met, and it
+  voids any violation it is not proven older than. A known other setting and a setting-less non-setting event
+  (``TOGGLE_CAA_ENABLEMENT``) stay isolated.
+- A value outside the row's good and bad values, a null value, a CHAT.5.2 payload that is not a category list, or an
+  unreadable time is unusable, never compliant.
+- A violation at the top unit counts only once every slot has a top-level event (Chat.rego:323-349); a child or group
+  violation counts on its own (D17, D19) and wins over unusable values elsewhere. With no violation, an unusable
+  value answers not_assessed, then a top unit lacking any slot's event answers ``no_setting_event`` (D1), else met.
+- The service gate skips a bad or unreadable value only where the service is off and no unit that could inherit the
+  value has it on or unknown; a bad value under an unknown state is unusable.
 
-Where this is stricter than ScubaGoggles, always toward not_assessed or a positively read violation (for the lead to
-number in design 8.3): a top-level delete is no event (ScubaGoggles passes it); a string outside the pinned values is
+Where this is stricter than ScubaGoggles, always toward not_assessed or a positively read violation (design 8.3
+D15 to D19, in order): a top-level delete is no event (ScubaGoggles passes it); a string outside the pinned values is
 unusable where the Rego fails anything but the good value (GMAIL.13.1, CC.2.1, CC.3.x); a CHAT.5.1 child OU is judged
 per setting, not only when it has all four (Chat.rego:283-296); a GEMINI.1.1 group event carries no OU, so its bad
 value is a violation only with the service on in every unit, else unusable (Gemini.rego:38-39 reads the event's OU).
@@ -30,7 +39,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+from fractions import Fraction
 from typing import Any
 
 from ..record import _rec
@@ -50,6 +60,10 @@ from .reduce import (
 _GROUP = re.compile(r"group:[^/\s]+")
 # RE2's ``\s`` (Chat.rego:415-423) is ASCII whitespace; a no-break space must not join a category.
 _SPACES = re.compile(r"\s+", re.ASCII)
+_ASCII_SPACE = " \t\n\r\f\v"
+_CATEGORY = re.compile(r"[A-Za-z_]+: [A-Za-z0-9_]+")
+_RFC3339 = re.compile(r"(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:\d{2})", re.ASCII)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _delete_event() -> str:
@@ -118,14 +132,26 @@ def _events(section: Any) -> list[dict]:
     return section["events"]
 
 
-def _time(value: Any) -> datetime | None:
-    if not isinstance(value, str):
+def _time(value: Any) -> Fraction | None:
+    """An RFC 3339 time as exact seconds since the epoch, at full precision (ScubaGoggles compares
+    ``time.parse_rfc3339_ns``, SG:scubagoggles/rego/Utils.rego:284-286, 318-320); anything else is unreadable."""
+    match = _RFC3339.fullmatch(value) if isinstance(value, str) else None
+    if match is None:
         return None
+    day, clock, fraction, zone = match.groups()
     try:
-        parsed = datetime.fromisoformat(value)
+        whole = datetime.fromisoformat(f"{day}T{clock}{'+00:00' if zone in 'Zz' else zone}")
     except ValueError:
         return None
-    return parsed if parsed.tzinfo is not None else None
+    seconds = Fraction((whole - _EPOCH) // timedelta(seconds=1))
+    return seconds + Fraction(int(fraction), 10 ** len(fraction)) if fraction else seconds
+
+
+def _window(section: dict) -> tuple[Fraction, Fraction]:
+    start, end = _time(section.get("window_start")), _time(section.get("window_end"))
+    if start is None or end is None or start >= end:
+        raise Unusable("gws_setting_events has no usable log window")
+    return start, end
 
 
 def _value(event: dict, by_event: bool) -> Any:
@@ -133,6 +159,24 @@ def _value(event: dict, by_event: bool) -> Any:
         return _DELETE
     value = event.get("new_value")
     return value if isinstance(value, str) else _UNREADABLE
+
+
+def _categories(value: str) -> frozenset[str] | None:
+    """A read category list (Chat.rego:415-447), bracketed or bare, or None when the payload is not one: empty,
+    unbalanced brackets, an empty item or an item that is not ``prefix: CATEGORY``. ``[]`` is a read, empty list."""
+    text = value.strip(_ASCII_SPACE)
+    if text.startswith("["):
+        if len(text) < 2 or not text.endswith("]"):
+            return None
+        text = text[1:-1].strip(_ASCII_SPACE)
+        if not text:
+            return frozenset()
+    elif not text or text.endswith("]"):
+        return None
+    items = [_SPACES.sub(" ", part).strip(" ") for part in text.split(",")]
+    if not all(_CATEGORY.fullmatch(item) for item in items):
+        return None
+    return frozenset(items)
 
 
 def _classify(slot: _Slot, value: Any, top: bool, top_delete: str) -> str:
@@ -144,24 +188,42 @@ def _classify(slot: _Slot, value: Any, top: bool, top_delete: str) -> str:
     if value is _UNREADABLE:
         return "unusable"
     if slot.required is not None:
-        enabled = {_SPACES.sub(" ", part).strip(" []") for part in value.split(",")}
+        enabled = _categories(value)
+        if enabled is None:
+            return "unusable"
         return "bad" if slot.required - enabled else "good"
     if value in slot.bad:
         return "bad"
     return "good" if value in slot.good else "unusable"
 
 
-def _last(entries: list[tuple[datetime | None, Any]]) -> Any:
-    """The value of the latest event; an unreadable time anywhere in the stream, or a tie at the latest time between
-    different values, is unreadable."""
+def _last(entries: list[tuple[Fraction | None, Any]]) -> tuple[Fraction | None, Any]:
+    """The time and value of the latest event; an unreadable time anywhere in the stream, or a tie at the latest
+    time between different values, is unreadable."""
     if any(when is None for when, _ in entries):
-        return _UNREADABLE
+        return None, _UNREADABLE
     latest = max(when for when, _ in entries)
     values = {repr(value) if isinstance(value, _Sentinel) else "v:" + value
               for when, value in entries if when == latest}
     if len(values) != 1:
-        return _UNREADABLE
-    return next(value for when, value in entries if when == latest)
+        return latest, _UNREADABLE
+    return latest, next(value for when, value in entries if when == latest)
+
+
+def _identity(slot: _Slot, event: dict) -> str:
+    """``match``, ``skip`` or ``ambiguous``: whether the event is this slot's, positively not, or cannot be told.
+    A known other setting, and a setting-less event that is not a setting change (``TOGGLE_CAA_ENABLEMENT``), stay
+    isolated; an empty event name, or a setting change whose setting is unknown, might be this slot's."""
+    name, setting = event["event"], event.get("setting")
+    if slot.by_event:
+        if name in slot.names:
+            return "match"
+        return "ambiguous" if not name and setting is None else "skip"
+    if isinstance(setting, str):
+        if setting not in slot.names:
+            return "skip"
+        return "match" if name else "ambiguous"
+    return "ambiguous" if not name or name.endswith("_APPLICATION_SETTING") else "skip"
 
 
 class _Gate:
@@ -214,6 +276,13 @@ def setting_event(policy_id: str, row: dict, sections: dict) -> dict:
         return _answer(policy_id, row, "section_shape_unusable")
     if sections["gws_setting_events"].get("complete") is not True:
         return _answer(policy_id, row, "event_read_incomplete")
+    try:
+        start, end = _window(sections["gws_setting_events"])
+    except Unusable:
+        return _answer(policy_id, row, "section_shape_unusable")
+    if not topology_complete:
+        # A cut or broken topology cannot tell a deleted OU from a live one, nor prove a universal service state.
+        return _answer(policy_id, row, "section_shape_unusable")
     gate = None
     if service:
         if sections["gws_policies"].get("complete") is not True:
@@ -225,50 +294,64 @@ def setting_event(policy_id: str, row: dict, sections: dict) -> dict:
             return _answer(policy_id, row, "service_status_absent")
 
     top_delete, groups = params.get("top_delete", "absent"), params.get("groups", False)
-    violation = unusable = absent = False
+    unusable = absent = False
+    violations: list[tuple[bool, Fraction | None, list[Fraction | None]]] = []
     for slot in slots:
-        streams: dict[tuple[str, str], list[tuple[datetime | None, Any]]] = {}
+        streams: dict[tuple[str, str], list[tuple[Fraction | None, Any]]] = {}
+        ambiguous: list[Fraction | None] = []
         for event in events:
-            if (event["event"] if slot.by_event else event.get("setting")) not in slot.names:
+            identity = _identity(slot, event)
+            if identity == "skip":
                 continue
-            value = _value(event, slot.by_event)
+            when = _time(event.get("time"))
+            if when is not None and not start <= when <= end:
+                when = None  # dated outside the read's own window: not usable evidence
             unit = event.get("unit")
+            if identity == "ambiguous":
+                ambiguous.append(when)
+                continue
             if slot.by_event:
                 place = ("tenant", "")
             elif isinstance(unit, str) and _OU.fullmatch(unit) and (unit == top or unit in org_units):
                 place = ("ou", unit)
-            elif isinstance(unit, str) and _OU.fullmatch(unit) and topology_complete:
-                continue  # an OU the complete topology does not hold: deleted
+            elif isinstance(unit, str) and _OU.fullmatch(unit):
+                continue  # an OU the complete topology does not hold: deleted (FilterEventsOU)
             elif isinstance(unit, str) and _GROUP.fullmatch(unit):
                 if not groups:
                     continue  # the setting is not group-scoped (FilterEventsOU drops group events)
                 place = ("group", unit)
             else:
-                # Cannot be placed: a bad or unreadable value here might be any unit's, and a delete might be the
-                # top unit's (D1, or a violation where the row says so).
-                if value is _DELETE or _classify(slot, value, False, top_delete) in {"bad", "unusable"}:
-                    unusable = True
+                ambiguous.append(when)  # cannot be placed: it might be any unit's change, or a delete
                 continue
-            streams.setdefault(place, []).append((_time(event.get("time")), value))
+            streams.setdefault(place, []).append((when, _value(event, slot.by_event)))
+        unusable = unusable or bool(ambiguous)
         top_place = ("tenant", "") if slot.by_event else ("ou", top)
         if top_place not in streams:
             absent = True
         for place, entries in streams.items():
-            verdict = _classify(slot, _last(entries), place == top_place, top_delete)
+            when, value = _last(entries)
+            verdict = _classify(slot, value, place == top_place, top_delete)
             if verdict == "absent":
                 absent = True
             elif verdict == "unusable":
-                unusable = True
+                # A proven off unit nothing inherits from cannot weaken the in-scope result (design 8.2 step 4).
+                if gate is None or place[0] != "ou" or gate.bad_at_ou(place[1]) != "skip":
+                    unusable = True
             elif verdict == "bad":
                 effect = "violates"
                 if gate is not None:
                     effect = gate.bad_at_group() if place[0] == "group" else gate.bad_at_ou(place[1])
                 if effect == "violates":
-                    violation = True
+                    violations.append((place == top_place, when, ambiguous))
                 elif effect == "unusable":
                     unusable = True
-    if violation:
-        return _answer(policy_id, row, "unit_violates")
+    for at_top, when, ambiguous in violations:
+        # An ambiguous change not proven older might have superseded the violation; the top unit's own violation
+        # counts only once every slot has a top-level event (Chat.rego:323-349, 364-377; children per D17, D19).
+        if any(other is None or when is None or other >= when for other in ambiguous):
+            unusable = True
+        elif not (at_top and absent):
+            return _answer(policy_id, row, "unit_violates")
     if unusable:
         return _answer(policy_id, row, "event_value_unusable")
     if absent:
