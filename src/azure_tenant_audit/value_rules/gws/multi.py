@@ -23,13 +23,16 @@ One catalogue kind; ``params.kind`` names the sub-kind, one per ScubaGoggles Reg
 "Effective" is the unit's own value, else the top unit's (design 8.1). A unit other than the top unit is evaluated
 only when at least one participating field is explicit in it; the top unit always is, its pinned defaults included.
 Unknown is not safe (design 8.4): a wrong type, an unknown enum or an ``*_UNSPECIFIED`` value is unusable, and so is a
-section record holding none of its section's fields (``{}``, review B5); an absent value at the top unit with no
-pinned default is ``setting_absent``; none ever answers met. A unit whose service status record is unreadable answers
-``service_status_absent`` whether or not it has settings of its own, unless a violation is read elsewhere (review B2).
-Answers carry only the catalogued constant texts.
+section record holding none of its section's fields (``{}``, review B5). Such an empty record is not a value at the top
+unit or below: it never takes a pinned default (round 2, B1) and never hides another section's readable inherited
+value (round 2, B2). An effective value absent at the unit and the top unit with no pinned default is
+``setting_absent`` wherever the row needs it (round 2, B3); none ever answers met. A unit whose service status record
+is unreadable answers ``service_status_absent`` whether or not it has settings of its own, unless a violation is read
+elsewhere (review B2). Answers carry only the catalogued constant texts.
 """
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, NamedTuple
 
 from ..record import _rec
@@ -39,6 +42,7 @@ from .reduce import (
     OFF,
     ON,
     UNUSABLE,
+    Units,
     Unusable,
     effective_units,
     service_on,
@@ -128,16 +132,34 @@ def _params(raw: Any) -> _Params:
     return _Params(kind, service, checks, mode, required)
 
 
-def _own(units, unit: str, section: str, field: str) -> Any:
-    """The unit's own value (at the top unit, pinned defaults included); ``MISSING`` or ``UNUSABLE``.
+def _records(units: Units, present: frozenset[tuple[str, str]]) -> Units:
+    """``units`` with every supplied record that holds none of its section's fields (``{}``, or only unknown keys)
+    replaced by ``UNUSABLE``: it states an override whose value cannot be read (review B5). Omitting the record is the
+    absent case. ``units.explicit`` holds the fields read before pinned defaults filled the top unit, so a supplied
+    empty top-level record is caught although the reducer filled it (round 2, B1); a top-level record nobody supplied
+    is pinned defaults alone and stays readable."""
+    values: dict[str, dict[str, Any]] = {}
+    for unit, by_section in units.values.items():
+        values[unit] = {}
+        for section, value in by_section.items():
+            fields = set(section_semantics(section)["fields"])
+            read = {field for name, field in units.explicit.get(unit, frozenset()) if name == section}
+            unreadable = not isinstance(value, dict) or (unit, section) in present and not read & fields
+            values[unit][section] = UNUSABLE if unreadable else value
+    return dataclasses.replace(units, values=values)
 
-    A record that is present but holds none of its section's fields (``{}``, or only unknown keys) is unreadable, not
-    absent: it states an override whose value cannot be read (review B5). Omitting the record is the absent case."""
+
+def _present(sections: dict, keys: list[str]) -> frozenset[tuple[str, str]]:
+    """The (unit, section) pairs with at least one supplied record; ``effective_units`` has checked their shape."""
+    return frozenset((entry["unit"], entry["section"]) for entry in sections["gws_policies"]["policies"]
+                     if entry["section"] in keys)
+
+
+def _own(units, unit: str, section: str, field: str) -> Any:
+    """The unit's own value (at the top unit, pinned defaults included); ``MISSING`` or ``UNUSABLE``."""
     value = units.values.get(unit, {}).get(section, MISSING)
-    if value is MISSING:
-        return MISSING
-    if not isinstance(value, dict) or not set(value) & set(section_semantics(section)["fields"]):
-        return UNUSABLE
+    if value is MISSING or value is UNUSABLE:
+        return value
     return value.get(field, MISSING)
 
 
@@ -208,8 +230,10 @@ def _mode_branch(units, unit: str, params: _Params) -> int:
 
 
 def _own_any_bad(units, unit: str, params: _Params) -> int:
+    # The same rule at every unit (round 2, B3): a sub-unit that restates one field and has no effective value for
+    # another, at itself or the top unit, is no more readable than the top unit would be.
     results = [_judge(check, _effective(units, unit, check.section, check.field)) for check in params.checks]
-    if _BAD in results or _UNUSABLE in results or unit != units.top:
+    if _BAD in results or _UNUSABLE in results:
         return _worst([result for result in results if result != _ABSENT])
     absent = [check for check, result in zip(params.checks, results, strict=True) if result == _ABSENT]
     if absent and (params.required == "all" or len(absent) == len(results)):
@@ -261,6 +285,7 @@ def settings_multi(policy_id: str, row: dict, sections: dict) -> dict:
         units = effective_units(sections, keys)
     except Unusable:
         return _answer(policy_id, row, "section_shape_unusable")
+    units = _records(units, _present(sections, keys))
     if not units.complete:
         return _answer(policy_id, row, "policy_read_incomplete")
     states = {unit: service_on(units, unit, params.service) for unit in units.values} if params.service else {}
@@ -284,10 +309,10 @@ def settings_multi(policy_id: str, row: dict, sections: dict) -> dict:
             continue
         if explicit is False or state == OFF and not (unit == units.top and inherited):
             continue
-        if explicit is None:
-            results.append(_UNUSABLE)
-        else:
-            results.append(evaluate(units, unit, params))
+        result = evaluate(units, unit, params)
+        # An unreadable record of its own leaves the unit unknown, yet a violation read on another section it
+        # inherits still decides it (round 2, B2).
+        results.append(max(result, _UNUSABLE) if explicit is None else result)
     worst = _worst(results)
     cell = {_BAD: "unit_violates", _SERVICE_UNKNOWN: "service_status_absent", _UNUSABLE: "setting_value_unusable",
             _ABSENT: "setting_absent", _OK: "no_unit_violates"}[worst]

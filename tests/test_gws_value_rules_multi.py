@@ -316,3 +316,187 @@ _CC121_ROOT = [_p("ou:root", "takeout_service_status", {"serviceState": "DISABLE
 ], ids=["b5-empty-status", "b5-empty-youtube", "b5-only-empty-status", "b5-status-omitted", "b5-no-child"])
 def test_b5_an_empty_one_field_record_is_unreadable(child, expected):
     assert _cell("GWS.COMMONCONTROLS.12.1v1", [*_CC121_ROOT, *child]) == expected
+
+
+# Repair round 2 (M13-L09 review, 25 Nov 2026). An empty settings record, at the top unit or below, is not a value: it
+# never takes a pinned default and never hides another section's readable inherited value; a unit with no effective
+# value for a field the row needs is never met. Every expected cell is a literal.
+@pytest.mark.parametrize(("policy_id", "policies", "expected"), [
+    ("GWS.CHAT.4.1v1", [_p("ou:root", "chat_service_status", {"serviceState": "ENABLED"}),
+                        _p("ou:root", "chat_external_chat_restriction", {})], UNUSABLE_CELL),
+    ("GWS.COMMONCONTROLS.11.1v1", [_p("ou:root", "workspace_marketplace_apps_access_options", {})], UNUSABLE_CELL),
+    ("GWS.GROUPS.4.1v1", [_p("ou:root", "groups_for_business_service_status", {"serviceState": "ENABLED"}),
+                          _p("ou:root", "groups_for_business_groups_sharing", {"unknownKey": True})], UNUSABLE_CELL),
+    # Omitting the record still lets the pinned default answer.
+    ("GWS.CHAT.4.1v1", [_p("ou:root", "chat_service_status", {"serviceState": "ENABLED"})], ("met", "no_unit_violates")),
+    ("GWS.COMMONCONTROLS.11.1v1", [], ("not_met", "unit_violates")),
+], ids=["r2b1-chat-empty", "r2b1-cc111-empty", "r2b1-groups-unknown-key", "r2b1-chat-omitted", "r2b1-cc111-omitted"])
+def test_r2_b1_an_empty_top_record_takes_no_default(policy_id, policies, expected):
+    assert _cell(policy_id, policies) == expected
+
+
+_GMAIL91_ROOT_OFF = [_p("ou:root", "gmail_service_status", {"serviceState": "DISABLED"}),
+                     _p("ou:a", "gmail_service_status", {"serviceState": "ENABLED"})]
+
+
+@pytest.mark.parametrize(("child", "expected"), [
+    ({}, ("not_met", "unit_violates")),
+    ({"enableImapAccess": None}, ("not_met", "unit_violates")),
+    ({"enableImapAccess": False}, ("not_met", "unit_violates")),
+], ids=["r2b2-empty-imap", "r2b2-null-imap", "r2b2-readable-imap"])
+def test_r2_b2_an_empty_child_record_never_hides_an_inherited_violation(child, expected):
+    policies = [*_GMAIL91_ROOT_OFF, _p("ou:root", "gmail_imap_access", {"enableImapAccess": False}),
+                _p("ou:root", "gmail_pop_access", {"enablePopAccess": True}), _p("ou:a", "gmail_imap_access", child)]
+    assert _cell("GWS.GMAIL.9.1v1", policies) == expected
+
+
+@pytest.mark.parametrize(("policies", "expected"), [
+    ([_p("ou:a", "gmail_imap_access", {"enableImapAccess": False})], ("not_assessed", "setting_absent")),
+    ([_p("ou:a", "gmail_pop_access", {"enablePopAccess": False})], ("not_assessed", "setting_absent")),
+    ([_p("ou:a", "gmail_imap_access", {"enableImapAccess": True})], ("not_met", "unit_violates")),
+    ([_p("ou:a", "gmail_imap_access", {"enableImapAccess": False}),
+      _p("ou:a", "gmail_pop_access", {"enablePopAccess": False})], ("met", "no_unit_violates")),
+    ([_p("ou:a", "gmail_imap_access", {"enableImapAccess": False}),
+      _p("ou:root", "gmail_pop_access", {"enablePopAccess": False})], ("met", "no_unit_violates")),
+], ids=["r2b3-pop-nowhere", "r2b3-imap-nowhere", "r2b3-bad-wins", "r2b3-both-own", "r2b3-pop-from-top"])
+def test_r2_b3_a_reactivated_child_needs_every_required_field(policies, expected):
+    assert _cell("GWS.GMAIL.9.1v1", [*_GMAIL91_ROOT_OFF, *policies]) == expected
+
+
+def _takeout() -> dict:
+    return {"takeout_service_status": {"serviceState": "DISABLED"}} | {
+        f"{app}_user_takeout": {"takeoutStatus": "DISABLED"}
+        for app in ("blogger", "books", "location_history", "maps", "pay", "photos", "play", "play_console", "youtube")}
+
+
+_EXT = "drive_and_docs_external_sharing"
+_MARKET = "workspace_marketplace_apps_access_options"
+# Compliant top-unit records per baseline; every field of each participating section is stated.
+_BASE = {
+    "gmail55": {"gmail_email_attachment_safety": {
+        "anomalousAttachmentProtectionConsequence": "SPAM_FOLDER", "encryptedAttachmentProtectionConsequence": "QUARANTINE",
+        "attachmentWithScriptsProtectionConsequence": "QUARANTINE"}},
+    "gmail76": {"gmail_spoofing_and_authentication": {
+        "domainSpoofingConsequence": "SPAM_FOLDER", "domainNameSpoofingConsequence": "QUARANTINE",
+        "employeeNameSpoofingConsequence": "SPAM_FOLDER", "groupsSpoofingConsequence": "QUARANTINE",
+        "unauthenticatedEmailConsequence": "SPAM_FOLDER"}},
+    "gmail91": {"gmail_imap_access": {"enableImapAccess": False}, "gmail_pop_access": {"enablePopAccess": False}},
+    "drive-disallowed": {_EXT: {"externalSharingMode": "DISALLOWED", "allowReceivingExternalFiles": False,
+                                "allowReceivingFilesOutsideAllowlistedDomains": False}},
+    "drive-allowlisted": {_EXT: {"externalSharingMode": "ALLOWLISTED_DOMAINS", "allowReceivingExternalFiles": False,
+                                 "allowReceivingFilesOutsideAllowlistedDomains": False,
+                                 "warnForSharingOutsideAllowlistedDomains": True, "warnForExternalSharing": True,
+                                 "allowNonGoogleInvitesInAllowlistedDomains": False, "allowNonGoogleInvites": False,
+                                 "allowPublishingFiles": False, "allowedPartiesForDistributingContent": "NONE"}},
+    "drive-allowed": {_EXT: {"externalSharingMode": "ALLOWED", "warnForSharingOutsideAllowlistedDomains": True,
+                             "warnForExternalSharing": True, "allowNonGoogleInvitesInAllowlistedDomains": False,
+                             "allowNonGoogleInvites": False, "allowPublishingFiles": False,
+                             "allowedPartiesForDistributingContent": "NONE"}},
+    "drive31": {"drive_and_docs_file_security_update": {"allowUsersToManageUpdate": False,
+                                                        "securityUpdate": "APPLY_TO_IMPACTED_FILES"}},
+    # Both fields participate: the activation is on and the dependent field makes the unit compliant.
+    "drive51": {"drive_and_docs_drive_for_desktop": {"allowDriveForDesktop": True, "restrictToAuthorizedDevices": True}},
+    "groups41": {"groups_for_business_groups_sharing": {"ownersCanHideGroups": False, "newGroupsAreHidden": False}},
+    "chat41": {"chat_external_chat_restriction": {"allowExternalChat": True,
+                                                  "externalChatRestriction": "TRUSTED_DOMAINS"}},
+    "cc111": {_MARKET: {"accessLevel": "ALLOW_LISTED_APPS", "allowAllInternalApps": False}},
+    "cc121": _takeout(),
+}
+MET, BAD, ABSENT = ("met", "no_unit_violates"), ("not_met", "unit_violates"), ("not_assessed", "setting_absent")
+STATUS_ABSENT = ("not_assessed", "service_status_absent")
+_APPS = ("blogger", "books", "location_history", "maps", "pay", "photos", "play", "play_console", "youtube")
+# (policy, baseline, section, field, a known value other than the baseline's, the top unit's answer when the field
+# is absent there). Absent fields at the top unit take the pinned default when the section has one.
+WALK = [
+    *[("GWS.GMAIL.5.5v1", "gmail55", "gmail_email_attachment_safety", field, "WARNING", MET) for field in (
+        "anomalousAttachmentProtectionConsequence", "encryptedAttachmentProtectionConsequence",
+        "attachmentWithScriptsProtectionConsequence")],
+    *[("GWS.GMAIL.7.6v1", "gmail76", "gmail_spoofing_and_authentication", field, "NO_ACTION", MET) for field in (
+        "domainSpoofingConsequence", "domainNameSpoofingConsequence", "employeeNameSpoofingConsequence",
+        "groupsSpoofingConsequence", "unauthenticatedEmailConsequence")],
+    ("GWS.GMAIL.9.1v1", "gmail91", "gmail_imap_access", "enableImapAccess", True, ABSENT),
+    ("GWS.GMAIL.9.1v1", "gmail91", "gmail_pop_access", "enablePopAccess", True, ABSENT),
+    ("GWS.DRIVEDOCS.1.2v1", "drive-disallowed", _EXT, "externalSharingMode", "ALLOWED", MET),
+    ("GWS.DRIVEDOCS.1.2v1", "drive-disallowed", _EXT, "allowReceivingExternalFiles", True, BAD),
+    ("GWS.DRIVEDOCS.1.2v1", "drive-allowlisted", _EXT, "allowReceivingFilesOutsideAllowlistedDomains", True, BAD),
+    ("GWS.DRIVEDOCS.1.3v1", "drive-allowlisted", _EXT, "externalSharingMode", "ALLOWED", MET),
+    ("GWS.DRIVEDOCS.1.3v1", "drive-allowlisted", _EXT, "warnForSharingOutsideAllowlistedDomains", False, MET),
+    ("GWS.DRIVEDOCS.1.3v1", "drive-allowed", _EXT, "warnForExternalSharing", False, MET),
+    ("GWS.DRIVEDOCS.1.4v1", "drive-allowlisted", _EXT, "externalSharingMode", "ALLOWED", MET),
+    ("GWS.DRIVEDOCS.1.4v1", "drive-allowlisted", _EXT, "allowNonGoogleInvitesInAllowlistedDomains", True, MET),
+    ("GWS.DRIVEDOCS.1.4v1", "drive-allowed", _EXT, "allowNonGoogleInvites", True, BAD),
+    ("GWS.DRIVEDOCS.1.5v1", "drive-allowed", _EXT, "externalSharingMode", "DISALLOWED", MET),
+    ("GWS.DRIVEDOCS.1.5v1", "drive-allowed", _EXT, "allowPublishingFiles", True, BAD),
+    ("GWS.DRIVEDOCS.1.5v1", "drive-allowlisted", _EXT, "allowPublishingFiles", True, BAD),
+    ("GWS.DRIVEDOCS.1.7v1", "drive-allowed", _EXT, "externalSharingMode", "DISALLOWED", MET),
+    ("GWS.DRIVEDOCS.1.7v1", "drive-allowed", _EXT, "allowedPartiesForDistributingContent", "ALL_ELIGIBLE_USERS", BAD),
+    ("GWS.DRIVEDOCS.1.7v1", "drive-allowlisted", _EXT, "allowedPartiesForDistributingContent",
+     "ELIGIBLE_INTERNAL_USERS", BAD),
+    ("GWS.DRIVEDOCS.3.1v1", "drive31", "drive_and_docs_file_security_update", "allowUsersToManageUpdate", True, ABSENT),
+    ("GWS.DRIVEDOCS.3.1v1", "drive31", "drive_and_docs_file_security_update", "securityUpdate",
+     "REMOVE_FROM_IMPACTED_FILES", ABSENT),
+    ("GWS.DRIVEDOCS.5.1v1", "drive51", "drive_and_docs_drive_for_desktop", "allowDriveForDesktop", False, ABSENT),
+    ("GWS.DRIVEDOCS.5.1v1", "drive51", "drive_and_docs_drive_for_desktop", "restrictToAuthorizedDevices", False,
+     ABSENT),
+    ("GWS.GROUPS.4.1v1", "groups41", "groups_for_business_groups_sharing", "ownersCanHideGroups", True, MET),
+    ("GWS.GROUPS.4.1v1", "groups41", "groups_for_business_groups_sharing", "newGroupsAreHidden", True, MET),
+    ("GWS.CHAT.4.1v1", "chat41", "chat_external_chat_restriction", "allowExternalChat", False, MET),
+    ("GWS.CHAT.4.1v1", "chat41", "chat_external_chat_restriction", "externalChatRestriction", "NO_RESTRICTION", BAD),
+    ("GWS.COMMONCONTROLS.11.1v1", "cc111", _MARKET, "accessLevel", "ALLOW_NONE", BAD),
+    ("GWS.COMMONCONTROLS.11.1v1", "cc111", _MARKET, "allowAllInternalApps", True, MET),
+    ("GWS.COMMONCONTROLS.12.1v1", "cc121", "takeout_service_status", "serviceState", "ENABLED", STATUS_ABSENT),
+    *[("GWS.COMMONCONTROLS.12.1v1", "cc121", f"{app}_user_takeout", "takeoutStatus", "ENABLED", ABSENT)
+      for app in _APPS],
+]
+VARIANTS = ("absent", "null", "wrong_type", "blank", "empty_record", "contradictory")
+
+
+def _variant_records(unit: str, records: dict, section: str, field: str, other, variant: str) -> list[dict]:
+    records = copy.deepcopy(records)
+    extra = []
+    if variant == "absent":
+        records[section].pop(field)
+        if not records[section]:
+            records.pop(section)
+    elif variant == "null":
+        records[section][field] = None
+    elif variant == "wrong_type":
+        records[section][field] = 1 if isinstance(records[section][field], bool) else True
+    elif variant == "blank":
+        records[section][field] = ""
+    elif variant == "empty_record":
+        records[section] = {}
+    else:  # two equal-ranked records that disagree on the field (D11)
+        extra = [_p(unit, section, {**records[section], field: other})]
+    return [_p(unit, name, value) for name, value in records.items()] + extra
+
+
+def _walk_status(policy_id: str) -> list[dict]:
+    service = ROWS[policy_id][1]
+    return [_p("ou:root", f"{service}_service_status", {"serviceState": "ENABLED"})] if service else []
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize(("policy_id", "base", "section", "field", "other", "top_absent"), WALK,
+                         ids=[f"{case[0]}:{case[1]}:{case[2]}.{case[3]}" for case in WALK])
+def test_r2_every_participating_field_at_the_top_unit(policy_id, base, section, field, other, top_absent, variant):
+    """Absent takes the pinned default, else setting_absent (consequence lists ignore it); every other variant is
+    unreadable, an empty record included."""
+    expected = top_absent if variant == "absent" else UNUSABLE_CELL
+    assert _cell(policy_id, [*_walk_status(policy_id), *_variant_records(
+        "ou:root", _BASE[base], section, field, other, variant)]) == expected
+    # The untouched baseline is compliant.
+    assert _cell(policy_id, [*_walk_status(policy_id), *[_p("ou:root", name, value)
+                                                          for name, value in _BASE[base].items()]]) == MET
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize(("policy_id", "base", "section", "field", "other", "top_absent"), WALK,
+                         ids=[f"{case[0]}:{case[1]}:{case[2]}.{case[3]}" for case in WALK])
+def test_r2_every_participating_field_in_a_child_unit(policy_id, base, section, field, other, top_absent, variant):
+    """The top unit is compliant; the child restates every record, then one variant. An absent field is inherited;
+    every other variant, an empty record included, is unreadable and never inherits."""
+    top = [_p("ou:root", name, value) for name, value in _BASE[base].items()]
+    expected = MET if variant == "absent" else UNUSABLE_CELL
+    assert _cell(policy_id, [*_walk_status(policy_id), *top, *_variant_records(
+        "ou:a", _BASE[base], section, field, other, variant)]) == expected
