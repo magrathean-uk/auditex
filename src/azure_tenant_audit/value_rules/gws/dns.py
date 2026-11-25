@@ -9,17 +9,21 @@ as RFC 7208 (SPF) and RFC 7489 (DMARC) do rather than by substring (lead, 25 Nov
 - DKIM: the three pinned selectors ``google``, ``selector1`` and ``selector2`` must all have been read (design 7);
   some answer among them starts ``v=DKIM1;``. Any other selector the collector holds is not read.
 - SPF: exactly one record whose version section is ``v=spf1`` (RFC 7208 4.5, case-insensitive). Its terms must parse
-  (RFC 7208 4.6, 5, 6; a malformed record fails), and it passes only when its single ``all`` is the final directive
-  with qualifier ``-``, or it has no ``all`` and one ``redirect=`` modifier. ``~all``, ``?all``, ``+all`` and a bare
-  ``all`` fail, and so does a second record.
+  (RFC 7208 4.6, 5, 6 and 7: every domain-spec and macro, CIDR length, IP address, ``redirect`` and ``exp`` argument
+  and unknown-modifier macro-string; a malformed record establishes no policy and fails), and it passes only when
+  its single ``all`` is the final directive with qualifier ``-``, or it has no ``all`` and one ``redirect=`` modifier.
+  ``~all``, ``?all``, ``+all`` and a bare ``all`` fail, and so does a second record.
 - DMARC: exactly one record whose first tag is ``v=DMARC1`` (4.1). It is an RFC 6376 3.2 tag-list (blanks around
   names and values, tag names case-insensitive by the RFC 7489 6.4 grammar, ``DMARC1`` case-sensitive); a repeated tag
   or a malformed list makes the domain have no DMARC record. A missing or invalid ``p``, or an invalid ``sp``, reads as
   ``p=none`` when ``rua`` holds a valid URI, else as no record (RFC 7489 6.6.3). An author-domain record needs
-  ``p=reject``; an inherited one needs ``sp=reject``, or no ``sp`` and ``p=reject`` (4.2). ``rua`` and ``ruf`` are
-  RFC 7489 6.4 URI lists: a malformed URI, an empty ``mailto:`` among them, makes that tag count for nothing. 4.3 wants
-  ``mailto:reports@dmarc.cyber.dhs.gov`` as a whole ``rua`` URI (the baseline names aggregate reports); 4.4 wants at
-  least two ``rua`` and one ``ruf`` ``mailto:`` addresses.
+  ``p=reject``; an inherited one needs ``sp=reject``, or no ``sp`` and ``p=reject`` (4.2). Tag order after ``v`` is
+  not enforced (receivers and ScubaGoggles read tags in any order; lead, 25 Nov 2026). ``rua`` and ``ruf`` are RFC 7489
+  6.4 URI lists: each URI is RFC 3986 with an optional size limit within 64 bits, and a ``mailto:`` URI is RFC 6068
+  (header fields allowed; its ``to`` part and ``to`` fields are percent-decoded RFC 5322 addr-specs). A malformed URI,
+  or a ``mailto:`` naming no recipient, makes that tag count for nothing in 4.3 and 4.4; the 6.6.3 fallback needs only
+  one syntactically valid URI of any scheme. 4.3 wants a ``rua`` address whose local part is exactly ``reports`` (RFC
+  5321 2.4) at ``dmarc.cyber.dhs.gov`` in any case; 4.4 wants at least two ``rua`` and one ``ruf`` addresses.
 - A non-DMARC TXT answer beside the DMARC record is never read for the later rows (design 8.3 D22).
 - A domain with ``resolver_error`` is unknown, never compliant. A positively read violation wins over unknown
   domains, over a cut read and over a malformed list element: the domains that were read keep their violation
@@ -34,6 +38,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from typing import Any
+from urllib.parse import unquote
 
 from ..record import _rec
 
@@ -47,14 +52,30 @@ _POLICIES = {"none", "quarantine", "reject"}
 # The two classes in _TAG_VALUE are disjoint, so the match is linear.
 _TAG_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _TAG_VALUE = re.compile(r"[\x21-\x3a\x3c-\x7e]+(?:[ \t]+[\x21-\x3a\x3c-\x7e]+)*")
-# RFC 7489 6.4: dmarc-uri = URI [ "!" 1*DIGIT [ "k" / "m" / "g" / "t" ] ]; a comma or "!" inside the URI is encoded.
-_SIZE = r"(?:![0-9]+[kmgtKMGT]?)?"
-_MAILTO = re.compile(r"[Mm][Aa][Ii][Ll][Tt][Oo]:([^\s@,;!?]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)" + _SIZE)
-_URI = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:[\x22-\x2b\x2d-\x3a\x3c-\x7e]+" + _SIZE)
+# RFC 7489 6.4: dmarc-uri = URI [ "!" 1*DIGIT [ "k" / "m" / "g" / "t" ] ], the number within an unsigned 64-bit
+# integer; a comma or "!" inside the URI is percent-encoded, so a raw "!" can only start the size limit.
+_SIZE = re.compile(r"[0-9]+[kmgtKMGT]?")
+_U64 = 2 ** 64 - 1
+_DIGITS = re.compile(r"[0-9]+")
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
+# RFC 3986 characters less "," and "!" (RFC 7489 6.4), and well-formed percent-encodings.
+_URI_REST = re.compile(r"(?:[A-Za-z0-9\-._~:/?#\[\]@$&'()*+;=]|%[0-9A-Fa-f]{2})*")
+# RFC 6068 2: hfields = "?" hfield *( "&" hfield ), hfield = *qchar "=" *qchar; qchar = unreserved / pct-encoded /
+# some-delims, less "," and "!" (RFC 7489 6.4).
+_QCHARS = r"(?:[A-Za-z0-9\-._~$'()*+;:@]|%[0-9A-Fa-f]{2})*"
+_HFIELDS = re.compile(_QCHARS + "=" + _QCHARS + "(?:&" + _QCHARS + "=" + _QCHARS + ")*")
+# The raw ``to`` part before percent-decoding: addr-spec characters a URI may carry unencoded (RFC 6068 2).
+_TO_RAW = re.compile(r"(?:[A-Za-z0-9\-._~$&'()*+;:@=\[\]]|%[0-9A-Fa-f]{2})*")
+_ATEXT = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-/=?^_`{|}~")
 # RFC 7208 12: mechanism names and modifier names are case-insensitive.
 _MECHANISM = re.compile(r"([+?~-]?)(all|include|a|mx|ptr|ip4|ip6|exists)([:/].*)?", re.IGNORECASE | re.DOTALL)
 _MODIFIER = re.compile(r"([A-Za-z][A-Za-z0-9_.-]*)=(.*)", re.DOTALL)
+# RFC 7208 7.1: macro-expand = "%{" macro-letter transformers *delimiter "}"; transformers = *DIGIT [ "r" ]. The
+# letters c, r and t belong only in explanation text (7.3), never in a record.
+_MACRO = re.compile(r"\{([slodiphvSLODIPHV])([0-9]*)([rR]?)[.\-+,/_=]*\}")
+_TOPLABEL = re.compile(r"[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*|[A-Za-z0-9]+-[A-Za-z0-9-]*[A-Za-z0-9]")
+_CIDR6 = re.compile(r"//([0-9]+)\Z")
+_CIDR4 = re.compile(r"/([0-9]+)\Z")
 
 
 class _Bad(Exception):
@@ -88,18 +109,80 @@ def _is_spf(record: str) -> bool:
     return record[:6].lower() == "v=spf1" and (len(record) == 6 or record[6] == " ")
 
 
+def _cidr(digits: str, top: int) -> bool:
+    """RFC 7208 5.6: ``"0" / %x31-39 0*nDIGIT`` within the address family's range."""
+    return _DIGITS.fullmatch(digits) is not None and (digits == "0" or digits[0] != "0") and len(digits) <= 3 \
+        and int(digits) <= top
+
+
+def _macro_string(text: str) -> str | None:
+    """RFC 7208 7.1 macro-string, with each macro-expand replaced by ``%`` (never a literal there); None if invalid."""
+    out, index = [], 0
+    while index < len(text):
+        char = text[index]
+        if char != "%":
+            if not 0x21 <= ord(char) <= 0x7E:
+                return None
+            out.append(char)
+            index += 1
+            continue
+        following = text[index + 1:index + 2]
+        if following in ("%", "_", "-"):
+            out.append("%")
+            index += 2
+            continue
+        macro = _MACRO.match(text, index + 1)
+        if macro is None or (macro[2] and not macro[2].strip("0")):
+            return None  # 7.3: a transformer digit, when given, is nonzero
+        out.append("%")
+        index = macro.end()
+    return "".join(out)
+
+
+def _domain_spec(text: str) -> bool:
+    """RFC 7208 7.1: domain-spec = macro-string domain-end; domain-end = ( "." toplabel [ "." ] ) / macro-expand."""
+    flat = _macro_string(text)
+    if not flat:
+        return False
+    if flat.endswith("%"):
+        return True
+    if flat.endswith("."):
+        flat = flat[:-1]
+    head, dot, label = flat.rpartition(".")
+    return bool(dot) and "%" not in label and _TOPLABEL.fullmatch(label) is not None
+
+
 def _ip_argument(argument: str, version: int) -> bool:
     """``:address`` with an optional ``/prefix`` (RFC 7208 5.6)."""
     if not argument.startswith(":"):
         return False
     address, slash, prefix = argument[1:].partition("/")
+    if "%" in address:
+        return False  # no zone index in an ip6-network
     try:
         parsed = ipaddress.ip_address(address)
     except ValueError:
         return False
     if parsed.version != version:
         return False
-    return not slash or (prefix.isdigit() and len(prefix) <= 3 and int(prefix) <= (32 if version == 4 else 128))
+    return not slash or _cidr(prefix, 32 if version == 4 else 128)
+
+
+def _host_argument(argument: str | None) -> bool:
+    """``a`` and ``mx``: [ ":" domain-spec ] [ dual-cidr-length ], dual-cidr-length = [ "/" ip4 ] [ "//" ip6 ]."""
+    if argument is None:
+        return True
+    six = _CIDR6.search(argument)
+    if six is not None:
+        if not _cidr(six[1], 128):
+            return False
+        argument = argument[:six.start()]
+    four = _CIDR4.search(argument)
+    if four is not None:
+        if not _cidr(four[1], 32):
+            return False
+        argument = argument[:four.start()]
+    return not argument or (argument.startswith(":") and _domain_spec(argument[1:]))
 
 
 def _directive(term: str) -> tuple[str, str] | None | bool:
@@ -111,13 +194,13 @@ def _directive(term: str) -> tuple[str, str] | None | bool:
     if name == "all":
         ok = argument is None
     elif name in ("include", "exists"):
-        ok = argument is not None and argument.startswith(":") and len(argument) > 1
+        ok = argument is not None and argument.startswith(":") and _domain_spec(argument[1:])
     elif name in ("ip4", "ip6"):
         ok = argument is not None and _ip_argument(argument, 4 if name == "ip4" else 6)
     elif name == "ptr":
-        ok = argument is None or (argument.startswith(":") and len(argument) > 1)
-    else:  # a, mx: [ ":" domain-spec ] [ dual-cidr-length ]
-        ok = argument is None or len(argument) > 1
+        ok = argument is None or (argument.startswith(":") and _domain_spec(argument[1:]))
+    else:
+        ok = _host_argument(argument)
     return (qualifier or "+", name) if ok else False
 
 
@@ -142,6 +225,8 @@ def _spf_passes(record: str) -> bool:
         name = modifier[1].lower()
         if name in ("redirect", "exp") and name in modifiers:
             return False  # RFC 7208 6: each at most once, else a permanent error
+        if not (_domain_spec(modifier[2]) if name in ("redirect", "exp") else _macro_string(modifier[2]) is not None):
+            return False  # RFC 7208 6.1, 6.2: redirect and exp take a domain-spec; 6.3: others a macro-string
         modifiers[name] = modifier[2]
     alls = [index for index, (_, mechanism) in enumerate(directives) if mechanism == "all"]
     if alls:  # RFC 7208 6.1: redirect is ignored when the record has an all mechanism
@@ -183,33 +268,125 @@ def _is_dmarc(record: str) -> bool:
     return bool(equals) and name.strip(_WSP).lower() == "v" and value.strip(_WSP) == "DMARC1"
 
 
-def _uris(value: str | None) -> list[str] | None:
-    """The ``mailto:`` addresses of an RFC 7489 6.4 URI list; None when the tag is absent or any URI is malformed."""
+def _dot_atom(text: str, start: int) -> int:
+    """End of the RFC 5322 dot-atom-text at ``start`` (RFC 6532 allows non-ASCII atext), or -1 when there is none."""
+    index, last_dot = start, True
+    while index < len(text):
+        char = text[index]
+        if char == ".":
+            if last_dot:
+                return -1
+            last_dot = True
+        elif char in _ATEXT or ord(char) > 0x7F:
+            last_dot = False
+        else:
+            break
+        index += 1
+    return -1 if last_dot else index
+
+
+def _addresses(to: str) -> list[tuple[str, str]] | None:
+    """RFC 6068 2 ``to = addr-spec *( "," addr-spec )``, percent-decoded: (local part, domain) pairs, the local part
+    unquoted (RFC 5321 4.1.2: a quoted and an unquoted spelling name the same mailbox); None when malformed."""
+    if _TO_RAW.fullmatch(to) is None:
+        return None
+    try:
+        text = unquote(to, encoding="utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    if not text:
+        return []
+    found, index = [], 0
+    while True:
+        if text.startswith('"', index):  # quoted-string: qtext (%d33 %d35-91 %d93-126), WSP, quoted-pair
+            local, index = [], index + 1
+            while index < len(text) and text[index] != '"':
+                char = text[index]
+                if char == "\\" and index + 1 < len(text) and (0x20 <= ord(text[index + 1]) <= 0x7E
+                                                                 or text[index + 1] == "\t"):
+                    local.append(text[index + 1])
+                    index += 2
+                elif char in _WSP or (0x21 <= ord(char) <= 0x7E and char != "\\") or ord(char) > 0x7F:
+                    local.append(char)
+                    index += 1
+                else:
+                    return None
+            if index >= len(text):
+                return None
+            local_part, index = "".join(local), index + 1
+        else:
+            end = _dot_atom(text, index)
+            if end < 0:
+                return None
+            local_part, index = text[index:end], end
+        if not text.startswith("@", index):
+            return None
+        index += 1
+        if text.startswith("[", index):  # domain literal: dtext-no-obs (%d33-90 / %d94-126)
+            close = text.find("]", index)
+            if close < 0 or any(not (33 <= ord(c) <= 90 or 94 <= ord(c) <= 126) for c in text[index + 1:close]):
+                return None
+            domain, index = text[index:close + 1], close + 1
+        else:
+            end = _dot_atom(text, index)
+            if end < 0:
+                return None
+            domain, index = text[index:end], end
+        found.append((local_part, domain))
+        if index == len(text):
+            return found
+        if text[index] != ",":
+            return None
+        index += 1
+
+
+def _uri(token: str) -> list[tuple[str, str]] | None:
+    """One RFC 7489 6.4 dmarc-uri: the mailbox addresses a ``mailto:`` URI names in its ``to`` part and ``to`` header
+    fields (RFC 6068 2), an empty list for any other valid URI, None when malformed. A ``mailto:`` URI that names no
+    recipient is a valid URI but no reporting address, so it counts as malformed here."""
+    uri, bang, size = token.partition("!")
+    if bang:
+        number = size.rstrip("kmgtKMGT").lstrip("0") or "0"
+        if _SIZE.fullmatch(size) is None or len(number) > 20 or int(number) > _U64:
+            return None
+    scheme = _SCHEME.match(uri)
+    if scheme is None or _URI_REST.fullmatch(uri, scheme.end()) is None:
+        return None
+    if scheme[0].lower() != "mailto:":
+        return []
+    to, question, hfields = uri[scheme.end():].partition("?")
+    if question and _HFIELDS.fullmatch(hfields) is None:
+        return None
+    addresses = _addresses(to)
+    for field in hfields.split("&") if question else ():
+        name, _, value = field.partition("=")
+        if addresses is not None and unquote(name).lower() == "to":
+            extra = _addresses(value)
+            addresses = None if extra is None else addresses + extra
+    return addresses or None
+
+
+def _uris(value: str | None) -> list[tuple[str, str]] | None:
+    """The mailbox addresses of an RFC 7489 6.4 URI list; None when the tag is absent or any URI in it is malformed."""
     if value is None:
         return None
     addresses = []
     for token in value.split(","):
-        token = token.strip(_WSP)
-        scheme = _SCHEME.match(token)
-        if scheme is None:
+        found = _uri(token.strip(_WSP))
+        if found is None:
             return None
-        if scheme[0].lower() == "mailto:":
-            mailto = _MAILTO.fullmatch(token)
-            if mailto is None:
-                return None
-            addresses.append(mailto[1])
-        elif not _URI.fullmatch(token):
-            return None
+        addresses.extend(found)
     return addresses
 
 
 def _policy(tags: dict[str, str]) -> dict[str, str] | None:
     """The record as RFC 7489 6.6.3 applies it: invalid or absent ``p``, or invalid ``sp``, reads as ``p=none`` when
-    ``rua`` holds a valid URI, else there is no policy."""
+    ``rua`` holds at least one syntactically valid URI of any scheme, else there is no policy."""
     p, sp = tags.get("p", "").lower(), tags.get("sp")
     if p in _POLICIES and (sp is None or sp.lower() in _POLICIES):
         return {**tags, "p": p, **({"sp": sp.lower()} if sp is not None else {})}
-    if _uris(tags.get("rua")):
+    rua = tags.get("rua")
+    if rua is not None and any(_uri(token.strip(_WSP)) is not None for token in rua.split(",")):
         return {**{name: value for name, value in tags.items() if name != "sp"}, "p": "none"}
     return None
 
@@ -250,9 +427,11 @@ def _reject(domain: dict) -> bool:
 
 
 def _cisa_contact(domain: dict) -> bool:
+    """The local part is matched exactly (RFC 5321 2.4: it is case-sensitive), the domain case-insensitively."""
     tags, _ = _dmarc_record(domain)
     addresses = _uris(tags.get("rua")) if tags is not None else None
-    return addresses is not None and _CISA_CONTACT in (address.lower() for address in addresses)
+    local, _, host = _CISA_CONTACT.partition("@")
+    return addresses is not None and any(found == local and name.lower() == host for found, name in addresses)
 
 
 def _agency_contact(domain: dict) -> bool:

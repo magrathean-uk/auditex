@@ -141,3 +141,26 @@ def test_long_records_parse_in_linear_time():
     assert answers == {"GWS.GMAIL.3.1v1": "domain_violates", "GWS.GMAIL.4.3v1": "domain_violates",
                        "GWS.GMAIL.4.4v1": "domain_violates"}
     assert time.monotonic() - started < 3
+
+
+def test_oversized_numbers_and_long_macros_are_malformed_not_errors():
+    # Digit runs past Python's int conversion limit (4,300 digits) must answer, not raise, and parse in linear time.
+    import time
+    cases = {
+        ("GWS.GMAIL.3.1v1", "v=spf1 a:%{d" + "1" * 10000 + "}.example.net -all", None): "no_domain_violates",
+        ("GWS.GMAIL.3.1v1", "v=spf1 a:%{d" + "0" * 10000 + "}.example.net -all", None): "domain_violates",
+        ("GWS.GMAIL.3.1v1", "v=spf1 ip4:192.0.2.1/² -all", None): "domain_violates",
+        ("GWS.GMAIL.3.1v1", "v=spf1 include:" + "%{d}" * 100000 + ".example.net -all", None): "no_domain_violates",
+        ("GWS.GMAIL.4.3v1", "v=spf1 -all", "v=DMARC1; p=reject; rua=mailto:reports@dmarc.cyber.dhs.gov!" + "9" * 10000):
+            "domain_violates",
+        ("GWS.GMAIL.4.3v1", "v=spf1 -all", "v=DMARC1; p=reject; rua=mailto:reports@dmarc.cyber.dhs.gov!" + "0" * 10000
+         + "1k"): "no_domain_violates",
+        ("GWS.GMAIL.4.4v1", "v=spf1 -all", "v=DMARC1; p=reject; rua=mailto:%22" + "a" * 200000 + "%22@example.com?"
+         + "a=b&" * 50000 + "c=d,mailto:" + "a." * 100000 + "a@example.org; ruf=mailto:f@example.com"):
+            "no_domain_violates",
+    }
+    started = time.monotonic()
+    answers = {key: gws.assess(key[0], {"gws_dns": {"complete": True, "domains": [
+        _dom("a.example.com", [key[1]], [key[2]] if key[2] else [])]}})["cell"] for key in cases}
+    assert answers == cases
+    assert time.monotonic() - started < 3
