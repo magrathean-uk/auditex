@@ -11,7 +11,10 @@ from typing import Any
 from azure_tenant_audit.collection_gaps import (
     REASON_PAGINATION_NOT_FOLLOWED,
 )
-from azure_tenant_audit.data_minimisation import minimise_gmail_settings
+from azure_tenant_audit.data_minimisation import (
+    POLICY_TYPE_PATTERN,
+    minimise_gmail_settings,
+)
 
 from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credentials
 
@@ -20,19 +23,12 @@ from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credenti
 SUBJECT_SERVICE_CACHE_SIZE = 8
 
 # Cloud Identity Policy API filter: an allow-list of the setting-type service prefixes the SCuBA Google Workspace
-# baselines read, plus the one system rule type they read. It is a CEL string, and CEL needs the
-# regex escape written as two backslashes (the API's own examples read ``gmail\\..*``), so this raw string holds
+# baselines read, plus the exact Takeout and system alert types they read. It is a CEL string, and CEL needs the
+# regex escape written as two backslashes (the API's own examples read ``gmail\\..*``), so the filter sends
 # two backslashes before every dot. ``settings/rule.dlp`` is never requested: DLP rule bodies can hold sensitive
 # patterns, so ``rule`` is not a prefix and only ``rule.system_defined_alerts`` is named in full. Every
 # ``security.two_step_verification_*`` policy matches, so the 2-step verification read is a subset of this one.
-_POLICY_SETTINGS_FILTER = (
-    r"setting.type.matches('^settings/((gmail|security|drive_and_docs|calendar|chat|meet|classroom|"
-    r"groups_for_business|sites|takeout|blogger_user_takeout|books_user_takeout|location_history_user_takeout|"
-    r"maps_user_takeout|pay_user_takeout|photos_user_takeout|play_user_takeout|play_console_user_takeout|"
-    r"youtube_user_takeout|data_regions|workspace_marketplace|api_controls|provisioning|multi_party_approval|"
-    r"enterprise_service_restrictions|early_access_apps|gemini_app|access_approval|access_management)\\..*|"
-    r"rule\\.system_defined_alerts)$')"
-)
+_POLICY_SETTINGS_FILTER = "setting.type.matches('" + POLICY_TYPE_PATTERN.replace("\\", "\\\\") + "')"
 
 # The widened policies read takes no operator ``--top``: a SCuBA setting cut off by a row limit would be unknown, and
 # the 2-step verification subset used to finish whatever ``--top`` said. This internal cap only stops a runaway read;
@@ -43,9 +39,6 @@ POLICY_SETTINGS_ROW_CAP = 20_000
 POLICY_PAGE_BUDGET = 1_000
 # The longest page cursor accepted; a longer one is a page that cannot be read.
 POLICY_CURSOR_MAX = 4_096
-# The setting types the filter asks for, as a Python pattern: a returned policy of any other type was never requested
-# (for example a ``rule.dlp`` rule body), so its content is not kept.
-POLICY_TYPE_ALLOWED = re.compile(_POLICY_SETTINGS_FILTER.split("matches('", 1)[1][: -len("')")].replace("\\\\", "\\"))
 # Error class of a policies read whose answer could not be read: a malformed page or no policies at all.
 POLICY_MALFORMED_ERROR_CLASS = "malformed_response"
 # Structured API reasons that may be named in a policies read error. Any other reason text is not copied: a reason
@@ -596,7 +589,7 @@ class GoogleWorkspaceClient:
                 limit=top,
             )
         if resource == "orgUnits":
-            payload = _execute(lambda: service.orgunits().list(customerId=self.customer, type="all").execute())
+            payload = _execute(lambda: service.orgunits().list(customerId=self.customer, type="allIncludingParent").execute())
             return _cut(payload.get("organizationUnits") or [], top)
         if resource == "domains":
             payload = _execute(lambda: service.domains().list(customer=self.customer).execute())

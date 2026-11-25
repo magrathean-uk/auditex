@@ -45,6 +45,7 @@ from .collection_gaps import REASON_UNKNOWN, TRUNCATION_REASONS, section_was_cut
 from .google_policy_schema import (
     CUSTOMER_ID,
     POLICY_VALUE_SCHEMAS,
+    TAKEOUT_SETTING_TYPES,
     RequiredPolicyField,
     policy_reference,
     policy_scalar,
@@ -156,14 +157,24 @@ def minimise_gmail_settings(payload: dict[str, Any]) -> dict[str, Any]:
 # customer id, the policy resource name and every other field are dropped.
 POLICY_ADDRESS_LIST_KEYS = ("addressList", "blockedAddressList")
 POLICY_SETTING_TYPE = re.compile(r"settings/[a-z0-9_]+(?:\.[a-z0-9_]+)+")
+# SCuBA's service prefixes and exact setting types, shared by the request and response checks.
+POLICY_TYPE_PATTERN = (
+    r"^settings/((gmail|security|drive_and_docs|calendar|chat|meet|classroom|groups_for_business|sites|takeout|"
+    r"data_regions|workspace_marketplace|api_controls|provisioning|multi_party_approval|"
+    r"enterprise_service_restrictions|early_access_apps|gemini_app|access_approval|access_management)\..*|"
+    rf"{'|'.join(map(re.escape, TAKEOUT_SETTING_TYPES))}|rule\.system_defined_alerts)$"
+)
+POLICY_TYPE_ALLOWED = re.compile(POLICY_TYPE_PATTERN)
+TWO_STEP_SETTING_PREFIX = "settings/security.two_step_verification_"
+UNRECOGNISED_POLICY_SETTING = "unrecognised"
 POLICY_UNIT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 POLICY_TYPES = ("ADMIN", "SYSTEM", "POLICY_TYPE_UNSPECIFIED")
 POLICY_QUERY_MAX = 4_096
 POLICY_SYSTEM_GROUPS = frozenset({"WORKSPACE_ALL_ADMIN_GROUP", "UNCONSENTED_CHILD_GROUP"})
 POLICY_QUERY_SCOPES = ("targets", "licences", "other", "unreadable")
 _DOMAIN_ENTRY = re.compile(r"^[^@]+\.[^@]+$")
-# The names of Google's system-defined alert rules (ScubaGoggles v1.1.0, parsers/system_rules_parser.py): the only
-# rule names kept. Unknown names produce an unreadable value.
+# The names of Google's system-defined alert rules read by ScubaGoggles v1.1.0 (parsers/system_rules_parser.py).
+UNRECOGNISED_SYSTEM_ALERT_NAME = "unrecognised"
 POLICY_SYSTEM_ALERT_NAMES = frozenset(
     {
         "Account suspension warning",
@@ -292,7 +303,9 @@ def _project_policy_field(value: Any, schema: Any) -> Any:
     if schema == "address-lists":
         return [_address_list_summary(item) for item in value] if isinstance(value, list) else None
     if schema == "system-alert-name":
-        return value if isinstance(value, str) and value in POLICY_SYSTEM_ALERT_NAMES else None
+        if not isinstance(value, str):
+            return None
+        return value if value in POLICY_SYSTEM_ALERT_NAMES else UNRECOGNISED_SYSTEM_ALERT_NAME
     return policy_scalar(value, schema)
 
 
@@ -300,6 +313,21 @@ def policy_value_schema(setting_type: Any) -> dict[str, Any] | None:
     if isinstance(setting_type, str) and setting_type.startswith("settings/"):
         return POLICY_VALUE_SCHEMAS.get(setting_type.removeprefix("settings/"))
     return None
+
+
+def policy_is_unrecognised(policy: Any) -> bool:
+    """An unsupported setting of a requested type, or its fixed marker in saved evidence."""
+    setting = policy.get("setting") if isinstance(policy, dict) else None
+    setting_type = setting.get("type") if isinstance(setting, dict) else None
+    return isinstance(setting_type, str) and (
+        setting_type == UNRECOGNISED_POLICY_SETTING
+        or (
+            not setting_type.startswith(TWO_STEP_SETTING_PREFIX)
+            and POLICY_SETTING_TYPE.fullmatch(setting_type) is not None
+            and POLICY_TYPE_ALLOWED.fullmatch(setting_type) is not None
+            and policy_value_schema(setting_type) is None
+        )
+    )
 
 
 def minimise_policy_value(setting_type: Any, value: Any) -> Any:
@@ -466,7 +494,9 @@ def _minimise_setting(setting: Any) -> Any:
 
 def _is_policy(value: dict[str, Any]) -> bool:
     setting = value.get("setting")
-    return isinstance(setting, dict) and isinstance(setting.get("type"), str) and setting["type"].startswith("settings/")
+    return isinstance(setting, dict) and isinstance(setting.get("type"), str) and (
+        setting["type"].startswith("settings/") or setting["type"] == UNRECOGNISED_POLICY_SETTING
+    )
 
 
 # The raw sections of the Google policies read: both hold Policy API objects, minimised the same way.
@@ -478,6 +508,7 @@ def minimise_policy_settings(policies: Any) -> Any:
 
     Each policy keeps ``type``, ``policyQuery`` (``orgUnit``, ``group``, ``sortOrder`` and ``query_scope``) and
     ``setting`` (``type`` and the projected ``value``). Unreadable fields or rows remain invalid after projection.
+    Unrecognised requested settings outside 2SV keep only a fixed type marker.
     """
     if not isinstance(policies, list):
         return None
@@ -485,6 +516,9 @@ def minimise_policy_settings(policies: Any) -> Any:
     for policy in policies:
         if not isinstance(policy, dict):
             result.append(None)
+            continue
+        if policy_is_unrecognised(policy):
+            result.append({"setting": {"type": UNRECOGNISED_POLICY_SETTING}})
             continue
         kept: dict[str, Any] = {}
         if "type" in policy:

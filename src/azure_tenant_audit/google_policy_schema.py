@@ -15,6 +15,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 CUSTOMER_ID = re.compile(r"C0[0-9A-Za-z]{5,}")
+# Google Policy API UserTakeout Settings; ScubaGoggles v1.1.0, Commoncontrols.rego, policy 12.1.
+TAKEOUT_SETTING_TYPES = (
+    "blogger.user_takeout", "books.user_takeout", "location_history.user_takeout", "maps.user_takeout",
+    "pay.user_takeout", "photos.user_takeout", "play.user_takeout", "play_console.user_takeout", "youtube.user_takeout",
+)
 _REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?::[A-Za-z0-9][A-Za-z0-9_-]{0,127})?")
 _DURATION = re.compile(r"[0-9]{1,12}(?:\.[0-9]{1,9})?s")
 _TIMESTAMP = re.compile(
@@ -537,6 +542,10 @@ def _value_schemas() -> dict[str, dict[str, Any]]:
         },
         "takeout.service_status": {
             "serviceState": ("ENABLED", "DISABLED"),
+        },
+        **{
+            setting_type: {"takeoutStatus": ("TAKEOUT_STATUS_UNSPECIFIED", "ENABLED", "DISABLED")}
+            for setting_type in TAKEOUT_SETTING_TYPES
         },
         "workspace_marketplace.apps_access_options": {
             "accessLevel": ("ALLOW_ALL", "ALLOW_LISTED_APPS", "ALLOW_NONE"),

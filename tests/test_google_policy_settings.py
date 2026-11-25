@@ -28,11 +28,11 @@ ADDRESSES = ("partner@example.org", "alerts@example.com", "ops@example.net")
 FILTER = (
     'customer == "customers/C123" && '
     "setting.type.matches('^settings/((gmail|security|drive_and_docs|calendar|chat|meet|classroom|"
-    "groups_for_business|sites|takeout|blogger_user_takeout|books_user_takeout|location_history_user_takeout|"
-    "maps_user_takeout|pay_user_takeout|photos_user_takeout|play_user_takeout|play_console_user_takeout|"
-    "youtube_user_takeout|data_regions|workspace_marketplace|api_controls|provisioning|multi_party_approval|"
+    "groups_for_business|sites|takeout|data_regions|workspace_marketplace|api_controls|provisioning|multi_party_approval|"
     "enterprise_service_restrictions|early_access_apps|gemini_app|access_approval|access_management)"
-    r"\\..*|rule\\.system_defined_alerts)$')"
+    r"\\..*|blogger\\.user_takeout|books\\.user_takeout|location_history\\.user_takeout|maps\\.user_takeout|"
+    r"pay\\.user_takeout|photos\\.user_takeout|play\\.user_takeout|play_console\\.user_takeout|youtube\\.user_takeout|"
+    r"rule\\.system_defined_alerts)$')"
 )
 
 
@@ -1398,7 +1398,7 @@ def test_r3_b1_admin_written_setting_text_and_queries_never_reach_raw_or_normali
     }
     result, _service = _collect([{"policies": [message, alerts]}])
 
-    assert result.status == "partial"
+    assert result.status == "ok"
     (written_message, written_alerts) = result.payload["policySettings"]["value"]
     assert written_message == {
         "type": "ADMIN",
@@ -1406,13 +1406,13 @@ def test_r3_b1_admin_written_setting_text_and_queries_never_reach_raw_or_normali
         "setting": {"type": "settings/api_controls.custom_user_message", "value": {}},
     }
     assert written_alerts["setting"]["value"] == {
-        "rules": [{"displayName": "Leaked password", "state": "ACTIVE"}, {"displayName": None, "state": "ACTIVE"}]
+        "rules": [{"displayName": "Leaked password", "state": "ACTIVE"}, {"displayName": "unrecognised", "state": "ACTIVE"}]
     }
     normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
     assert ("api_controls_custom_user_message", "org_unit", "root", None, 1, {}) in _policy_records(normalized)
 
     rc, run_dir = _replay(tmp_path, json.loads(json.dumps(result.payload)))
-    assert rc == 1  # The unrecognised alert name is unreadable.
+    assert rc == 0
     text = _bundle_text(run_dir)
     for secret in ("C0SyntheticPolicyRef", "Contact support", "Night shift", "entity.org_units", "orgUnitId("):
         assert secret not in text, secret
@@ -1655,6 +1655,83 @@ def _policy_setting(section: str, value: dict[str, Any], **query: Any) -> dict[s
     }
 
 
+def test_m13_followup_n1_unlisted_google_alert_keeps_the_policy_read_complete(tmp_path: Path) -> None:
+    rows = [
+        _two_step(), _two_step("orgUnits/sales", _ENFORCED),
+        _policy_setting("rule.system_defined_alerts", {"displayName": "Leaked password", "state": "ACTIVE"}),
+        _policy_setting("rule.system_defined_alerts", {"displayName": "App Maker Cloud SQL setup", "state": "INACTIVE"}),
+    ]
+    result, _ = _collect([{"policies": rows}])
+    assert (result.status, result.item_count) == ("ok", 4)
+    assert result.payload["policySettings"]["value"][3]["setting"]["value"] == {
+        "displayName": "unrecognised", "state": "INACTIVE",
+    }
+    rc, run_dir = _replay(tmp_path, _widened(rows))
+    assert (rc, _bundle_two_step_status(run_dir), _bundle_state(run_dir)["complete"]) == (0, "partial", True)
+    assert _bundle_state(run_dir)["malformed_count"] == 0
+    assert "App Maker Cloud SQL setup" not in _bundle_text(run_dir)
+    assert "Leaked password" in (run_dir / "normalized/google_policy_settings.json").read_text(encoding="utf-8")
+
+
+def test_m13_followup_n2_single_ou_keeps_root_settings_and_the_two_step_finding(tmp_path: Path) -> None:
+    class Directory:
+        def orgunits(self) -> Directory:
+            return self
+
+        def list(self, **kwargs: Any) -> _Request:
+            units = [{"orgUnitId": "id:root", "orgUnitPath": "/"}] if kwargs["type"] == "allIncludingParent" else []
+            return _Request({"organizationUnits": units})
+
+    client = _client(_Policies([]))
+    assert client._services is not None
+    client._services[("admin", "directory_v1")] = Directory()
+    directory = {"orgUnits": {"value": client.list_directory("orgUnits")}}
+    for name, value, status in (("disabled", {}, "not_enforced"), ("enabled", _ENFORCED, "enforcing")):
+        rc, run_dir = _replay(tmp_path / name, _widened([_two_step(value=value), _gmail_row()]), directory=directory)
+        assert (rc, _bundle_two_step_status(run_dir), _bundle_state(run_dir)["complete"]) == (0, status, True)
+        assert _bundle_state(run_dir)["record_count"] == 2
+        records = json.loads((run_dir / "normalized/google_policy_settings.json").read_text(encoding="utf-8"))["records"]
+        assert [(row["org_unit"], row["value"]) for row in records if row.get("section") == "gmail_auto_forwarding"] == [
+            ("root", {"enableAutoForwarding": False}),
+        ]
+        findings = (run_dir / "findings/findings.json").read_text(encoding="utf-8")
+        assert ("google.org_2sv_policy_not_enforced" in findings) is (name == "disabled")
+
+
+def test_m13_followup_n3_unlisted_gmail_setting_keeps_readable_two_step_evidence(tmp_path: Path) -> None:
+    rows = [
+        _two_step(), _two_step("orgUnits/sales", _ENFORCED), _gmail_row(),
+        _policy_setting("gmail.future_setting", {"enabled": True, "text": "INTERNAL_SETTING_731"}),
+    ]
+    result, _ = _collect([{"policies": rows}])
+    assert (result.status, result.item_count) == ("ok", 4)
+    assert result.payload["policySettings"]["value"][3] == {"setting": {"type": "unrecognised"}}
+    rc, run_dir = _replay(tmp_path, _widened(rows))
+    assert (rc, _bundle_two_step_status(run_dir), _bundle_state(run_dir)["complete"]) == (0, "partial", True)
+    assert _bundle_state(run_dir)["record_count"] == 3
+    assert "google.org_2sv_policy_not_enforced" in (run_dir / "findings/findings.json").read_text(encoding="utf-8")
+    raw = json.loads((run_dir / "raw/google_policies.json").read_text(encoding="utf-8"))
+    assert raw["policySettings"]["value"][3] == {"setting": {"type": "unrecognised"}}
+    assert "future_setting" not in _bundle_text(run_dir) and "INTERNAL_SETTING_731" not in _bundle_text(run_dir)
+
+
+def test_m13_followup_n4_all_nine_takeout_types_are_requested_and_projected() -> None:
+    apps = ("blogger", "books", "location_history", "maps", "pay", "photos", "play", "play_console", "youtube")
+    rows = [_policy_setting(f"{app}.user_takeout", {"takeout_status": "ENABLED"}) for app in apps]
+    service = _Policies(rows)
+    result = GooglePoliciesCollector().run({"client": _client(service)})
+    setting_filter = service.calls[0]["filter"]
+    pattern = re.compile(setting_filter.split("matches('", 1)[1][:-len("')")].replace("\\\\", "\\"))
+    assert all(pattern.fullmatch(f"settings/{app}.user_takeout") for app in apps)
+    assert pattern.fullmatch("settings/blogger_user_takeout.service_status") is None
+    assert pattern.fullmatch("settings/blogger.service_status") is None
+    normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
+    assert (result.status, _read_state(normalized)["complete"]) == ("ok", True)
+    assert _policy_records(normalized) == [
+        (f"{app}_user_takeout", "org_unit", "root", None, 1, {"takeoutStatus": "ENABLED"}) for app in apps
+    ]
+
+
 def test_structural_b4_licence_qualifier_does_not_suppress_readable_2sv() -> None:
     gmail = _policy_setting(
         "gmail.confidential_mode", {"enableConfidentialMode": True},
@@ -1694,6 +1771,8 @@ def test_structural_m2_probe_counts_only_readable_rows() -> None:
 def test_policy_allow_list_marks_unreadable_typed_fields_partial() -> None:
     cases = [
         ("gmail.auto_forwarding", {"enableAutoForwarding": "false"}, {"enableAutoForwarding": None}),
+        ("rule.system_defined_alerts", {"state": "INACTIVE"}, {"displayName": None, "state": "INACTIVE"}),
+        ("rule.system_defined_alerts", {"displayName": False, "state": "INACTIVE"}, {"displayName": None, "state": "INACTIVE"}),
         ("meet.safety_access", {"meetingsAllowedToJoin": "INCIDENT_1234"}, {"meetingsAllowedToJoin": None}),
         ("security.password", {"minimumLength": True}, {"minimumLength": None}),
         ("security.password", {"minimumLength": 10**30}, {"minimumLength": None}),

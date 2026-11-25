@@ -18,11 +18,14 @@ from azure_tenant_audit.collectors.base import (
 )
 from azure_tenant_audit.data_minimisation import (
     POLICY_SETTING_TYPE,
+    POLICY_TYPE_ALLOWED,
     POLICY_TYPES,
+    TWO_STEP_SETTING_PREFIX,
     finite_policy_number,
     minimise_policy_section,
     minimise_policy_settings,
     minimise_policy_value,
+    policy_is_unrecognised,
     policy_query_classification,
     policy_target,
     policy_value_schema,
@@ -43,7 +46,6 @@ from azure_tenant_audit.offline_replay import OFFLINE_ROW_TYPE
 from .auth import POLICIES_SCOPE
 from .client import (
     POLICY_MALFORMED_ERROR_CLASS,
-    POLICY_TYPE_ALLOWED,
     classify_google_error,
     classify_page_error,
     gmail_settings_status,
@@ -608,8 +610,6 @@ class GoogleDevicesCollector:
         )
 
 
-# The 2-step verification setting types, kept in today's ``twoStepVerificationPolicies`` shape.
-TWO_STEP_SETTING_PREFIX = "settings/security.two_step_verification_"
 # The two payloads of the one Policy API read, in the order they are written.
 POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 
@@ -675,6 +675,8 @@ def policy_problems(policy: Any) -> tuple[str, ...]:
     """
     if not isinstance(policy, dict):
         return ("policy_invalid",)
+    if policy_is_unrecognised(policy):
+        return ()
     problems: list[str] = []
     if any(key in policy and not isinstance(policy[key], str) for key in ("name", "customer")):
         problems.append("name_invalid")
@@ -735,7 +737,7 @@ def policy_scope_unrepresentable(policy: Any) -> bool:
     exception or any other condition): its setting for that unit is unknown, so the read is not complete."""
     if not isinstance(policy, dict) or not isinstance(policy.get("policyQuery"), dict):
         return False
-    return policy_query_classification(policy["policyQuery"]) in ("licences", "other")
+    return not policy_is_unrecognised(policy) and policy_query_classification(policy["policyQuery"]) in ("licences", "other")
 
 
 def _scope_policy_error(count: int, total: int) -> str:
@@ -753,7 +755,7 @@ def _requested(policy: Any) -> Any:
     if not isinstance(setting, dict):
         return policy
     setting_type = setting.get("type")
-    if isinstance(setting_type, str) and POLICY_TYPE_ALLOWED.fullmatch(setting_type):
+    if (isinstance(setting_type, str) and POLICY_TYPE_ALLOWED.fullmatch(setting_type)) or policy_is_unrecognised(policy):
         return policy
     kept = {"type": setting_type} if isinstance(setting_type, str) and POLICY_SETTING_TYPE.fullmatch(setting_type) else {}
     return {**policy, "setting": kept}

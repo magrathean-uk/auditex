@@ -14,9 +14,11 @@ from azure_tenant_audit.collection_gaps import (
     truncations_from_payloads,
 )
 from azure_tenant_audit.data_minimisation import (
+    UNRECOGNISED_SYSTEM_ALERT_NAME,
     finite_policy_number,
     minimise_gmail_settings,
     minimise_policy_settings,
+    policy_is_unrecognised,
     policy_unit_id,
 )
 from azure_tenant_audit.google_policy_schema import policy_enforced_at
@@ -211,18 +213,26 @@ def _org_unit_id(value: Any) -> str:
 def _org_unit_tree(units: list[Any]) -> tuple[dict[str, str], set[str], int]:
     """The units' parents, the root id(s) and how many units or tree checks failed.
 
-    Ids must be sound id strings. The root is the parent of the top-level units (``parentOrgUnitPath`` ``/``); there
-    must be exactly one, it must not be listed itself, and every unit's parent chain must reach it with no cycle. A
-    unit listed twice under different parents fails too, and so does a row that is not an object.
+    Ids must be sound id strings. The root is listed at ``orgUnitPath`` ``/`` with no parent. Older reads identify
+    it as the parent of the top-level units (``parentOrgUnitPath`` ``/``). Every unit must reach the same root
+    without a cycle. A unit listed under two parents or a row that is not an object invalidates the read.
     """
     parents: dict[str, str] = {}
     order: list[str] = []
     roots: set[str] = set()
     malformed = 0
     for unit in units:
-        unit_id = _org_unit_id(unit.get("orgUnitId")) if isinstance(unit, dict) else ""
-        parent_id = _org_unit_id(unit.get("parentOrgUnitId")) if isinstance(unit, dict) else ""
-        if not unit_id or not parent_id:
+        if not isinstance(unit, dict) or not (unit_id := _org_unit_id(unit.get("orgUnitId"))):
+            malformed += 1
+            continue
+        if unit.get("orgUnitPath") == "/":
+            if unit.get("parentOrgUnitId") not in (None, ""):
+                malformed += 1
+            else:
+                roots.add(unit_id)
+            continue
+        parent_id = _org_unit_id(unit.get("parentOrgUnitId"))
+        if not parent_id:
             malformed += 1
             continue
         if unit.get("parentOrgUnitPath") == "/":
@@ -234,7 +244,7 @@ def _org_unit_tree(units: list[Any]) -> tuple[dict[str, str], set[str], int]:
         parents[unit_id] = parent_id
         order.append(unit_id)
     if len(roots) > 1 or (parents and not roots) or roots & set(parents):
-        # Two roots, units with no top-level unit among them, or a root that is also listed: no single root.
+        # Two roots, no root, or a root also listed with a parent: no single root.
         return parents, roots, malformed + 1
     for unit_id in order:
         seen: set[str] = set()
@@ -318,6 +328,15 @@ def _policy_targets(policy: dict[str, Any]) -> tuple[str | None, str | None] | N
     return org_unit, group
 
 
+def _unrecognised_system_alert(setting: Any) -> bool:
+    return (
+        isinstance(setting, dict)
+        and setting.get("type") == "settings/rule.system_defined_alerts"
+        and isinstance(value := setting.get("value"), dict)
+        and value.get("displayName") == UNRECOGNISED_SYSTEM_ALERT_NAME
+    )
+
+
 def unplaced_policy_count(payloads: dict[str, dict[str, Any]], coverage_rows: list[dict[str, Any]]) -> int:
     """Count dangling OU targets in the one Policy API read or its legacy subset."""
     payload = payloads.get("google_policies", {})
@@ -326,7 +345,8 @@ def unplaced_policy_count(payloads: dict[str, dict[str, Any]], coverage_rows: li
     known_units = roots | units
     return sum(
         1 for policy in _values(payload, name)
-        if (targets := _policy_targets(policy)) is not None and targets[0] is not None and targets[0] not in known_units
+        if not _unrecognised_system_alert(policy.get("setting"))
+        and (targets := _policy_targets(policy)) is not None and targets[0] is not None and targets[0] not in known_units
     )
 
 
@@ -385,8 +405,12 @@ def _policy_settings_read(
     scopes: set[tuple[str, str, str]] = set()
     candidates: list[tuple[str, str | None, str | None, Any, dict[str, Any]]] = []
     for item in items:
+        if policy_is_unrecognised(item):
+            continue
         problems = set(policy_problems(item))
         setting = item.get("setting") if isinstance(item, dict) else None
+        if not problems and _unrecognised_system_alert(setting):
+            continue
         setting_section = None if problems & POLICY_SECTION_PROBLEMS else _policy_section(setting.get("type"))  # type: ignore[union-attr]
         if setting_section is None:
             malformed += 1
@@ -452,8 +476,8 @@ def _org_unit_records(
 ) -> list[dict[str, Any]]:
     """``google_org_units``: ``id``, ``parent_id`` and ``is_root`` per unit plus one read-state record.
 
-    The OU path and name are never kept (they can be personal). The root has no row of its own in the Directory
-    list, so it is added as the parent of the top-level units. Absent when the run holds no ``orgUnits`` section.
+    The OU path and name are never kept (they can be personal). The Directory list supplies the root row, or
+    for a legacy read, the parent of the top-level units. Absent when the run holds no ``orgUnits`` section.
     A unit tree that does not hang from one root (see :func:`_org_unit_tree`) is not a complete read.
     """
     topology = _org_unit_topology(directory, coverage_rows)
