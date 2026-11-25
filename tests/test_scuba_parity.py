@@ -184,8 +184,9 @@ def test_scubagoggles_two_input_divergences_and_no_events(tmp_path, capsys):
         # D2 is scoped to its reason code: the same pair with another reason is not documented.
         "GWS.ASSUREDCONTROLS.1.1v1": ("documented_divergence", ["D2"], "Pass", "pass", "not_assessed",
                                       "data_unavailable_setting_absent"),
+        # Listed once the M13 GWS catalogue is on main.
         "GWS.ASSUREDCONTROLS.1.2v1": ("auditex_not_assessed", [], "Pass", "pass", "not_assessed",
-                                      "unlisted_reason_code"),
+                                      "data_unavailable_policy_read_incomplete"),
     }
 
 
