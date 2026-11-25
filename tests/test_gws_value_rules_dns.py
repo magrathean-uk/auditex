@@ -53,7 +53,7 @@ def test_vectors_use_only_synthetic_domains():
     sections = [vector["sections"].get("gws_dns") for vector in VECTORS]
     names = {entry["domain"] for section in sections if isinstance(section, dict)
              for entry in section.get("domains", []) if isinstance(entry, dict)}
-    assert names <= {"", "a.example.com", "b.example.org", "b.example.net"}
+    assert names <= {"", "  ", "a.example.com", "b.example.org", "b.example.net"}
     assert "@" not in "".join(name for name in names)
 
 
@@ -76,7 +76,7 @@ def test_assess_does_not_change_its_input():
 
 def _dom(name, spf, own_dmarc, alias=False):
     return {"domain": name, "alias": alias, "resolver_error": False, "spf": {"records": spf},
-            "dkim": {"selectors": {"google": ["v=DKIM1; p=A"]}},
+            "dkim": {"selectors": {"google": ["v=DKIM1; p=A"], "selector1": [], "selector2": []}},
             "dmarc": {"query_name": "_dmarc." + name, "inherited": False, "records": own_dmarc}}
 
 
@@ -126,4 +126,18 @@ def test_a_long_run_of_blanks_is_linear():
     started = time.monotonic()
     record = gws.assess("GWS.GMAIL.4.2v1", {"gws_dns": {"complete": True, "domains": [entry]}})
     assert (record["verdict"], record["cell"]) == ("not_met", "domain_violates")
+    assert time.monotonic() - started < 3
+
+
+def test_long_records_parse_in_linear_time():
+    # The SPF term and DMARC tag and URI parsers must not backtrack on long input.
+    import time
+    long_rua = "v=DMARC1; p=reject; rua=mailto:" + "a" * 200000 + "@" + "b." * 100000 + "example.com!"
+    long_spf = "v=spf1 " + "include:" + "x" * 200000 + " " + " " * 200000 + "~all"
+    entry = _dom("a.example.com", [long_spf], [long_rua])
+    started = time.monotonic()
+    answers = {policy: gws.assess(policy, {"gws_dns": {"complete": True, "domains": [entry]}})["cell"]
+               for policy in ("GWS.GMAIL.3.1v1", "GWS.GMAIL.4.3v1", "GWS.GMAIL.4.4v1")}
+    assert answers == {"GWS.GMAIL.3.1v1": "domain_violates", "GWS.GMAIL.4.3v1": "domain_violates",
+                       "GWS.GMAIL.4.4v1": "domain_violates"}
     assert time.monotonic() - started < 3
