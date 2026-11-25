@@ -23,7 +23,11 @@ does for Microsoft 365.
   (``data_minimisation.minimise_policy_value``), else the value is dropped and the entry is unusable. DMARC records are
   rewritten to the tags the rows read, with every reporting address other than CISA's replaced by a placeholder, so the
   engine's contact count and exact CISA check give the same answer; an SPF answer becomes ``v=spf1 -all`` or
-  ``v=spf1 ?all`` as GMAIL.3.1 would judge it, and a DKIM answer keeps only its ``v=DKIM1;`` prefix.
+  ``v=spf1 ?all`` as GMAIL.3.1 would judge it, and a DKIM answer keeps only its ``v=DKIM1;`` prefix. A domain is a
+  keyed pseudonym (``domain:<hex>.invalid``) and its DMARC query name says only whether the record is the domain's own
+  (``_dmarc.<pseudonym>``), a parent's (``_dmarc.invalid``) or neither (``unrecognised``), so a label that holds the
+  customer id never leaves the bundle. A domain whose own posture read is not proven (its ``posture:<domain>``
+  coverage row, one raw record with no resolver failure, a whole posture read) is a resolver failure: unknown.
   OU names and paths, addresses, the customer id, display names and free text never reach a section.
 - Output keys are written as values (``_obj``), never as mapping keys or module constants, so none becomes a product
   field name the shareable redaction keeps (``output_redaction._D5_FIELD_NAMES``, DEC-171).
@@ -35,9 +39,11 @@ from __future__ import annotations
 import math
 import os
 import re
+from collections import Counter
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +51,7 @@ from azure_tenant_audit.collection_gaps import section_was_cut
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.data_minimisation import (
     finite_policy_number,
+    minimise_policy_settings,
     minimise_policy_value,
     policy_is_unrecognised,
     policy_unit_id,
@@ -80,14 +87,15 @@ from ..scuba_projection import (
 from .client import SCUBA_ADMIN_EVENTS
 from .collectors import (
     POLICY_SECTION_PROBLEMS,
+    POLICY_TARGET_PROBLEMS,
     _event_value_fields,
     _scuba_application_allowed,
     _scuba_group_email,
     policy_problems,
 )
-from .normalize import _policy_section, _unrecognised_system_alert
+from .normalize import _policy_section, _policy_targets
 
-GWS_PROJECTION_VERSION = "2026-11-25.2"
+GWS_PROJECTION_VERSION = "2026-11-25.3"
 SECTIONS = ("gws_tenant", "gws_policies", "gws_setting_events", "gws_dns", "gws_admins", "gws_sso")
 # The projected-section budget. These sections are rule input, never prompt text, so the budget is sized to the
 # largest read the collectors make (20,000 events for each of 13 event names) rather than to a prompt; the scan
@@ -120,8 +128,9 @@ def _dkim_selectors() -> tuple[str, ...]:
 
 
 def _sso_modes() -> frozenset[str]:
-    """The ``InboundSsoAssignment.SsoMode`` values; any other text is passed as ``unrecognised`` (an unknown mode)."""
-    return frozenset(("SSO_OFF", "SSO_MODE_UNSPECIFIED", "SAML_SSO", "OIDC_SSO", "DOMAIN_WIDE_SAML_IF_ENABLED"))
+    """The ``InboundSsoAssignment.SsoMode`` values, and the explicit empty mode the engine reads as Google-only
+    (design 8.2, ``identity._sso_modes``); any other text is passed as ``unrecognised`` (an unknown mode)."""
+    return frozenset(("SSO_OFF", "SSO_MODE_UNSPECIFIED", "", "SAML_SSO", "OIDC_SSO", "DOMAIN_WIDE_SAML_IF_ENABLED"))
 
 
 def _section_types() -> dict[str, str]:
@@ -140,6 +149,18 @@ def _bare(value: Any) -> bool:
     return policy_unit_id(value)
 
 
+def _ident(value: Any) -> bool:
+    """A readable identity (a user, role, assignee or member id): a non-empty printable string with no blank in it."""
+    return isinstance(value, str) and bool(value) and all(char.isprintable() and not char.isspace() for char in value)
+
+
+def _role_key(value: Any) -> str | None:
+    """A role id (a string or an integer, never a boolean) as text; None unless it is a readable identity."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    return str(value) if _ident(str(value)) else None
+
+
 def _unit_id(value: Any) -> str | None:
     """A Directory ``orgUnitId`` (``id:<id>``) as its bare id; None unless sound."""
     bare = value.removeprefix("id:") if isinstance(value, str) else None
@@ -156,15 +177,24 @@ def _instant(value: Any) -> str | None:
 
 
 def _whole(section: Any) -> bool:
-    """A raw list section that is a list, uncut, and carries no error or partial marker."""
+    """A raw list section that is a list, uncut, and carries no error, partial or non-ok status marker. A cut marker
+    of any value but false (``"true"``, ``1``) is a cut."""
     return (isinstance(section, dict) and isinstance(section.get("value"), list) and not section_was_cut(section)
+            and section.get("collection_truncated") in (None, False) and section.get("status") in (None, "ok")
             and not section.get("error") and not section.get("error_class") and not section.get("partial")
             and not section.get("truncation_reason"))
 
 
 def _row_ok(row: dict[str, Any]) -> bool:
-    return (row.get("status") in (None, "ok") and row.get("collection_truncated") is not True
+    return (row.get("status") in (None, "ok") and row.get("collection_truncated") in (None, False)
             and not row.get("truncation_reason") and not row.get("partial"))
+
+
+def _envelope_whole(data: dict[str, Any], name: str) -> bool:
+    """A normalised section's envelope as the writer makes it (``kind`` and ``records``, and at most the
+    ``collected`` status): any other key (``complete``, ``status``, ``partial``, a cut marker, an ``item_count``) is a
+    claim about the list the writer never makes, so it proves nothing and the list is not taken as whole."""
+    return set(data) <= {"kind", "records", "collection_status"} and data.get("kind", name) == name
 
 
 def _as_of(manifest: dict[str, Any]) -> str | None:
@@ -173,15 +203,16 @@ def _as_of(manifest: dict[str, Any]) -> str | None:
     if manifest.get("mode") == "offline" or manifest.get("replay_source"):
         return None
     created, duration = manifest.get("created_utc"), manifest.get("duration_seconds")
-    if not isinstance(created, str) or isinstance(duration, bool) or not isinstance(duration, (int, float)):
+    # Strict RFC 3339 with a zone, as the events kind parses a time; Python's permissive ISO parser would take a
+    # malformed separator (``2026-11-20X10:00:00Z``) for a time.
+    start = _time(created)
+    if start is None or isinstance(duration, bool) or not isinstance(duration, (int, float)):
         return None
     try:
         if not math.isfinite(duration) or duration < 0:
             return None
-        start = datetime.fromisoformat(created)
-        if start.tzinfo is None:
-            return None
-        end = (start + timedelta(seconds=duration)).astimezone(UTC)
+        micros = math.floor((start + Fraction(duration)) * 1_000_000)
+        end = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(microseconds=micros)
     except (ValueError, OverflowError):
         return None
     return end.isoformat(timespec="microseconds").replace("+00:00", "Z")
@@ -201,6 +232,7 @@ class _Context:
         self.cache: dict[str, tuple[Any, int, Unavailable | None]] = {}
         self.users: set[str] = set()
         self.groups: set[str] = set()
+        self.domains: set[str] = set()
         self.addresses = 0
         self.begin()
 
@@ -259,8 +291,7 @@ class _Context:
         _require(isinstance(records, list), "records", "invalid_type")
         _require(all(isinstance(row, dict) for row in records), "records", "invalid_type")
         self.charge(relative, len(records))
-        whole = not section_was_cut(data) and not data.get("partial") and not data.get("truncation_reason")
-        return records, whole
+        return records, _envelope_whole(data, name)
 
     def coverage(self) -> list[dict[str, Any]] | None:
         """The coverage rows; None when they cannot be read. The writer leaves the file out only when no row was
@@ -306,10 +337,13 @@ class _Context:
             return False
         return not any(row.get("collector") == collector and about(row, "list") for row in gaps)
 
-    def fanout_ok(self, collector: str, name: str) -> bool:
-        """Positive evidence that one per-object read ran and finished: a coverage row of that exact name, all ok."""
+    def fanout_ok(self, collector: str, name: str, count: int | None = None) -> bool:
+        """Positive evidence that one per-object read ran and finished: a coverage row of that exact name, all ok,
+        and, given ``count``, each row's ``item_count`` equal to the rows the bundle kept for that object."""
         rows = [row for row in self.coverage() or [] if row.get("collector") == collector and row.get("name") == name]
-        return bool(rows) and all(_row_ok(row) and row.get("status") == "ok" for row in rows)
+        return bool(rows) and all(
+            _row_ok(row) and row.get("status") == "ok"
+            and (count is None or type(row.get("item_count")) is int and row["item_count"] == count) for row in rows)
 
     def tree(self) -> tuple[str | None, dict[str, str | None], bool]:
         """The top unit, the ``ou:<id>`` parent map and whether the topology is complete and sound: one root, every
@@ -393,6 +427,12 @@ class _Context:
         self.groups.add("group:" + group_id)
         return "group:" + pseudonym(self.key, "group:" + group_id)
 
+    def domain(self, name: str) -> str:
+        """A domain as a keyed pseudonym under the reserved ``.invalid`` name, so a parent's DMARC record can still
+        be told from the domain's own (``_dmarc.invalid``) without the name."""
+        self.domains.add(name.lower())
+        return "domain:" + pseudonym(self.key, "domain:" + name.lower()) + ".invalid"
+
     def group_address(self, address: str) -> str:
         """A group the Directory list does not hold, known only by its address (events of a deleted group)."""
         self.groups.add("group-email:" + address.lower())
@@ -431,8 +471,10 @@ def _tenant(ctx: _Context) -> dict[str, Any]:
 
 def _attributed(ctx: _Context, state: dict[str, Any]) -> list[tuple[str, str | None, str | None]] | None:
     """The (section, org unit, group) failures the normaliser attributed (``unusable_sections``: every unit), when
-    they are the only reason the read is not complete: the Policy API read itself whole, and every unreadable row
-    attributed to its section. None otherwise."""
+    they are the only reason the read is not complete: the Policy API read itself whole, and every unreadable raw row
+    covered by an attribution of its own section and unit, worked out from the raw row as the normaliser does. An
+    attribution the raw read contradicts (it names one setting, the failed row is another's) proves nothing. None
+    otherwise."""
     sections, scopes, types = state.get("unusable_sections"), state.get("unusable_scopes"), _section_types()
     if not isinstance(sections, list) or not isinstance(scopes, list) or not (sections or scopes):
         return None
@@ -461,16 +503,24 @@ def _attributed(ctx: _Context, state: dict[str, Any]) -> list[tuple[str, str | N
                 _row_ok(row) or row.get("policy_row_validation") is True
                 and row.get("collection_truncated") is not True and not row.get("truncation_reason")):
             return None
-    for item in section["value"]:
+    every_unit = {name for name, org_unit, group in found if org_unit is None and group is None}
+    scoped = {(name, org_unit, group) for name, org_unit, group in found}
+    for item in minimise_policy_settings(section["value"]):
         if policy_is_unrecognised(item):
             continue
         problems = set(policy_problems(item))
         setting = item.get("setting") if isinstance(item, dict) else None
-        if not problems and _unrecognised_system_alert(setting):
+        if not problems:
             continue
-        if problems & POLICY_SECTION_PROBLEMS or not isinstance(setting, dict) or _policy_section(
-                setting.get("type")) is None:
+        name = None if problems & POLICY_SECTION_PROBLEMS or not isinstance(setting, dict) else _policy_section(
+            setting.get("type"))
+        if name is None:
             return None  # a policy whose section cannot be told may be any rule's
+        if name in every_unit:
+            continue
+        targets = None if problems & POLICY_TARGET_PROBLEMS else _policy_targets(item)
+        if targets is None or (name, targets[0], targets[1]) not in scoped:
+            return None  # the failed row is not the one the normaliser attributed
     return found
 
 
@@ -570,6 +620,10 @@ def _events(ctx: _Context) -> dict[str, Any]:
             unit = "ou:" + org_unit
         told = _event_fields(row, fields)
         name, setting, value, application = told if told else ("", None, None, None)
+        if name == "DELETE_APPLICATION_SETTING" and row.get("new_value") is not None:
+            # A delete carries no value (L04 drops the target of one that does): malformed, so it cannot be placed
+            # and the events kind holds it ambiguous rather than a reset or a delete it can rank.
+            unit = None
         events.append(_obj(("time", _instant(row.get("event_time"))), ("event", name), ("setting", setting),
                            ("new_value", value), ("unit", unit), ("application", application)))
     # The log window is the read's own record; without one it is null and the events kind concludes nothing.
@@ -628,6 +682,30 @@ def _dmarc_text(record: str, ctx: _Context) -> str:
     return text
 
 
+def _listed(rows: list[Any]) -> set[str] | None:
+    """The lower-case names the posture read must cover: every verified Directory domain and verified alias, as the
+    collector picks them; None when a row cannot be read."""
+    names: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        name, verified, aliases = row.get("domainName", row.get("domain")), row.get("verified", True), row.get(
+            "domainAliases", [])
+        if not isinstance(name, str) or not name.strip() or type(verified) is not bool or not isinstance(aliases, list):
+            return None
+        if not verified:
+            continue
+        names.add(name.strip().lower())
+        for alias in aliases:
+            alias_name = alias.get("domainAliasName") if isinstance(alias, dict) else None
+            alias_verified = alias.get("verified", True) if isinstance(alias, dict) else None
+            if not isinstance(alias_name, str) or not alias_name.strip() or type(alias_verified) is not bool:
+                return None
+            if alias_verified:
+                names.add(alias_name.strip().lower())
+    return names
+
+
 def _dns(ctx: _Context) -> dict[str, Any]:
     records, whole = ctx.records("google_dns_posture")
     data = [row for row in records if row.get("kind") == "google_domain_posture"]
@@ -638,11 +716,22 @@ def _dns(ctx: _Context) -> dict[str, Any]:
 
     # A bundle collected before the DMARC tree walk and the selector map has none of their fields: not collected.
     _require(not data or any(new_shape(row) for row in data), "dmarc.query_name", "missing_field")
-    # The posture read itself must be whole, whether or not the normaliser wrote a read-state record.
+    # The posture read itself must be whole, whether or not the normaliser wrote a read-state record, and it must
+    # cover exactly the domains the Directory lists: a domain left unread may be the one that fails.
     raw = ctx.optional("raw/google_dns_posture.json")
-    complete = (whole and ctx.read_ok(raw, "google_dns_posture", "domains")
-                and ctx.read_ok(raw, "google_dns_posture", "domainPosture")
-                and len(raw["domainPosture"]["value"]) == len(data))
+    posture_read = ctx.read_ok(raw, "google_dns_posture", "domainPosture")
+    complete = whole and ctx.read_ok(raw, "google_dns_posture", "domains") and posture_read
+    listed = _listed(raw["domains"]["value"]) if complete else None
+    raw_posture: dict[str, list[dict[str, Any]]] = {}
+    for item in raw["domainPosture"]["value"] if posture_read else []:
+        name = item.get("domain") if isinstance(item, dict) else None
+        if not isinstance(name, str) or not name:
+            complete = False
+            continue
+        raw_posture.setdefault(name.lower(), []).append(item)
+    posture_names = {row["domain"].lower() for row in data if isinstance(row.get("domain"), str)}
+    if listed is None or not listed == posture_names == set(raw_posture):
+        complete = False
     if states:
         _, consistent, state = _split(records, "google_dns_posture", "google_domain_posture")
         complete = complete and consistent and state.get("complete") is True
@@ -660,26 +749,36 @@ def _dns(ctx: _Context) -> dict[str, Any]:
         if name.lower() in seen:
             complete = False  # one domain read twice may disagree with itself
         seen.add(name.lower())
-        host = name if _DOMAIN.fullmatch(name) else ""  # blank: the kind holds the entry unusable
+        host = ctx.domain(name) if _DOMAIN.fullmatch(name) else ""  # blank: the kind holds the entry unusable
         kind = kinds.get(name.lower())
-        listed = (kind == "alias") if kind in ("alias", "primary", "secondary") else None
-        alias = row.get("alias") if "alias" in row else listed
-        if not isinstance(alias, bool) or listed is not None and alias != listed:
+        listed_alias = (kind == "alias") if kind in ("alias", "primary", "secondary") else None
+        alias = row.get("alias") if "alias" in row else listed_alias
+        if not isinstance(alias, bool) or listed_alias is not None and alias != listed_alias:
             alias = None  # malformed or contradicting the Directory domain kind: the domain's scope is unknown
+        # This domain's own read must be proven before its answers (even an empty TXT list) count as read: one raw
+        # record with no resolver failure, in a whole posture read, and its own coverage row ok. Otherwise unknown.
+        twins = raw_posture.get(name.lower(), [])
+        read = (posture_read and len(twins) == 1 and twins[0].get("resolver_error") in (None, False)
+                and ctx.fanout_ok("google_dns_posture", "posture:" + name))
         error = row.get("resolver_error")
         spf, dkim, dmarc = (row.get(part) if isinstance(row.get(part), dict) else {} for part in ("spf", "dkim", "dmarc"))
         selectors = dkim.get("selectors") if isinstance(dkim.get("selectors"), dict) else {}
         inherited, query = dmarc.get("inherited"), dmarc.get("query_name")
-        if isinstance(query, str) and not (query == "_dmarc." + host or query.startswith("_dmarc.") and len(query) > 7
-                                            and host.endswith("." + query[7:])):
-            query = "unrecognised"  # neither the domain's own nor a parent's name: the kind holds it unusable
+        if isinstance(query, str):
+            # Only the relation the kind reads leaves the bundle: the domain's own name, a parent's, or neither.
+            if host and query == "_dmarc." + name:
+                query = "_dmarc." + host
+            elif host and query.startswith("_dmarc.") and len(query) > 7 and name.endswith("." + query[7:]):
+                query = "_dmarc.invalid"
+            else:
+                query = "unrecognised"  # the kind holds it unusable
         spf_records, dmarc_records = _strings(spf.get("records")), _strings(dmarc.get("records"))
         dkim_records = {selector: _strings(selectors.get(selector)) for selector in _dkim_selectors()}
 
         domains.append(_obj(
             ("domain", host), ("alias", alias),
             # Only the fact of a resolver failure is kept, never its message (a resolver URL or local detail).
-            ("resolver_error", not (error is None or error is False)),
+            ("resolver_error", not read or not (error is None or error is False)),
             # An SPF answer becomes what GMAIL.3.1 reads of it (``dns._is_spf``, ``dns._spf_passes``).
             ("spf", _obj(("records", None if spf_records is None else [
                 ("v=spf1 -all" if _spf_passes(text) else "v=spf1 ?all") if _is_spf(text) else "unrecognised"
@@ -700,8 +799,8 @@ def _roles(raw: dict[str, Any] | None) -> dict[str, bool | None]:
     fields cannot be read."""
     roles: dict[str, bool | None] = {}
     for role in raw["roles"]["value"]:
-        role_id = role.get("roleId") if isinstance(role, dict) else None
-        if not isinstance(role_id, (str, int)) or isinstance(role_id, bool) or str(role_id) == "":
+        key = _role_key(role.get("roleId")) if isinstance(role, dict) else None
+        if key is None:
             continue
         # ``isSuperAdminRole`` absent is false, as ScubaGoggles reads it; the privilege list must be read unless the
         # flag or the name already makes the role privileged.
@@ -717,23 +816,23 @@ def _roles(raw: dict[str, Any] | None) -> dict[str, bool | None]:
             verdict = None
         else:
             verdict = any(item["privilegeName"] in _privileged_privileges() for item in privileges)
-        key = str(role_id)
         roles[key] = verdict if key not in roles or roles[key] == verdict else None
     return roles
 
 
 def _admins(ctx: _Context) -> dict[str, Any]:
-    """``complete`` proves the super admin count: the user read whole in both files, one normalised row per distinct
-    raw account, and each counted flag a real boolean in the raw read. The role-dependent inventory (roles, their
-    assignments, delegated-admin flags) is separate: when it cannot be read, the privileged list gains one
-    unplaceable entry (``user:unresolved``, no OU), so COMMONCONTROLS.6.1 cannot conclude while 6.2 still can."""
+    """``complete`` proves the super admin count: the user read whole in both files (the normalised envelope as the
+    writer makes it), one normalised row per distinct raw account, every id a readable identity, and each counted flag
+    a real boolean in the raw read. The role-dependent inventory (roles, their assignments, delegated-admin flags) is
+    separate: when it cannot be read, the privileged list gains one unplaceable entry (``user:unresolved``, no OU), so
+    COMMONCONTROLS.6.1 cannot conclude while 6.2 still can."""
     users, users_whole = ctx.records("google_users")
     raw = ctx.directory()
     raw_users: dict[str, dict[str, Any]] = {}
     complete = users_whole and ctx.read_ok(raw, _DIRECTORY, "users")
     for row in raw["users"]["value"] if complete else []:
         user_id = row.get("id") if isinstance(row, dict) else None
-        if not isinstance(user_id, str) or not user_id or user_id in raw_users:
+        if not _ident(user_id) or user_id in raw_users:
             complete = False
             continue
         raw_users[user_id] = row
@@ -742,10 +841,10 @@ def _admins(ctx: _Context) -> dict[str, Any]:
     super_admins, inventory = 0, True
     for row in users:
         user_id, admin, delegated = row.get("id"), row.get("is_admin"), row.get("is_delegated_admin")
-        twin = raw_users.get(user_id) if isinstance(user_id, str) else None
+        twin = raw_users.get(user_id) if _ident(user_id) else None
         if (twin is None or user_id in known or type(admin) is not bool
                 or type(twin.get("isAdmin")) is not bool or twin["isAdmin"] != admin):
-            complete = False  # an unread, repeated or coerced account proves no count
+            complete = False  # an unread, blank, repeated or coerced account proves no count
             continue
         known.add(user_id)
         if type(delegated) is not bool or type(twin.get("isDelegatedAdmin")) is not bool \
@@ -755,24 +854,10 @@ def _admins(ctx: _Context) -> dict[str, Any]:
         people.append((user_id, admin or delegated, row.get("org_unit_path")))
     if len(people) != len(raw_users):
         complete = False
-    assignments, assignments_whole = ctx.records("google_role_assignments", required=False)
-    roles_read = ctx.read_ok(raw, _DIRECTORY, "roles")
-    if not (roles_read and ctx.read_ok(raw, _DIRECTORY, "roleAssignments")
-            and (assignments is not None and assignments_whole or not raw["roleAssignments"]["value"])
-            and len(raw["roleAssignments"]["value"]) == len(assignments or [])):
-        inventory = False
-    roles = _roles(raw) if roles_read else {}
-    assigned: set[str] = set()
-    for row in assignments or []:
-        role_id, assignee = row.get("role_id"), row.get("assigned_to")
-        verdict = roles.get(str(role_id)) if isinstance(role_id, (str, int)) and not isinstance(role_id, bool) else None
-        if not isinstance(assignee, str) or not assignee or verdict is None:
-            inventory = False  # an assignment to a role that cannot be read may make its holder privileged
-        elif verdict:
-            assigned.add(assignee)
-    # ScubaGoggles counts user assignees only (provider.py:804-809). A privileged role held by anything else (a group)
-    # makes accounts privileged that no user row shows, so the privileged list is not the whole.
-    if assigned - known:
+    assigned = _assigned(ctx, raw)
+    if assigned is None or assigned - known:
+        # An unreadable or misjoined role inventory, or a privileged role held by anything but a user (a group), makes
+        # accounts privileged that no user row shows (ScubaGoggles counts user assignees only, provider.py:804-809).
         inventory = False
     by_path = ctx.path_index()
     member_of, memberships_complete = _memberships(ctx, raw, known, users)
@@ -781,37 +866,75 @@ def _admins(ctx: _Context) -> dict[str, Any]:
              # Unplaceable (an unknown or shared path, an unproven unit tree): null, which the SSO kind cannot place.
              ("org_unit", by_path.get(path) if isinstance(path, str) else None),
              ("groups", sorted(member_of.get(user_id, ()))))
-        for user_id, flagged, path in people if flagged or user_id in assigned]
+        for user_id, flagged, path in people if flagged or user_id in (assigned or ())]
     if not inventory:
         privileged.append(_obj(("user", "user:unresolved"), ("org_unit", None), ("groups", [])))
     return _obj(("complete", complete), ("super_admin_count", super_admins), ("privileged", privileged),
                 ("memberships_complete", memberships_complete))
 
 
+def _assigned(ctx: _Context, raw: dict[str, Any] | None) -> set[str] | None:
+    """The assignees of highly privileged roles, or None when the inventory cannot be proven: the role and assignment
+    reads whole, every assignment's role and assignee readable identities, the normalised assignments the same
+    (role, assignee) pairs as the raw read (by identity, never by list length), and every assigned role readable."""
+    rows, rows_whole = ctx.records("google_role_assignments", required=False)
+    if not (ctx.read_ok(raw, _DIRECTORY, "roles") and ctx.read_ok(raw, _DIRECTORY, "roleAssignments")):
+        return None
+    raw_pairs, normalised_pairs = Counter(), Counter()
+    for pairs, items, role_field, who_field in ((raw_pairs, raw["roleAssignments"]["value"], "roleId", "assignedTo"),
+                                                (normalised_pairs, rows or [], "role_id", "assigned_to")):
+        for item in items:
+            key = _role_key(item.get(role_field)) if isinstance(item, dict) else None
+            who = item.get(who_field) if isinstance(item, dict) else None
+            if key is None or not _ident(who):
+                return None
+            pairs[(key, who)] += 1
+    if (rows is None and raw_pairs) or (rows is not None and not rows_whole) or raw_pairs != normalised_pairs:
+        return None
+    roles = _roles(raw)
+    assigned: set[str] = set()
+    for key, who in raw_pairs:
+        verdict = roles.get(key)
+        if verdict is None:
+            return None  # an assignment to a role that cannot be read may make its holder privileged
+        if verdict:
+            assigned.add(who)
+    return assigned
+
+
 def _memberships(ctx: _Context, raw: dict[str, Any] | None, known: set[str],
                  users: list[dict[str, Any]]) -> tuple[dict[str, set[str]], bool]:
     """User id to the pseudonyms of the groups it is a direct member of, and whether that is every membership: the
-    group and member lists whole, a finished member read for every group, no member error, and every member a user
-    resolved by its stable id (else by its address). A member the tenant's user list does not hold is not one of its
-    admins."""
+    group and member lists whole in the raw and normalised files (the same number of members in both), a finished
+    member read for every group whose coverage count equals the members kept for it, no member error, and every member
+    a user resolved by its stable id (else by its address). A member the tenant's user list does not hold is not one of
+    its admins."""
     groups = ctx.group_ids()
     complete = (groups is not None and ctx.read_ok(raw, _DIRECTORY, "groupMembers", fanout=True)
                 and _whole(raw.get("groupMembersErrors", {"value": []})) and not raw.get(
                     "groupMembersErrors", {"value": []})["value"])
     errors, _ = ctx.records("google_group_member_errors", required=False)
+    normalised, normalised_whole = ctx.records("google_group_members", required=False)
     complete = complete and not errors
     if not complete:
         return {}, False
+    members = raw["groupMembers"]["value"]
+    # The normaliser writes no file for an empty section, so an absent one stands only for an empty raw list.
+    if (normalised is None and members) or normalised is not None and (
+            not normalised_whole or len(normalised) != len(members)):
+        complete = False  # the normalised member list is cut or disagrees with the raw one
+    kept = Counter(member.get("groupEmail") for member in members if isinstance(member, dict))
     for group in raw["groups"]["value"]:
-        if not ctx.fanout_ok(_DIRECTORY, "groupMembers:" + str(group.get("email") or group.get("id"))):
-            complete = False  # no proof that this group's members were read
+        key = str(group.get("email") or group.get("id"))
+        if not ctx.fanout_ok(_DIRECTORY, "groupMembers:" + key, kept.get(key, 0)):
+            complete = False  # no proof that this group's members were all read and kept
     emails: dict[str, str | None] = {}
     for row in users:
         email, user_id = row.get("primary_email"), row.get("id")
         if isinstance(email, str) and email and user_id in known:
             emails[email.lower()] = None if email.lower() in emails else user_id
     member_of: dict[str, set[str]] = {}
-    for member in raw["groupMembers"]["value"]:
+    for member in members:
         if not isinstance(member, dict):
             complete = False
             continue
@@ -821,7 +944,10 @@ def _memberships(ctx: _Context, raw: dict[str, Any] | None, known: set[str],
         if group_id is None or member.get("type") != "USER":
             complete = False
             continue
-        if isinstance(member_id, str) and member_id:
+        if "id" in member:
+            if not _ident(member_id):
+                complete = False  # a blank or malformed member id is no account, nor proof of an outsider
+                continue
             user_id = member_id if member_id in known else None
         else:
             user_id = emails.get(email.lower()) if isinstance(email, str) else None
@@ -927,7 +1053,7 @@ def project_gws_run(run_dir: str | Path, *,
             report[section]["scan"] = {"rows": ctx.rows, "bytes": ctx.bytes, "chunks": 0}
     redaction = _obj(("enabled", True), ("strategy", PSEUDONYM_STRATEGY),
                      ("user_ids", len(ctx.users) if ctx else 0), ("group_ids", len(ctx.groups) if ctx else 0),
-                     ("email_addresses", ctx.addresses if ctx else 0))
+                     ("email_addresses", ctx.addresses if ctx else 0), ("domain_names", len(ctx.domains) if ctx else 0))
     result.report = {"schema_version": GWS_PROJECTION_VERSION, "sections": report, "redaction": redaction,
                      "bounds": bounds}
     return result

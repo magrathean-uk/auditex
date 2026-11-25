@@ -21,6 +21,7 @@ KEY = bytes(range(32))
 U100, U200, U300, U500 = "user:a3da8ecfe18ba66b", "user:3cd262199099fc36", "user:c53758839d880a20", "user:95072140579b78b2"
 G1, G2 = "group:1f28b0e409ce3330", "group:3b8c6f8c6686cfef"
 G9_EMAIL = "group:f89b76e9cadfed92"
+D_COM, D_NET = "domain:0f1b91af965ab2e1.invalid", "domain:bf4ddaa84e70a66f.invalid"
 UNRESOLVED = {"user": "user:unresolved", "org_unit": None, "groups": []}
 CUSTOMER = "C0synth9x"
 SETTING = "OutOfDomainWarningProto disable_untrusted_recipient_warning"  # GMAIL.13.1: good "false", bad "true"
@@ -90,10 +91,13 @@ def bundle(tmp_path: Path) -> Path:
     })
     seed_key(root)
     write(root, "coverage.json", [
-        *({"collector": "google_directory", "name": name, "status": "ok", "item_count": 1}
-          for name in ("users", "groups", "orgUnits", "roles", "roleAssignments", "groupMembers:g1@example.com",
-                       "groupMembers:g2@example.org")),
+        *({"collector": "google_directory", "name": name, "status": "ok", "item_count": count}
+          for name, count in (("users", 5), ("groups", 2), ("orgUnits", 2), ("roles", 4), ("roleAssignments", 4),
+                              ("groupMembers:g1@example.com", 1), ("groupMembers:g2@example.org", 2))),
         {"collector": "google_dns_posture", "name": "domains", "status": "ok", "item_count": 1},
+        {"collector": "google_dns_posture", "name": "posture:example.com", "status": "ok", "item_count": 1},
+        {"collector": "google_dns_posture", "name": "posture:example.net", "status": "failed", "item_count": 1,
+         "error_class": "dns_resolver_error"},
         {"collector": "google_policies", "name": "policySettings", "status": "ok", "item_count": 2},
     ])
     write(root, "raw/google_directory.json", {
@@ -115,7 +119,8 @@ def bundle(tmp_path: Path) -> Path:
             {"roleId": "4", "roleName": "Help Desk", "rolePrivileges": [{"privilegeName": "USERS_RETRIEVE"}]},
             {"roleId": 5, "roleName": "Custom", "rolePrivileges": [{"privilegeName": "USERS_ALL", "serviceId": "s1"}]},
         ]},
-        "roleAssignments": {"value": [{"roleId": "1"}, {"roleId": "2"}, {"roleId": "4"}, {"roleId": 5}]},
+        "roleAssignments": {"value": [{"roleId": "1", "assignedTo": "u100"}, {"roleId": "2", "assignedTo": "u300"},
+                                      {"roleId": "4", "assignedTo": "u400"}, {"roleId": 5, "assignedTo": "u500"}]},
     })
     normalised(root, "google_users", [
         {"kind": "google_user", "id": u["id"], "primary_email": u["primaryEmail"], "display_name": "Synthetic Person",
@@ -174,8 +179,11 @@ def bundle(tmp_path: Path) -> Path:
         {"kind": "google_domain_posture", "domain": "example.net", "resolver_error": "timeout via https://resolver.example/dns-query",
          "dmarc": {"query_name": "_dmarc.example.net"}},
     ])
-    write(root, "raw/google_dns_posture.json", {"domains": {"value": [{"domainName": "example.com"}]},
-                                                "domainPosture": {"value": [{}, {}]}})
+    write(root, "raw/google_dns_posture.json", {
+        "domains": {"value": [{"domainName": "example.com", "verified": True, "isPrimary": True,
+                               "domainAliases": [{"domainAliasName": "example.net", "verified": True}]}]},
+        "domainPosture": {"value": [{"domain": "example.com", "resolver_error": False},
+                                    {"domain": "example.net", "resolver_error": "DNS resolver could not answer."}]}})
     return root
 
 
@@ -200,13 +208,13 @@ EXPECTED = {
         {"time": "2026-10-05T10:00:00Z", "event": "CHANGE_GMAIL_SETTING", "setting": SETTING,
          "new_value": "true", "unit": G9_EMAIL, "application": None}]},
     "gws_dns": {"complete": True, "domains": [
-        {"domain": "example.com", "alias": False, "resolver_error": False,
+        {"domain": D_COM, "alias": False, "resolver_error": False,
          "spf": {"records": ["v=spf1 -all"]},
          "dkim": {"selectors": {"google": ["v=DKIM1;"], "selector1": [], "selector2": []}},
-         "dmarc": {"query_name": "_dmarc.example.com", "inherited": False, "records": [DMARC_OUT, "unrecognised"]}},
-        {"domain": "example.net", "alias": True, "resolver_error": True, "spf": {"records": None},
+         "dmarc": {"query_name": "_dmarc." + D_COM, "inherited": False, "records": [DMARC_OUT, "unrecognised"]}},
+        {"domain": D_NET, "alias": True, "resolver_error": True, "spf": {"records": None},
          "dkim": {"selectors": {"google": None, "selector1": None, "selector2": None}},
-         "dmarc": {"query_name": "_dmarc.example.net", "inherited": None, "records": None}}]},
+         "dmarc": {"query_name": "_dmarc." + D_NET, "inherited": None, "records": None}}]},
     "gws_admins": {"complete": True, "super_admin_count": 2, "memberships_complete": True, "privileged": [
         {"user": U100, "org_unit": "ou:root01", "groups": sorted([G1, G2])},
         {"user": U200, "org_unit": "ou:ou0a1", "groups": []},
@@ -229,10 +237,11 @@ def test_each_section_from_a_synthetic_bundle(bundle: Path) -> None:
     assert {name: entry["status"] for name, entry in sections.items()} == {name: "projected" for name in SECTIONS}
     assert set(sections["gws_admins"]["source"]) == {
         "run-manifest.json", "normalized/google_users.json", "normalized/google_role_assignments.json",
-        "raw/google_directory.json", "coverage.json", "normalized/google_org_units.json"}
+        "raw/google_directory.json", "coverage.json", "normalized/google_org_units.json",
+        "normalized/google_group_members.json"}
     assert projection.report["redaction"] == {"enabled": True, "strategy": "keyed-hmac-sha256-v1", "user_ids": 4,
-                                              "group_ids": 3, "email_addresses": 2}
-    assert projection.report["schema_version"] == "2026-11-25.2"
+                                              "group_ids": 3, "email_addresses": 2, "domain_names": 2}
+    assert projection.report["schema_version"] == "2026-11-25.3"
 
 
 # --- B1: only allow-listed vocabulary, pseudonyms, ids, counts and verdict-relevant values --------------------------
@@ -252,7 +261,8 @@ def test_no_address_customer_id_group_id_path_or_name_in_the_output(bundle: Path
     for needle in ("ada.admin", "bo.admin", "cy.groups", "ed.custom", "g1@example.com", "g9@example.com", "ops@",
                    "dmarc.ops", "forensic.ops", "guest@", CUSTOMER, "g1grp01", "g2grp02", "/Sales", "Sales",
                    "Example Org", "Synthetic Person", "Ada Admin", "/home/example", "resolver.example", "timeout",
-                   "u100", "u500", "x999", "Ops", "google-site-verification", "k=rsa", "pct=100"):
+                   "u100", "u500", "x999", "Ops", "google-site-verification", "k=rsa", "pct=100", "example.com",
+                   "example.net", "_dmarc.example"):
         assert needle not in text, needle
     assert projection["gws_setting_events"]["events"][0]["new_value"] == "unrecognised"
     assert projection["gws_setting_events"]["events"][0]["application"] == ""
@@ -263,10 +273,17 @@ def test_no_address_customer_id_group_id_path_or_name_in_the_output(bundle: Path
         "unit": "ou:root01", "unit_kind": "org_unit", "section": "gmail_auto_forwarding", "sort_order": 1}
 
 
-def dns_only(bundle: Path, *records: dict) -> None:
+def dns_only(bundle: Path, *records: dict, listed: list[str] | None = None) -> None:
+    """The posture records, a raw read listing and proving each of them (or the ``listed`` names) and their coverage."""
     normalised(bundle, "google_dns_posture", list(records))
-    write(bundle, "raw/google_dns_posture.json", {"domains": {"value": [{"domainName": "example.com"}]},
-                                                  "domainPosture": {"value": [{} for _ in records]}})
+    names = [row["domain"] for row in records if row.get("kind") == "google_domain_posture"
+             and isinstance(row.get("domain"), str)]
+    write(bundle, "raw/google_dns_posture.json", {
+        "domains": {"value": [{"domainName": name, "verified": True} for name in (names if listed is None else listed)]},
+        "domainPosture": {"value": [{"domain": name, "resolver_error": False} for name in names]}})
+    coverage = [row for row in load(bundle, "coverage.json") if not row["name"].startswith("posture:")]
+    write(bundle, "coverage.json", [*coverage, *({"collector": "google_dns_posture", "name": f"posture:{name}",
+                                                  "status": "ok", "item_count": 1} for name in names)])
 
 
 def good_domain(name: str = "example.com", **change) -> dict:
@@ -418,6 +435,10 @@ def test_a_raw_admin_flag_that_is_not_a_boolean_proves_no_count(bundle: Path, fl
 def test_a_member_is_joined_by_its_stable_id(bundle: Path) -> None:
     raw_directory(bundle, lambda raw: raw["groupMembers"]["value"].append(
         {"groupEmail": "g1@example.com", "id": "u200", "email": "bo.old.address@example.com", "type": "USER"}))
+    members = rows(bundle, "google_group_members")
+    normalised(bundle, "google_group_members", [*members, {**members[0], "email": "bo.old.address@example.com"}])
+    write(bundle, "coverage.json", [{**row, "item_count": 2} if row["name"] == "groupMembers:g1@example.com" else row
+                                    for row in load(bundle, "coverage.json")])
     projection = project_gws_run(bundle)
     assert projection["gws_admins"]["privileged"][1] == {"user": U200, "org_unit": "ou:ou0a1", "groups": [G1]}
     assert projection["gws_admins"]["memberships_complete"] is True
@@ -506,9 +527,9 @@ def test_an_alias_flag_contradicting_the_directory_is_unusable(bundle: Path) -> 
 def test_a_partial_posture_read_is_incomplete(bundle: Path, read_state) -> None:
     domains = [good_domain(), good_domain("example.net", alias=True)]
     dns_only(bundle, *domains, *([state("google_dns_posture", 2)] if read_state else []))
-    write(bundle, "raw/google_dns_posture.json", {"domains": {"value": [{"domainName": "example.com"}]},
-                                                  "domainPosture": {"value": [{}, {}], "partial": True,
-                                                                    "error_class": "denied"}})
+    raw = load(bundle, "raw/google_dns_posture.json")
+    raw["domainPosture"].update(partial=True, error_class="denied")
+    write(bundle, "raw/google_dns_posture.json", raw)
     projection = project_gws_run(bundle)
     assert projection["gws_dns"]["complete"] is False
     assert verdict(projection, "GWS.GMAIL.3.1v1") == ("not_assessed", "data_unavailable_dns_read_incomplete")
@@ -594,9 +615,9 @@ def test_raw_and_supporting_rows_count_against_the_bound(bundle: Path) -> None:
         state("google_setting_events", 1, window_start="2026-05-25T00:00:00Z", window_end="2026-11-20T10:01:30Z")])
     report = project_gws_run(bundle, scan_max_rows=2).report["sections"]["gws_setting_events"]
     assert (report["reason"], report["detail"]) == ("oversize", {"field": "scan_max_rows", "kind": "scan_bound"})
-    # gws_admins: 5 + 4 normalised rows, 5 + 4 + 4 + 2 + 3 + 2 raw Directory rows, 9 coverage rows, 3 unit rows.
-    assert project_gws_run(bundle, scan_max_rows=41).report["sections"]["gws_admins"]["reason"] is None
-    assert project_gws_run(bundle, scan_max_rows=40).report["sections"]["gws_admins"]["reason"] == "oversize"
+    # gws_admins: 5 + 4 + 3 normalised rows, 5 + 4 + 4 + 2 + 3 + 2 raw Directory rows, 11 coverage rows, 3 unit rows.
+    assert project_gws_run(bundle, scan_max_rows=46).report["sections"]["gws_admins"]["reason"] is None
+    assert project_gws_run(bundle, scan_max_rows=45).report["sections"]["gws_admins"]["reason"] == "oversize"
 
 
 # --- M4: the tenant topology ----------------------------------------------------------------------------------------
@@ -850,6 +871,7 @@ def test_a_privileged_role_held_by_a_group_leaves_the_inventory_unresolved(bundl
     assignments = rows(bundle, "google_role_assignments")
     assignments[3]["assigned_to"] = "g1grp01"
     normalised(bundle, "google_role_assignments", assignments)
+    raw_directory(bundle, lambda raw: raw["roleAssignments"]["value"][3].update(assignedTo="g1grp01"))
     admins = project_gws_run(bundle)["gws_admins"]
     assert [entry["user"] for entry in admins["privileged"]] == [U100, U200, U300, "user:unresolved"]
 
@@ -903,6 +925,7 @@ def test_resolver_error_is_unknown_unless_absent_or_false(bundle: Path, value, e
 
 @pytest.mark.parametrize("change,field,expected", [
     ({"domain": "example.org", "alias": None}, "alias", None),
+    ({"domain": "example.org"}, "domain", "domain:1631ad6c226401f3.invalid"),
     ({"domain": "exa mple.com"}, "domain", ""),
     ({"spf": {"records": ["v=spf1", 3]}}, "spf", {"records": None}),
     ({"spf": {"records": ["v=spf1 include:_spf.google.com ~all", "ops@example.com"]}}, "spf",
@@ -929,3 +952,414 @@ def test_a_lone_surrogate_never_reaches_a_section(bundle: Path) -> None:
     assert projection["gws_dns"]["domains"][0]["spf"] == {"records": ["v=spf1 ?all"]}
     assert projection["gws_setting_events"]["events"][0]["application"] == ""
     assert projection["gws_sso"]["assignments"][1]["sso_mode"] == "unrecognised"
+
+
+# --- Review round 2 (M13-L06 repair) ---------------------------------------------------------------------------------
+
+CHAT_REPORTS = "ContentReportingProto report_types"  # CHAT.5.2: a top-level delete violates
+WINDOW = {"window_start": "2026-05-25T00:00:00Z", "window_end": "2026-11-20T10:01:30Z"}
+
+
+def edit_rows(bundle: Path, name: str, change, **envelope) -> None:
+    data = rows(bundle, name)
+    change(data)
+    normalised(bundle, name, data, **envelope)
+
+
+def edit_manifest(bundle: Path, **fields) -> None:
+    data = load(bundle, "run-manifest.json")
+    for key, value in fields.items():
+        if value == "MISSING":
+            data.pop(key, None)
+        else:
+            data[key] = value
+    write(bundle, "run-manifest.json", data)
+
+
+def edit_coverage(bundle: Path, name: str, **fields) -> None:
+    """Change one coverage row; ``DROP=True`` removes it, a ``MISSING`` value removes that field."""
+    out = []
+    for row in load(bundle, "coverage.json"):
+        if row["name"] == name:
+            if fields.get("DROP"):
+                continue
+            row = {**row, **{k: v for k, v in fields.items() if v != "MISSING"}}
+            for key in [k for k, v in fields.items() if v == "MISSING"]:
+                row.pop(key, None)
+        out.append(row)
+    write(bundle, "coverage.json", out)
+
+
+def edit_raw(bundle: Path, path: str, change) -> None:
+    raw = load(bundle, path)
+    change(raw)
+    write(bundle, path, raw)
+
+
+def two_step(bundle: Path) -> None:
+    normalised(bundle, "google_policy_settings", [*TWO_STEP, state("google_policy_settings", 2)])
+
+
+def placed(bundle: Path, path: str = "/") -> None:
+    """Every privileged account in a known OU: u500 moves from the unknown ``/Unknown`` to ``path``."""
+    raw_directory(bundle, lambda raw: raw["users"]["value"][4].update(orgUnitPath=path))
+    edit_rows(bundle, "google_users", lambda data: data[4].update(org_unit_path=path))
+
+
+def sso(bundle: Path, *assignments: dict) -> None:
+    normalised(bundle, "google_sso_assignments", [*({"kind": "google_sso_assignment", **row} for row in assignments),
+                                                  state("google_sso_assignments", len(assignments))])
+
+
+def third_ou(bundle: Path) -> None:
+    """u500 (role 5, USERS_ALL) in a third OU whose SAML assignment is the only external one."""
+    raw_directory(bundle, lambda raw: raw["orgUnits"]["value"].append(
+        {"orgUnitId": "id:ou0b2", "orgUnitPath": "/Ops", "name": "Ops", "parentOrgUnitId": "id:root01",
+         "parentOrgUnitPath": "/"}))
+    normalised(bundle, "google_org_units", [
+        {"kind": "google_org_unit", "id": "ou0a1", "parent_id": "root01", "is_root": False},
+        {"kind": "google_org_unit", "id": "ou0b2", "parent_id": "root01", "is_root": False},
+        {"kind": "google_org_unit", "id": "root01", "parent_id": None, "is_root": True},
+        state("google_org_units", 3, root_id_known=True, malformed_count=0)])
+    placed(bundle, "/Ops")
+    sso(bundle, {"target_org_unit": "orgUnits/ou0b2", "sso_mode": "SAML_SSO"})
+
+
+def chat_delete(bundle: Path, **fields) -> None:
+    normalised(bundle, "google_setting_events", [
+        event("2026-10-03T10:00:00Z", "DELETE_APPLICATION_SETTING",
+              **{"setting": CHAT_REPORTS, "org_unit": "root01", "new_value": None, **fields}),
+        state("google_setting_events", 1, **WINDOW)])
+
+
+# B1: a DNS label never carries the customer id, whatever its shape.
+
+def test_dns_labels_are_pseudonyms_and_keep_only_their_relation(bundle: Path) -> None:
+    own, child = "C0synth9x.example.org", "mail.C0synth9x.example.org"
+    dns_only(bundle, good_domain(own), good_domain(child, dmarc={
+        "query_name": f"_dmarc.{own}", "inherited": True, "records": [DMARC]}))
+    projection = project_gws_run(bundle)
+    text = json.dumps([dict(projection), projection.report]).lower()
+    assert CUSTOMER.lower() not in text and "example.org" not in text
+    domains = projection["gws_dns"]["domains"]
+    assert [(entry["domain"], entry["dmarc"]["query_name"]) for entry in domains] == [
+        ("domain:ed29e53bc9f78521.invalid", "_dmarc.domain:ed29e53bc9f78521.invalid"),
+        ("domain:6d34e6674c106194.invalid", "_dmarc.invalid")]
+    assert verdict(projection, "GWS.GMAIL.4.1v1") == ("met", "no_domain_violates")
+    assert verdict(projection, "GWS.GMAIL.4.2v1") == ("met", "no_domain_violates")
+
+
+# B2: the collection end is a strictly parsed instant.
+
+@pytest.mark.parametrize("created", ["2026-11-20X10:00:00Z", "2026-11-20 10:00:00Z", "2026-11-20T10:00:00",
+                                     "2026-11-20T24:00:00Z", "20261120T100000Z"])
+def test_a_malformed_creation_time_confirms_no_2sv_answer(bundle: Path, created) -> None:
+    two_step(bundle)
+    assert verdict(project_gws_run(bundle), "GWS.COMMONCONTROLS.1.2v1") == ("met", "no_unit_violates")
+    edit_manifest(bundle, created_utc=created)
+    projection = project_gws_run(bundle)
+    assert projection["gws_tenant"]["as_of"] is None
+    assert verdict(projection, "GWS.COMMONCONTROLS.1.2v1")[0] == "not_assessed"
+
+
+# B3: an envelope claim or a blank identity never proves the super admin count.
+
+@pytest.mark.parametrize("envelope", [{"complete": False}, {"status": "partial"}, {"collection_truncated": "true"},
+                                      {"item_count": 6}])
+def test_an_incomplete_user_envelope_proves_no_count(bundle: Path, envelope) -> None:
+    edit_rows(bundle, "google_users", lambda data: None, **envelope)
+    projection = project_gws_run(bundle)
+    assert projection["gws_admins"]["complete"] is False
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.2v1") == ("not_assessed", "data_unavailable_user_read_incomplete")
+
+
+def test_a_blank_admin_id_proves_no_count(bundle: Path) -> None:
+    raw_directory(bundle, lambda raw: raw["users"]["value"][1].update(id=" "))
+    edit_rows(bundle, "google_users", lambda data: data[1].update(id=" "))
+    projection = project_gws_run(bundle)
+    assert projection["gws_admins"]["complete"] is False
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.2v1") == ("not_assessed", "data_unavailable_user_read_incomplete")
+
+
+# B4: memberships and role joins must reconcile, not merely be present.
+
+@pytest.mark.parametrize("change", ["kept_rows_short_of_coverage", "normalised_members_cut"])
+def test_a_dropped_membership_never_confirms_google_sign_in(bundle: Path, change) -> None:
+    placed(bundle)
+    assert verdict(project_gws_run(bundle), "GWS.COMMONCONTROLS.6.1v1") == ("not_met", "admin_uses_external_sso")
+    raw_directory(bundle, lambda raw: raw["groupMembers"]["value"].pop(0))  # u100's only g1 (SAML) membership
+    if change == "kept_rows_short_of_coverage":
+        edit_rows(bundle, "google_group_members", lambda data: data.pop(0))  # coverage still says one member
+    else:
+        edit_coverage(bundle, "groupMembers:g1@example.com", item_count=0)
+        edit_rows(bundle, "google_group_members", lambda data: data.pop(0), collection_truncated=True)
+    projection = project_gws_run(bundle)
+    assert projection["gws_admins"]["memberships_complete"] is False
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.1v1") == ("not_assessed", "data_unavailable_membership_incomplete")
+
+
+def test_role_assignments_are_joined_by_identity_not_length(bundle: Path) -> None:
+    third_ou(bundle)
+    assert verdict(project_gws_run(bundle), "GWS.COMMONCONTROLS.6.1v1") == ("not_met", "admin_uses_external_sso")
+    edit_rows(bundle, "google_role_assignments", lambda data: data.__setitem__(3, dict(data[2])))
+    projection = project_gws_run(bundle)
+    assert projection["gws_admins"]["privileged"][-1] == UNRESOLVED
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.1v1")[0] == "not_assessed"
+
+
+# B5: a delete that carries a value is malformed, never a delete the kind can rank.
+
+def test_a_delete_with_a_value_is_ambiguous(bundle: Path) -> None:
+    chat_delete(bundle)
+    assert verdict(project_gws_run(bundle), "GWS.CHAT.5.2v1") == ("not_met", "unit_violates")
+    chat_delete(bundle, new_value={"invalid": True})
+    projection = project_gws_run(bundle)
+    assert projection["gws_setting_events"]["events"][0]["unit"] is None
+    assert verdict(projection, "GWS.CHAT.5.2v1") == ("not_assessed", "data_unusable_event_value")
+
+
+# B6: each domain's own read, and the domain list's coverage, must be proven.
+
+def test_a_posture_read_that_misses_a_listed_domain_confirms_no_pass(bundle: Path) -> None:
+    dns_only(bundle, good_domain())
+    assert verdict(project_gws_run(bundle), "GWS.GMAIL.3.1v1") == ("met", "no_domain_violates")
+    dns_only(bundle, good_domain(), listed=["example.com", "example.org"])
+    projection = project_gws_run(bundle)
+    assert projection["gws_dns"]["complete"] is False
+    assert verdict(projection, "GWS.GMAIL.3.1v1") == ("not_assessed", "data_unavailable_dns_read_incomplete")
+
+
+@pytest.mark.parametrize("change", ["raw_posture_partial", "coverage_failed", "coverage_missing"])
+def test_an_unproven_domain_read_confirms_no_failure(bundle: Path, change) -> None:
+    dns_only(bundle, good_domain(spf={"records": []}))
+    assert verdict(project_gws_run(bundle), "GWS.GMAIL.3.1v1") == ("not_met", "domain_violates")
+    if change == "raw_posture_partial":
+        edit_raw(bundle, "raw/google_dns_posture.json",
+                 lambda raw: raw["domainPosture"].update(partial=True, error_class="denied"))
+    elif change == "coverage_failed":
+        edit_coverage(bundle, "posture:example.com", status="failed", error_class="dns_resolver_error")
+    else:
+        edit_coverage(bundle, "posture:example.com", DROP=True)
+    projection = project_gws_run(bundle)
+    assert projection["gws_dns"]["domains"][0]["resolver_error"] is True
+    assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "not_assessed"
+
+
+# B7: an attribution the raw read contradicts proves nothing.
+
+def test_an_attribution_contradicted_by_the_raw_row_leaves_the_read_incomplete(bundle: Path) -> None:
+    attributed(bundle)
+    edit_raw(bundle, "raw/google_policies.json", lambda raw: raw["policySettings"]["value"][2].update(
+        setting={"type": "settings/security.two_step_verification_enrollment", "value": {"allowEnrollment": None}}))
+    projection = project_gws_run(bundle)
+    assert projection["gws_policies"]["complete"] is False
+    assert verdict(projection, "GWS.COMMONCONTROLS.1.2v1") == ("not_assessed", "data_unavailable_policy_read_incomplete")
+
+
+# M1: the explicit empty SSO mode is the engine's Google-only value.
+
+def test_the_empty_sso_mode_passes_through(bundle: Path) -> None:
+    placed(bundle)
+    sso(bundle, {"target_org_unit": "orgUnits/root01", "sso_mode": ""})
+    projection = project_gws_run(bundle)
+    assert projection["gws_sso"] == {"complete": True, "assignments": [{"target": "ou:root01", "sso_mode": ""}]}
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.1v1") == ("met", "admins_use_google_sign_in")
+
+
+# Every input the projection reads, through absent, null, wrong-typed, blank, malformed, partial and contradictory
+# values: none may confirm met or not_met. Each row names its base (whose verdict is checked first, so the row is not
+# vacuous), the policy, the base verdict and the change.
+
+def _member(index: int, **fields):
+    return lambda b: raw_directory(b, lambda raw: raw["groupMembers"]["value"][index].update(**fields))
+
+
+def _raw_user(**fields):
+    return lambda b: raw_directory(b, lambda raw: raw["users"]["value"][1].update(**fields))
+
+
+def _raw_user_drop(field: str):
+    return lambda b: raw_directory(b, lambda raw: raw["users"]["value"][1].pop(field))
+
+
+def _norm_assignment(**fields):
+    return lambda b: edit_rows(b, "google_role_assignments", lambda data: data[3].update(**fields))
+
+
+def _raw_assignment(**fields):
+    return lambda b: raw_directory(b, lambda raw: raw["roleAssignments"]["value"][3].update(**fields))
+
+
+def _attribution(**fields):
+    return lambda b: edit_rows(b, "google_policy_settings", lambda data: data[-1].update(**fields))
+
+
+def _scope(**fields):
+    return lambda b: edit_rows(b, "google_policy_settings",
+                               lambda data: data[-1]["unusable_scopes"][0].update(**fields))
+
+
+def _raw_domains(rows_):
+    return lambda b: edit_raw(b, "raw/google_dns_posture.json", lambda raw: raw["domains"].update(value=rows_))
+
+
+def _raw_posture(**fields):
+    return lambda b: edit_raw(b, "raw/google_dns_posture.json",
+                              lambda raw: raw["domainPosture"]["value"][0].update(**fields))
+
+
+def _sso_row(**fields):
+    return lambda b: sso(b, {"target_org_unit": "orgUnits/root01", **fields})
+
+
+BASES = {
+    "2sv": (two_step, "GWS.COMMONCONTROLS.1.2v1", "met"),
+    "count": (lambda b: None, "GWS.COMMONCONTROLS.6.2v1", "met"),
+    "groups": (placed, "GWS.COMMONCONTROLS.6.1v1", "not_met"),
+    "roles": (third_ou, "GWS.COMMONCONTROLS.6.1v1", "not_met"),
+    "delete": (chat_delete, "GWS.CHAT.5.2v1", "not_met"),
+    "dns_pass": (lambda b: dns_only(b, good_domain()), "GWS.GMAIL.3.1v1", "met"),
+    "dns_fail": (lambda b: dns_only(b, good_domain(spf={"records": []})), "GWS.GMAIL.3.1v1", "not_met"),
+    "attributed": (attributed, "GWS.COMMONCONTROLS.1.2v1", "met"),
+    "sso": (lambda b: (placed(b), sso(b, {"target_org_unit": "orgUnits/root01", "sso_mode": "SSO_OFF"})),
+            "GWS.COMMONCONTROLS.6.1v1", "met"),
+}
+
+UNKNOWN_INPUTS = {
+    # manifest times
+    "created absent": ("2sv", lambda b: edit_manifest(b, created_utc="MISSING")),
+    "created null": ("2sv", lambda b: edit_manifest(b, created_utc=None)),
+    "created number": ("2sv", lambda b: edit_manifest(b, created_utc=1763632800)),
+    "created blank": ("2sv", lambda b: edit_manifest(b, created_utc=" ")),
+    "created malformed": ("2sv", lambda b: edit_manifest(b, created_utc="2026-11-20X10:00:00Z")),
+    "created zoneless": ("2sv", lambda b: edit_manifest(b, created_utc="2026-11-20T10:00:00")),
+    "duration absent": ("2sv", lambda b: edit_manifest(b, duration_seconds="MISSING")),
+    "duration null": ("2sv", lambda b: edit_manifest(b, duration_seconds=None)),
+    "duration text": ("2sv", lambda b: edit_manifest(b, duration_seconds="90.5")),
+    "duration negative": ("2sv", lambda b: edit_manifest(b, duration_seconds=-1)),
+    # user envelopes and ids
+    "users envelope complete false": ("count", lambda b: edit_rows(b, "google_users", lambda d: None, complete=False)),
+    "users envelope complete null": ("count", lambda b: edit_rows(b, "google_users", lambda d: None, complete=None)),
+    "users envelope status": ("count", lambda b: edit_rows(b, "google_users", lambda d: None, status="partial")),
+    "users envelope cut text": ("count", lambda b: edit_rows(b, "google_users", lambda d: None,
+                                                             collection_truncated="true")),
+    "users envelope cut number": ("count", lambda b: edit_rows(b, "google_users", lambda d: None,
+                                                               collection_truncated=1)),
+    "users envelope count": ("count", lambda b: edit_rows(b, "google_users", lambda d: None, item_count=6)),
+    "users envelope other kind": ("count", lambda b: edit_rows(b, "google_users", lambda d: None,
+                                                               kind="google_groups")),
+    "raw users status": ("count", lambda b: raw_directory(b, lambda raw: raw["users"].update(status="partial"))),
+    "raw users cut text": ("count", lambda b: raw_directory(
+        b, lambda raw: raw["users"].update(collection_truncated="true"))),
+    "raw user id absent": ("count", _raw_user_drop("id")),
+    "raw user id null": ("count", _raw_user(id=None)),
+    "raw user id number": ("count", _raw_user(id=200)),
+    "raw user id blank": ("count", _raw_user(id=" ")),
+    "raw user id padded": ("count", _raw_user(id="u200 ")),
+    "user ids contradict": ("count", lambda b: edit_rows(b, "google_users", lambda d: d[1].update(id="u999"))),
+    # memberships
+    "members envelope cut": ("groups", lambda b: edit_rows(b, "google_group_members", lambda d: None,
+                                                          collection_truncated=True)),
+    "members envelope status": ("groups", lambda b: edit_rows(b, "google_group_members", lambda d: None,
+                                                             status="partial")),
+    "members normalised short": ("groups", lambda b: edit_rows(b, "google_group_members", lambda d: d.pop())),
+    "members normalised absent": ("groups", lambda b: (b / "normalized/google_group_members.json").unlink()),
+    "member coverage count absent": ("groups", lambda b: edit_coverage(b, "groupMembers:g1@example.com",
+                                                                      item_count="MISSING")),
+    "member coverage count null": ("groups", lambda b: edit_coverage(b, "groupMembers:g1@example.com",
+                                                                    item_count=None)),
+    "member coverage count text": ("groups", lambda b: edit_coverage(b, "groupMembers:g1@example.com",
+                                                                    item_count="1")),
+    "member coverage count contradicts": ("groups", lambda b: edit_coverage(b, "groupMembers:g1@example.com",
+                                                                           item_count=2)),
+    "member coverage partial": ("groups", lambda b: edit_coverage(b, "groupMembers:g1@example.com",
+                                                                 status="partial")),
+    "member coverage absent": ("groups", lambda b: edit_coverage(b, "groupMembers:g1@example.com", DROP=True)),
+    "member id null": ("groups", _member(2, id=None)),
+    "member id blank": ("groups", _member(2, id=" ")),
+    "member id number": ("groups", _member(2, id=999)),
+    "member type absent": ("groups", lambda b: raw_directory(b, lambda raw: raw["groupMembers"]["value"][2].pop(
+        "type"))),
+    "member group blank": ("groups", _member(2, groupEmail="")),
+    "raw members partial": ("groups", lambda b: raw_directory(b, lambda raw: raw["groupMembers"].update(
+        status="partial"))),
+    # role joins
+    "assignment duplicated": ("roles", lambda b: edit_rows(b, "google_role_assignments",
+                                                          lambda d: d.__setitem__(3, dict(d[2])))),
+    "assignee blank": ("roles", _norm_assignment(assigned_to=" ")),
+    "assignee null": ("roles", _norm_assignment(assigned_to=None)),
+    "assignee contradicts": ("roles", _norm_assignment(assigned_to="u400")),
+    "role id boolean": ("roles", _norm_assignment(role_id=True)),
+    "role id null": ("roles", _norm_assignment(role_id=None)),
+    "raw assignee absent": ("roles", lambda b: raw_directory(b, lambda raw: raw["roleAssignments"]["value"][3].pop(
+        "assignedTo"))),
+    "raw role id blank": ("roles", _raw_assignment(roleId=" ")),
+    "assignments envelope cut": ("roles", lambda b: edit_rows(b, "google_role_assignments", lambda d: None,
+                                                             partial=True)),
+    "assignments absent": ("roles", lambda b: (b / "normalized/google_role_assignments.json").unlink()),
+    # setting deletes
+    "delete value object": ("delete", lambda b: chat_delete(b, new_value={"invalid": True})),
+    "delete value text": ("delete", lambda b: chat_delete(b, new_value="system_violation: SPAM")),
+    "delete value blank": ("delete", lambda b: chat_delete(b, new_value="")),
+    "delete value false": ("delete", lambda b: chat_delete(b, new_value=False)),
+    "delete value list": ("delete", lambda b: chat_delete(b, new_value=[])),
+    "delete time malformed": ("delete", lambda b: chat_delete(b, event_time="2026-10-03X10:00:00Z")),
+    "delete unit blank": ("delete", lambda b: chat_delete(b, org_unit=" ")),
+    # DNS coverage
+    "posture coverage absent": ("dns_fail", lambda b: edit_coverage(b, "posture:example.com", DROP=True)),
+    "posture coverage failed": ("dns_fail", lambda b: edit_coverage(b, "posture:example.com", status="failed")),
+    "posture coverage status null": ("dns_fail", lambda b: edit_coverage(b, "posture:example.com", status=None)),
+    "posture coverage cut": ("dns_fail", lambda b: edit_coverage(b, "posture:example.com",
+                                                                collection_truncated="true")),
+    "raw posture resolver failure": ("dns_fail", _raw_posture(resolver_error="timeout")),
+    "raw posture record absent": ("dns_fail", lambda b: edit_raw(
+        b, "raw/google_dns_posture.json", lambda raw: raw["domainPosture"].update(value=[]))),
+    "raw posture record twice": ("dns_fail", lambda b: edit_raw(
+        b, "raw/google_dns_posture.json", lambda raw: raw["domainPosture"]["value"].append(
+            {"domain": "example.com", "resolver_error": False}))),
+    "raw posture partial": ("dns_fail", lambda b: edit_raw(
+        b, "raw/google_dns_posture.json", lambda raw: raw["domainPosture"].update(status="partial"))),
+    "listed domains extra": ("dns_pass", _raw_domains([{"domainName": "example.com"}, {"domainName": "example.org"}])),
+    "listed alias extra": ("dns_pass", _raw_domains([{"domainName": "example.com", "domainAliases": [
+        {"domainAliasName": "example.net", "verified": True}]}])),
+    "listed name null": ("dns_pass", _raw_domains([{"domainName": None}])),
+    "listed name blank": ("dns_pass", _raw_domains([{"domainName": " "}])),
+    "listed verified text": ("dns_pass", _raw_domains([{"domainName": "example.com", "verified": "yes"}])),
+    "listed empty": ("dns_pass", _raw_domains([])),
+    "listed partial": ("dns_pass", lambda b: edit_raw(b, "raw/google_dns_posture.json",
+                                                      lambda raw: raw["domains"].update(status="partial"))),
+    # failure attributions
+    "attribution contradicts setting": ("attributed", lambda b: edit_raw(
+        b, "raw/google_policies.json", lambda raw: raw["policySettings"]["value"][2].update(setting={
+            "type": "settings/security.two_step_verification_enrollment", "value": {"allowEnrollment": None}}))),
+    "attribution contradicts unit": ("attributed", _scope(org_unit="ou0a1")),
+    "attribution contradicts group": ("attributed", _scope(group="g1grp01")),
+    "attribution unit blank": ("attributed", _scope(org_unit=" ")),
+    "attribution section null": ("attributed", _scope(section=None)),
+    "attribution scopes absent": ("attributed", lambda b: edit_rows(
+        b, "google_policy_settings", lambda data: data[-1].pop("unusable_scopes"))),
+    "attribution scopes null": ("attributed", _attribution(unusable_scopes=None)),
+    "attribution scopes text": ("attributed", _attribution(unusable_scopes="gmail_auto_forwarding")),
+    "attribution scopes empty": ("attributed", _attribution(unusable_scopes=[])),
+    # SSO modes
+    "sso mode absent": ("sso", lambda b: sso(b, {"target_org_unit": "orgUnits/root01"})),
+    "sso mode null": ("sso", _sso_row(sso_mode=None)),
+    "sso mode number": ("sso", _sso_row(sso_mode=0)),
+    "sso mode blank": ("sso", _sso_row(sso_mode=" ")),
+    "sso mode padded": ("sso", _sso_row(sso_mode="SSO_OFF ")),
+    "sso mode malformed": ("sso", _sso_row(sso_mode="SSO-OFF")),
+    "sso modes contradict": ("sso", lambda b: sso(b, {"target_org_unit": "orgUnits/root01", "sso_mode": "SSO_OFF"},
+                                                  {"target_org_unit": "orgUnits/root01", "sso_mode": "SAML_SSO"})),
+    "sso envelope partial": ("sso", lambda b: edit_rows(b, "google_sso_assignments", lambda d: None,
+                                                       partial=True)),
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNKNOWN_INPUTS))
+def test_unknown_input_never_confirms_a_verdict(bundle: Path, case) -> None:
+    base, change = UNKNOWN_INPUTS[case]
+    setup, policy, expected = BASES[base]
+    setup(bundle)
+    assert verdict(project_gws_run(bundle), policy)[0] == expected
+    change(bundle)
+    assert verdict(project_gws_run(bundle), policy)[0] == "not_assessed", case
