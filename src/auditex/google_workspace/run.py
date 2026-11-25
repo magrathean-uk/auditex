@@ -65,6 +65,7 @@ from .collectors import (
     SUBJECT_SCOPE_ADMIN,
     SUBJECT_SCOPE_USER,
     SUBJECT_SCOPED_COLLECTORS,
+    policy_replay_rows,
 )
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
@@ -736,6 +737,7 @@ def run_google_offline(
             *replay_coverage_rows(name, payload),
             *absent_section_rows(name, held, COLLECTOR_SECTIONS.get(name, ())),
             *_replayed_mailbox_rows(name, payload),
+            *policy_replay_rows(name, payload),
         ]
         coverage_rows.extend(replayed)
         diagnostics.extend(dict(row) for row in replayed if row.get("status") != "ok")

@@ -187,8 +187,17 @@ def test_one_read_fills_the_unchanged_two_step_payload_and_a_minimised_settings_
 
     assert result.status == "ok" and result.item_count == 5
     assert COLLECTOR_SECTIONS["google_policies"] == ("twoStepVerificationPolicies", "policySettings")
-    # The 2-step verification subset keeps today's raw shape, name and customer included.
-    assert result.payload["twoStepVerificationPolicies"] == {"value": [_two_step_root()]}
+    # The 2-step verification subset keeps today's raw shape, without the customer id and the policy's resource name.
+    assert result.payload["twoStepVerificationPolicies"] == {
+        "value": [
+            {
+                "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1},
+                "setting": {"type": "settings/security.two_step_verification_enforcement", "value": {"enforcedFrom": "2020-01-01T00:00:00Z"}},
+                "type": "ADMIN",
+            }
+        ]
+    }
+    assert "customers/" not in json.dumps(result.payload) and "policies/" not in json.dumps(result.payload)
     assert result.payload["policySettings"] == {
         "value": [
             {
@@ -266,6 +275,7 @@ def test_the_normalised_settings_hold_sections_units_and_values_and_no_address()
         "complete": True,
         "record_count": 5,
         "malformed_count": 0,
+        "unusable_sections": [],
     }
     text = json.dumps(normalized["google_policy_settings"])
     assert not any(address in text for address in ADDRESSES)
@@ -336,9 +346,9 @@ def test_the_operator_top_never_cuts_the_policies_read_so_two_step_matches_the_u
         (r["id"], r["policy_scope"], r["org_unit"], r["setting_type"], r.get("enforced_from"), r["source"])
         for r in normalized["google_two_step_policies"]["records"]
     ] == [
-        ("policies/two-step-enforcement-root", "organisation", "orgUnits/root-ou", "security.two_step_verification_enforcement", None, "google_policies.twoStepVerificationPolicies"),
-        ("policies/two-step-enforcement-sales", "org_unit", "orgUnits/sales-ou", "security.two_step_verification_enforcement", "2020-01-01T00:00:00Z", "google_policies.twoStepVerificationPolicies"),
-        ("policies/two-step-enrollment-root", "organisation", "orgUnits/root-ou", "security.two_step_verification_enrollment", None, "google_policies.twoStepVerificationPolicies"),
+        ("security.two_step_verification_enforcement:orgUnits/root-ou", "organisation", "orgUnits/root-ou", "security.two_step_verification_enforcement", None, "google_policies.twoStepVerificationPolicies"),
+        ("security.two_step_verification_enforcement:orgUnits/sales-ou", "org_unit", "orgUnits/sales-ou", "security.two_step_verification_enforcement", "2020-01-01T00:00:00Z", "google_policies.twoStepVerificationPolicies"),
+        ("security.two_step_verification_enrollment:orgUnits/root-ou", "organisation", "orgUnits/root-ou", "security.two_step_verification_enrollment", None, "google_policies.twoStepVerificationPolicies"),
     ]
     findings = build_google_findings(normalized, now=datetime(2026, 11, 25, tzinfo=UTC))
     (finding,) = [item for item in findings if item["rule_id"] == "google.org_2sv_policy_not_enforced"]
@@ -350,8 +360,8 @@ def test_the_operator_top_never_cuts_the_policies_read_so_two_step_matches_the_u
         "enforced_scopes": [{"scope": "org_unit", "org_unit": "orgUnits/sales-ou", "enforced_from": "2020-01-01T00:00:00Z"}],
     }
     assert [ref["record_key"] for ref in finding["evidence_refs"]] == [
-        "google_two_step_policy:policies/two-step-enforcement-root",
-        "google_two_step_policy:policies/two-step-enforcement-sales",
+        "google_two_step_policy:security.two_step_verification_enforcement:orgUnits/root-ou",
+        "google_two_step_policy:security.two_step_verification_enforcement:orgUnits/sales-ou",
     ]
 
 
@@ -403,6 +413,7 @@ def test_a_failed_read_is_incomplete_and_leaves_two_step_status_unknown() -> Non
             "complete": False,
             "record_count": 0,
             "malformed_count": 0,
+            "unusable_sections": [],
         }
     ]
     assert normalized["snapshot"]["two_step_policy_status"] == "unknown"
@@ -457,9 +468,9 @@ def test_the_offline_sample_keeps_its_two_step_records_and_finding(tmp_path: Pat
     assert not (normalized / "google_policy_settings.json").exists()
     records = json.loads((normalized / "google_two_step_policies.json").read_text(encoding="utf-8"))["records"]
     assert [(r["id"], r["policy_scope"]) for r in records] == [
-        ("policies/two-step-enforcement-root", "organisation"),
-        ("policies/two-step-enforcement-sales", "org_unit"),
-        ("policies/two-step-enrollment-root", "organisation"),
+        ("security.two_step_verification_enforcement:orgUnits/root-ou", "organisation"),
+        ("security.two_step_verification_enforcement:orgUnits/sales-ou", "org_unit"),
+        ("security.two_step_verification_enrollment:orgUnits/root-ou", "organisation"),
     ]
     findings = json.loads((tmp_path / "Example-g" / "findings" / "findings.json").read_text(encoding="utf-8"))
     rows = findings if isinstance(findings, list) else findings.get("findings") or findings.get("records") or []
@@ -584,3 +595,365 @@ def test_lens_fixes_wrong_type_targets_and_conflicting_units_are_malformed() -> 
     ]}
     state = _read_state(_normalise({}, "ok", [], {"orgUnits": units}), "google_org_units")
     assert (state["complete"], state["malformed_count"]) == (False, 1)
+
+
+# M13 L03 repair: the review's counterexamples, each pinned with literal expectations.
+
+
+class _ScriptedPolicies:
+    """A ``policies`` resource answering a fixed script of pages (a payload or an error); page ``n`` has cursor ``p<n>``.
+
+    ``repeat_last`` answers the last scripted page for every further request, up to 50 requests, after which the
+    request fails, so an unbounded loop shows up as a call count instead of a hang.
+    """
+
+    def __init__(self, pages: list[Any], *, repeat_last: bool = False) -> None:
+        self.pages = pages
+        self.repeat_last = repeat_last
+        self.calls: list[dict[str, Any]] = []
+
+    def policies(self) -> _ScriptedPolicies:
+        return self
+
+    def list(self, **kwargs: Any) -> _Request:
+        self.calls.append(kwargs)
+        index = len(self.calls) - 1
+        if index >= 50:
+            return _Request(AssertionError("runaway read"))
+        if index >= len(self.pages):
+            if not self.repeat_last:
+                return _Request(AssertionError("no such page"))
+            index = len(self.pages) - 1
+        page = self.pages[index]
+        if callable(page):
+            page = page(len(self.calls) - 1)
+        return _Request(page)
+
+
+def _gmail_row(**query: Any) -> dict[str, Any]:
+    return {
+        "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, **query},
+        "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enableAutoForwarding": False}},
+        "type": "ADMIN",
+    }
+
+
+def _collect(pages: list[Any], **kwargs: Any) -> tuple[Any, _ScriptedPolicies]:
+    service = _ScriptedPolicies(pages, **kwargs)
+    return GooglePoliciesCollector().run({"client": _client(service)}), service
+
+
+def test_b1_a_page_holding_a_non_object_policy_is_not_a_complete_read() -> None:
+    result, _service = _collect([{"policies": [None]}])
+
+    assert result.status == "partial"
+    (row,) = result.coverage
+    assert (row["status"], row["error_class"], row["item_count"]) == ("failed", "malformed_response", 0)
+    assert result.payload["policySettings"]["error_class"] == "malformed_response"
+    normalized = _normalise(result.payload, result.status, result.coverage)
+    assert (_read_state(normalized)["complete"], normalized["snapshot"]["two_step_policy_status"]) == (False, "unknown")
+
+
+def test_b1_a_later_page_that_cannot_be_read_keeps_the_rows_and_marks_the_read_cut() -> None:
+    result, service = _collect([{"policies": [_gmail_row()], "nextPageToken": "page-2"}, {"policies": "unreadable"}])
+
+    assert len(service.calls) == 2 and result.status == "partial"
+    (row,) = result.coverage
+    assert (row["status"], row["error_class"], row["collection_truncated"], row["truncation_reason"]) == (
+        "partial",
+        "malformed_response",
+        True,
+        "pagination_failed",
+    )
+    assert row["error"] == "policySettings: paging stopped after 1 rows because a page could not be read; the list is incomplete."
+    assert result.payload["policySettings"]["collection_truncated"] is True
+    assert result.payload["policySettings"]["truncation_reason"] == "pagination_failed"
+    assert len(result.payload["policySettings"]["value"]) == 1
+    normalized = _normalise(result.payload, result.status, result.coverage)
+    assert _read_state(normalized)["complete"] is False
+    # No 2-step verification policy was retained, but the read was cut: unknown, never "not enforced".
+    assert normalized["snapshot"]["two_step_policy_status"] == "unknown"
+
+
+def test_b1_an_items_list_is_not_a_policies_answer_and_an_empty_read_is_not_complete() -> None:
+    result, _service = _collect([{"items": [_gmail_row()]}])
+    (row,) = result.coverage
+    assert (row["status"], row["error_class"]) == ("failed", "malformed_response")
+    assert result.payload["policySettings"]["value"] == []
+
+    result, _service = _collect([{"policies": []}])
+    (row,) = result.coverage
+    assert (row["status"], row["error_class"], row["error"]) == (
+        "failed",
+        "malformed_response",
+        "The policies read returned no readable policies, so no setting could be read.",
+    )
+    normalized = _normalise(result.payload, result.status, result.coverage)
+    assert (_read_state(normalized)["complete"], normalized["snapshot"]["two_step_policy_status"]) == (False, "unknown")
+    # The same empty section with no coverage marker (a hand-made sample) is still not a complete read.
+    assert _read_state(_normalise({"policySettings": {"value": []}}, "ok", []))["complete"] is False
+
+
+def _replay(tmp_path: Path, policies: Any) -> tuple[int, Path]:
+    from auditex.google_workspace.run import run_google_offline
+
+    sample = json.loads(Path("examples/google_workspace_sample.json").read_text(encoding="utf-8"))
+    sample["google_policies"] = policies
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "sample.json"
+    path.write_text(json.dumps(sample), encoding="utf-8")
+    rc = run_google_offline(sample_path=path, out=tmp_path / "out", tenant_name="E", run_name="g", domain="example.com", customer_id="C123")
+    return rc, tmp_path / "out" / "E-g"
+
+
+def _bundle_state(run_dir: Path) -> dict[str, Any]:
+    return json.loads((run_dir / "normalized" / "google_policy_settings.json").read_text(encoding="utf-8"))["records"][-1]
+
+
+def test_b2_a_replayed_raw_payload_of_a_cut_read_stays_incomplete_and_fails_the_run(tmp_path: Path) -> None:
+    result, _service = _collect([{"policies": [_gmail_row()], "nextPageToken": "page-2"}, RuntimeError("page refused")])
+    assert result.payload["twoStepVerificationPolicies"] == {
+        "value": [],
+        "collection_truncated": True,
+        "truncation_reason": "pagination_failed",
+        "item_count": 0,
+    }
+
+    rc, run_dir = _replay(tmp_path, json.loads(json.dumps(result.payload)))
+
+    assert rc == 1
+    assert _bundle_state(run_dir)["complete"] is False
+    assert not (run_dir / "normalized" / "google_two_step_policies.json").exists()  # none was read
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert [row["status"] for row in summary["collectors"] if row["name"] == "google_policies"] == ["partial"]
+
+
+def test_b2_a_malformed_or_null_policies_section_fails_the_run_and_is_not_absent(tmp_path: Path) -> None:
+    rc, run_dir = _replay(tmp_path / "a", {"policySettings": {"value": ["unreadable"]}})
+    assert rc == 1
+    state = _bundle_state(run_dir)
+    assert (state["complete"], state["malformed_count"]) == (False, 1)
+
+    rc, run_dir = _replay(tmp_path / "b", {"twoStepVerificationPolicies": {"value": []}, "policySettings": None})
+    assert rc == 1
+    assert _bundle_state(run_dir) == {
+        "kind": "google_policy_settings_read_state",
+        "source": "google_policies.policySettings",
+        "id": "read_state",
+        "key": "google_policy_settings_read_state:read_state",
+        "complete": False,
+        "record_count": 0,
+        "malformed_count": 1,
+        "unusable_sections": [],
+    }
+
+
+def test_b3_unknown_precedence_or_a_missing_value_makes_the_setting_unusable() -> None:
+    rows = [
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": {"position": 5}}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enabled": True}}},
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enabled": False}}},
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1}, "setting": {"type": "settings/gmail.imap_access"}},
+        {"policyQuery": {"orgUnit": "orgUnits/sales"}, "setting": {"type": "settings/chat.chat_history", "value": {"historyOnByDefault": True}}},
+        {"policyQuery": {"orgUnit": "orgUnits/sales"}, "setting": {"type": "settings/chat.chat_history", "value": {"historyOnByDefault": False}}},
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 2.5}, "setting": {"type": "settings/meet.safety_access", "value": {}}},
+    ]
+
+    records = _normalise({"policySettings": {"value": rows}}, "ok", [{"collector": "google_policies", "name": "policySettings", "status": "ok"}])[
+        "google_policy_settings"
+    ]["records"]
+
+    # Only the decimal-ordered setting with its explicit empty value survives; the other three sections are unusable.
+    assert [(r["section"], r["sort_order"], r["value"]) for r in records[:-1]] == [("meet_safety_access", 2.5, {})]
+    assert records[-1]["complete"] is False
+    assert records[-1]["malformed_count"] == 2
+    assert records[-1]["unusable_sections"] == ["chat_chat_history", "gmail_auto_forwarding", "gmail_imap_access"]
+
+
+def test_b4_a_query_with_an_exception_is_never_unconditional_org_unit_evidence() -> None:
+    exception = "entity.org_units.exists(o, o.org_unit_id == orgUnitId('root')) && !entity.groups.exists(g, g.group_id == groupId('g1'))"
+    plain = "entity.org_units.exists(o, o.org_unit_id == orgUnitId('root'))"
+    rows = [
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query": exception}, "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enabled": False}}},
+        {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query": plain}, "setting": {"type": "settings/gmail.imap_access", "value": {"enabled": False}}},
+    ]
+    state = _read_state(_normalise({"policySettings": {"value": rows}}, "ok", [{"collector": "google_policies", "name": "policySettings", "status": "ok"}]))
+    assert (state["complete"], state["record_count"], state["unusable_sections"]) == (False, 1, ["gmail_auto_forwarding"])
+
+    # The 2-step verification enforcement at the root, except for group g1: not organisation-wide enforcement.
+    enforcing = {
+        "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query": exception},
+        "setting": {"type": "settings/security.two_step_verification_enforcement", "value": {"enforcedFrom": "2020-01-01T00:00:00Z"}},
+        "type": "ADMIN",
+    }
+    directory = {"orgUnits": {"value": [{"orgUnitId": "id:sales", "parentOrgUnitId": "id:root", "parentOrgUnitPath": "/"}]}}
+    coverage = [{"collector": "google_directory", "name": "orgUnits", "status": "ok"}, {"collector": "google_policies", "name": "policySettings", "status": "ok"}]
+    normalized = _normalise({"twoStepVerificationPolicies": {"value": [enforcing]}, "policySettings": {"value": [enforcing]}}, "ok", coverage, directory)
+    assert normalized["snapshot"]["two_step_policy_status"] == "unknown"
+    assert [r["policy_scope"] for r in normalized["google_two_step_policies"]["records"]] == ["unclassified"]
+
+
+def test_b5_no_customer_id_policy_id_or_local_path_in_either_raw_section_or_the_bundle(tmp_path: Path) -> None:
+    two_step = {
+        "name": "policies/sample-resource",
+        "customer": "customers/C0example01",
+        "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1},
+        "setting": {"type": "settings/security.two_step_verification_enforcement", "value": {}},
+        "type": "ADMIN",
+    }
+    widened = {
+        "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1},
+        "setting": {"type": "settings/chat.chat_apps_access", "value": {"friendlyName": "see /srv/example/notes.txt", "other": "D:\\example\\notes.txt"}},
+    }
+    lists = {
+        "policyQuery": {"orgUnit": "orgUnits/sales", "sortOrder": 1},
+        "setting": {"type": "settings/gmail.email_address_lists", "value": {"emailAddressList": "example.com"}},
+    }
+    listed = {
+        "policyQuery": {"orgUnit": "orgUnits/eng", "sortOrder": 1},
+        "setting": {"type": "settings/gmail.email_address_lists", "value": {"emailAddressList": ["example.org"]}},
+    }
+    result, _service = _collect([{"policies": [two_step, widened, lists, listed]}])
+
+    text = json.dumps(result.payload)
+    assert "C0example01" not in text and "sample-resource" not in text
+    assert "/srv/" not in text and "D:\\\\example" not in text
+    assert '"example.com"' not in text and '"example.org"' not in text
+    assert result.payload["policySettings"]["value"][1]["setting"]["value"] == {"friendlyName": "redacted:path", "other": "redacted:path"}
+    assert result.payload["policySettings"]["value"][2]["setting"]["value"] == {"emailAddressList": None}
+    assert result.payload["policySettings"]["value"][3]["setting"]["value"] == {
+        "emailAddressList": [{"id": None, "entry_count": None, "domain_entry_count": None}]
+    }
+    # The bundle writer's pass on a legacy 2-step verification section drops both fields too.
+    assert minimise_user_text({"twoStepVerificationPolicies": {"value": [two_step]}}) == {
+        "twoStepVerificationPolicies": {
+            "value": [
+                {
+                    "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1},
+                    "setting": {"type": "settings/security.two_step_verification_enforcement", "value": {}},
+                    "type": "ADMIN",
+                }
+            ]
+        }
+    }
+    # Replaying the shipped sample (whose 2SV rows carry a customer id and resource names) writes neither.
+    rc, run_dir = _replay(tmp_path, json.loads(Path("examples/google_workspace_sample.json").read_text(encoding="utf-8"))["google_policies"])
+    assert rc == 0
+    for relative in ("raw/google_policies.json", "normalized/google_two_step_policies.json", "findings/findings.json"):
+        written = (run_dir / relative).read_text(encoding="utf-8")
+        assert "customers/" not in written and "policies/two-step" not in written, relative
+
+
+class _HttpError(Exception):
+    """The shape of ``googleapiclient.errors.HttpError``: its text names the request URL with the customer id."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            '<HttpError 400 when requesting https://cloudidentity.googleapis.com/v1/policies?pageSize=100&'
+            'filter=customer+%3D%3D+%22customers%2FC0example01%22 returned "Invalid filter">'
+        )
+        self.resp = type("Resp", (), {"status": 400})()
+
+
+def test_b6_a_first_page_failure_never_publishes_the_request_url() -> None:
+    from auditex.google_workspace.run import _preflight_call
+
+    result, _service = _collect([_HttpError()])
+    (row,) = result.coverage
+    assert (row["status"], row["error_class"], row["error"]) == ("failed", "client_error", "The Cloud Identity policies read failed (HTTP 400).")
+    assert result.payload["policySettings"]["error"] == "The Cloud Identity policies read failed (HTTP 400)."
+    assert "C0example01" not in json.dumps(result.payload)
+
+    probe = _preflight_call("google_policies", "policySettings", lambda: _client(_ScriptedPolicies([_HttpError()])).list_policies(limit=1))
+    assert (probe["status"], probe["error_class"], probe["error"]) == ("failed", "client_error", "The Cloud Identity policies read failed (HTTP 400).")
+
+    refusal = RuntimeError("('unauthorized_client: Client is unauthorized for sa@example.iam.gserviceaccount.com', {})")
+    result, _service = _collect([refusal])
+    (row,) = result.coverage
+    assert row["error_class"] == "insufficient_permissions"
+    assert row["error"] == (
+        "The token exchange for the Cloud Identity policies scope was refused (unauthorized_client): "
+        "the domain-wide delegation does not grant that scope."
+    )
+
+
+def test_b7_a_malformed_two_step_target_answers_unknown_instead_of_aborting() -> None:
+    row = {"policyQuery": ["unreadable"], "setting": {"type": "settings/security.two_step_verification_enforcement", "value": {}}}
+    result, _service = _collect([{"policies": [row, _gmail_row()]}])
+
+    (coverage_row,) = result.coverage
+    assert (coverage_row["status"], coverage_row["error_class"]) == ("partial", "malformed_response")
+    assert coverage_row["error"] == "1 of 2 policies returned by the read cannot be read; the settings they hold are unknown."
+    normalized = _normalise(result.payload, result.status, result.coverage)
+    assert normalized["snapshot"]["two_step_policy_status"] == "unknown"
+    state = _read_state(normalized)
+    assert (state["complete"], state["malformed_count"], state["unusable_sections"]) == (
+        False,
+        1,
+        ["security_two_step_verification_enforcement"],
+    )
+
+
+def test_m1_an_orphan_a_cycle_or_a_non_string_id_is_not_a_complete_unit_tree() -> None:
+    top = {"orgUnitId": "id:a", "parentOrgUnitId": "id:root", "parentOrgUnitPath": "/"}
+    for extra in (
+        {"orgUnitId": "id:b", "parentOrgUnitId": "id:missing", "parentOrgUnitPath": "/Unset"},
+        {"orgUnitId": "id:b", "parentOrgUnitId": "id:b", "parentOrgUnitPath": "/B"},
+        {"orgUnitId": 123, "parentOrgUnitId": "id:a", "parentOrgUnitPath": "/A"},
+    ):
+        normalized = _normalise({}, "ok", [], {"orgUnits": {"value": [top, extra]}})
+        state = _read_state(normalized, "google_org_units")
+        assert (state["complete"], state["root_id_known"], state["malformed_count"]) == (False, False, 1), extra
+        assert "123" not in {r["id"] for r in normalized["google_org_units"]["records"]}
+
+
+def test_m2_blank_entries_ids_and_contradictory_counts_are_unknown_not_counts() -> None:
+    def summary(value: dict[str, Any]) -> Any:
+        (policy,) = minimise_policy_settings(
+            [{"policyQuery": {"orgUnit": "orgUnits/root"}, "setting": {"type": "settings/gmail.email_address_lists", "value": value}}]
+        )
+        return policy["setting"]["value"]["emailAddressList"]
+
+    assert summary({"emailAddressList": [{"id": "a", "addressList": {"address": [{"address": ""}, {"address": "www.example"}]}}]}) == [
+        {"id": "a", "entry_count": None, "domain_entry_count": None}
+    ]
+    assert summary({"emailAddressList": [{"id": "a", "entry_count": 0, "domain_entry_count": 2}]}) == [
+        {"id": "a", "entry_count": None, "domain_entry_count": None}
+    ]
+    assert summary({"emailAddressList": [{"id": "", "addressList": {"address": [{"address": "www.example"}]}}]}) == [
+        {"id": None, "entry_count": None, "domain_entry_count": None}
+    ]
+    # The pinned domain regex still decides what a readable entry is.
+    assert summary({"emailAddressList": [{"id": "a", "addressList": {"address": [{"address": "www.example"}, {"address": "localhost"}]}}]}) == [
+        {"id": "a", "entry_count": 2, "domain_entry_count": 1}
+    ]
+    rows = [{"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1}, "setting": {"type": "settings/gmail.email_address_lists", "value": {
+        "emailAddressList": [{"id": "a", "addressList": {"address": [{"address": ""}]}}]}}}]
+    state = _read_state(_normalise({"policySettings": {"value": rows}}, "ok", [{"collector": "google_policies", "name": "policySettings", "status": "ok"}]))
+    assert (state["complete"], state["unusable_sections"]) == (False, ["gmail_email_address_lists"])
+
+
+def test_m3_a_repeated_cursor_endless_empty_pages_or_the_page_budget_stop_the_read_incomplete(monkeypatch: Any) -> None:
+    result, service = _collect([{"policies": [], "nextPageToken": "repeat"}], repeat_last=True)
+    assert len(service.calls) == 2
+    (row,) = result.coverage
+    assert (row["status"], row["error_class"]) == ("failed", "malformed_response")
+
+    result, service = _collect([lambda index: {"policies": [], "nextPageToken": f"c{index}"}], repeat_last=True)
+    assert len(service.calls) == 3
+    assert result.coverage[0]["status"] == "failed"
+
+    result, service = _collect(
+        [{"policies": [_gmail_row()], "nextPageToken": "c0"}, {"policies": [], "nextPageToken": "c0"}], repeat_last=True
+    )
+    assert len(service.calls) == 2
+    (row,) = result.coverage
+    assert (row["status"], row["collection_truncated"], row["truncation_reason"]) == ("partial", True, "pagination_not_followed")
+    assert result.payload["policySettings"]["collection_truncated"] is True
+
+    monkeypatch.setattr(client_module, "POLICY_PAGE_BUDGET", 3)
+    result, service = _collect([lambda index: {"policies": [_gmail_row(sortOrder=index + 1)], "nextPageToken": f"c{index}"}], repeat_last=True)
+    assert len(service.calls) == 3
+    (row,) = result.coverage
+    assert (row["status"], row["collection_truncated"], row["truncation_reason"]) == ("partial", True, "pagination_not_followed")
+    normalized = _normalise(result.payload, result.status, result.coverage)
+    assert _read_state(normalized)["complete"] is False

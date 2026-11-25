@@ -145,14 +145,19 @@ POLICY_ADDRESS_LIST_KEYS = ("addressList", "blockedAddressList")
 POLICY_DESCRIBED_LIST_TYPES = ("settings/gmail.blocked_sender_lists", "settings/gmail.spam_override_lists")
 POLICY_ADDRESS_LISTS_TYPE = "settings/gmail.email_address_lists"
 REDACTED_ADDRESS = "redacted:address"
+REDACTED_PATH = "redacted:path"
 _ADDRESS = re.compile(r"[^@\s]+@[^@\s]+")
 _DOMAIN_ENTRY = re.compile(r"^[^@]+\.[^@]+$")
+# An absolute local path anywhere in a string: POSIX (``/a/b``, ``~/a``), Windows drive or UNC, or a file URL.
+_LOCAL_PATH = re.compile(r"(?:^|[\s\"'(=,;])(?:~?/[^/\s]+/|~/|[A-Za-z]:[\\/]|\\\\[^\\\s]+\\)|file:/", re.IGNORECASE)
 
 
 def _scrub_addresses(value: Any) -> Any:
-    """``value`` with every string (and mapping key) that holds an address replaced by a constant."""
+    """``value`` with every string (and mapping key) that holds an address or a local path replaced by a constant."""
     if isinstance(value, str):
-        return REDACTED_ADDRESS if _ADDRESS.search(value) else value
+        if _ADDRESS.search(value):
+            return REDACTED_ADDRESS
+        return REDACTED_PATH if _LOCAL_PATH.search(value) else value
     if isinstance(value, list):
         return [_scrub_addresses(item) for item in value]
     if not isinstance(value, dict):
@@ -178,9 +183,10 @@ def _address_entries(container: Any) -> list[str] | None:
     texts: list[str] = []
     for entry in entries:
         text = entry.get("address") if isinstance(entry, dict) else entry
-        if not isinstance(text, str):
+        if not isinstance(text, str) or not text.strip():
+            # A blank entry is unreadable, not an entry that is or is not a domain.
             return None
-        texts.append(text)
+        texts.append(text.strip())
     return texts
 
 
@@ -194,17 +200,24 @@ def _address_list_summary(entry: dict[str, Any], *, keep_siblings: bool = False)
     ``gmail.email_address_lists``; the list's name is dropped either way.
     """
     list_id = entry.get("id")
+    id_readable = isinstance(list_id, str) and bool(list_id.strip()) and not _ADDRESS.search(list_id)
     summary: dict[str, Any] = {"id": _scrub_addresses(list_id) if isinstance(list_id, (str, int)) else None}
     if keep_siblings:
         for index, (key, item) in enumerate(entry.items()):
             if key not in _SUMMARY_FIELDS:
                 name = f"{REDACTED_ADDRESS}:{index}" if isinstance(key, str) and _ADDRESS.search(key) else key
                 summary[name] = _scrub_addresses(item)
+    elif not id_readable:
+        # A list of ``gmail.email_address_lists`` is referenced by its id: without one its counts mean nothing.
+        summary.update(id=None, entry_count=None, domain_entry_count=None)
+        return summary
     if "entry_count" in entry and not any(key in entry for key in POLICY_ADDRESS_LIST_KEYS):
-        # Already minimised: keep the counts only when they are counts.
-        for field in ("entry_count", "domain_entry_count"):
-            count = entry.get(field)
-            summary[field] = count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else None
+        # Already minimised: keep the counts only when they are consistent counts, else both are unknown.
+        total, domains = entry.get("entry_count"), entry.get("domain_entry_count")
+        consistent = all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in (total, domains))
+        consistent = consistent and domains <= total
+        summary["entry_count"] = total if consistent else None
+        summary["domain_entry_count"] = domains if consistent else None
         return summary
     containers = [entry[key] for key in POLICY_ADDRESS_LIST_KEYS if key in entry]
     texts: list[str] | None = [] if containers else None
@@ -229,11 +242,17 @@ def _drop_descriptions(value: Any) -> Any:
 
 def minimise_policy_value(setting_type: Any, value: Any) -> Any:
     """One Policy API setting value with address lists reduced to counts and no address or list description left."""
-    if setting_type == POLICY_ADDRESS_LISTS_TYPE and isinstance(value, dict) and isinstance(value.get("emailAddressList"), list):
+    if setting_type == POLICY_ADDRESS_LISTS_TYPE and isinstance(value, dict) and "emailAddressList" in value:
         lists = value["emailAddressList"]
+        unreadable = {"id": None, "entry_count": None, "domain_entry_count": None}
+        # A list that is not a list of objects is unreadable: its content is dropped and its counts are unknown.
         value = {
             **value,
-            "emailAddressList": [_address_list_summary(item) if isinstance(item, dict) else item for item in lists],
+            "emailAddressList": [
+                _address_list_summary(item) if isinstance(item, dict) else dict(unreadable) for item in lists
+            ]
+            if isinstance(lists, list)
+            else None,
         }
     if setting_type in POLICY_DESCRIBED_LIST_TYPES:
         value = _drop_descriptions(value)
@@ -250,7 +269,11 @@ def _minimise_policy(policy: dict[str, Any]) -> dict[str, Any]:
 
 def _is_policy(value: dict[str, Any]) -> bool:
     setting = value.get("setting")
-    return isinstance(setting, dict) and isinstance(setting.get("type"), str) and setting["type"].startswith("settings/") and "policyQuery" in value
+    return isinstance(setting, dict) and isinstance(setting.get("type"), str) and setting["type"].startswith("settings/")
+
+
+# The raw sections of the Google policies read: both hold Policy API objects, minimised the same way.
+POLICY_SECTION_KEYS = ("policySettings", "twoStepVerificationPolicies")
 
 
 def minimise_policy_settings(policies: Any) -> Any:
@@ -321,11 +344,13 @@ def minimise_user_text(value: Any) -> Any:
         # A Graph inbox rule: the words it matches on are the owner's, the actions and addresses are what is judged.
         result["conditions"] = strip_word_lists(result["conditions"], RULE_CONDITION_WORD_FIELDS)
     if _is_policy(result):
-        # A Cloud Identity policy, wherever it sits: Gmail address lists become counts and no address is kept.
-        result = _minimise_policy(result)
-    if isinstance(result.get("policySettings"), dict) and isinstance(result["policySettings"].get("value"), list):
-        # The Google SCuBA settings payload, replayed or written: no customer id or policy name either.
-        result["policySettings"] = {**result["policySettings"], "value": minimise_policy_settings(result["policySettings"]["value"])}
+        # A Cloud Identity policy, wherever it sits: no customer id or policy name, address lists become counts and
+        # no address or local path is kept.
+        (result,) = minimise_policy_settings([result])
+    for key in POLICY_SECTION_KEYS:
+        if isinstance(result.get(key), dict) and "value" in result[key]:
+            # The Google policies payloads, replayed or written: every row, even one that cannot be read, minimised.
+            result[key] = {**result[key], "value": minimise_policy_settings(result[key]["value"])}
     if isinstance(result.get("criteria"), dict) and isinstance(result.get("action"), dict):
         # A Gmail filter: its search terms are the owner's; the forward target and labels are what is judged.
         result["criteria"] = strip_text_fields(result["criteria"], GMAIL_FILTER_TEXT_FIELDS, keep_presence=False)

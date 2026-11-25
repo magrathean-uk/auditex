@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from typing import Any
@@ -8,6 +9,7 @@ from azure_tenant_audit.collection_gaps import (
     REASON_OPERATOR_LIMIT,
     REASON_PAGINATION_FAILED,
     fanout_gap_row,
+    section_was_cut,
 )
 from azure_tenant_audit.collectors.base import (
     CollectorResult,
@@ -25,6 +27,7 @@ from azure_tenant_audit.dns_lookup import (
     safe_resolver_diagnostic,
     unknown_posture,
 )
+from azure_tenant_audit.offline_replay import OFFLINE_ROW_TYPE
 
 from .auth import POLICIES_SCOPE
 from .client import (
@@ -593,11 +596,104 @@ class GoogleDevicesCollector:
 
 # The 2-step verification setting types, kept in today's ``twoStepVerificationPolicies`` shape.
 TWO_STEP_SETTING_PREFIX = "settings/security.two_step_verification_"
+# The two payloads of the one Policy API read, in the order they are written.
+POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
+# Error class of a policies read whose answer could not be read: a malformed page, malformed policies or no policies.
+POLICY_MALFORMED_ERROR_CLASS = "malformed_response"
 
 
 def _is_two_step_policy(policy: Any) -> bool:
     setting = policy.get("setting") if isinstance(policy, dict) else None
     return isinstance(setting, dict) and str(setting.get("type") or "").startswith(TWO_STEP_SETTING_PREFIX)
+
+
+def finite_number(value: Any) -> bool:
+    """A JSON number that is not a Boolean, NaN or infinite (the Policy API's ``sortOrder`` is a double)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def policy_row_readable(policy: Any) -> bool:
+    """Whether one Policy API policy has the shape every reader of it relies on.
+
+    ``setting`` holds a ``settings/...`` type and an object ``value`` (Google declares the value required; ``{}`` is
+    a setting at its defaults). ``policyQuery`` is an object whose ``orgUnit``, ``group`` and ``query`` are strings
+    when present, with at least one target, and whose ``sortOrder`` is a number when present (proto3 JSON omits 0).
+    """
+    if not isinstance(policy, dict):
+        return False
+    setting, query = policy.get("setting"), policy.get("policyQuery")
+    if not isinstance(setting, dict) or not isinstance(query, dict):
+        return False
+    setting_type = setting.get("type")
+    if not isinstance(setting_type, str) or not setting_type.startswith("settings/") or setting_type == "settings/":
+        return False
+    if not isinstance(setting.get("value"), dict):
+        return False
+    if any(key in query and not isinstance(query[key], str) for key in ("orgUnit", "group", "query")):
+        return False
+    if not (str(query.get("orgUnit") or "").strip() or str(query.get("group") or "").strip()):
+        return False
+    return "sortOrder" not in query or finite_number(query["sortOrder"])
+
+
+def _malformed_policy_error(bad: int, total: int) -> str:
+    return f"{bad} of {total} policies returned by the read cannot be read; the settings they hold are unknown."
+
+
+def policy_replay_rows(collector: str, payload: Any) -> list[dict[str, Any]]:
+    """Coverage rows for a replayed ``google_policies`` payload whose sections cannot be read.
+
+    A section present under its name but not an object with a ``value`` list (``null``, a list, a string) is a failed
+    read; one with policies that cannot be read is a partial read. A section the sample leaves out is the older shape
+    and gets no row here, and a section that carries an error or a cut marker is already replayed from that marker.
+    """
+    if collector != "google_policies" or not isinstance(payload, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    for name in POLICY_SECTIONS:
+        if name not in payload:
+            continue
+        section = payload[name]
+        if isinstance(section, dict) and (section.get("error") or section.get("error_class") or section_was_cut(section)):
+            continue
+        values = section.get("value") if isinstance(section, dict) else None
+        if not isinstance(values, list):
+            status, item_count, error = "failed", 0, f"google_policies.{name}: the offline sample holds this section in a shape that cannot be read."
+        else:
+            bad = sum(1 for policy in values if not policy_row_readable(policy))
+            if not bad:
+                continue
+            status, item_count, error = "partial", len(values), _malformed_policy_error(bad, len(values))
+        rows.append(
+            {
+                "collector": collector,
+                "type": OFFLINE_ROW_TYPE,
+                "name": name,
+                "status": status,
+                "item_count": item_count,
+                "error_class": POLICY_MALFORMED_ERROR_CLASS,
+                "error": error,
+                "message": "Replayed from an offline sample whose policies section cannot be read.",
+            }
+        )
+    return rows
+
+
+def _policy_sections(policies: list[Any], markers: dict[str, Any]) -> dict[str, Any]:
+    """The two payloads of one read, each carrying the read's outcome so a replay of the raw evidence keeps it.
+
+    Both drop ``customer`` and ``name`` (a customer id and a raw policy id); the SCuBA payload also reduces Gmail
+    address lists to counts. The 2-step verification subset keeps its shape otherwise.
+    """
+    two_step = minimise_policy_settings([policy for policy in policies if _is_two_step_policy(policy)])
+    settings = minimise_policy_settings(list(policies))
+    sections: dict[str, Any] = {}
+    for name, values in (("twoStepVerificationPolicies", two_step), ("policySettings", settings)):
+        section: dict[str, Any] = {"value": values}
+        for key, item in markers.items():
+            section[key] = len(values) if key == "item_count" else item
+        sections[name] = section
+    return sections
 
 
 class GooglePoliciesCollector:
@@ -616,8 +712,10 @@ class GooglePoliciesCollector:
             row = _coverage(self.name, "client", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
             return CollectorResult(self.name, "partial", {}, 0, "Google client unavailable", coverage=[row])
         # One read of every allow-listed setting type, never bounded by the operator's ``--top`` (the client's own
-        # safety cap stops a runaway read). Its coverage row (``policySettings``) is the completeness signal for both
-        # payloads: a cut at that cap or a later page error makes it partial.
+        # bounds stop a runaway read). Its coverage row (``policySettings``) is the completeness signal for both
+        # payloads: a failed first page, a page that cannot be read, a cut at a bound, a later page error, no
+        # policies at all or policies that cannot be read make it failed or partial, and the same outcome is written
+        # on both raw sections so a replay cannot read the evidence as complete.
         policies = _call(
             collector=self.name,
             name="policySettings",
@@ -626,17 +724,37 @@ class GooglePoliciesCollector:
             endpoint="cloudidentity.policies.list",
             func=lambda: client.list_policies(),
         )
-        # The 2-step verification subset keeps its raw shape, so its records and finding do not change; the
-        # SCuBA payload drops the customer id and policy name and reduces Gmail address lists to counts.
-        two_step = [policy for policy in policies if _is_two_step_policy(policy)]
-        partial = any(row.get("status") != "ok" for row in coverage)
+        row = coverage[-1]
+        markers: dict[str, Any] = {}
+        if row.get("status") != "failed" and getattr(policies, "empty_read", False):
+            # No policies at all (or a first page that could not be read): nothing was positively read.
+            row.update(
+                status="failed",
+                item_count=0,
+                error_class=POLICY_MALFORMED_ERROR_CLASS,
+                error="The policies read returned no readable policies, so no setting could be read.",
+            )
+        elif getattr(policies, "malformed_page", False):
+            row.update(
+                status="partial",
+                error_class=POLICY_MALFORMED_ERROR_CLASS,
+                error=f"policySettings: paging stopped after {len(policies)} rows because a page could not be read; the list is incomplete.",
+            )
+        if row.get("status") == "failed":
+            markers = {"error_class": row.get("error_class"), "error": row.get("error")}
+        elif row.get("collection_truncated") is True:
+            markers = {"collection_truncated": True, "truncation_reason": row.get("truncation_reason"), "item_count": None}
+            if row.get("result_limit"):
+                markers["result_limit"] = row["result_limit"]
+        else:
+            bad = sum(1 for policy in policies if not policy_row_readable(policy))
+            if bad:
+                row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_malformed_policy_error(bad, len(policies)))
+        partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(
             self.name,
             "partial" if partial else "ok",
-            {
-                "twoStepVerificationPolicies": {"value": two_step},
-                "policySettings": {"value": minimise_policy_settings(list(policies))},
-            },
+            _policy_sections(list(policies), markers),
             len(policies),
             coverage=coverage,
         )

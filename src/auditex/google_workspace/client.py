@@ -8,7 +8,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
-from azure_tenant_audit.collection_gaps import REASON_PAGINATION_NOT_FOLLOWED
+from azure_tenant_audit.collection_gaps import (
+    REASON_PAGINATION_FAILED,
+    REASON_PAGINATION_NOT_FOLLOWED,
+)
 from azure_tenant_audit.data_minimisation import minimise_gmail_settings
 
 from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credentials
@@ -36,6 +39,10 @@ _POLICY_SETTINGS_FILTER = (
 # the 2-step verification subset used to finish whatever ``--top`` said. This internal cap only stops a runaway read;
 # a read cut at it comes back marked as cut at the collector's safety cap, and the collector records it as incomplete.
 POLICY_SETTINGS_ROW_CAP = 20_000
+# Further bounds on the policies read: a read that needs more requests than this, repeats a page cursor, or returns
+# this many empty pages in a row while still handing out a cursor is stopped there and marked incomplete.
+POLICY_PAGE_BUDGET = 1_000
+POLICY_EMPTY_PAGE_LIMIT = 3
 
 # Fields read from the device lists. Naming them keeps the telemetry the FULL projection also returns
 # (installed apps, recent users, active time ranges, disk and CPU reports) out of the bundle.
@@ -125,6 +132,41 @@ def classify_page_error(exc: Exception) -> tuple[str, str]:
     status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
     detail = f"HTTP {status}" if isinstance(status, int) else error_class
     return error_class, f"A later page failed after its retries ({detail}); the rows read before it are kept."
+
+
+class PolicyReadError(RuntimeError):
+    """A Cloud Identity policies read that failed, with a fixed message.
+
+    The library's error text names the request URL, whose query holds the customer id (and could echo a path or a
+    token), so it is never copied. The HTTP status and the structured reasons are kept, so the error class and the
+    token-refusal check are those of the original error.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None, reasons: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_details = [{"reason": reason} for reason in reasons]
+
+
+def policy_read_error(exc: Exception) -> Exception:
+    """``exc`` as a :class:`PolicyReadError` with a bounded message (a fixed actionable error is kept as it is)."""
+    if isinstance(exc, (PolicyReadError, GoogleWorkspaceError)):
+        return exc
+    error_class, message = classify_google_error(exc)
+    status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
+    status = status if isinstance(status, int) and not isinstance(status, bool) else None
+    # Structured reasons are API codes (``badRequest``, ``SERVICE_DISABLED``); anything else is not copied.
+    reasons = tuple(sorted(reason for reason in _error_reasons(exc) if re.fullmatch(r"[A-Za-z_]{1,64}", reason)))
+    if is_token_refusal(message):
+        text = (
+            "The token exchange for the Cloud Identity policies scope was refused (unauthorized_client): "
+            "the domain-wide delegation does not grant that scope."
+        )
+    else:
+        detail = f"HTTP {status}" if status is not None else error_class
+        named = f"; reason {', '.join(reasons)}" if reasons else ""
+        text = f"The Cloud Identity policies read failed ({detail}{named})."
+    return PolicyReadError(text, status_code=status, reasons=reasons)
 
 
 class GoogleWorkspaceError(RuntimeError):
@@ -237,6 +279,10 @@ class CollectedRows(list):
     # Drive only: files whose permissions files.list left out and that were read one by one (see list_drive_files).
     # Why the list was cut when that was not the operator's limit (for example a collector's own safety cap).
     truncation_reason: str | None = None
+    # Cloud Identity policies only: a page whose shape could not be read (the read stopped there) or a read that
+    # returned no policies at all. Either way the list is not a complete read.
+    malformed_page: bool = False
+    empty_read: bool = False
     permission_reads: int = 0
     permission_errors: list[dict[str, Any]] | None = None
 
@@ -252,6 +298,77 @@ class CollectedRows(list):
         self.truncated = truncated
         self.result_limit = result_limit
         self.page_error = page_error
+
+
+def _policy_page(payload: Any) -> tuple[list[dict[str, Any]], str | None] | None:
+    """One ``policies.list`` page as (policies, next cursor), or ``None`` when its shape cannot be read.
+
+    Only ``policies`` holds rows (an ``items`` or ``value`` list is not a policies answer), it must be a list of
+    objects, and a cursor must be a non-empty string. ``{}`` is an empty page: proto3 JSON omits an empty list.
+    """
+    if not isinstance(payload, dict):
+        return None
+    if "policies" not in payload and any(key in payload for key in ("items", "value")):
+        return None
+    values = payload.get("policies", [])
+    if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+        return None
+    token = payload.get("nextPageToken")
+    if token in (None, ""):
+        return values, None
+    if not isinstance(token, str):
+        return None
+    return values, token
+
+
+def _collect_policy_pages(request_factory: Callable[[str | None], Any], *, cap: int, bounded: bool) -> CollectedRows:
+    """Page through ``policies.list`` with the shape checked on every page and every bound marked.
+
+    ``bounded`` is a probe's own limit (a cut there is the operator-style limit); otherwise ``cap`` is the safety cap
+    and a cut there is ``pagination_not_followed``. A malformed page keeps the rows read before it and marks the read
+    as cut by a page that could not be read. A repeated cursor, ``POLICY_PAGE_BUDGET`` requests or
+    ``POLICY_EMPTY_PAGE_LIMIT`` empty pages in a row stop the read as not followed. No rows at all is ``empty_read``.
+    """
+    rows: list[dict[str, Any]] = []
+    token: str | None = None
+    seen_tokens: set[str] = set()
+    empty_pages = 0
+    for request in range(POLICY_PAGE_BUDGET):
+        try:
+            payload = _execute(lambda token=token: request_factory(token).execute())
+        except Exception as exc:
+            if request == 0:
+                raise
+            # A later page failed after its retries: keep what was read, recorded as a list cut short.
+            return CollectedRows(rows, truncated=True, result_limit=cap if bounded else None, page_error=exc)
+        page = _policy_page(payload)
+        if page is None:
+            result = CollectedRows(rows, truncated=True, result_limit=cap if bounded else None)
+            result.malformed_page = True
+            result.truncation_reason = REASON_PAGINATION_FAILED
+            result.empty_read = not rows
+            return result
+        values, token = page
+        rows.extend(values)
+        if len(rows) >= cap:
+            cut = len(rows) > cap or bool(token)
+            result = CollectedRows(rows[:cap], truncated=cut, result_limit=cap if (bounded or cut) else None)
+            if cut and not bounded:
+                result.truncation_reason = REASON_PAGINATION_NOT_FOLLOWED
+            return result
+        if not token:
+            result = CollectedRows(rows, result_limit=None)
+            result.empty_read = not rows
+            return result
+        empty_pages = empty_pages + 1 if not values else 0
+        if token in seen_tokens or empty_pages >= POLICY_EMPTY_PAGE_LIMIT:
+            break
+        seen_tokens.add(token)
+    # The page budget ran out, a cursor came back a second time, or the pages stayed empty: the read never ended.
+    result = CollectedRows(rows, truncated=True, result_limit=None)
+    result.truncation_reason = REASON_PAGINATION_NOT_FOLLOWED
+    result.empty_read = not rows
+    return result
 
 
 def _cut(values: list[dict[str, Any]], limit: int | None) -> CollectedRows:
@@ -661,31 +778,31 @@ class GoogleWorkspaceClient:
         """Cloud Identity policies for the SCuBA setting types (read-only policies scope).
 
         One paged read of every allow-listed setting type (``_POLICY_SETTINGS_FILTER``). The operator's ``--top`` never
-        bounds it; only the preflight probe passes a ``limit``. Otherwise ``POLICY_SETTINGS_ROW_CAP`` stops a runaway
-        read, and a read cut there or by a later page error comes back marked, so the collector records it as
-        incomplete.
+        bounds it; only the preflight probe passes a ``limit``. Otherwise ``POLICY_SETTINGS_ROW_CAP``,
+        ``POLICY_PAGE_BUDGET``, cursor repeat detection and ``POLICY_EMPTY_PAGE_LIMIT`` stop a runaway read. A read cut
+        by any of them, by a later page error or by a page whose shape cannot be read comes back marked, so the
+        collector records it as incomplete. Any error raised carries a fixed message (see :func:`policy_read_error`).
         """
-        service = self._service("cloudidentity", "v1", scopes=(POLICIES_SCOPE,))
-        policies = getattr(service, "policies", None)
-        if policies is None:
-            raise GoogleWorkspaceError(
-                "the installed google-api-python-client has no cloudidentity v1 policies resource; upgrade it",
-                surface="policies",
+        try:
+            service = self._service("cloudidentity", "v1", scopes=(POLICIES_SCOPE,))
+            policies = getattr(service, "policies", None)
+            if policies is None:
+                raise GoogleWorkspaceError(
+                    "the installed google-api-python-client has no cloudidentity v1 policies resource; upgrade it",
+                    surface="policies",
+                )
+            cap = limit or POLICY_SETTINGS_ROW_CAP
+            page_size = min(self.page_size, cap, 100)
+            policy_filter = f'customer == "customers/{self.customer}" && {_POLICY_SETTINGS_FILTER}'
+            rows = _collect_policy_pages(
+                lambda page_token: policies().list(pageSize=page_size, pageToken=page_token, filter=policy_filter),
+                cap=cap,
+                bounded=limit is not None,
             )
-        cap = limit or POLICY_SETTINGS_ROW_CAP
-        page_size = min(self.page_size, cap, 100)
-        policy_filter = f'customer == "customers/{self.customer}" && {_POLICY_SETTINGS_FILTER}'
-        rows = self._collect_pages(
-            lambda page_token: policies().list(pageSize=page_size, pageToken=page_token, filter=policy_filter),
-            "policies",
-            limit=cap,
-        )
-        if limit is None:
-            if rows.truncated and rows.page_error is None:
-                rows.truncation_reason = REASON_PAGINATION_NOT_FOLLOWED
-            elif not rows.truncated:
-                # A read that ended before the cap reports no limit, as an unbounded read did before.
-                rows.result_limit = None
+        except Exception as exc:
+            raise policy_read_error(exc) from None
+        if rows.page_error is not None:
+            rows.page_error = policy_read_error(rows.page_error)
         return rows
 
     def list_devices(self, resource: str, *, top: int | None = None) -> list[dict[str, Any]]:
