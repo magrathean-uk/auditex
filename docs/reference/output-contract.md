@@ -1509,7 +1509,8 @@ for answered selectors that published no matching record. Alias domains are read
 Failed resolver reads leave record evidence unknown, and an incomplete
 Directory read marks the domain inventory partial.
 Shareable, customer-pack and explainer output carries these records, and the Microsoft 365
-`dns_posture` records, as record-text predicates instead (see `security-privacy.md`, Output redaction boundary).
+`dns_posture` records and DNS findings, as allow-listed predicates with pseudonymised domain ids instead (see
+`security-privacy.md`, Output redaction boundary).
 
 **DKIM CNAME parity.** For raw SCuBA records, a NOERROR CNAME-only answer is retained as `rdata`,
 matching the pinned ScubaGear DoH fallback, and stops the selector walk as a non-key answer.

@@ -179,6 +179,8 @@ was not evaluated also has a `reason`:
 - `mta_sts_policy_not_fetched`: the MTA-STS policy rules need the policy file fetched (public
   lookups off, or the fetch skipped).
 - `tls_rpt_not_collected`: the bundle predates TLS-RPT collection.
+- `dmarc_pct_unreadable`: `dns_posture.dmarc_pct_partial` needs a readable `pct=` (0 to 100) on every domain
+  that publishes DMARC; an unreadable or missing percentage proves neither full nor partial enforcement.
 - `public_footprint_not_collected`: the public footprint rule needs footprint records.
 - `signal_unknown:<reason>`, `signal_not_collected`: a detection rule needs its detection signal
   to be `on` or `off`, not `unknown`.

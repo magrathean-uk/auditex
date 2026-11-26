@@ -682,29 +682,41 @@ Compare, drift and shareable SARIF and OSCAL deduplication use the recorded Work
 retain their original contract and can be compared with current bundles using the same domain. Compare and
 drift mask the legacy customer ID in the result.
 
-DNS record text is public data the operator queried, and the local report keeps it: SPF, DMARC, DKIM, MTA-STS,
-TLS-RPT and BIMI TXT text, DMARC `rua`/`ruf` and TLS-RPT report addresses, SPF mechanisms and DMARC query names.
-The shareable, customer-pack and explainer profiles replace it, because a DMARC record names report mailboxes and an
-SPF record names the domains and addresses allowed to send (`dns_shareable.py`, applied by the redactor to every
-record). Each Google Workspace or Microsoft 365 record section becomes fixed-vocabulary predicates marked
-`record_text: "withheld"`:
+DNS record text is public data the operator queried. The local report shows what normalisation kept: the full
+Google Workspace SPF, DMARC and DKIM TXT text, DMARC query names and the Microsoft 365 flat fields (DMARC `rua`
+addresses, SPF mechanisms, the TLS-RPT `rua` list and the MTA-STS id). The raw Microsoft 365 TXT text stays in the
+private evidence. The shareable, customer-pack and explainer profiles never show it, because a DMARC record names
+report mailboxes, an SPF record names the domains and addresses allowed to send, and the posture's domain names the
+domain (`dns_shareable.py`, applied by the redactor to every record). A DNS posture record there is built by
+allow-list: only the fields below are written, each computed from the parsed value, and any other field is dropped.
+Each record section becomes fixed-vocabulary predicates marked `record_text: "withheld"`:
 
 | Record | Shareable, customer-pack and explainer output | Withheld |
 |---|---|---|
+| Posture | `domain`, `id` and `key` as keyed `Id` pseudonyms; `alias`, `is_primary`, `is_default`, `managed_by_microsoft`, `authentication_type` (`managed`, `federated`), `resolver_error` (a flag; its text can name the resolver host) | the domain name, any other field |
 | SPF | `present`, `all_qualifier` (`+`, `-`, `~`, `?`), `multiple_records`, `mechanism_count`, `record_count` | `raw`, `records`, `mechanisms` |
-| DMARC | `present`, `policy` and `subdomain_policy` (`none`, `quarantine`, `reject`), `subdomain_policy_present`, `pct`, `pct_partial`, `rua_count`, `rua_invalid_count`, `ruf_count`, `ruf_invalid_count`, `cisa_rua_present`, `inherited`, `multiple_records`, `record_count`, `query_domain` (a keyed `Id` pseudonym of the query name) | `raw`, `records`, report addresses, `query_name` |
+| DMARC | `present`, `policy` and `subdomain_policy` (`none`, `quarantine`, `reject`), `subdomain_policy_present`, `pct`, `pct_partial` (from a readable `pct` only), `rua_count`, `rua_invalid_count`, `ruf_count`, `ruf_invalid_count`, `cisa_rua_present` (a valid `mailto:` URI for the CISA address only), `inherited`, `multiple_records`, `record_count`, `query_domain` (a keyed `Id` pseudonym of the query name, or of any `query_domain` the input carried) | `raw`, `records`, report addresses, `query_name` |
 | DKIM | selector names (Auditex's fixed probe list), `selector_record_count` | `selectors` and `selector_details` record text |
-| MTA-STS, TLS-RPT, BIMI | `dns_present`, `id_present`, `policy_mode`; `present`, `rua_count`; `present`, `logo_url_present`, `authority_url_present` and their `_is_https` flags | `raw`, `id`, report addresses, URLs |
+| MTA-STS, TLS-RPT, BIMI | `dns_present`, `id_present`, `policy_fetch_status`, `policy_mode`; `present`, `rua_count`; `present`, `logo_url_present`, `authority_url_present` and their `_is_https` flags | `raw`, `id`, policy URL and MX patterns, report addresses, URLs |
 
-A flat Microsoft 365 `dns_posture` record, in the normalised section and as the `evidence` of a DNS finding, shows
-`spf_mechanism_count`, `dmarc_rua_count`, `dmarc_rua_invalid_count`, `dmarc_cisa_rua_present`, `tls_rpt_rua_count`
-and `mta_sts_id_present` in place of `spf_mechanisms`, `dmarc_aggregate_addresses`, `dmarc_aggregate_invalid`,
-`tls_rpt_rua` and `mta_sts_id`; the `dns_posture.dmarc_rua_invalid` finding's `returned_value` is the invalid entry
-count. Raw SCuBA DNS rows show `rdata_count`, and their resolver log entries `query_answer_count` and `query_domain`.
-A policy, qualifier or mode outside its vocabulary reads `unrecognised` (a DMARC tag missing its `;` can fold an
-address into `p=`), and a wrong-typed value reads `null`; neither is shown as its text. Domain labels themselves stay
-as they do elsewhere in shareable output. Older bundles, whose posture records predate record text, render with the
-predicates they can supply. The run bundle, its evidence index and the local report are unchanged.
+A flat Microsoft 365 `dns_posture` record, in the normalised section and as the `evidence` of a DNS finding, is built
+the same way: `spf_mechanism_count`, `dmarc_rua_count`, `dmarc_rua_invalid_count`, `dmarc_cisa_rua_present`,
+`tls_rpt_rua_count` and `mta_sts_id_present` replace `spf_mechanisms`, `dmarc_aggregate_addresses`,
+`dmarc_aggregate_invalid`, `tls_rpt_rua` and `mta_sts_id`, and the remaining flags, policies, counts and selector
+lists are checked against their types and vocabularies. A DNS finding (`dns_posture.*`, `google.dns_*`) and every row
+built from one (proof table, reviewer index) shows its id, `affected_objects`, `blast_radius.affected_objects` and
+evidence `record_key` with the domain pseudonymised, and its `returned_value` as the rule's own predicate (a policy
+word, qualifier, mode, percentage, count, selector list or the pseudonymised domain). A DNS-derived id quoted in free
+text (`dns_posture:<domain>`, `google_domain_posture:<domain>`, `google.dns_<rule>:<domain>`) is pseudonymised too.
+Raw SCuBA DNS rows show `rdata_count` and a pseudonymised `domain`, and their resolver log entries
+`query_answer_count` and `query_domain`.
+
+A wrong-typed, unreadable or out-of-vocabulary value, and a count over a list with an unreadable member, reads
+`unusable` (a DMARC tag missing its `;` can fold an address into `p=`); `null` stays `null`. Neither is shown as its
+text. Older bundles, whose posture records predate record text, render with the predicates they can supply. The run
+bundle, its evidence index and the local report are unchanged. A Microsoft 365 `dns_posture.dmarc_pct_partial` finding
+needs a readable `pct=` below 100, and the rule reads `not_assessed` (`dmarc_pct_unreadable`) when a domain publishing
+DMARC has none.
 
 Shareable SARIF and OSCAL exports withhold waiver reasons, which can include identifiers unavailable to the audit.
 They retain the accepted-risk status and expiry date. Local output includes the reason with known customer IDs masked.

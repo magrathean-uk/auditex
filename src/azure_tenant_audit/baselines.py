@@ -644,6 +644,12 @@ def _dns_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | N
     if rule_id == "dns_posture.tls_rpt_missing" and any(record.get("tls_rpt_present") is None for record in records):
         # None means the bundle predates TLS-RPT collection, so absence was never checked.
         return "tls_rpt_not_collected"
+    if rule_id == "dns_posture.dmarc_pct_partial" and any(
+        record.get("dmarc_present") and not (type(record.get("dmarc_pct")) is int and 0 <= record["dmarc_pct"] <= 100)
+        for record in records
+    ):
+        # A published DMARC record whose pct= nobody could read proves neither full nor partial enforcement.
+        return "dmarc_pct_unreadable"
     if rule_id in _MTA_STS_POLICY_RULES:
         for record in records:
             policy_fetched = str(record.get("mta_sts_policy_fetch_status") or "") not in {"", "skipped"}
