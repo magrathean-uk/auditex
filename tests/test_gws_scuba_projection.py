@@ -208,7 +208,7 @@ EXPECTED = {
          "new_value": "true", "unit": G1, "application": None},
         {"time": "2026-10-05T10:00:00Z", "event": "CHANGE_GMAIL_SETTING", "setting": SETTING,
          "new_value": "true", "unit": G9_EMAIL, "application": None}]},
-    "gws_dns": {"complete": False, "domains": [
+    "gws_dns": {"complete": True, "domains": [
         {"domain": D_COM, "alias": False, "resolver_error": False,
          "spf": {"records": ["v=spf1 include:example.invalid -all"]},
          "dkim": {"selectors": {"google": ["v=DKIM1;"], "selector1": [], "selector2": []}},
@@ -1741,3 +1741,29 @@ def test_directory_parent_fields_must_agree_with_its_path_hierarchy(bundle: Path
         parentOrgUnitId="id:ou0a1", parentOrgUnitPath="/Sales"))
     edit_rows(bundle, "google_org_units", lambda data: data[1].update(parent_id="ou0a1"))
     assert verdict(project_gws_run(bundle), policy)[0] == "not_met"
+
+
+@pytest.mark.parametrize("record_gap", [False, True])
+def test_an_accounted_alias_failure_leaves_base_domain_rules_answerable(bundle: Path, record_gap: bool) -> None:
+    if record_gap:
+        normalised(bundle, "collection_gaps", [
+            {"collector": "google_dns_posture", "list": "posture:example.net", "status": "failed",
+             "reason": "read_failed", "rows_collected": 1, "error_classes": ["dns_resolver_error"]}])
+    projection = project_gws_run(bundle)
+    assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "met"
+    assert verdict(projection, "GWS.GMAIL.4.1v1")[0] == "not_assessed"
+    edit_coverage(bundle, "posture:example.net", item_count=0)
+    projection = project_gws_run(bundle)
+    assert projection["gws_dns"]["complete"] is False
+    assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "not_assessed"
+
+
+def test_a_failed_resolver_configuration_withholds_apparently_readable_txt(bundle: Path) -> None:
+    dns_only(bundle, good_domain(spf={"records": []}))
+    coverage = load(bundle, "coverage.json")
+    coverage.append({"collector": "google_dns_posture", "name": "dohEndpoint", "status": "failed",
+                     "item_count": 0, "error_class": "config_error"})
+    write(bundle, "coverage.json", coverage)
+    projection = project_gws_run(bundle)
+    assert projection["gws_dns"]["complete"] is False
+    assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "not_assessed"

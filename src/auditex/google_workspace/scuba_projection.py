@@ -1063,14 +1063,47 @@ def _no_resolver_error(row: dict[str, Any]) -> bool:
     return _markers_ok(row) and (row.get("resolver_error") is None or row["resolver_error"] is False)
 
 
+def _dns_failure_accounted(ctx: _Context, operation: str, row: dict, twin: dict) -> bool:
+    """A corroborated resolver failure accounts for an alias that base-domain rules do not read."""
+    collector = "google_dns_posture"
+    evidence = row.get("resolver_error")
+    if not (evidence is True or _label(evidence)) or evidence != twin.get("resolver_error"):
+        return False
+    if not (_markers_ok(row) and _markers_ok(twin)):
+        return False
+    coverage = ctx.coverage().get((collector, operation), [])
+    if len(coverage) != 1:
+        return False
+    read = coverage[0]
+    if (read.get("status") != "failed" or not _uninterrupted(read) or not _count_agrees(read, 1)
+            or read.get("error_class") != "dns_resolver_error"):
+        return False
+    if operation not in ctx.gaps().get(collector, ()):
+        return True
+    # A recorded resolver failure describes the same attempt. A cut or ambiguous gap can hide evidence.
+    rows = ctx.read("normalized/collection_gaps.json")["records"]
+    gaps = [gap for gap in rows if gap.get("collector") == collector
+            and operation in (gap.get("list"), gap.get("section"))]
+    return (len(gaps) == 1 and _uninterrupted(gaps[0])
+            and gaps[0].get("status") == "failed" and gaps[0].get("reason") == "read_failed"
+            and type(gaps[0].get("rows_collected")) is int and gaps[0]["rows_collected"] == 1
+            and gaps[0].get("error_classes") == ["dns_resolver_error"])
+
+
 def _dns(ctx: _Context) -> dict[str, Any]:
     records, whole = ctx.records("google_dns_posture")
     data = [row for row in records if row.get("kind") == "google_domain_posture"]
     states = len(records) != len(data)
     _require(not data or any("alias" in row or isinstance(row.get("dmarc"), dict) and "query_name" in row["dmarc"]
                              for row in data), "dmarc.query_name", "missing_field")
+    collector = "google_dns_posture"
     raw = ctx.optional("raw/google_dns_posture.json")
-    posture_read = ctx.read_ok(raw, "google_dns_posture", "domainPosture", direct_count=False)
+    coverage = ctx.coverage() or {}
+    operations = {label for owner, label in coverage if owner == collector}
+    gaps = (ctx.gaps() or {}).get(collector, ())
+    posture_read = (ctx.read_ok(raw, collector, "domainPosture", direct_count=False)
+                    and all(label in ("domains", "domainPosture") or label.startswith("posture:")
+                            for label in operations.union(gaps)))
     scope = _dns_scope(ctx, raw)
     if states:
         _, consistent, state = _split(records, "google_dns_posture", "google_domain_posture")
@@ -1085,9 +1118,7 @@ def _dns(ctx: _Context) -> dict[str, Any]:
                 and len(raw_rows) == len(raw_names) and len(data) == len(norm_names)
                 and set(raw_names) == set(norm_names) == set(scope))
 
-    coverage = ctx.coverage() or {}
-    complete = complete and {label for owner, label in coverage if owner == "google_dns_posture"
-                             and label.startswith("posture:")} == {
+    complete = complete and {label for label in operations if label.startswith("posture:")} == {
         "posture:" + row["domain"] for row in data if _domain_name(row.get("domain"))}
     domains = []
     for row in data:
@@ -1103,12 +1134,14 @@ def _dns(ctx: _Context) -> dict[str, Any]:
         twin = raw_by_name.get(label)
         raw_alias = twin.get("alias", listed_alias) if twin is not None else None
         answers = _dns_answers(row)
-        read = (whole and posture_read and host and type(listed_alias) is bool and alias is listed_alias
-                and raw_alias is listed_alias and raw_names[label] == norm_names[label] == 1
-                and ctx.fanout_ok("google_dns_posture", "posture:" + name, 1)
+        same_domain = (whole and posture_read and bool(host) and type(listed_alias) is bool and alias is listed_alias
+                       and raw_alias is listed_alias and raw_names[label] == norm_names[label] == 1)
+        operation = "posture:" + name
+        read = (same_domain and ctx.fanout_ok(collector, operation, 1)
                 and _no_resolver_error(row) and _no_resolver_error(twin)
                 and answers == _dns_answers(twin) and None not in answers)
-        complete = complete and bool(read)
+        complete = complete and (read or same_domain and alias is True
+                                 and _dns_failure_accounted(ctx, operation, row, twin))
         domains.append(_project_domain(ctx, row, name, host, alias, bool(read)))
     return _obj(("complete", complete), ("domains", domains))
 
