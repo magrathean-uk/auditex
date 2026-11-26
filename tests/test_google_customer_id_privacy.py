@@ -180,6 +180,7 @@ def test_b1_live_id_learned_on_a_later_read_is_withheld_from_earlier_failures(tm
         def run(self, context):
             message = "Customer customer_Account731_lookup was not found."
             logging.getLogger("googleapiclient.http").warning("HTTP library diagnostic: %s", message)
+            logging.getLogger("googleapiclient.discovery").debug("HTTP library request: %s", message)
             context["audit_logger"]("collector.endpoint.finished", message, None)
             return CollectorResult(self.name, "failed", {"error": message}, 0, message)
 
@@ -191,6 +192,7 @@ def test_b1_live_id_learned_on_a_later_read_is_withheld_from_earlier_failures(tm
             _execute(lambda: {"policies": [{"customer": "customers/Account731"}]})
             return CollectorResult(self.name, "ok", {}, 0, "read policy")
 
+    caplog.set_level(logging.DEBUG, logger="googleapiclient.discovery")
     monkeypatch.setattr(google_run, "REGISTRY", {"google_alert_center": FailedAlert(), "google_policies": PolicyRead()})
     monkeypatch.setattr(google_run, "google_dependency_status", lambda: {"available": True})
     monkeypatch.setattr(google_run, "build_google_credentials", lambda _config: object())
@@ -324,6 +326,15 @@ def test_b1_live_classifier_withholds_a_customer_id_in_the_api_reason() -> None:
     assert message == ('<HttpError 404 when requesting https://admin.googleapis.com/admin/directory/v1/users'
                        '?customerId=<customer-id>&alt=json returned "Customer customer_<customer-id>_lookup was not found">')
     assert error_class == "resource_not_found"
+
+
+def test_b1_classifier_learns_customer_id_from_error_metadata() -> None:
+    from auditex.google_workspace.client import classify_google_error
+
+    error = RuntimeError("Customer customer_Account731_lookup was not found")
+    error.status_code = 404
+    error.error_details = [{"metadata": {"customerId": "Account731"}}]
+    assert classify_google_error(error) == ("resource_not_found", "Customer customer_<customer-id>_lookup was not found")
 
 
 def test_b2_sample_filename_and_run_labels_are_withheld(tmp_path: Path, capsys) -> None:

@@ -292,7 +292,7 @@ def classify_google_error(exc: Exception) -> tuple[str, str]:
     """Class and text of a Google error. The library's text names the request URL, whose path or query holds the
     customer id: it is replaced by a marker, so no coverage row, blocker or log carries it (PRIV-CUSTOMER-ID)."""
     error_class, message = _classify_google_error(exc)
-    return error_class, withhold_request_customer_ids(message)
+    return error_class, withhold_request_customer_ids(message, getattr(exc, "error_details", None))
 
 
 def _classify_google_error(exc: Exception) -> tuple[str, str]:

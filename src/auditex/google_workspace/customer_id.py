@@ -138,16 +138,21 @@ def collect_customer_ids(ids: CustomerIds) -> Iterator[None]:
     token = _active_ids.set(ids)
     # The discovery library can log entire HTTP error responses before our classifier sees them.
     # Auditex emits its own diagnostics after it has learned and masked the customer IDs.
-    library_log = logging.getLogger("googleapiclient.http")
+    library_logs = (
+        logging.getLogger("googleapiclient.http"),
+        logging.getLogger("googleapiclient.discovery"),
+    )
 
     def outside_collection(_record: logging.LogRecord) -> bool:
         return _active_ids.get() is not ids
 
-    library_log.addFilter(outside_collection)
+    for logger in library_logs:
+        logger.addFilter(outside_collection)
     try:
         yield
     finally:
-        library_log.removeFilter(outside_collection)
+        for logger in library_logs:
+            logger.removeFilter(outside_collection)
         _active_ids.reset(token)
 
 
@@ -157,8 +162,9 @@ def learn_response_customer_ids(response: Any) -> None:
         ids.learn(response)
 
 
-def withhold_request_customer_ids(text: str) -> str:
+def withhold_request_customer_ids(text: str, details: Any = None) -> str:
     ids = _active_ids.get() or CustomerIds()
+    ids.learn(details, error=True)
     return ids.text(ids.learn_error(text))
 
 
