@@ -206,12 +206,16 @@ def _count_agrees(row: dict[str, Any], count: int) -> bool:
     return type(row.get("item_count")) is int and row["item_count"] == count
 
 
-def _markers_ok(row: dict[str, Any]) -> bool:
-    """Reject explicit incompleteness and continuation markers even when a list and its count agree."""
-    return (_uncut(row) and row.get("status", "ok") == "ok"
-            and row.get("collection_status", "collected") == "collected"
-            and row.get("complete", True) is True
-            and all(row.get(key) is None for key in ("error", "error_class", "nextPageToken", "next_page_token")))
+def _uninterrupted(row: dict[str, Any], *, read_state: bool = False) -> bool:
+    """Reject interruption markers. A read-state record can separately attest to a scoped failure."""
+    return (_uncut(row) and row.get("collection_status", "collected") == "collected"
+            and (read_state or row.get("complete", True) is True)
+            and row.get("nextPageToken") is None and row.get("next_page_token") is None)
+
+
+def _markers_ok(row: dict[str, Any], *, read_state: bool = False) -> bool:
+    return (_uninterrupted(row, read_state=read_state) and row.get("status", "ok") == "ok"
+            and row.get("error") is None and row.get("error_class") is None)
 
 
 def _whole(section: Any) -> bool:
@@ -226,7 +230,8 @@ def _row_ok(row: dict[str, Any], count: int) -> bool:
 
 def _envelope_whole(data: dict[str, Any], name: str) -> bool:
     """The writer's normalised envelope carries only its kind, records and optional collection status."""
-    return set(data) <= {"kind", "records", "collection_status"} and data.get("kind") == name
+    return (set(data) <= {"kind", "records", "collection_status"} and data.get("kind") == name
+            and data.get("collection_status", "collected") == "collected")
 
 
 def _read_manifest(bundle: Bundle) -> dict[str, Any]:
@@ -438,7 +443,7 @@ class _Context:
         roots: list[str] = []
         for row in units:
             unit, parent, root = row.get("id"), row.get("parent_id"), row.get("is_root")
-            if (not _bare(unit) or "ou:" + unit in org_units or type(root) is not bool
+            if (not _uninterrupted(row) or not _bare(unit) or "ou:" + unit in org_units or type(root) is not bool
                     or (parent is not None if root else not _bare(parent))):
                 complete = False
                 continue
@@ -460,7 +465,7 @@ class _Context:
         paths: dict[str, str] = {}
         parent_paths: dict[str, str] = {}
         for row in raw["orgUnits"]["value"]:
-            if not isinstance(row, dict):
+            if not isinstance(row, dict) or not _uninterrupted(row):
                 return {}, {}
             unit, path = _unit_id(row.get("orgUnitId")), row.get("orgUnitPath")
             if unit is None or not _ou_path(path) or path in paths or "ou:" + unit in topology:
@@ -552,7 +557,8 @@ def _rows_agree(records: list[dict] | None, whole: bool, raw: list, normalised_k
     """Require the same unique, readable row identities and values on both sides of a join."""
     if records is None:
         return not raw
-    if not whole or len(records) != len(raw):
+    if (not whole or len(records) != len(raw) or not all(map(_uninterrupted, records))
+            or any(isinstance(row, dict) and not _uninterrupted(row) for row in raw)):
         return False
     normalised = {normalised_key(row) for row in records}
     source = {raw_key(row) for row in raw}
@@ -592,7 +598,8 @@ def _split(records: list[dict[str, Any]], section: str, kind: str) -> tuple[list
     state = states[0] if len(states) == 1 else {}
     count = state.get("record_count")
     consistent = (len(states) == 1 and state.get("id") == "read_state" and len(data) + 1 == len(records)
-                  and type(count) is int and count == len(data))
+                  and type(count) is int and count == len(data) and type(state.get("complete")) is bool
+                  and _markers_ok(state, read_state=True))
     return data, consistent, state
 
 
@@ -621,6 +628,8 @@ def _policy_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[s
         return False
     values = raw[name]["value"]
     for item in values:
+        if isinstance(item, dict) and not _uninterrupted(item):
+            return False
         query = item.get("policyQuery") if isinstance(item, dict) else None
         if isinstance(query, dict) and not set(query) <= {"orgUnit", "group", "sortOrder", "query", "query_scope"}:
             return False
@@ -640,7 +649,7 @@ def _policy_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[s
         if "policy_row_validation" in row and type(row["policy_row_validation"]) is not bool:
             return False
         if not _row_ok(row, len(values)) and not (
-                row.get("status") == "partial" and row.get("policy_row_validation") is True and _uncut(row)
+                row.get("status") == "partial" and row.get("policy_row_validation") is True and _uninterrupted(row)
                 and _count_agrees(row, len(values)) and row.get("error_class") == "malformed_response"
                 and state.get("complete") is False):
             return False
@@ -671,7 +680,7 @@ def _placement_failure(row: dict, state: dict, org_units: dict[str, str | None])
     """A derived placement diagnostic is covered only by a saved scope outside the Directory tree."""
     scopes = state.get("unusable_scopes")
     return (row.get("status") == "partial" and row.get("policy_row_validation") is True
-            and _uncut(row) and _count_agrees(row, 0) and row.get("error_class") == "malformed_response"
+            and _uninterrupted(row) and _count_agrees(row, 0) and row.get("error_class") == "malformed_response"
             and isinstance(scopes, list) and any(
                 isinstance(scope, dict) and _bare(scope.get("org_unit"))
                 and "ou:" + scope["org_unit"] not in org_units for scope in scopes))
@@ -809,6 +818,8 @@ def _event_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[st
     if gaps.get(collector):
         return False
     saved = raw[name]["value"]
+    if any(isinstance(row, dict) and not _uninterrupted(row) for row in saved):
+        return False
     replayed = _scuba_read_records(
         collector, _obj((collector, raw)), [_obj(("name", collector), ("status", "ok"))], [],
         event_org_units=_event_org_units(ctx.directory(), {unit[3:] for unit in org_units}),
@@ -1132,7 +1143,7 @@ def _roles(raw: dict[str, Any] | None) -> dict[str, bool | None]:
     roles: dict[str, bool | None] = {}
     for role in raw["roles"]["value"]:
         key = _role_key(role.get("roleId")) if isinstance(role, dict) else None
-        if key is None:
+        if key is None or not _uninterrupted(role):
             return {}
         # ``isSuperAdminRole`` absent is false, as ScubaGoggles reads it; the privilege list must be read unless the
         # flag or the name already makes the role privileged.
@@ -1179,7 +1190,7 @@ def _admins(ctx: _Context) -> dict[str, Any]:
     complete = users_whole and ctx.read_ok(raw, _DIRECTORY, "users")
     for row in raw["users"]["value"] if complete else []:
         user_id = row.get("id") if isinstance(row, dict) else None
-        if not _ident(user_id) or user_id in raw_users:
+        if not _ident(user_id) or user_id in raw_users or not _uninterrupted(row):
             complete = False
             continue
         raw_users[user_id] = row
@@ -1190,7 +1201,8 @@ def _admins(ctx: _Context) -> dict[str, Any]:
     for row in users:
         user_id, admin, delegated = row.get("id"), row.get("is_admin"), row.get("is_delegated_admin")
         twin = raw_users.get(user_id) if _ident(user_id) else None
-        if (row.get("kind") != "google_user" or twin is None or user_id in known or type(admin) is not bool
+        if (not _uninterrupted(row) or row.get("kind") != "google_user" or twin is None
+                or user_id in known or type(admin) is not bool
                 or type(twin.get("isAdmin")) is not bool or twin["isAdmin"] != admin):
             complete = False  # an unread, blank, repeated or coerced account proves no count
             continue

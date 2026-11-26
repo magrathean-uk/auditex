@@ -1460,6 +1460,7 @@ def test_policy_attribution_requires_agreement_at_each_source(bundle: Path, faul
         policy = _policy("security.two_step_verification_enrollment", {"allowEnrollment": False}, order=2)
         policy["policyQuery"].update(query_scope="other")
         edit_raw(bundle, "raw/google_policies.json", lambda raw: raw["policySettings"]["value"].append(policy))
+        edit_coverage(bundle, "policySettings", item_count=4)
     else:
         edit_coverage(bundle, "policySettings", policy_row_validation=True, collection_truncated="true")
     projection = project_gws_run(bundle)
@@ -1683,3 +1684,31 @@ def test_matching_txt_payloads_with_a_failed_read_are_unknown(bundle: Path, mark
     projection = project_gws_run(bundle)
     assert projection["gws_dns"]["complete"] is False
     assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "not_assessed"
+
+
+@pytest.mark.parametrize("marker", [{"complete": False}, {"collection_status": "not_collected"},
+                                    {"nextPageToken": "another-page"}, {"next_page_token": "another-page"}])
+def test_attribution_cannot_override_unproven_transport(bundle: Path, marker: dict) -> None:
+    attributed(bundle)
+    assert verdict(project_gws_run(bundle), "GWS.COMMONCONTROLS.1.2v1")[0] == "met"
+    edit_coverage(bundle, "policySettings", **marker)
+    assert verdict(project_gws_run(bundle), "GWS.COMMONCONTROLS.1.2v1")[0] == "not_assessed"
+
+
+def test_an_unreadable_gap_artifact_cannot_prove_the_absence_of_gaps(bundle: Path) -> None:
+    normalised(bundle, "collection_gaps", [], collection_status="not_collected")
+    assert verdict(project_gws_run(bundle), "GWS.COMMONCONTROLS.6.2v1")[0] == "not_assessed"
+
+
+@pytest.mark.parametrize("base,source", [
+    ("2sv", "google_org_units"), ("2sv", "google_policy_settings"), ("delete", "google_setting_events"),
+    ("sso", "google_sso_assignments"),
+])
+@pytest.mark.parametrize("marker", [{"complete": "true"}, {"collection_truncated": True},
+                                    {"nextPageToken": "another-page"}, {"error_class": "denied"}])
+def test_read_state_cannot_attest_to_an_interrupted_read(bundle: Path, base: str, source: str, marker: dict) -> None:
+    setup, policy, expected = BASES[base]
+    setup(bundle)
+    assert verdict(project_gws_run(bundle), policy)[0] == expected
+    edit_rows(bundle, source, lambda data: data[-1].update(**marker))
+    assert verdict(project_gws_run(bundle), policy)[0] == "not_assessed"
