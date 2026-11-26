@@ -885,6 +885,106 @@ def test_a_privileged_role_held_by_a_group_leaves_the_inventory_unresolved(bundl
     assert [entry["user"] for entry in admins["privileged"]] == [U100, U200, U300, "user:unresolved"]
 
 
+SERVICE_ID = "104000000000000000001"  # a 21-digit Directory id with no users.list row (synthetic)
+
+
+def service_principal(bundle: Path, raw_type="user", normalised_type="user") -> None:
+    """A super admin role held by an id outside the complete user read, as Google lists the Directory Sync account.
+    ``"MISSING"`` leaves the field out on that side."""
+    raw_row = {"roleAssignmentId": "ra9", "roleId": "1", "assignedTo": SERVICE_ID}
+    norm_row = {"kind": "google_role_assignment", "id": "ra9", "role_id": "1", "assigned_to": SERVICE_ID}
+    if raw_type != "MISSING":
+        raw_row["assigneeType"] = raw_type
+    if normalised_type != "MISSING":
+        norm_row["assignee_type"] = normalised_type
+    raw_directory(bundle, lambda raw: raw["roleAssignments"]["value"].append(raw_row))
+    edit_rows(bundle, "google_role_assignments", lambda data: data.append(norm_row))
+    edit_coverage(bundle, "roleAssignments", item_count=5)
+
+
+def test_a_user_typed_assignee_outside_a_complete_user_read_is_not_a_person(bundle: Path) -> None:
+    service_principal(bundle)
+    admins = project_gws_run(bundle)["gws_admins"]
+    assert admins == {"complete": True, "super_admin_count": 2, "memberships_complete": True, "privileged": [
+        {"user": U100, "org_unit": ROOT, "groups": sorted([G1, G2])},
+        {"user": U200, "org_unit": SALES, "groups": []},
+        {"user": U300, "org_unit": SALES, "groups": []},
+        {"user": U500, "org_unit": None, "groups": []}]}
+
+
+def test_a_service_principal_leaves_both_admin_policies_as_they_were(bundle: Path) -> None:
+    placed(bundle)
+    sso(bundle, {"target_org_unit": "orgUnits/root01", "sso_mode": "SSO_OFF"})
+    service_principal(bundle)
+    projection = project_gws_run(bundle)
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.1v1") == ("met", "admins_use_google_sign_in")
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.2v1") == ("met", "count_in_range")
+
+
+@pytest.mark.parametrize("raw_type,normalised_type", [
+    ("group", "group"), ("GROUP", "GROUP"), ("User", "User"), (" user", " user"), ("user ", "user "),
+    ("customer", "customer"), (1, 1), (True, True), (["user"], ["user"]), ({"type": "user"}, {"type": "user"}),
+    ("MISSING", "MISSING"), (None, "MISSING"), ("", "MISSING"), ("user", "MISSING")])
+def test_an_outside_assignee_not_proven_a_user_stays_unresolved(bundle: Path, raw_type, normalised_type) -> None:
+    service_principal(bundle, raw_type, normalised_type)
+    admins = project_gws_run(bundle)["gws_admins"]
+    assert admins["complete"] is True and admins["super_admin_count"] == 2
+    assert [entry["user"] for entry in admins["privileged"]] == [U100, U200, U300, U500, "user:unresolved"]
+    assert admins["privileged"][-1] == UNRESOLVED
+
+
+@pytest.mark.parametrize("raw_type,normalised_type", [
+    ("user", "group"), ("group", "user"), ("MISSING", "user"), (None, "user"), ("user", "USER"), ("1", 1)])
+def test_an_assignee_type_the_two_files_contradict_voids_the_role_inventory(bundle: Path, raw_type,
+                                                                            normalised_type) -> None:
+    service_principal(bundle, raw_type, normalised_type)
+    admins = project_gws_run(bundle)["gws_admins"]
+    assert admins["complete"] is True and admins["super_admin_count"] == 2
+    assert [entry["user"] for entry in admins["privileged"]] == [U100, U200, "user:unresolved"]
+
+
+def test_a_contradicted_type_on_a_known_users_assignment_voids_the_role_inventory(bundle: Path) -> None:
+    raw_directory(bundle, lambda raw: raw["roleAssignments"]["value"][1].update(assigneeType="user"))
+    edit_rows(bundle, "google_role_assignments", lambda data: data[1].update(assignee_type="group"))
+    admins = project_gws_run(bundle)["gws_admins"]
+    assert [entry["user"] for entry in admins["privileged"]] == [U100, U200, "user:unresolved"]
+
+
+def test_an_outside_assignee_also_held_without_a_type_stays_unresolved(bundle: Path) -> None:
+    service_principal(bundle)
+    raw_directory(bundle, lambda raw: raw["roleAssignments"]["value"].append(
+        {"roleAssignmentId": "ra10", "roleId": "2", "assignedTo": SERVICE_ID}))
+    edit_rows(bundle, "google_role_assignments", lambda data: data.append(
+        {"kind": "google_role_assignment", "id": "ra10", "role_id": "2", "assigned_to": SERVICE_ID}))
+    edit_coverage(bundle, "roleAssignments", item_count=6)
+    admins = project_gws_run(bundle)["gws_admins"]
+    assert [entry["user"] for entry in admins["privileged"]] == [U100, U200, U300, U500, "user:unresolved"]
+
+
+def test_an_outside_assignee_on_an_unprivileged_role_changes_nothing(bundle: Path) -> None:
+    raw_directory(bundle, lambda raw: raw["roleAssignments"]["value"].append(
+        {"roleAssignmentId": "ra9", "roleId": "4", "assignedTo": SERVICE_ID, "assigneeType": "group"}))
+    edit_rows(bundle, "google_role_assignments", lambda data: data.append(
+        {"kind": "google_role_assignment", "id": "ra9", "role_id": "4", "assigned_to": SERVICE_ID,
+         "assignee_type": "group"}))
+    edit_coverage(bundle, "roleAssignments", item_count=5)
+    assert [entry["user"] for entry in project_gws_run(bundle)["gws_admins"]["privileged"]] == [U100, U200, U300, U500]
+
+
+@pytest.mark.parametrize("cut", ["raw users cut", "normalised users cut", "user row unproven"])
+def test_an_outside_user_assignee_on_an_incomplete_user_read_stays_unresolved(bundle: Path, cut) -> None:
+    service_principal(bundle)
+    if cut == "raw users cut":
+        raw_directory(bundle, lambda raw: raw["users"].update(collection_truncated=True))
+    elif cut == "normalised users cut":
+        edit_rows(bundle, "google_users", lambda data: None, complete=False)
+    else:
+        raw_directory(bundle, lambda raw: raw["users"]["value"][3].update(isAdmin="false"))
+    admins = project_gws_run(bundle)["gws_admins"]
+    assert admins["complete"] is False
+    assert admins["privileged"][-1] == UNRESOLVED
+
+
 @pytest.mark.parametrize("role,privileged", [({"roleId": 5}, None), ({"roleId": 5, "rolePrivileges": []}, False),
                                              ({"roleId": 5, "roleName": "Services Admin"}, True),
                                              ({"roleId": 5, "isSuperAdminRole": True}, True)])
@@ -1233,6 +1333,20 @@ def _raw_assignment(**fields):
     return lambda b: raw_directory(b, lambda raw: raw["roleAssignments"]["value"][3].update(**fields))
 
 
+def _service_type(bundle: Path, **fields) -> None:
+    """Set (or, with ``"MISSING"``, drop) the service principal's assignee type: ``assigneeType`` raw,
+    ``assignee_type`` normalised."""
+    def change(row: dict, key: str) -> None:
+        if fields[key] == "MISSING":
+            row.pop(key, None)
+        else:
+            row[key] = fields[key]
+    if "assigneeType" in fields:
+        raw_directory(bundle, lambda raw: change(raw["roleAssignments"]["value"][-1], "assigneeType"))
+    if "assignee_type" in fields:
+        edit_rows(bundle, "google_role_assignments", lambda data: change(data[-1], "assignee_type"))
+
+
 def _attribution(**fields):
     return lambda b: edit_rows(b, "google_policy_settings", lambda data: data[-1].update(**fields))
 
@@ -1266,6 +1380,8 @@ BASES = {
     "attributed": (attributed, "GWS.COMMONCONTROLS.1.2v1", "met"),
     "sso": (lambda b: (placed(b), sso(b, {"target_org_unit": "orgUnits/root01", "sso_mode": "SSO_OFF"})),
             "GWS.COMMONCONTROLS.6.1v1", "met"),
+    "service": (lambda b: (placed(b), sso(b, {"target_org_unit": "orgUnits/root01", "sso_mode": "SSO_OFF"}),
+                           service_principal(b)), "GWS.COMMONCONTROLS.6.1v1", "met"),
 }
 
 UNKNOWN_INPUTS = {
@@ -1340,6 +1456,17 @@ UNKNOWN_INPUTS = {
     "assignments envelope cut": ("roles", lambda b: edit_rows(b, "google_role_assignments", lambda d: None,
                                                              partial=True)),
     "assignments absent": ("roles", lambda b: (b / "normalized/google_role_assignments.json").unlink()),
+    # an outside role assignee read as a user (a non-user principal)
+    "outside type group": ("service", lambda b: _service_type(b, assigneeType="group", assignee_type="group")),
+    "outside type absent": ("service", lambda b: _service_type(b, assigneeType="MISSING", assignee_type="MISSING")),
+    "outside type null": ("service", lambda b: _service_type(b, assigneeType=None, assignee_type="MISSING")),
+    "outside type number": ("service", lambda b: _service_type(b, assigneeType=1, assignee_type=1)),
+    "outside type padded": ("service", lambda b: _service_type(b, assigneeType="user ", assignee_type="user ")),
+    "outside type normalised absent": ("service", lambda b: _service_type(b, assignee_type="MISSING")),
+    "outside type contradicts": ("service", lambda b: _service_type(b, assignee_type="group")),
+    "outside type raw absent": ("service", lambda b: _service_type(b, assigneeType="MISSING")),
+    "outside with users cut": ("service", lambda b: raw_directory(
+        b, lambda raw: raw["users"].update(collection_truncated=True))),
     # setting deletes
     "delete value object": ("delete", lambda b: chat_delete(b, new_value={"invalid": True})),
     "delete value text": ("delete", lambda b: chat_delete(b, new_value="system_violation: SPAM")),

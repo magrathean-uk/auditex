@@ -1831,7 +1831,7 @@ builds six sections:
 | `gws_policies` | `complete` and one entry per policy: `unit`, `unit_kind`, `section`, `sort_order`, `value` | `google_policy_settings` |
 | `gws_setting_events` | `complete`, `window_start`, `window_end` and one entry per event: `time`, `event`, `setting`, `new_value`, `unit`, `application` | `google_setting_events` |
 | `gws_dns` | `complete` and one entry per domain: `domain`, `alias`, `resolver_error`, `spf`, `dkim` selectors, `dmarc` (`query_name`, `inherited`, `records`) | `google_dns_posture` |
-| `gws_admins` | `complete`, `super_admin_count`, the privileged users with their unit and groups, `memberships_complete` | `google_users`, `google_role_assignments`, roles and `google_group_members` |
+| `gws_admins` | `complete`, `super_admin_count`, the privileged users with their unit and groups, `memberships_complete` | `google_users`, `google_role_assignments` (with `assignee_type`, copied from `assigneeType`), roles and `google_group_members` |
 | `gws_sso` | `complete` and one entry per assignment: `target`, `sso_mode` | `google_sso_assignments` |
 
 Users, groups, organisational units and domains appear only as pseudonyms under the run's key, so units are stable
@@ -1904,6 +1904,7 @@ The reason codes are `required_evidence_section_not_collected`, `data_unavailabl
 | D21 | Top unit with the service off: sub-units without their own values are not judged | the top unit's values are judged for a sub-unit that turns the service on and inherits them | Google applies the inherited value there |
 | D22 | TXT records at `_dmarc` that are not DMARC are ignored | they are ignored too, and exactly one valid DMARC record must remain: none or several give the domain no DMARC record | a set that is not one policy is not read as one |
 | D23 | GMAIL.14.1 gates on the top unit's Gmail status | the rule applies when Gmail is on in any unit | an enabled unit is in scope |
+| D24 | CC.6.1 privileged accounts are `isAdmin`, `isDelegatedAdmin` and role assignees whose `assigneeType` is `USER` (the API writes `user`, so no role assignee is added); only `users.list` rows are judged | every user holding a highly privileged role is privileged too. An assignee absent from a complete user read whose every privileged assignment reads assignee type `user` in both the raw and normalised files is a non-user principal (the Directory Sync service account) and is left out. A group assignee, another, missing or contradicted type, or any outside assignee while the user read is incomplete adds an unplaceable entry: `not_assessed`, `data_unusable_section_shape` | a role holder that may be a person cannot be ruled out; a service account has no interactive sign-in, so inbound SSO cannot apply |
 
 The DRIVEDOCS.1.8 default is copied, not diverged: ScubaGoggles' pinned default is Google's documented default, and a
 tenant on it fails the baseline.

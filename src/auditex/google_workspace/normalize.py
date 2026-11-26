@@ -972,6 +972,7 @@ def build_google_normalized_snapshot(
             role_id=item.get("roleId"),
             role_name=(roles.get(str(item.get("roleId"))) or {}).get("roleName"),
             assigned_to=item.get("assignedTo"),
+            assignee_type=item.get("assigneeType"),
             scope_type=item.get("scopeType"),
             org_unit_id=item.get("orgUnitId"),
         )
