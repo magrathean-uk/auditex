@@ -193,21 +193,25 @@ def test_a_microsoft_assessment_in_a_google_run_is_refused(tmp_path: Path) -> No
     assert _load_policy_explanations(google, manifest) == []
 
 
-@pytest.fixture(scope="module")
-def masked_name_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The shipped sample with one directory user named "Gws Gmail", assessed for GWS.GMAIL.4.1v1 only."""
-    out = tmp_path_factory.mktemp("gws-masked")
+def _run_with_user_named(root: Path, full_name: str) -> Path:
+    """The shipped sample with one directory user given ``full_name``, assessed for GWS.GMAIL.4.1v1 only."""
     sample = json.loads((REPO / "examples/google_workspace_sample.json").read_text())
     [user] = [u for u in sample["google_directory"]["users"]["value"] if u["id"] == "u-user"]
-    user["name"]["fullName"] = "Gws Gmail"
-    (out / "sample.json").write_text(json.dumps(sample))
-    runs = out / "runs"
-    assert run_google_offline(sample_path=out / "sample.json", out=runs, tenant_name="ci", run_name="google",
+    user["name"]["fullName"] = full_name
+    (root / "sample.json").write_text(json.dumps(sample))
+    runs = root / "runs"
+    assert run_google_offline(sample_path=root / "sample.json", out=runs, tenant_name="ci", run_name="google",
                               domain="example.com", customer_id=None,
                               as_of=datetime(2026, 11, 11, tzinfo=UTC)) == 0
     [run] = [path for path in runs.iterdir() if path.is_dir()]
     assert main(["assess", str(run), "--policies", DMARC_POLICY]) == 0
     return run
+
+
+@pytest.fixture(scope="module")
+def masked_name_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The shipped sample with one directory user named "Gws Gmail", assessed for GWS.GMAIL.4.1v1 only."""
+    return _run_with_user_named(tmp_path_factory.mktemp("gws-masked"), "Gws Gmail")
 
 
 @pytest.mark.parametrize("profile", ["shareable", "customer_pack"])
@@ -425,3 +429,43 @@ def test_a_google_reason_on_an_m365_payload_is_tenant_text() -> None:
     sources = {value["name"]: value["source"] for value in item["values"]}
     assert sources["reason"] == "tenant" and sources["check"] == "tenant"
     assert "requirement" not in sources
+
+
+# --- Repair round 2 (review M13-L16 round 2): a title-word person name, and coverage of the rows shown ------------
+
+@pytest.mark.parametrize("name", ["Google Workspace", "Cisa Scuba"])
+def test_a_person_named_like_the_title_cannot_change_the_google_heading(tmp_path: Path, name: str) -> None:
+    run = _run_with_user_named(tmp_path, name)
+    for profile in ("shareable", "customer_pack"):
+        md = preview_report(run_dir=str(run), format_name="md", profile=profile)["content"]
+        html = preview_report(run_dir=str(run), format_name="html", profile=profile)["content"]
+        assert md.count(f"## {GWS_TITLE}\n\n{PARTIAL_REPORT}\n") == 1
+        assert html.count(f"<section><h2>{GWS_TITLE}</h2>") == 1
+    write_enterprise_handoff_pack(run, tmp_path / "pack")
+    report = (tmp_path / "pack" / "report.md").read_text()
+    assert report.count(f"## {GWS_TITLE}\n\n{PARTIAL_REPORT}\n") == 1
+    assert name not in report.replace(GWS_TITLE, "").replace(PARTIAL_REPORT, "")
+
+
+@pytest.mark.parametrize("fmt,partial", [
+    ("md", "Partial: the rules assessed 137 of the 138 SCuBA Google Workspace checks in the shipped catalogue; "
+           "the other 1 are not in this report."),
+    ("html", "Partial: the rules assessed 137 of the 138 SCuBA Google Workspace checks in the shipped catalogue; "
+             "the other 1 are not in this report."),
+])
+def test_coverage_counts_only_the_rows_the_report_shows(google_run: Path, tmp_path: Path, fmt: str,
+                                                        partial: str) -> None:
+    import shutil
+    run = tmp_path / "run"
+    shutil.copytree(google_run, run)
+    path = run / "model_assessment.json"
+    payload = json.loads(path.read_text())
+    [row] = [r for r in payload["policies"] if r["policy_id"] == DMARC_POLICY]
+    del row["explainer"]
+    validate_assessment(payload)
+    path.write_text(json.dumps(payload))
+    content = preview_report(run_dir=str(run), format_name=fmt, profile="customer_pack",
+                             include_sections=["policy_explanations"])["content"]
+    assert partial in content
+    assert content.count("GWS.GMAIL.4.1v1" if fmt == "html" else "GWS\\.GMAIL\\.4\\.1v1") == 0
+    assert content.count("GWS.GMAIL.4.2v1" if fmt == "html" else "GWS\\.GMAIL\\.4\\.2v1") == 1

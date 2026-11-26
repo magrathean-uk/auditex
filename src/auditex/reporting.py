@@ -667,9 +667,7 @@ def _load_policy_section(run_path: Path, manifest: Mapping[str, Any]
         assessment = admitted_assessment(run_path)
         if assessment["run_id"] != manifest.get("run_id"):
             return [], None
-        heading = None
-        if assessment.get("baseline") == GWS_BASELINE:
-            heading = {"title": GWS_POLICY_EXPLANATIONS_TITLE, "coverage": gws_coverage(assessment)}
+        google = assessment.get("baseline") == GWS_BASELINE
         candidates = [row for row in assessment["policies"] if "explainer" in row]
         if candidates:
             # Assessment files can be changed after creation, so apply the explainer boundary again even for local reports.
@@ -686,7 +684,15 @@ def _load_policy_section(run_path: Path, manifest: Mapping[str, Any]
                     rows.append({"policy_id": row["policy_id"], "verdict": value_rule_verdict(row),
                                  "explainer": safe_derived})
             assert_snapshot_stable(run_path, context.snapshot)
-            return rows, heading if rows else None
+            if not rows or not google:
+                return rows, None
+            # Coverage counts the rows this report shows, not the rows the assessment holds: an explainer the
+            # report drops (missing, mismatched or unredactable) is a check the report does not carry.
+            shown = {row["policy_id"] for row in rows}
+            heading = {"title": GWS_POLICY_EXPLANATIONS_TITLE,
+                       "coverage": gws_coverage({"policies": [row for row in assessment["policies"]
+                                                              if row["policy_id"] in shown]})}
+            return rows, heading
     except (UnsafeRunFileError, MemoryError):
         raise
     except Exception:
@@ -2494,7 +2500,9 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     generated = [
         generated_row("handoff.md", render_enterprise_handoff_markdown(handoff_payload)),
         generated_row("handoff.json", _json(handoff_payload) + "\n"),
-        generated_row("report.md", rendered_report),
+        # The final pass of the pack's report keeps the Google section title, as the preview did.
+        generated_row("report.md", rendered_report, lambda text: keep_gws_title(
+            rendered_report, text, PROFILE_CUSTOMER_PACK, redaction)),
         generated_row("api-calls.md", render_api_call_inventory_markdown(api_payload)),
         generated_row("api-calls.json", _json(api_payload) + "\n"),
         generated_row("permissions.md", render_permissions_ledger_markdown(permissions_payload)),
@@ -3279,6 +3287,33 @@ def _append_local_answer_markdown(lines: list[str], payload: Mapping[str, Any]) 
 # masking a policy id can never change it; with no heading the Microsoft 365 title stays as it always was.
 POLICY_EXPLANATIONS_TITLE = "Policy explanations"
 GWS_POLICY_EXPLANATIONS_TITLE = "CISA SCuBA Google Workspace (ScubaGoggles v1.1.0)"
+
+
+_GWS_COVERAGE_NOTE = re.compile(
+    r"Partial: the rules assessed \d+ of the \d+ SCuBA Google Workspace checks in the shipped catalogue; "
+    r"the other \d+ are not in this report\.")
+
+
+def keep_gws_title(rendered: str, redacted: str, profile: str, context: RedactionContext) -> str:
+    """Put the Google section's fixed text back after a redaction pass (design M13 section 9.3).
+
+    The title and the coverage line under it are product text, but the name masking pass can take words of them
+    (``Google Workspace``) for a directory person's name. ``rendered`` is the text before the pass and ``redacted``
+    the text after it: only where the rendered text carried the title as a heading (Markdown ``##`` or HTML ``<h2>``)
+    or the coverage line in its own paragraph is that spot, as the same pass spelled it for the fixed text alone, put
+    back byte for byte. Display names never join the field names (``_D5_FIELD_NAMES``) and every other occurrence
+    of a masked word stays masked.
+    """
+    fixed_texts = [(GWS_POLICY_EXPLANATIONS_TITLE, "## ", "\n"), (GWS_POLICY_EXPLANATIONS_TITLE, "<h2>", "</h2>")]
+    for note in {match.group(0) for match in _GWS_COVERAGE_NOTE.finditer(rendered)}:
+        fixed_texts += [(note, "\n\n", "\n"), (note, '<p class="coverage-note">', "</p>")]
+    for text, before, after in fixed_texts:
+        if before + text + after not in rendered:
+            continue
+        masked = redact_output(text, profile=profile, context=context, markup=True)
+        if masked != text:
+            redacted = redacted.replace(before + masked + after, before + text + after)
+    return redacted
 
 
 def _policy_explanations_heading(heading: Any) -> tuple[str, str | None]:
@@ -4559,7 +4594,8 @@ def _final_pass(content: str, format_name: str, context: RedactionContext, profi
     were serialised (their text cannot be edited safely), so they are returned as rendered."""
     if format_name in _STRUCTURED_FORMATS:
         return content
-    return redact_output(content, profile=profile, context=context, markup=True)
+    return keep_gws_title(content, redact_output(content, profile=profile, context=context, markup=True), profile,
+                          context)
 
 
 def _with_unmatched_names_note(content: str, format_name: str, context: RedactionContext) -> str:
