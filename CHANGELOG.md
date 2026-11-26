@@ -7,6 +7,41 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+These changes are planned for 2.1.0. The run-bundle `CONTRACT_VERSION` stays `2026-11-11`, and earlier bundles still
+load and validate.
+
+### SCuBA answers for Google Workspace
+
+- **`auditex assess` answers Google Workspace runs.** On a Google Workspace run it answers the 138 policies of the CISA
+  SCuBA Google Workspace baselines (ScubaGoggles v1.1.0, 11 baselines) with deterministic value rules, as it does
+  for the 102 Microsoft 365 policies. Each policy is met, not met, not applicable or not assessed with a fixed reason;
+  unknown is never safe, so a missing, cut or unreadable read, an absent setting with no documented default, an absent
+  log event or an unrecognised value reads not assessed, and not met needs a positively read violation. 17 policies
+  have no read-only API and always ask for a check by hand. The differences from ScubaGoggles (23, each pinned by a
+  test vector) are listed in the output contract.
+- **New reads.** The Cloud Identity policies read is widened from the 2-step verification policies to every setting
+  type the baselines read (DLP rules are never requested), admin setting-change events are read from the Admin
+  Reports API, inbound SSO assignments from Cloud Identity, and Google DNS posture adds alias domains, the DMARC
+  parent walk and the `selector1` and `selector2` DKIM selectors. Address lists, events and SSO assignments are
+  minimised before they are written: no addresses, actors, IP addresses, old values or SSO profiles.
+- **New read-only scope `cloud-identity.inboundsso.readonly`.** It is used on its own token, only for
+  COMMONCONTROLS.6.1; a tenant that has not granted it loses only that policy. `auditex setup-guide google` adds it to
+  the scope list whenever the chosen preset includes the inbound SSO read.
+- **Reports, local answer and MCP.** Reports and customer packs show the answers under "CISA SCuBA Google Workspace
+  (ScubaGoggles v1.1.0)", with a partial note when only part of the catalogue was answered. `auditex explain` and the
+  `auditex_local_answer` MCP tool answer Google runs. Explanations come from a generated Google template.
+- **Assessment schema `2026-11-27`.** `model_assessment.json` gains a required `baseline`
+  (`cisa-scuba-m365-v3.9.1` or `cisa-scubagoggles-v1.1.0`) and accepts `GWS.*` policy ids. Google runs write it;
+  Microsoft 365 runs still write `2026-11-22`, whose schema is kept byte for byte, so their output does not change.
+
+### Privacy
+
+- **The Google customer ID stays out of run folders.** The configured customer ID is used for API calls only. The
+  manifest, snapshot, run summary, auth context, probe and doctor output keep the `my_customer` alias, the recorded
+  command line masks `--customer-id`, and customer IDs learned from API fields or failure text are masked in
+  evidence, logs and diagnostics. Compare, drift and shareable SARIF and OSCAL exports match Google runs by the
+  recorded domain. A consumer that read the real ID from `customer_id` must stop.
+
 ## [2.0.0] - 2026-11-23
 
 Auditex now installs from PyPI, and this release carries the fixes from the November review of the 1.x code, each

@@ -382,6 +382,16 @@ The optional `operator_inputs.sensitive_users`, `operator_inputs.partner_domains
 and `redacted_artifacts` manifest keys and the private-input integrity exclusions
 above are additive under this version.
 
+Added within `2026-11-11` for 2.1.0 (unreleased; `CONTRACT_VERSION` is unchanged and bundles from earlier versions
+still load and validate). Google Workspace runs add the normalised sections `google_policy_settings`,
+`google_setting_events`, `google_sso_assignments` and `google_org_units`, each with a read-state record, and the DNS
+posture fields `alias`, `resolver_error`, `query_name`, `inherited`, `records` and the DKIM `selectors` map (see
+"Google Workspace evidence scope, domains and rules"). `model_assessment.json` gains schema version `2026-11-27` with a
+required `baseline`; a Google Workspace run is answered against the ScubaGoggles v1.1.0 baseline (138 `GWS.*`
+policies), while Microsoft 365 writers still emit `2026-11-22` (see "Evidence discipline" and "SCuBA answers for
+Google Workspace"). Removed: a Google Workspace bundle no longer records an explicit customer ID. The manifest and
+snapshot `customer_id` hold `my_customer` or null, and a consumer that read the real ID from them must stop.
+
 Version `2026-11-11` (1.5.0). Pseudonyms come from a private per-run key: the run key `operator-inputs/pseudonym.key`, made at collection, excluded from the hash manifest and never copied (see "Private pseudonym key"); keyless runs (made by 1.4.0 or earlier, copied without operator-inputs/, or sealed on storage without locking) use a temporary key held in memory, say so in their output, and get a key from the new `auditex report prepare-key`. The projection label is `keyed-hmac-sha256-v1`; `schemas/model_assessment.schema.json` accepts it and `run-salted-sha256-v1` in place (its `schema_version` stays `2026-11-05`), and writers emit only the new label. `schemas/bundle_hashes.schema.json` lists `redacted_operator_input` among the `excluded` reasons, which writers of `2026-10-22` already wrote. Pseudonyms made by 1.4.0 or earlier do not match; 1.4.0 rejects a 1.5.0 assessment.
 
 Version `2026-11-08` (1.3.0). Removed, from the Gmail settings, Alert Center and group-settings text exclusions (live output only; offline fixtures follow): the length and presence fields derived from text the collector no longer requests, for example the vacation message and signature lengths. Presence stays only where a non-text field reports it, and no value rule read a removed field. Added since 1.2.4 (new in this version): the skip reasons `teams_token_unavailable` and `teams_powershell_not_supported` on section gaps with `status: skipped`, and the preservation of `status: skipped` on the coverage rows of an offline replay (added in 3e8c1bd); and, from the PIM role policy reads of `identity_governance` (see "PIM role policy reads"), the normalized artefact `normalized/privileged_roles.json`, the `governance_objects` record kinds `role_management_policy_assignment` and `role_management_policy_rule`, the coverage rows `roleManagementPolicyAssignments`, `roleManagementPolicyRules` and `roleManagementPolicyRulesFanout`, and the `collection_gaps` reasons `endpoint_unavailable` and `artefact_withheld` (with its `reasons` field).
@@ -451,8 +461,12 @@ by the schema manifest and checked when present by bundle validation. A Google W
 assessment uses this version with `baseline: "cisa-scubagoggles-v1.1.0"` and
 `scope_post_check: {"status": "not_applicable"}`. The version also accepts
 `cisa-scuba-m365-v3.9.1` as a baseline. Every policy id and the projection section catalogue
-must match the envelope baseline. Microsoft 365 writers continue to emit `2026-11-22`,
-which has an implicit Microsoft 365 baseline. `2026-11-22` is
+must match the envelope baseline. `2026-11-27` widens `policy_id` to `^(MS|GWS)\.[A-Z]+\.\d+\.\d+v\d+$`; a
+Google Workspace file holds only `GWS.*` ids and the six `gws_*` projection sections of
+`configs/scuba-gws-policy-sections.json` (see "SCuBA answers for Google Workspace"). Microsoft 365 writers continue to
+emit `2026-11-22`, which has an implicit Microsoft 365 baseline; its schema is the byte-preserved copy
+`schemas/model_assessment-2026-11-22.schema.json`, and `schemas/model_assessment.schema.json` is now `2026-11-27`.
+`2026-11-22` is
 `2026-11-05` plus the optional projection-section field `rule_view` (`adapter` or `variant`),
 which names the value-rule view still built for a `not_collected` section; the schema itself
 rejects it on a `projected` section. Beside `rule_view: variant`, optional
@@ -1114,6 +1128,17 @@ counts by verdict, `fixed_text_items`, the run `summary`, one entry per item of 
   returns `status: unavailable` with the reason.
 - The report holds a `local_answer` section (JSON, Markdown and HTML; CSV, SARIF and OSCAL leave it out) when the run
   holds an answer that checks.
+- Google Workspace runs are answered too. The assessment is admitted only when its `run_id` is the run's and its
+  baseline is the run's platform's (`cisa-scubagoggles-v1.1.0` for `platform: google_workspace`, otherwise the
+  Microsoft 365 baseline, which a file without `baseline` implies); anything else gives no digest. A Google row whose
+  rule cites a section the assessment's own projection did not project is shown as the rules answer it without that
+  section: `not_assessed`, required evidence not collected. The digest of a Google assessment carries
+  `baseline: "cisa-scubagoggles-v1.1.0"`; a Microsoft 365 digest has no `baseline` key and is unchanged, and
+  `digest_version` stays `answer-digest-v2`. For a Google digest the reason-text allow-list, the requirement sentences
+  and the check count come from the GWS catalogue (each policy's kind cell reason texts plus the shared reasons; 138
+  checks), the criticalities `SHALL` and `SHOULD` read as `Shall` and `Should`, and the prompts name a Google
+  Workspace tenant. A partial assessment prints "Partial: the rules assessed N of the 138 SCuBA Google Workspace
+  checks in the shipped catalogue; the other M are not in this answer." (Microsoft 365: "... SCuBA checks ...").
 
 The runtime is the optional extra `local-answer` (`llama-cpp-python` 0.3.36; PyPI ships it as source, so pip builds
 llama.cpp, which needs CMake and a C and C++ compiler). Without it every item shows the fixed text and the answer says
@@ -1760,6 +1785,126 @@ The delegated-admin flag also moves `google.admin_2sv_not_enforced`, `google.adm
 
 **Waivers.** `auditex google run --waiver-file` takes the file the Microsoft 365 run takes (`azure_tenant_audit.waivers`): every populated field must match (AND), a waiver names a `finding_id` or `rule_id` (`collector` and `category` only narrow it), an expired waiver never matches, and a file that is missing, unreadable or invalid stops the run with exit status 2 before any API call or output. A matched finding becomes `accepted_risk` with its `waiver`; the manifest records `waiver_path` (an absolute path as `<local-path>/<file name>`).
 
+### SCuBA answers for Google Workspace
+
+`auditex assess <run>` on a run whose manifest `platform` is `google_workspace` writes `model_assessment.json` schema
+`2026-11-27` with `baseline: "cisa-scubagoggles-v1.1.0"`. It answers the 138 policies of the CISA ScubaGoggles v1.1.0
+baselines (tag `v1.1.0`, commit `08a08ce1`; 11 baselines, 121 automated and 17 manual) from the value rules alone:
+`src/azure_tenant_audit/value_rules/gws/`, with rows in `configs/scuba-gws-value-rules.json` and its seven
+`configs/scuba-gws-rules-*.json` fragments. The policy catalogue `configs/scuba-gws-policy-sections.json` is
+generated from the pinned baseline Markdown by `scripts/generate-gws-scuba-catalogue.py`, which checks each file's
+SHA-256 before parsing it. Policy ids are `GWS.<PRODUCT>.<group>.<n>v<version>`. A selection on a Google run must
+hold only `GWS.*` ids and one on a Microsoft 365 run only `MS.*` ids; any other selection is refused. The envelope
+keeps every required key: `endpoint_host: "none"`, `model_name: "rules-only"`, the pinned `system_prompt_sha256`,
+`totals`, `policies`, `projection`, `scope_post_check: {"status": "not_applicable"}` (the Conditional Access scope
+check is Entra-only) and `limitations`, which is `["projection_not_implemented"]` only when every section is
+`not_collected`. Each row's `rule_precheck` has `class: "value_rule"`, the row's `rule_id`
+(`<policy id>.<kind>`), the cited `section`s, the `cell`, `reason_code` and `reason_text`. Its `comparison` has no
+finding baseline to compare with, so `baseline_match` is `none` and `result` is `not_assessed`.
+
+| kind | policies | decided from |
+| --- | --- | --- |
+| `setting` | 74 | one Policy API field per unit against a pinned operator and value |
+| `manual_only` | 17 | nothing: always `not_assessed`, `data_unavailable_manual_check` |
+| `settings_multi` | 14 | several Policy API fields combined per unit (Drive sharing modes, Gmail consequence lists, IMAP or POP, Groups, Chat, Marketplace, Takeout) |
+| `setting_event` | 12 | the last Admin Reports setting-change event per setting and unit |
+| `gws_list_settings` | 8 | Gmail address lists and rule states, API access controls, system alert rules |
+| `gws_dns` | 6 | SPF, DKIM and DMARC records of the verified domains |
+| `twosv` | 5 | the 2-step verification policies, compared with the run's `as_of` |
+| `super_admin_count` | 1 | the super admin count (met from 2 to 8) |
+| `admin_sso` | 1 | inbound SSO assignments of the privileged users' groups and organisational units |
+
+Per product: Assured Controls 3, Calendar 6 (1 manual), Chat 7, Classroom 6, Common Controls 42 (9 manual), Drive and
+Docs 17 (3 manual), Gemini 5 (3 manual), Gmail 36, Groups 6, Meet 9 (1 manual) and Sites 1.
+
+**Projection.** `auditex.google_workspace.scuba_projection.project_gws_run` reads the bundle through the guarded
+run-file reader with the same scan bounds as the Microsoft 365 projection, writes nothing and uses no network. It
+reshapes, bounds and redacts; it reduces nothing, applies no default and compares nothing with the baseline. It
+builds six sections:
+
+| section | content | built from |
+| --- | --- | --- |
+| `gws_tenant` | `as_of`, `top_unit`, the organisational unit tree as unit to parent, `complete` | the manifest and `google_org_units` |
+| `gws_policies` | `complete` and one entry per policy: `unit`, `unit_kind`, `section`, `sort_order`, `value` | `google_policy_settings` |
+| `gws_setting_events` | `complete`, `window_start`, `window_end` and one entry per event: `time`, `event`, `setting`, `new_value`, `unit`, `application` | `google_setting_events` |
+| `gws_dns` | `complete` and one entry per domain: `domain`, `alias`, `resolver_error`, `spf`, `dkim` selectors, `dmarc` (`query_name`, `inherited`, `records`) | `google_dns_posture` |
+| `gws_admins` | `complete`, `super_admin_count`, the privileged users with their unit and groups, `memberships_complete` | `google_users`, `google_role_assignments`, roles and `google_group_members` |
+| `gws_sso` | `complete` and one entry per assignment: `target`, `sso_mode` | `google_sso_assignments` |
+
+Users, groups, organisational units and domains appear only as pseudonyms under the run's key, so units are stable
+within a run and cannot be linked across runs. DNS TXT records keep only the fixed syntax the rule parsers need (SPF
+directives and modifiers with synthetic arguments, DKIM version markers, DMARC tags and synthetic contact URIs).
+`gws_tenant.as_of` is the run's recorded evaluation instant (an older live run falls back to its collection end; an
+older offline run has none, and its 2-step verification policies answer `not_assessed`). A source that was not
+collected, cannot be read or has the wrong envelope makes the section the `not_collected` marker; a cut, duplicated
+or misjoined input makes its `complete` false. Only each section's `status`, `source` and `reason` and the
+redaction's `enabled`, `strategy` and `email_addresses` are written to `model_assessment.json`; the section content
+stays in memory and never reaches a report, export, customer pack, local answer or MCP output.
+
+**Decision order.** For every kind the first rule that applies decides: a required section missing or marked
+(`required_evidence_section_not_collected`); a section of the wrong shape (`data_unusable_section_shape`) or not
+complete (`data_unavailable_<read>_read_incomplete`); the service read as off in every unit and on in none
+(`not_applicable`, `service_off_everywhere`) or an absent top-level service status with no unit explicitly on
+(`data_unavailable_service_status_absent`); a unit or domain that positively violates (`not_met`, `unit_violates` or
+`domain_violates`), which wins over unusable values elsewhere; an unusable value (`data_unusable_*`); an absent
+top-level value with no pinned default (`data_unavailable_setting_absent`); otherwise `met`. Unknown is never safe: a
+malformed value, a wrong type, an unknown enum, a cut, partial or failed read, a missing section, an absent top-level
+value with no default, an absent service status, a resolver error, an empty domain list or an absent event never
+answers `met`, and `not_met` needs a positively read violation.
+
+The reason codes are `required_evidence_section_not_collected`, `data_unavailable_manual_check`,
+`data_unavailable_policy_read_incomplete`, `data_unavailable_event_read_incomplete`,
+`data_unavailable_sso_read_incomplete`, `data_unavailable_user_read_incomplete`,
+`data_unavailable_dns_read_incomplete`, `data_unavailable_membership_incomplete`,
+`data_unavailable_org_unit_lineage`, `data_unavailable_service_status_absent`, `data_unavailable_setting_absent`,
+`data_unavailable_no_setting_event`, `data_unavailable_no_domains`, `data_unavailable_resolver_error`,
+`data_unusable_section_shape`, `data_unusable_setting_value`, `data_unusable_event_value`,
+`data_unusable_domain_record`, `data_unusable_sso_assignment`, `data_unusable_super_admin_count` (all
+`not_assessed`), `service_off_everywhere` (`not_applicable`), `unit_violates`, `domain_violates`,
+`count_out_of_range`, `admin_uses_external_sso` (`not_met`), `no_unit_violates`, `no_domain_violates`,
+`count_in_range` and `admins_use_google_sign_in` (`met`), plus the shared `rule_evaluation_failed` and
+`rule_not_implemented`.
+
+**Divergences from ScubaGoggles.** Each is pinned by a rule vector.
+
+| id | ScubaGoggles v1.1.0 | Auditex | why |
+| --- | --- | --- | --- |
+| D1 | No setting event with a safe default shows "No events found" and passes (GMAIL.13.1, CC.3.2, MEET.6.x, GEMINI.x) | `not_assessed`, `data_unavailable_no_setting_event` | unknown is not safe; admin logs older than about six months are gone |
+| D2 | A setting outside its expected table passes silently when absent (CC.10.x, CC.16.2, GMAIL.12.1, the GEMINI.1.1 gate) | `not_assessed`, `data_unavailable_setting_absent` on a complete read | unknown is not safe |
+| D3 | A missing top-level service status counts as off, so the policy passes | `not_assessed`, `data_unavailable_service_status_absent`, unless a unit is explicitly on | the API may simply not have returned it |
+| D4 | GMAIL.7.5 reads the 7.3 field | reads `detectGroupsSpoofing`, as the baseline text says | ScubaGoggles defect |
+| D5 | CC.1.4 passes a grace period from 1 second to under 1 day | `not_met` below 86,400 seconds ("at least one day") | ScubaGoggles defect |
+| D6 | CC.10.1 with no `api_controls_google_services` section fails every service | `not_assessed`, `data_unavailable_setting_absent` when the section is absent everywhere; `not_met` only when it is present and a service has no restriction | absence of the whole section cannot be told from an API gap |
+| D7 | CC.7.1 reads `option` only | reads `option`, else `conflictingAccountsManagement`; both present and different is `not_assessed`, `data_unusable_setting_value` | field mismatch; the live run decides which Google returns |
+| D8 | CC.1.x compares with the wall clock | compares with the run's `as_of` | the same bundle always gives the same answer |
+| D9 | CC.6.2 excludes configured break-glass accounts | counts every super admin | no exclusion input exists yet |
+| D10 | An error when a prerequisite call failed | `required_evidence_section_not_collected` or `data_unavailable_*_read_incomplete` | same meaning, Auditex vocabulary |
+| D11 | Two units with the same sort order: the first one wins | the tie makes that unit and section unusable, so the policy is `not_assessed` | an ambiguous order is unknown |
+| D12 | An unrecognised service state is treated as off | the service gate is `not_assessed` | unknown is not safe |
+| D13 | CC.6.2 with zero super admins or an empty privileged list passes or errors | `not_assessed`, `data_unusable_super_admin_count` | an empty admin read is unknown |
+| D14 | An unknown 2SV or SSO enum value falls through as compliant | `not_assessed` with the unusable-value reason | unknown is not safe |
+| D15 | A top-level `DELETE_APPLICATION_SETTING` counts as an event and passes | `not_assessed`, `data_unavailable_no_setting_event` | a deleted setting is not a confirmed value |
+| D16 | An event value outside the good value fails | a value outside the pinned good and bad values is `data_unusable_event_value` | unknown is not safe either way |
+| D17 | CHAT.5.1 ignores a child unit without all four event types | each setting is judged per unit | a partial child is still evidence |
+| D18 | The GEMINI.1.1 group event uses the event's unit | a group event has no unit: a bad value is a violation only with the Gemini app on in every unit, else unusable | there is no unit to place it on |
+| D19 | No top-level event is reported before a child violation | a child-unit violation answers `not_met` even with no top-level event | a positively read violation is definite |
+| D20 | DRIVEDOCS.3.1, CHAT.4.1 and CC.11.1 read each unit's own values only | effective values (own, else inherited) are combined per unit | a positively read violating combination is definite |
+| D21 | Top unit with the service off: sub-units without their own values are not judged | the top unit's values are judged for a sub-unit that turns the service on and inherits them | Google applies the inherited value there |
+| D22 | TXT records at `_dmarc` that are not DMARC are ignored | a mixed TXT set at `_dmarc` is read strictly | stricter, towards `not_assessed` or `not_met` |
+| D23 | GMAIL.14.1 gates on the top unit's Gmail status | the rule applies when Gmail is on in any unit | an enabled unit is in scope |
+
+The DRIVEDOCS.1.8 default is copied, not diverged: ScubaGoggles' pinned default is Google's documented default, and a
+tenant on it fails the baseline.
+
+**Reports.** A Google assessment's rows reach reports and customer packs as M365 rows do, through `policy_explanations`
+(see "Explainer"). The Markdown and HTML section is titled "CISA SCuBA Google Workspace (ScubaGoggles v1.1.0)"; an
+assessment of part of the catalogue adds "Partial: the rules assessed N of the 138 SCuBA Google Workspace checks in
+the shipped catalogue; the other M are not in this report." The heading is chosen from the validated baseline before
+redaction and is not part of the JSON report, so the JSON row contract and the Microsoft 365 output are unchanged. The
+same admission rule as the local answer applies: the assessment must be the run's and match its platform's
+baseline, and a Google row citing a section its projection withheld is shown as `not_assessed`, required evidence not
+collected. Exporters, compare, drift and the gates never read `model_assessment.json`.
+
 ## MCP contract surface
 
 External assessment review is a separate local contract. Normalized imports
@@ -1879,6 +2024,15 @@ and match its run id before adding `policy_explanations`, containing only
 unreadable or unredactable assessment, or when no row has an explainer.
 JSON includes the structured section; Markdown and HTML show what each policy
 means and numbered actions. CSV, SARIF and OSCAL do not include the section.
+
+Google Workspace rows (`GWS.*`) are explained from `configs/explainer-gws-template.json`, which
+`scripts/generate-gws-explainer.py` generates from the GWS catalogue (each kind's cells and their fixed steps) and
+each policy's baseline text; `--check` fails on drift. `explain()` dispatches by the policy id prefix. A Google
+explanation is the policy's baseline text followed by the row's fixed reason text. A `not_met` or `not_assessed` row
+has one step, the cell's fixed step; a `met` or `not_applicable` row has none and carries that text as a sentence
+instead. It cites `e0`, then the sections the row cites in catalogue order, never reads an evidence value and keeps
+the 80-word and three-sentence limits. The Microsoft 365 template, `configs/explainer-baselines.json` and their
+parsers are unchanged.
 
 A1 (5 November 2026, 11:25 GMT) governs these shared reasons, dispatched before
 cell lookup. Neither adds a decision cell to the 1,084-cell v3.9.1 inventory:

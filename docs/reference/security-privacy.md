@@ -138,6 +138,16 @@ The Google Cloud Identity Policy API read uses the existing `cloud-identity.poli
 
 The read-only `cloud-identity.inboundsso.readonly` scope can read inbound SAML and OIDC profiles, their assignments and SAML public-key metadata. Auditex lists assignments and keeps only their OU or group target and mode. With domain-wide delegation the collector uses its own token, so a missing grant affects only the inbound SSO read.
 
+The SCuBA setting-change read (`google_setting_events`) uses the existing `admin.reports.audit.readonly` scope. It
+asks the Admin Reports API for each pinned admin event name separately and requests only the activity time, the
+event names and their parameters, so the actor and the IP address are never returned. The collector keeps only the
+`SETTING_NAME`, `NEW_VALUE`, `ORG_UNIT_NAME`, `GROUP_EMAIL` and `APPLICATION_NAME` parameters; `OLD_VALUE` and every
+other parameter are dropped before `raw/`. A value outside the pinned values of an audited setting is kept as
+`unrecognised`, and an application name outside a fixed list is not kept. Each event stream stops at 20,000
+activities, and a cut read is incomplete. The inbound SSO read requests only `targetOrgUnit`, `targetGroup` and
+`ssoMode`, so profile names, certificates and resource names are never returned. Without the inbound SSO grant only
+COMMONCONTROLS.6.1 loses its evidence and answers `not_assessed`.
+
 MCP tools with `read_only_hint` false (a test compares this list with the registry).
 None of them writes to a tenant; the hint is false because they write local files,
 or, for the response tool, because it is a gated response action:
@@ -924,7 +934,11 @@ not match those of 1.5.0; they stay confirmable by a holder who knows the path.
 The Google Workspace assessment keeps the value-rule projection in memory. Its file
 stores policy answers and projection metadata, including section status, reason and
 source artefact names. Projected DNS record text and reporting addresses stay out of
-the assessment and the reports, exports and customer packs derived from its answers.
+the assessment and the reports, exports and customer packs derived from its answers. Users,
+groups, organisational units and domains enter the projection only as pseudonyms under
+the run key, so they are stable within a run and cannot be linked across runs. A row
+carries the policy answer with a fixed reason text and never names a unit, user, group
+or domain.
 
 Key sources:
 
