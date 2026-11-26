@@ -625,3 +625,73 @@ def test_b4_unrelated_id_shaped_org_unit_paths_stay_distinct(tmp_path: Path) -> 
     assert event["org_unit"] == "finance-ou"
     assert events[-1]["complete"] is True
     assert _files_holding(run, "C0learn987") == []
+
+
+# A customer id quoted only inside failure text, in a form no URL parameter or id field names, is never learned.
+# The text masks anything shaped like a customer id (PRIV-CUSTOMER-ID-fix).
+_UNLEARNED_FAILURES = {
+    "compound": ('<HttpError 404 returned "Customer customer_C0ghost421_lookup was not found">', "C0ghost421"),
+    "free_text": ("Access denied: tenant C0freeform7 is not licensed for this API", "C0freeform7"),
+    "json_escaped_url": (
+        '{"error": "https:\\/\\/admin.googleapis.com\\/v1\\/customers\\/C0escaped55\\/users?customerId\\u003dC0escaped55'
+        '\\u0026alt=json"}',
+        "C0escaped55",
+    ),
+}
+
+
+@pytest.mark.parametrize("form", sorted(_UNLEARNED_FAILURES))
+def test_unrecognised_customer_id_in_failure_text_is_withheld_everywhere(form: str, tmp_path: Path, capsys) -> None:
+    text, needle = _UNLEARNED_FAILURES[form]
+    sample = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    sample["google_alert_center"]["alerts"] = {"value": [], "error_class": "resource_not_found", "error": text}
+    path = _write_sample(tmp_path / "sample.json", sample)
+
+    assert _replay(tmp_path / "out", "unlearned", customer_id="my_customer", sample=path) == 1
+
+    run_dir = tmp_path / "out" / "Example-unlearned"
+    exports = _shareable_exports(run_dir, tmp_path / "exports")
+    printed = capsys.readouterr()
+    assert needle not in printed.out + printed.err
+    assert _files_holding(run_dir, needle) == []
+    assert _files_holding(exports, needle) == []
+    assert "<customer-id>" in (run_dir / "blockers" / "blockers.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("form", sorted(_UNLEARNED_FAILURES))
+def test_unrecognised_customer_id_in_live_classifier_and_probe_text_is_withheld(
+    form: str, tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    from auditex.google_workspace import run as google_run
+    from auditex.google_workspace.client import classify_google_error
+
+    text, needle = _UNLEARNED_FAILURES[form]
+    assert needle not in classify_google_error(RuntimeError(text))[1]
+
+    def preflight(*_args, **_kwargs):
+        return [{
+            "collector": "google_directory", "name": "users", "status": "failed", "item_count": 0,
+            "error_class": "resource_not_found", "error": text,
+        }]
+
+    monkeypatch.setattr(google_run, "google_dependency_status", lambda: {"available": True, "missing": [], "install_hint": ""})
+    monkeypatch.setattr(google_run, "build_google_credentials", lambda _config: object())
+    monkeypatch.setattr(google_run, "build_google_preflight_rows", preflight)
+    assert auditex_cli.main([
+        "google", "probe", "--customer-id", "my_customer", "--collectors", "google_directory",
+        "--domain", "example.com", "--subject", "admin@example.com", "--out", str(tmp_path),
+        "--tenant-name", "Example", "--run-name", "unlearned",
+    ]) == 1
+    printed = capsys.readouterr()
+    assert needle not in printed.out + printed.err
+    assert _files_holding(tmp_path / "Example-unlearned", needle) == []
+
+
+def test_customer_id_shaped_tokens_outside_failure_text_are_kept() -> None:
+    from auditex.google_workspace.customer_id import CustomerIds
+
+    ids = CustomerIds()
+    path = {"orgUnitPath": "/Teams/C0finance1", "error": "no access to C0finance1"}
+    assert ids.scrub_legacy_output(path) == path  # nothing learned: untouched
+    ids.add("C0other999")
+    assert ids.scrub(path) == {"orgUnitPath": "/Teams/C0finance1", "error": "no access to <customer-id>"}

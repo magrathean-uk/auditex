@@ -21,6 +21,12 @@ _REQUEST_CUSTOMER = re.compile(
     r"(?:[?&]customer(?:Id)?=|/customers?/|customers?%2F)([A-Za-z0-9_%+-]+)", re.IGNORECASE,
 )
 _MISSING_CUSTOMER = re.compile(r"(?i:\bcustomer\s+)(C[0-9][A-Za-z0-9_-]*)(?=\s+was not found\b)")
+# A Google customer id is "C" and a digit, then 6 to 10 letters or digits (real ones are 9 characters, "C03az79cb"). In
+# failure text one may be quoted in any wording, so it is also masked by shape. The id may follow a URL (%3D) or JSON
+# (=) escape, or an underscore of a compound token such as customer_<id>_lookup.
+_CUSTOMER_ID_SHAPE = re.compile(
+    r"(?:(?<![A-Za-z0-9])|(?<=%[0-9A-Fa-f]{2})|(?<=\\u[0-9A-Fa-f]{4})|(?<=\\[nrt]))C[0-9][A-Za-z0-9]{6,10}(?![A-Za-z0-9])"
+)
 _ENCODED_CUSTOMER_FILTER = re.compile(r"customer%3D(?:%3D)?%22customers%2F[A-Za-z0-9_%+-]+", re.IGNORECASE)
 
 
@@ -71,6 +77,14 @@ class CustomerIds:
         text = _URL.sub(lambda url: _REQUEST_CUSTOMER.sub(mask, url[0]), text)
         return _ENCODED_CUSTOMER_FILTER.sub(lambda query: _REQUEST_CUSTOMER.sub(mask, query[0]), text)
 
+    def failure_text(self, text: str, *, learn: bool = True) -> str:
+        """API failure text with every learned id and every customer-id-shaped token withheld."""
+        if learn:
+            text = self.learn_error(text)
+        else:
+            text = self._request_text(text, learn=False)
+        return _CUSTOMER_ID_SHAPE.sub(WITHHELD, self.text(text))
+
     def learn_error(self, text: str) -> str:
         for match in _MISSING_CUSTOMER.finditer(text):
             self.add(match[1])
@@ -92,16 +106,16 @@ class CustomerIds:
             self.learn_error(value)
 
     def scrub(self, value: Any) -> Any:
-        return self._scrub(value, error=True)[0]
+        return self._scrub(value, error=True, failure=False)[0]
 
     def scrub_legacy_output(self, value: Any) -> Any:
         return self.scrub(value) if self.values else value
 
     def evidence(self, value: Any) -> tuple[Any, bool]:
         """Return scrubbed evidence and whether a field used as evidence could have changed."""
-        return self._scrub(value, error=False)
+        return self._scrub(value, error=False, failure=False)
 
-    def _scrub(self, value: Any, *, error: bool) -> tuple[Any, bool]:
+    def _scrub(self, value: Any, *, error: bool, failure: bool) -> tuple[Any, bool]:
         if isinstance(value, dict):
             out: dict[Any, Any] = {}
             changed = False
@@ -116,16 +130,21 @@ class CustomerIds:
                     safe_member = self.text(member)
                     member_changed = False
                 else:
-                    safe_member, member_changed = self._scrub(member, error=error or norm in _ERROR_KEYS)
+                    safe_member, member_changed = self._scrub(
+                        member, error=error or norm in _ERROR_KEYS, failure=failure or norm in _ERROR_KEYS,
+                    )
                 out[safe_key] = safe_member
                 changed |= member_changed or (not error and safe_key != key)
             return out, changed
         if isinstance(value, (list, tuple)):
-            members = [self._scrub(member, error=error) for member in value]
+            members = [self._scrub(member, error=error, failure=failure) for member in value]
             safe_list = [member for member, _ in members]
             return (tuple(safe_list) if isinstance(value, tuple) else safe_list), any(changed for _, changed in members)
         if isinstance(value, str):
-            safe = self.text(self._request_text(value, learn=False) if "://" in value or "%2" in value else value)
+            if failure:
+                safe = self.failure_text(value, learn=False)
+            else:
+                safe = self.text(self._request_text(value, learn=False) if "://" in value or "%2" in value else value)
             return safe, not error and safe != value
         return value, False
 
@@ -165,7 +184,7 @@ def learn_response_customer_ids(response: Any) -> None:
 def withhold_request_customer_ids(text: str, details: Any = None) -> str:
     ids = _active_ids.get() or CustomerIds()
     ids.learn(details, error=True)
-    return ids.text(ids.learn_error(text))
+    return ids.failure_text(text)
 
 
 def legacy_google_customer_ids(manifest: Mapping[str, Any]) -> CustomerIds:

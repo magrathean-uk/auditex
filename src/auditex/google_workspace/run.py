@@ -950,7 +950,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     try:
         credentials = build_google_credentials(auth_config)
     except (RuntimeError, ValueError, OSError) as exc:
-        message = ids.text(ids.learn_error(str(exc)))
+        message = ids.failure_text(str(exc))
         print(json.dumps({"error": "google_auth_failed", "message": message}, indent=2), file=sys.stderr)
         return 2
     client = GoogleWorkspaceClient(
