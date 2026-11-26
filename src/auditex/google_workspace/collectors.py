@@ -56,12 +56,14 @@ from azure_tenant_audit.value_rules.gws.events import _categories, _time
 
 from .auth import INBOUND_SSO_SCOPE, POLICIES_SCOPE
 from .client import (
+    GMAIL_NOT_APPLICABLE_REASON,
     POLICY_MALFORMED_ERROR_CLASS,
     SCUBA_ADMIN_EVENTS,
     CollectedRows,
     PolicyReadError,
     classify_google_error,
     classify_page_error,
+    gmail_mail_service_not_enabled,
     gmail_settings_status,
     minimise_gmail_settings,
     policy_malformed_error,
@@ -562,23 +564,26 @@ class GoogleGmailSettingsCollector:
                 rows.append(settings)
                 # The client keeps each failed settings read as ``<name>_error``: all failing fails the mailbox.
                 status, error_class, error = gmail_settings_status(settings)
+                not_applicable = gmail_mail_service_not_enabled(settings)
             except Exception as exc:  # noqa: BLE001
-                status = "failed"
+                status, not_applicable = "failed", False
                 error_class, error = classify_google_error(exc)
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
-            coverage.append(
-                _coverage(
-                    self.name,
-                    f"mailboxSettings:{user_email}",
-                    status=status,
-                    item_count=0 if status == "failed" else 1,
-                    duration_ms=duration_ms,
-                    endpoint="gmail.users.settings",
-                    error_class=error_class,
-                    error=error,
-                    subject_scoped=subject_scope,
-                )
+            row = _coverage(
+                self.name,
+                f"mailboxSettings:{user_email}",
+                status=status,
+                item_count=0 if status == "failed" or not_applicable else 1,
+                duration_ms=duration_ms,
+                endpoint="gmail.users.settings",
+                error_class=error_class,
+                error=error,
+                subject_scoped=subject_scope,
             )
+            if not_applicable:
+                # The user has no Gmail service: no mailbox to read, which is not a failed read.
+                row["not_applicable"] = GMAIL_NOT_APPLICABLE_REASON
+            coverage.append(row)
         partial = any(row.get("status") != "ok" for row in coverage)
         return CollectorResult(self.name, "partial" if partial else "ok", {"mailboxSettings": {"value": rows}}, len(rows), coverage=coverage)
 
@@ -648,8 +653,8 @@ POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 # | policyQuery                 | query_object_invalid| same              | -                                          |
 # | policyQuery.orgUnit, group  | fine (one required: target_missing) | org_unit_invalid / group_invalid | not ``orgUnits/<id>`` / ``groups/<id>`` or a system group id |
 # | policyQuery.sortOrder       | fine (proto3 0)     | sort_order_invalid| NaN, infinite or outside the double range  |
-# | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL that the targets cannot represent is unsupported scope (collector partial, normaliser unusable scope) |
-# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets``, ``licences`` or ``other``              |
+# | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL beyond targets and licence clauses is unsupported scope (collector partial, normaliser unusable scope); a licence-only clause off the top unit is an unusable scope in the normaliser |
+# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets``, ``licences``, ``licences_wide`` or ``other`` |
 # | 2SV enforcedFrom            | fine (not enforced) | two_step_value_invalid | blank or not an RFC 3339 timestamp    |
 # | 2SV allowEnrollment         | fine                | two_step_value_invalid | not a Boolean                         |
 # | 2SV allowedSignInFactorSet  | fine                | two_step_value_invalid | not a documented enum member           |
@@ -748,11 +753,14 @@ def policy_row_readable(policy: Any) -> bool:
 
 
 def policy_scope_unrepresentable(policy: Any) -> bool:
-    """Whether a readable policy's CEL query holds a scope its targets cannot show (another unit or group, an
-    exception or any other condition): its setting for that unit is unknown, so the read is not complete."""
+    """Whether a readable policy's CEL query holds a scope its targets cannot show (another unit or group, or any
+    condition beyond Google's licence clauses): its setting for that unit is unknown, so the read is not complete.
+    Licence clauses narrow a policy to the licence holders of its unit and leave it that unit's setting, as
+    ScubaGoggles reads it; whether a licence-only clause (``licences_wide``) stands is the normaliser's call, since
+    only the Directory tree tells whether its unit is the top unit."""
     if not isinstance(policy, dict) or not isinstance(policy.get("policyQuery"), dict):
         return False
-    return not policy_is_unrecognised(policy) and policy_query_classification(policy["policyQuery"]) in ("licences", "other")
+    return not policy_is_unrecognised(policy) and policy_query_classification(policy["policyQuery"]) == "other"
 
 
 def _scope_policy_error(count: int, total: int) -> str:

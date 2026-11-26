@@ -160,7 +160,7 @@ def _policy_vocabulary() -> tuple[tuple[str, ...], tuple[str, ...], frozenset[st
         ("addressList", "blockedAddressList"),
         ("ADMIN", "SYSTEM", "POLICY_TYPE_UNSPECIFIED"),
         frozenset({"WORKSPACE_ALL_ADMIN_GROUP", "UNCONSENTED_CHILD_GROUP"}),
-        ("targets", "licences", "other", "unreadable"),
+        ("targets", "licences", "licences_wide", "other", "unreadable"),
     )
 
 
@@ -402,12 +402,13 @@ def policy_target(value: Any, prefix: str) -> str | None | Literal[False]:
 
 
 # The CEL terms a policy query may hold and still be represented by its ``orgUnit`` and ``group`` fields alone. The
-# captured id must be a sound id and must name the same unit or group as the field.
+# captured id must be a sound id and must name the same unit or group as the field. Google writes the id bare or,
+# for some settings (``provisioning.*``), with its resource prefix (``orgUnitId('orgUnits/<id>')``).
 _QUERY_ORG_UNIT_TERM = re.compile(
-    r"entity\.org_units\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.org_unit_id\s*==\s*orgUnitId\(\s*'([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
+    r"entity\.org_units\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.org_unit_id\s*==\s*orgUnitId\(\s*'(?:orgUnits/)?([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
 )
 _QUERY_GROUP_TERM = re.compile(
-    r"entity\.groups\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.group_id\s*==\s*groupId\(\s*'([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
+    r"entity\.groups\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.group_id\s*==\s*groupId\(\s*'(?:groups/)?([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
 )
 _LICENCE_SKU = r"(?:/product/[A-Za-z0-9-]+/sku/[A-Za-z0-9-]+|CHROMEBOOK-SOFTWARE|GOOGLE-IDENTITY)"
 _LICENCE_TERM = re.compile(
@@ -416,23 +417,13 @@ _LICENCE_TERM = re.compile(
 )
 
 
-def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
-    """What a policy's CEL ``query`` says about its scope, against its raw ``orgUnit`` and ``group`` fields.
-
-    ``targets``: a conjunction (``&&``) of at most one org-unit membership term naming the ``orgUnit`` field's unit
-    and at most one group membership term naming the ``group`` field's group, with the group term present exactly
-    when the field is. ``licences``: matching targets with Google's include/exclude SKU clauses. The evidence is
-    conditional. ``other``: any scope beyond these forms or inconsistent with the helpers.
-    ``unreadable``: not a string of bounded length.
-    Only this word is kept; the query text never leaves the minimiser.
-    """
-    if not isinstance(query, str) or len(query) > POLICY_QUERY_MAX:
-        return "unreadable"
-    org_id, group_id = policy_target(org_unit, "orgUnits/"), policy_target(group, "groups/")
+def _query_conjunction(conjunction: str) -> tuple[list[str], list[str], set[bool]] | None:
+    """The org-unit ids, group ids and licence polarities of one ``&&`` conjunction; None for any other term or for
+    two licence clauses of the same polarity."""
     org_ids: list[str] = []
     group_ids: list[str] = []
     licence_polarities: set[bool] = set()
-    for term in query.split("&&"):
+    for term in conjunction.split("&&"):
         term = term.strip()
         while term.startswith("(") and term.endswith(")") and _QUERY_ORG_UNIT_TERM.fullmatch(term) is None:
             term = term[1:-1].strip()
@@ -443,17 +434,50 @@ def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
         elif licence := _LICENCE_TERM.fullmatch(term):
             negated = licence.group(1) is not None
             if negated in licence_polarities:
-                return "other"
+                return None
             licence_polarities.add(negated)
         else:
+            return None
+    return org_ids, group_ids, licence_polarities
+
+
+def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
+    """What a policy's CEL ``query`` says about its scope, against its raw ``orgUnit`` and ``group`` fields.
+
+    The query is read as a disjunction (``||``) of conjunctions (``&&``, which binds tighter in CEL) of org-unit
+    membership, group membership and Google's include/exclude licence SKU clauses (at most one of each polarity).
+
+    ``targets``: one conjunction of at most one org-unit term naming the ``orgUnit`` field's unit and a group term
+    present exactly when the ``group`` field is, naming that group. ``licences``: the same targets in every
+    conjunction, with licence clauses: the policy holds the unit's setting for the users holding (or not holding)
+    those licences. ``licences_wide``: as ``licences``, except that some conjunction holds licence clauses alone (no
+    org-unit or group term) while the policy names an org unit and no group, so that conjunction is not bounded to
+    the unit; only the top unit, which every user is under, can stand for it. ``other``: any scope beyond these
+    forms or inconsistent with the fields. ``unreadable``: not a string of bounded length.
+    Only this word is kept; the query text never leaves the minimiser.
+    """
+    if not isinstance(query, str) or len(query) > POLICY_QUERY_MAX:
+        return "unreadable"
+    org_id, group_id = policy_target(org_unit, "orgUnits/"), policy_target(group, "groups/")
+    conjunctions = [_query_conjunction(part) for part in query.split("||")]
+    if any(parts is None for parts in conjunctions):
+        return "other"
+    licensed = wide = False
+    for org_ids, group_ids, licence_polarities in conjunctions:  # type: ignore[misc]
+        if len(org_ids) > 1 or (org_ids and org_ids[0] != org_id):
             return "other"
-    if len(org_ids) > 1 or (org_ids and org_ids[0] != org_id):
+        if not org_ids and not group_ids and licence_polarities and isinstance(org_id, str) and not isinstance(group_id, str):
+            wide = True  # licence clauses alone: not bounded to the policy's unit
+        elif group_ids != ([group_id] if isinstance(group_id, str) else []):
+            return "other"
+        elif not org_ids and not group_ids:
+            return "other"
+        licensed = licensed or bool(licence_polarities)
+    if len(conjunctions) > 1 and not licensed:
         return "other"
-    if group_ids != ([group_id] if isinstance(group_id, str) else []):
-        return "other"
-    if not org_ids and not group_ids and not licence_polarities:
-        return "other"
-    return "licences" if licence_polarities else "targets"
+    if wide:
+        return "licences_wide"
+    return "licences" if licensed else "targets"
 
 
 def _minimise_target(value: Any, prefix: str) -> Any:

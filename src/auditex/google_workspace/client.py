@@ -162,11 +162,36 @@ GMAIL_SETTING_NAMES: tuple[str, ...] = (
 )
 
 
+# A user with no Gmail service (no Gmail licence, or Gmail off for the user) answers every settings read with HTTP 400
+# ``failedPrecondition`` "Mail service not enabled". That mailbox does not exist: it is recorded as not applicable.
+GMAIL_SERVICE_NOT_ENABLED = "not_enabled"
+GMAIL_NOT_APPLICABLE_REASON = "mail_service_not_enabled"
+_GMAIL_NOT_ENABLED_TEXT = "Mail service not enabled"
+
+
+def gmail_mail_service_not_enabled(payload: Any) -> bool:
+    """Whether a mailbox row is exactly the not-applicable marker: ``userEmail`` and ``mailService: not_enabled``."""
+    return (isinstance(payload, dict) and set(payload) == {"userEmail", "mailService"}
+            and payload["mailService"] == GMAIL_SERVICE_NOT_ENABLED)
+
+
+def _gmail_not_enabled_error(exc: Exception) -> bool:
+    """HTTP 400 ``failedPrecondition`` with Google's "Mail service not enabled" text; any other error is a failure."""
+    status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
+    return status == 400 and "failedPrecondition" in _error_reasons(exc) and _GMAIL_NOT_ENABLED_TEXT in str(exc)
+
+
 def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str | None]:
     """Status, dominant error class and error of one mailbox's settings read.
 
-    Every settings read failing is ``failed``; some failing is ``partial``; none failing is ``ok``.
+    Every settings read failing is ``failed``; some failing is ``partial``; none failing is ``ok``. A mailbox whose
+    user has no Gmail service (:func:`gmail_mail_service_not_enabled`) is ``ok``: there is nothing to read. A
+    ``mailService`` key in any other shape is an unreadable row, never a mailbox without Gmail.
     """
+    if gmail_mail_service_not_enabled(payload):
+        return "ok", None, None
+    if "mailService" in payload:
+        return "failed", "malformed_response", "The Gmail settings row carries an unreadable mail service marker."
     skipped = set(payload.get("skippedSettings") or ())
     attempted = [name for name in GMAIL_SETTING_NAMES if name not in skipped]
     failures = {
@@ -771,7 +796,14 @@ class GoogleWorkspaceClient:
                 error_class, error = classify_google_error(exc)
                 payload[f"{name}_error"] = {"error_class": error_class, "error": error}
 
-        _capture("autoForwarding", lambda: settings.getAutoForwarding(userId=user_email).execute(), default={})
+        try:
+            payload["autoForwarding"] = _execute(lambda: settings.getAutoForwarding(userId=user_email).execute())
+        except Exception as exc:  # noqa: BLE001
+            if _gmail_not_enabled_error(exc):
+                # No Gmail service for this user: no mailbox to read, so no further settings call is made.
+                return {"userEmail": user_email, "mailService": GMAIL_SERVICE_NOT_ENABLED}
+            error_class, error = classify_google_error(exc)
+            payload["autoForwarding_error"] = {"error_class": error_class, "error": error}
         _capture("filters", lambda: settings.filters().list(userId=user_email, fields=GMAIL_FILTERS_FIELDS).execute(), list_key="filter", default=[])
         _capture(
             "forwardingAddresses",

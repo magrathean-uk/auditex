@@ -1829,3 +1829,76 @@ def test_a_failed_resolver_configuration_withholds_apparently_readable_txt(bundl
     projection = project_gws_run(bundle)
     assert projection["gws_dns"]["complete"] is False
     assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "not_assessed"
+
+
+# LIVE-FIX-1: one admin action that creates several settings is logged as several events at the same instant. Once
+# minimised (a setting outside the vocabulary becomes ``unrecognised``, no unit) they share one identity; the join
+# must count them, not refuse them.
+
+def same_instant_creates(count: int) -> list[dict]:
+    return [event("2026-10-03T10:00:00Z", "CREATE_APPLICATION_SETTING", setting="unrecognised")
+            for _ in range(count)]
+
+
+def test_repeated_identical_events_keep_the_event_read_complete(bundle: Path) -> None:
+    recorded_events(bundle, [*same_instant_creates(4), state("google_setting_events", 4, **WINDOW)])
+    section = project_gws_run(bundle)["gws_setting_events"]
+    assert section["complete"] is True
+    assert len(section["events"]) == 4
+
+
+def test_repeats_must_match_the_raw_read_one_for_one(bundle: Path) -> None:
+    other = event("2026-10-04T10:00:00Z", "CREATE_APPLICATION_SETTING", setting="unrecognised")
+    recorded_events(bundle, [*same_instant_creates(3), other, state("google_setting_events", 4, **WINDOW)])
+    # The normalised side now says the other way round: one repeat, three of the other. Same set, same length.
+    normalised(bundle, "google_setting_events", [*same_instant_creates(1), other, other, other,
+                                                  state("google_setting_events", 4, **WINDOW)])
+    assert project_gws_run(bundle)["gws_setting_events"]["complete"] is False
+
+
+# LIVE-FIX-1: Google writes its own defaults as SYSTEM policies narrowed by licence SKU clauses. ScubaGoggles never
+# reads the query: each is its unit's setting, ranked by sortOrder. Shapes as the live Policy API returned them.
+
+ROOT_TERM = "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root01'))"
+SKU_A = "entity.licenses.exists(license, license in ['/product/Google-Apps/sku/9990000001'])"
+SKU_B = "entity.licenses.exists(license, license in ['GOOGLE-IDENTITY'])"
+
+
+def licensed(setting: str, value: dict, order: float, query: str, kind: str = "SYSTEM") -> dict:
+    row = _policy(setting, value)
+    row["policyQuery"].update(sortOrder=order, query=query)
+    row["type"] = kind
+    return row
+
+
+RECOVERY = "security.super_admin_account_recovery"
+
+
+@pytest.mark.parametrize("top,expected", [(False, ("met", "no_unit_violates")), (True, ("not_met", "unit_violates"))])
+def test_a_licence_scoped_default_is_ranked_as_its_unit_setting(tmp_path: Path, top, expected) -> None:
+    run = replay(tmp_path, [
+        ENROLLED,
+        licensed(RECOVERY, {"enableAccountRecovery": top}, 100.00005, f"{ROOT_TERM} && {SKU_A}"),
+        licensed(RECOVERY, {"enableAccountRecovery": not top}, 100.00001, ROOT_TERM),
+    ])
+    state = [row for row in rows(run, "google_policy_settings") if row["id"] == "read_state"][0]
+    assert (state["complete"], state["unusable_scopes"]) == (True, [])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == expected
+
+
+def test_a_licence_only_disjunct_stands_on_the_top_unit(tmp_path: Path) -> None:
+    wide = f"{ROOT_TERM} && !{SKU_A} || {SKU_B} && !{SKU_A}"
+    run = replay(tmp_path, [ENROLLED, licensed(RECOVERY, {"enableAccountRecovery": True}, 100.00003, wide)])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_met", "unit_violates")
+
+
+def test_an_admin_value_ranked_below_a_licence_scoped_policy_is_unknown(tmp_path: Path) -> None:
+    run = replay(tmp_path, [
+        ENROLLED,
+        licensed(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && {SKU_A}"),
+        licensed(RECOVERY, {"enableAccountRecovery": True}, 201, ROOT_TERM, kind="ADMIN"),
+    ])
+    state = [row for row in rows(run, "google_policy_settings") if row["id"] == "read_state"][0]
+    assert state["complete"] is False
+    assert [scope["section"] for scope in state["unusable_scopes"]] == ["security_super_admin_account_recovery"]
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")

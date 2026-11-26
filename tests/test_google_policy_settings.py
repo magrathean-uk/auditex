@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from auditex.google_workspace import client as client_module
 from auditex.google_workspace.client import GoogleWorkspaceClient
 from auditex.google_workspace.collectors import (
@@ -1804,6 +1806,7 @@ def test_m13_followup_n4_all_nine_takeout_types_are_requested_and_projected() ->
 
 
 def test_structural_b4_licence_qualifier_does_not_suppress_readable_2sv() -> None:
+    # LIVE-FIX-1: a licence clause narrows the policy to the unit's licence holders; it stays the unit's setting.
     gmail = _policy_setting(
         "gmail.confidential_mode", {"enableConfidentialMode": True},
         query="entity.org_units.exists(o, o.org_unit_id == orgUnitId('root')) && "
@@ -1811,12 +1814,13 @@ def test_structural_b4_licence_qualifier_does_not_suppress_readable_2sv() -> Non
     )
     rows = [_two_step("orgUnits/root", {}), _two_step("orgUnits/sales", _ENFORCED), gmail]
     result, _service = _collect([{"policies": rows}])
+    assert result.status == "ok"
     normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
     assert normalized["snapshot"]["two_step_policy_status"] == "partial"
     assert any(f["rule_id"] == "google.org_2sv_policy_not_enforced" for f in build_google_findings(normalized))
     state = _read_state(normalized)
-    assert state["complete"] is False
-    assert state["unusable_scopes"] == [{"section": "gmail_confidential_mode", "org_unit": "root", "group": None}]
+    assert (state["complete"], state["unusable_scopes"]) == (True, [])
+    assert ("gmail_confidential_mode", "org_unit", "root", None, 1, {"enableConfidentialMode": True}) in _policy_records(normalized)
 
 
 def test_structural_b5_nanosecond_after_as_of_is_scheduled(tmp_path: Path) -> None:
@@ -1871,7 +1875,7 @@ def test_policy_allow_list_marks_unreadable_typed_fields_partial() -> None:
         assert (state["record_count"], state["malformed_count"], state["complete"]) == (0, 1, False), section
 
 
-def test_licence_inclusion_and_exclusion_are_conditional_on_replay(tmp_path: Path) -> None:
+def test_licence_inclusion_and_exclusion_stand_as_the_unit_setting_on_replay(tmp_path: Path) -> None:
     gmail = _policy_setting(
         "gmail.confidential_mode", {"enableConfidentialMode": True},
         query="entity.org_units.exists(o, o.org_unit_id == orgUnitId('root')) && "
@@ -1881,7 +1885,7 @@ def test_licence_inclusion_and_exclusion_are_conditional_on_replay(tmp_path: Pat
     result, _ = _collect([{"policies": [_two_step(), _two_step("orgUnits/sales", _ENFORCED), gmail]}])
     assert result.payload["policySettings"]["value"][2]["policyQuery"]["query_scope"] == "licences"
     rc, run_dir = _replay(tmp_path, result.payload)
-    assert (rc, _bundle_two_step_status(run_dir)) == (1, "partial")
+    assert (rc, _bundle_two_step_status(run_dir)) == (0, "partial")
     for sku in ("1010020020", "GOOGLE-IDENTITY", "1010060005"):
         assert sku not in _bundle_text(run_dir)
 
@@ -1942,3 +1946,104 @@ def test_l03b_a_present_but_malformed_org_unit_read_fails_the_replay(tmp_path: P
         assert manifest["overall_status"] == "partial", orgunits
         assert [row["status"] for row in summary["collectors"] if row["name"] == "google_directory"] == ["partial"], orgunits
         assert _bundle_two_step_status(run_dir) == "unknown", orgunits
+
+
+# ---- LIVE-FIX-1: Google's licence-scoped policies, as the live Policy API returned them ------------------------------
+
+_OU = "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root'))"
+_SKU_A = "entity.licenses.exists(license, license in ['/product/Google-Apps/sku/9990000001'])"
+_SKU_AB = "entity.licenses.exists(license, license in ['/product/Google-Apps/sku/9990000001','GOOGLE-IDENTITY'])"
+_SKU_B = "entity.licenses.exists(license, license in ['GOOGLE-IDENTITY'])"
+
+
+@pytest.mark.parametrize("query,fields,expected", [
+    (f"{_OU} && {_SKU_A}", {"orgUnit": "orgUnits/root"}, "licences"),
+    (f"{_OU} && !{_SKU_A}", {"orgUnit": "orgUnits/root"}, "licences"),
+    (f"{_OU} && {_SKU_B} && !{_SKU_A}", {"orgUnit": "orgUnits/root"}, "licences"),
+    (f"{_OU} && {_SKU_A} || {_OU} && !{_SKU_B}", {"orgUnit": "orgUnits/root"}, "licences"),
+    (f"{_OU} && !{_SKU_AB} || {_SKU_A} && !{_SKU_B}", {"orgUnit": "orgUnits/root"}, "licences_wide"),
+    (_SKU_A, {"orgUnit": "orgUnits/root"}, "licences_wide"),
+    (_SKU_A, {"orgUnit": "orgUnits/root", "group": "groups/g1"}, "other"),
+    (_SKU_A, {"group": "groups/g1"}, "other"),
+    (f"{_OU} || {_OU}", {"orgUnit": "orgUnits/root"}, "other"),
+    (f"{_OU} && {_SKU_A} || ", {"orgUnit": "orgUnits/root"}, "other"),
+    (f"{_OU} && {_SKU_A} || entity.licenses.exists(l, l.sku == 'x')", {"orgUnit": "orgUnits/root"}, "other"),
+    (f"{_OU} && {_SKU_A} && {_SKU_B}", {"orgUnit": "orgUnits/root"}, "other"),
+    (f"{_OU} && {_SKU_A}", {"orgUnit": "orgUnits/sales"}, "other"),
+    ("entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('orgUnits/root'))", {"orgUnit": "orgUnits/root"}, "targets"),
+    ("entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('orgUnits/sales'))", {"orgUnit": "orgUnits/root"}, "other"),
+    ("entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('groups/root'))", {"orgUnit": "orgUnits/root"}, "other"),
+    (f"{_OU} && entity.groups.exists(g, g.group_id == groupId('groups/g1'))", {"orgUnit": "orgUnits/root", "group": "groups/g1"}, "targets"),
+])
+def test_live_fix_1_query_scope_words(query: str, fields: dict[str, Any], expected: str) -> None:
+    from azure_tenant_audit.data_minimisation import policy_query_scope
+
+    assert policy_query_scope(query, fields.get("orgUnit"), fields.get("group")) == expected
+
+
+def _licensed(section: str, value: dict[str, Any], order: Any, query: str, kind: str | None = "SYSTEM",
+              org_unit: str = "orgUnits/root") -> dict[str, Any]:
+    row = _policy_setting(section, value, query=query, orgUnit=org_unit, sortOrder=order)
+    if kind is None:
+        row.pop("type")
+    else:
+        row["type"] = kind
+    return row
+
+
+def _licence_read(*rows: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    result, _ = _collect([{"policies": [_two_step(), *rows]}])
+    return result, _read_state(_normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY))
+
+
+def test_live_fix_1_system_defaults_per_licence_are_ranked_as_the_unit_setting() -> None:
+    result, state = _licence_read(
+        _licensed("gmail.links_and_external_images", {"enableShortenerScanning": True}, 100.00009, f"{_OU} && {_SKU_A}"),
+        _licensed("gmail.links_and_external_images", {"enableShortenerScanning": False}, 100.00001, _OU),
+        _licensed("security.session_controls", {"webSessionDuration": "1209600s"}, 100.00003,
+                  f"{_OU} && !{_SKU_AB} || {_SKU_A} && !{_SKU_B}"),
+    )
+    assert (result.status, state["complete"], state["unusable_scopes"], state["record_count"]) == ("ok", True, [], 4)
+
+
+def test_live_fix_1_a_licence_only_disjunct_off_the_top_unit_is_unknown_for_that_unit() -> None:
+    result, state = _licence_read(
+        _licensed("security.session_controls", {"webSessionDuration": "1209600s"}, 100.00003,
+                  "entity.org_units.exists(o, o.org_unit_id == orgUnitId('sales')) && !" + _SKU_A + " || " + _SKU_B,
+                  org_unit="orgUnits/sales"),
+    )
+    assert result.status == "ok"  # only the Directory tree tells the top unit; the normaliser decides
+    assert state["complete"] is False
+    assert state["unusable_scopes"] == [{"section": "security_session_controls", "org_unit": "sales", "group": None}]
+
+
+@pytest.mark.parametrize("lower", [
+    {"kind": "ADMIN", "order": 201},
+    {"kind": None, "order": 201},
+    {"kind": "POLICY_TYPE_UNSPECIFIED", "order": 201},
+    {"kind": "ADMIN", "order": 201, "query": f"{_OU} && {_SKU_B}"},
+])
+def test_live_fix_1_an_admin_policy_below_a_licence_scoped_one_is_unknown(lower: dict[str, Any]) -> None:
+    result, state = _licence_read(
+        _licensed("gmail.web_offline", {"enabled": False}, 300, f"{_OU} && {_SKU_A}"),
+        _licensed("gmail.web_offline", {"enabled": True}, lower["order"], lower.get("query", _OU), kind=lower["kind"]),
+    )
+    assert state["complete"] is False
+    assert state["unusable_scopes"] == [{"section": "gmail_web_offline", "org_unit": "root", "group": None}]
+
+
+def test_live_fix_1_a_licence_scoped_group_with_a_policy_of_no_rank_is_unknown() -> None:
+    no_rank = _licensed("gmail.web_offline", {"enabled": True}, 1, _OU)
+    del no_rank["policyQuery"]["sortOrder"]
+    _, state = _licence_read(_licensed("gmail.web_offline", {"enabled": False}, 300, f"{_OU} && {_SKU_A}"), no_rank)
+    assert state["complete"] is False
+    assert state["unusable_scopes"] == [{"section": "gmail_web_offline", "org_unit": "root", "group": None}]
+
+
+def test_live_fix_1_an_admin_licence_policy_on_top_of_system_defaults_stands() -> None:
+    _, state = _licence_read(
+        _licensed("gmail.web_offline", {"enabled": True}, 201.00134, f"{_OU} && {_SKU_A}", kind="ADMIN"),
+        _licensed("gmail.web_offline", {"enabled": False}, 100.00009, f"{_OU} && {_SKU_A}"),
+        _licensed("gmail.web_offline", {"enabled": False}, 100.00001, _OU),
+    )
+    assert (state["complete"], state["unusable_scopes"], state["record_count"]) == (True, [], 4)
