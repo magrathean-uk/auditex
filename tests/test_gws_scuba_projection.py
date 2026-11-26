@@ -1660,19 +1660,24 @@ def test_policy_identifiers_and_ip_addresses_are_redacted_after_reconciliation(b
         _policy("gmail.comprehensive_mail_storage", {"ruleId": rule_id}),
         _policy("gmail.rule_states", {"ruleStates": [{"ruleId": rule_id, "enabled": True}]}),
         _policy("gmail.email_spam_filter_ip_allowlist", {"allowedIpAddresses": [address]}),
+        _policy("gmail.email_attachment_safety", {"enableEncryptedAttachmentProtection": True,
+                                                  "encryptedAttachmentProtectionQuarantineId": 908792381872}),
+        _policy("security.password", {"minimumLength": 16}),
     ]}}
     normalised_rows, _ = _policy_settings_read(
         policies, [{"name": "google_policies", "status": "ok"}], [], {"root01", "ou0a1"})
     write(bundle, "raw/google_policies.json", policies)
     normalised(bundle, "google_policy_settings", normalised_rows)
-    edit_coverage(bundle, "policySettings", item_count=4)
+    edit_coverage(bundle, "policySettings", item_count=6)
     projection = project_gws_run(bundle)
     text = json.dumps([dict(projection), projection.report])
-    assert rule_id not in text and address not in text
+    assert rule_id not in text and address not in text and "908792381872" not in text
     entries = {row["section"]: row["value"] for row in projection["gws_policies"]["policies"]}
     assert entries["gmail_comprehensive_mail_storage"] == {"ruleId": "ref:485a522113e0c67b"}
     assert entries["gmail_rule_states"] == {"ruleStates": [{"ruleId": "ref:485a522113e0c67b", "enabled": True}]}
     assert entries["gmail_email_spam_filter_ip_allowlist"] == {"allowedIpAddresses": ["2001:db8::8aa7:7a5d:eafd:529b"]}
+    assert entries["gmail_email_attachment_safety"] == {"enableEncryptedAttachmentProtection": True}
+    assert entries["security_password"] == {"minimumLength": 16}
     assert verdict(projection, "GWS.GMAIL.17.1v1")[0] == "met"
     assert verdict(projection, "GWS.GMAIL.14.1v1")[0] == "not_met"
 

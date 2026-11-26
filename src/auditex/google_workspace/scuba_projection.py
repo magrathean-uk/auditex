@@ -701,7 +701,9 @@ def _policy_value(ctx: _Context, value: Any, schema: Any) -> Any:
     if isinstance(schema, RequiredPolicyField):
         return _policy_value(ctx, value, schema.schema)
     if isinstance(schema, dict):
-        return {key: _policy_value(ctx, field, schema[key]) for key, field in value.items()}
+        # Quarantine resource identifiers are numeric in the API. No rule reads them.
+        return {key: _policy_value(ctx, field, schema[key]) for key, field in value.items()
+                if not key.lower().endswith("quarantineid")}
     if isinstance(schema, list):
         return [_policy_value(ctx, item, schema[0]) for item in value]
     if schema == "address-lists":
