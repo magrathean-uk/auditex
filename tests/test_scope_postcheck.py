@@ -21,7 +21,7 @@ from azure_tenant_audit.scuba_scope import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())
+SCHEMA = json.loads((ROOT / "schemas/model_assessment-2026-11-22.schema.json").read_text())
 LIMITATION_ID = "scope_narrowed"  # Historical row vocabulary; never written by assessment.
 CA = "conditional_access_policies"
 LOCATION = "7c1e4b52-3a90-4d68-8f21-b5d0a6e93c14"
@@ -434,7 +434,7 @@ def test_raw_evidence_that_cannot_be_read_is_not_evaluated_with_a_reason(tmp_pat
     elif case == "error":
         write_raw(tmp_path, scoped, error="Forbidden")
     elif case == "platform":
-        write_raw(tmp_path, scoped, manifest={"run_id": "run", "platform": "google_workspace"})
+        write_raw(tmp_path, scoped, manifest={"run_id": "run", "platform": "unknown"})
     else:
         write_raw(tmp_path, scoped)
         if case == "rows":
@@ -573,8 +573,7 @@ def test_schema_and_validators_accept_the_marked_result(marked, version, claim_s
     marked["policies"][0]["comparison"]["model_status"] = "pass" if claim_status == "confirmed" else None
     validate_assessment(marked)
     jsonschema.Draft202012Validator.check_schema(SCHEMA)
-    schema_path = ("schemas/model_assessment.schema.json" if version == "2026-11-22"
-                   else f"schemas/model_assessment-{version}.schema.json")
+    schema_path = f"schemas/model_assessment-{version}.schema.json"
     schema = json.loads((ROOT / schema_path).read_text())
     jsonschema.validate(marked, schema)
     assert marked["projection"]["schema_version"] == "2026-10-29"

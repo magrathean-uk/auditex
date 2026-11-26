@@ -37,6 +37,9 @@ SCOPE_LIMITATION = "scope_narrowed"
 
 MODEL_ASSESSMENT_PATH = "model_assessment.json"
 MODEL_ASSESSMENT_SCHEMA = "schemas/model_assessment.schema.json"
+BASELINE_SCHEMA_VERSION = "2026-11-27"
+M365_BASELINE = "cisa-scuba-m365-v3.9.1"
+GWS_BASELINE = "cisa-scubagoggles-v1.1.0"
 ASSESSMENT_SCHEMAS = {
     "2026-10-27": "schemas/model_assessment-2026-10-27.schema.json",
     "2026-10-27.1": "schemas/model_assessment-2026-10-27.1.schema.json",
@@ -44,14 +47,20 @@ ASSESSMENT_SCHEMAS = {
     "2026-10-29": "schemas/model_assessment-2026-10-29.schema.json",
     "2026-11-05": "schemas/model_assessment-2026-11-05.schema.json",
     # Review R106: 2026-11-22 adds the optional projection rule_view; nothing else differs from 2026-11-05.
-    "2026-11-22": MODEL_ASSESSMENT_SCHEMA,
+    "2026-11-22": "schemas/model_assessment-2026-11-22.schema.json",
+    BASELINE_SCHEMA_VERSION: MODEL_ASSESSMENT_SCHEMA,
 }
 # The versions that share the 2026-11-05 validation rules.
-_CURRENT = frozenset({"2026-11-05", "2026-11-22"})
+_CURRENT = frozenset({"2026-11-05", "2026-11-22", BASELINE_SCHEMA_VERSION})
 # Bot review wave 2 (item 56): the versions whose value-rule answers cite a late rule section (SS 7.x
 # built_in_protection_rules) by its own evidence id after the case's (``scuba_precheck.evidence_sections``). Answers
 # that earlier writers of the same version wrote with the case's ids only still validate (repair round 1).
-_LATE_EVIDENCE = frozenset({"2026-11-22"})
+_LATE_EVIDENCE = frozenset({"2026-11-22", BASELINE_SCHEMA_VERSION})
+
+
+def policy_catalogue(baseline: str = M365_BASELINE) -> dict[str, Any]:
+    resource = "configs/scuba-gws-policy-sections.json" if baseline == GWS_BASELINE else "configs/scuba-policy-sections.json"
+    return json.loads(open_text_resource(resource))
 
 
 SCAN_BOUND_FIELDS = frozenset({"scan_max_rows", "scan_max_bytes", "scan_max_chunks"})
@@ -245,7 +254,7 @@ def derive_explainer(row: dict[str, Any]) -> dict[str, Any] | None:
         if row["reason"] != "rule_precheck" or detail.get("class") != "value_rule":
             return None
         pid = row["policy_id"]
-        catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
+        catalogue = policy_catalogue(GWS_BASELINE if pid.startswith("GWS.") else M365_BASELINE)["policies"]
         order = list(catalogue[pid]["sections"])
         requirement = next(c for c in row["claims"] if c["id"] == "requirement_met")
         present = set(requirement["evidence_ids"])
@@ -304,7 +313,9 @@ def validate_assessment(payload: Any) -> None:
         raise ValueError("Unsupported model assessment schema_version")
     schema = json.loads(open_text_resource(ASSESSMENT_SCHEMAS[version]))
     _check(payload, schema, schema, "assessment")
-    catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
+    google = payload.get("baseline", M365_BASELINE) == GWS_BASELINE
+    catalogue = policy_catalogue(GWS_BASELINE if google else M365_BASELINE)["policies"]
+    prefix = "GWS." if google else "MS."
     from .scuba_precheck import optional_collection_entry
     optional = optional_collection_entry()
     optional_sections = {s for policy in optional["policies"].values() for s in policy["sections"]}
@@ -314,6 +325,8 @@ def validate_assessment(payload: Any) -> None:
         if set(sections) != {s for policy in catalogue.values() for s in policy["sections"]}:
             raise ValueError("Invalid projection section catalogue")
         for section, detail in sections.items():
+            if google:
+                _check(detail, schema["$defs"]["gws_projection_section"], schema, "assessment.projection.sections")
             if detail["reason"] == optional["reason_code"] and (
                     version not in _CURRENT or section not in optional_sections
                     or detail["status"] != "not_collected"):
@@ -347,7 +360,7 @@ def validate_assessment(payload: Any) -> None:
                                        or not _sorted_unique(detail[name])):
                     raise ValueError("Inconsistent projection Conditional Access record")
             diagnostic = detail.get("detail")
-            if detail["reason"] == "collector_error":
+            if detail["reason"] == "collector_error" and not google:
                 # A failed read names its cause: the collector's error class, and the operation when known.
                 if (detail["status"] != "not_collected" or diagnostic is None or "error_class" not in diagnostic
                         or not set(diagnostic) <= {"error_class", "operation"}):
@@ -374,7 +387,7 @@ def validate_assessment(payload: Any) -> None:
         projected = any(s["status"] == "projected" for s in sections.values())
         if payload["limitations"] != ([] if projected else ["projection_not_implemented"]):
             raise ValueError("Inconsistent projection limitations")
-        if "scope_post_check" in payload:
+        if "scope_post_check" in payload and not google:
             _validate_scope_record(payload["scope_post_check"], sections[SCOPE_SECTION]["status"] == "projected")
         redaction = projection["redaction"]
         if not redaction["enabled"]:
@@ -391,7 +404,7 @@ def validate_assessment(payload: Any) -> None:
         counts["rule_answered"] = 0
     # A rules-only file (2026-11-05) is marked by its envelope or by an uncovered row; any marker binds all of
     # them: no endpoint, no model name, no serving block, no model-answered or shadow row. Legacy files unchanged.
-    if any(row["reason"] == "rule_not_implemented" for row in payload["policies"]) or (
+    if google or any(row["reason"] == "rule_not_implemented" for row in payload["policies"]) or (
             version in _CURRENT and (payload["endpoint_host"] == "none" or payload["model_name"] == "rules-only")):
         if (payload["endpoint_host"] != "none" or payload["model_name"] != "rules-only"
                 or "serving" in payload or any(
@@ -401,6 +414,8 @@ def validate_assessment(payload: Any) -> None:
     ids = set()
     scope_rows = 0
     for row in payload["policies"]:
+        if not row["policy_id"].startswith(prefix):
+            raise ValueError("Assessment policy does not match baseline")
         if row["policy_id"] in ids:
             raise ValueError("Duplicate model assessment policy")
         ids.add(row["policy_id"])
@@ -419,8 +434,9 @@ def validate_assessment(payload: Any) -> None:
             counts["rule_answered"] += is_rule
             if ("rule_precheck" in row) != is_rule or "model_shadow" in row and not is_rule:
                 raise ValueError("Invalid rule pre-check metadata")
-        late = version in _LATE_EVIDENCE
+        late = not google and version in _LATE_EVIDENCE
         evidence_order = policy["sections"] if policy else []
+        criticality = (policy["criticality"] if google else policy["policy_item"]["criticality"]) if policy else None
         if policy and late and is_rule and row.get("rule_precheck", {}).get("class") == "value_rule":
             evidence_order = evidence_sections(row["policy_id"], policy["sections"])
         allowed_evidence = {f"e{index}" for index in range(len(evidence_order) + 1)} if policy else set()
@@ -430,6 +446,8 @@ def validate_assessment(payload: Any) -> None:
         if status == "valid" and requirement.get("status") == "confirmed":
             model_status = "pass" if requirement.get("value") is True else "fail"
         comparison = row["comparison"]
+        if google and (comparison["baseline_status"] is not None or comparison["baseline_match"] != "none"):
+            raise ValueError("Unexpected Google Workspace baseline comparison")
         agreement = "not_assessed"
         if model_status is not None and comparison["baseline_status"] in {"pass", "fail"}:
             agreement = "agree" if comparison["baseline_status"] == model_status else "disagree"
@@ -469,7 +487,7 @@ def validate_assessment(payload: Any) -> None:
                 if claim["id"] == "requirement_met" and type(claim["value"]) is not bool:
                     raise ValueError("Known requirement value must be boolean")
                 if claim["id"] == "policy_criticality" and (
-                    claim["value"] != policy["policy_item"]["criticality"] or claim["evidence_ids"] != ["e0"]
+                    claim["value"] != criticality or claim["evidence_ids"] != ["e0"]
                 ):
                     raise ValueError("Invalid policy criticality value")
         if is_rule:
@@ -480,6 +498,8 @@ def validate_assessment(payload: Any) -> None:
                 raise ValueError("Invalid rule pre-check provenance")
             sections = policy["sections"]
             value_row = None
+            if google and detail["class"] != "value_rule":
+                raise ValueError("Google Workspace requires a value rule")
             if detail["class"] == "value_rule":
                 if version not in _CURRENT:
                     raise ValueError("Value rule requires current schema")
@@ -495,6 +515,9 @@ def validate_assessment(payload: Any) -> None:
                     RULE_NOT_IMPLEMENTED_CODE,
                     is_shared_reason,
                 )
+                if google:
+                    from .value_rules.gws import catalogue as gws_catalogue
+                    row_for, shared_reason = gws_catalogue.row_for, gws_catalogue.shared_reason
                 value_row = row_for(row["policy_id"])
                 if not {"cell", "reason_code", "reason_text"} <= detail.keys():
                     raise ValueError("Missing value-rule cell or reason")
@@ -581,17 +604,20 @@ def validate_assessment(payload: Any) -> None:
             verdict = cell["verdict"] if detail["class"] == "value_rule" else None
             # Repair round 1 (item 56): 2026-11-22 files written before item 56 cite the case's sections only; a
             # row matches one form or the other as a whole.
-            forms = [late, False] if late else [False]
-            expected = [precheck_response(detail, policy["policy_item"], sections, verdict=verdict, late_evidence=form)
-                        for form in forms]
+            if google:
+                from .value_rules.record import as_pack_response
+                expected = [as_pack_response({"verdict": verdict, "reason_code": detail["reason_code"],
+                                              "cited_sections": detail["section"]}, criticality, sections)]
+            else:
+                forms = [late, False] if late else [False]
+                expected = [precheck_response(detail, policy["policy_item"], sections, verdict=verdict, late_evidence=form)
+                            for form in forms]
+                if detail["class"] == "value_rule":
+                    # Earlier M365 rows used the missing-evidence vocabulary for all abstentions.
+                    expected.extend(precheck_response(detail, policy["policy_item"], sections, legacy=True,
+                                                      verdict=verdict, late_evidence=form) for form in forms)
             if not any(all(row[key] == answer[key] for key in answer) for answer in expected):
-                # A1 is additive within unreleased 2026-11-05. Previously written
-                # value-rule rows used the missing-evidence vocabulary for all abstentions.
-                previous = [precheck_response(detail, policy["policy_item"], sections, legacy=True, verdict=verdict,
-                                              late_evidence=form) for form in forms]
-                if detail["class"] != "value_rule" or not any(
-                        all(row[key] == answer[key] for key in answer) for answer in previous):
-                    raise ValueError("Invalid rule pre-check answer")
+                raise ValueError("Invalid rule pre-check answer")
             if "explainer" in row:
                 _validate_explainer(row, requirement)
             if "model_shadow" in row:

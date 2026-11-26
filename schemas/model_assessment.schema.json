@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://magrathean.uk/solutions/auditex/schemas/model_assessment-2026-11-22.schema.json",
+  "$id": "https://magrathean.uk/solutions/auditex/schemas/model_assessment-2026-11-27.schema.json",
   "title": "Optional model assessment (does not change findings)",
   "type": "object",
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "2026-11-22"
+      "const": "2026-11-27"
     },
     "generated_at": {
       "type": "string",
@@ -111,7 +111,61 @@
       },
       "uniqueItems": true
     },
-    "projection": {
+    "projection": { "type": "object" },
+    "scope_post_check": { "type": "object" },
+    "baseline": {
+      "type": "string",
+      "enum": ["cisa-scuba-m365-v3.9.1", "cisa-scubagoggles-v1.1.0"]
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "run_id",
+    "endpoint_host",
+    "model_name",
+    "prompt_convention",
+    "system_prompt_sha256",
+    "totals",
+    "policies",
+    "limitations",
+    "projection",
+    "baseline"
+  ],
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "properties": {
+        "baseline": {
+          "const": "cisa-scuba-m365-v3.9.1"
+        },
+        "projection": {
+          "$ref": "#/$defs/m365_projection"
+        },
+        "scope_post_check": {
+          "$ref": "#/$defs/scope_post_check"
+        }
+      }
+    },
+    {
+      "properties": {
+        "baseline": {
+          "const": "cisa-scubagoggles-v1.1.0"
+        },
+        "projection": {
+          "$ref": "#/$defs/gws_projection"
+        },
+        "scope_post_check": {
+          "$ref": "#/$defs/gws_scope_post_check"
+        }
+      },
+      "required": [
+        "scope_post_check"
+      ]
+    }
+  ],
+  "$defs": {
+    "m365_projection": {
       "type": "object",
       "properties": {
         "schema_version": {
@@ -432,25 +486,6 @@
       ],
       "additionalProperties": false
     },
-    "scope_post_check": {
-      "$ref": "#/$defs/scope_post_check"
-    }
-  },
-  "required": [
-    "schema_version",
-    "generated_at",
-    "run_id",
-    "endpoint_host",
-    "model_name",
-    "prompt_convention",
-    "system_prompt_sha256",
-    "totals",
-    "policies",
-    "limitations",
-    "projection"
-  ],
-  "additionalProperties": false,
-  "$defs": {
     "claim": {
       "type": "object",
       "properties": {
@@ -498,7 +533,7 @@
       "properties": {
         "policy_id": {
           "type": "string",
-          "pattern": "^MS\\.[A-Z]+\\.\\d+\\.\\d+v\\d+$"
+          "pattern": "^(MS|GWS)\\.[A-Z]+\\.\\d+\\.\\d+v\\d+$"
         },
         "claims": {
           "type": "array",
@@ -778,7 +813,7 @@
       "properties": {
         "policy_id": {
           "type": "string",
-          "pattern": "^MS\\.[A-Z]+\\.\\d+\\.\\d+v\\d+$"
+          "pattern": "^(MS|GWS)\\.[A-Z]+\\.\\d+\\.\\d+v\\d+$"
         },
         "claims": {
           "type": "array",
@@ -1382,6 +1417,129 @@
           }
         }
       }
+    },
+    "gws_scope_post_check": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "not_applicable"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "gws_projection_section": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "projected",
+            "not_collected"
+          ]
+        },
+        "reason": {
+          "enum": [
+            null,
+            "collector_error",
+            "incomplete_shape",
+            "missing_artifact",
+            "not_applicable_to_platform",
+            "oversize"
+          ]
+        },
+        "source": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:(?:raw|normalized)/google_[a-z_]+\\.json|normalized/collection_gaps\\.json|coverage\\.json|run-manifest\\.json)$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "gws_projection": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "2026-11-25.4"
+        },
+        "sections": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/gws_projection_section"
+          }
+        },
+        "redaction": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "const": true
+            },
+            "strategy": {
+              "const": "keyed-hmac-sha256-v1"
+            },
+            "email_addresses": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "enabled",
+            "strategy",
+            "email_addresses"
+          ],
+          "additionalProperties": false
+        },
+        "bounds": {
+          "type": "object",
+          "properties": {
+            "max_items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "scan_max_rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "scan_max_bytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "scan_max_chunks": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "max_items",
+            "max_chars",
+            "scan_max_rows",
+            "scan_max_bytes",
+            "scan_max_chunks"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema_version",
+        "sections",
+        "redaction",
+        "bounds"
+      ],
+      "additionalProperties": false
     }
   }
 }

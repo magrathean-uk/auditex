@@ -144,7 +144,7 @@ def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundl
     assert result["endpoint_host"] == "none" and result["model_name"] == "rules-only" and result["run_id"] == "demo"
     assert "serving" not in result
     validate_assessment(result)
-    schema = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())
+    schema = json.loads((ROOT / "schemas/model_assessment-2026-11-22.schema.json").read_text())
     jsonschema.Draft202012Validator.check_schema(schema)
     jsonschema.validate(result, schema)
     assert json.loads((demo_bundle / "model_assessment.json").read_text()) == result
@@ -207,6 +207,7 @@ def test_assessment_resources_are_shipped_and_schema_is_registered():
     assert "schemas/model_assessment-2026-10-28.schema.json" in resources
     assert "schemas/model_assessment-2026-10-29.schema.json" in resources
     assert "schemas/model_assessment-2026-11-05.schema.json" in resources
+    assert "schemas/model_assessment-2026-11-22.schema.json" in resources
     assert "schemas/model_assessment.schema.json" in resources
     assert "model_assessment.schema.json" in contract_schema_manifest()["schemas"]
 
@@ -367,22 +368,26 @@ def test_malformed_optional_assessment_warns_without_changing_gate(demo_bundle, 
     assert any(i['code'] == 'invalid_model_assessment' and i['severity'] == 'warning' for i in report['issues'])
 
 
-def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monkeypatch):
+@pytest.mark.parametrize("version", ["2026-10-27", "2026-10-27.1"])
+def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monkeypatch, version):
     (tmp_path / 'run-manifest.json').write_text('{"run_id":"run"}')
     # Legacy schema dispatch is checked using an actual model row.
     monkeypatch.setattr('auditex.rule_assessment.project_run',
                         lambda root, **kwargs: fake_projection(root, {'privileged_users': {}}))
     result = assess_historical_model(tmp_path, missing_answer(), policies=[POLICY])
-    result['schema_version'] = '2026-10-27'
+    result['schema_version'] = version
     del result['limitations'], result['projection'], result['totals']['rule_answered']
     del result['scope_post_check'], result['totals']['scope_narrowed'], result['serving']
     row = result['policies'][0]
-    del row['thinking_disabled'], row['thinking_stripped'], row['comparison']['baseline_match']
+    if version == '2026-10-27':
+        del row['thinking_disabled'], row['thinking_stripped'], row['comparison']['baseline_match']
     with pytest.raises(ValueError, match='Unexpected'):
         validate_assessment(result)  # finish_reason is newer than 2026-10-27
     del row['finish_reason']
     validate_assessment(result)
-    row['thinking_disabled'] = True
+    schema = json.loads((ROOT / f"schemas/model_assessment-{version}.schema.json").read_text())
+    jsonschema.validate(result, schema)
+    row['rule_precheck'] = {}
     with pytest.raises(ValueError, match='Unexpected'):
         validate_assessment(result)
 
@@ -411,7 +416,7 @@ def test_absent_field_rule_is_served_and_validated(tmp_path, monkeypatch):
     assert row["rule_precheck"]["section"] == ["SPO_tenant"] and row["rule_precheck"]["value"] is None
     assert next(c for c in row["claims"] if c["id"] == "requirement_met")["status"] == "unknown"
     _validate(result)
-    _jsonschema.validate(result, _json.loads(_Path("schemas/model_assessment.schema.json").read_text(encoding="utf-8")))
+    _jsonschema.validate(result, _json.loads(_Path("schemas/model_assessment-2026-11-22.schema.json").read_text(encoding="utf-8")))
     tampered = _deepcopy(result)
     tampered["policies"][0]["rule_precheck"]["class"] = "closed_gate"
     with pytest.raises(ValueError):

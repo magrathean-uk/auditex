@@ -31,13 +31,20 @@ from azure_tenant_audit.output_redaction import (
     redact_output,
 )
 from azure_tenant_audit.private_io import make_private_dirs, write_private_text
-from azure_tenant_audit.resources import open_text_resource
-from azure_tenant_audit.scuba_assessment import validate_explainer, value_rule_verdict
+from azure_tenant_audit.scuba_assessment import (
+    GWS_BASELINE,
+    M365_BASELINE,
+    policy_catalogue,
+    validate_explainer,
+    value_rule_verdict,
+)
 from azure_tenant_audit.scuba_precheck import (
     optional_collection_entry,
     precheck_policy,
     precheck_response,
 )
+from azure_tenant_audit.strict_json import reject_json_constant, strict_pairs
+from azure_tenant_audit.value_rules.gws.catalogue import POLICY_ID as GWS_POLICY_ID
 
 from .scope_postcheck import collect_scope_evidence
 from .scuba_projection import (
@@ -64,10 +71,6 @@ LOG = logging.getLogger(__name__)
 
 def canonical(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-
-
-def policy_catalogue() -> dict[str, Any]:
-    return json.loads(open_text_resource("configs/scuba-policy-sections.json"))
 
 
 class PolicyUnavailable(ValueError):
@@ -233,10 +236,10 @@ def _baseline_statuses(pack_path: Path) -> dict[str, str]:
         return {}
 
 
-def _uncovered_record(case: dict[str, Any]) -> dict[str, Any]:
-    return {"policy_id": case["policy_id"],
-            "claims": [{"id": item["id"], "status": "unknown", "value": None, "evidence_ids": []}
-                       for item in case["requested_claims"]],
+def _uncovered_record(policy_id: str) -> dict[str, Any]:
+    return {"policy_id": policy_id,
+            "claims": [{"id": claim, "status": "unknown", "value": None, "evidence_ids": []}
+                       for claim in ("requirement_met", "policy_criticality")],
             "limitations": [], "recommendations": [], "validation_status": "unknown",
             "reason": "rule_not_implemented", "reason_text": RULE_NOT_IMPLEMENTED_TEXT,
             "latency_ms": 0, "attempts": 0, "prompt_sha256": None, "response_sha256": None,
@@ -277,7 +280,7 @@ def _assess_policies(projection: dict[str, Any], selected: list[str], catalogue:
                                     rule_projection=rule_projection, explain=explainer_context is not None,
                                     redaction_context=explainer_context) if row else None)
             if record is None:
-                record = _uncovered_record(case)
+                record = _uncovered_record(policy_id)
             elif explainer_context_error and record["rule_precheck"]["class"] == "value_rule":
                 LOG.debug("Explainer %s failed (%s)", policy_id, explainer_context_error)
         record["comparison"] = _comparison(policy_id, record, baseline)
@@ -301,9 +304,11 @@ def _totals(records: list[dict[str, Any]]) -> dict[str, int]:
     return totals
 
 
-def _selected_policies(catalogue: dict[str, Any], policies: list[str] | None) -> list[str]:
+def _selected_policies(catalogue: dict[str, Any], policies: list[str] | None,
+                       policy_id_pattern: re.Pattern[str] = _POLICY_ID) -> list[str]:
     selected = list(catalogue["policies"]) if policies is None else policies
-    if not selected or len(set(selected)) != len(selected) or any(not _POLICY_ID.fullmatch(pid) for pid in selected):
+    if (not selected or any(not isinstance(pid, str) or not policy_id_pattern.fullmatch(pid) for pid in selected)
+            or len(set(selected)) != len(selected)):
         raise ValueError("Policies must be unique SCuBA policy IDs")
     return selected
 
@@ -314,11 +319,16 @@ def _admit_run(run_dir: str | Path, policies: list[str] | None,
     root = Path(os.path.abspath(os.path.expanduser(run_dir)))
     current_context().bind_run(root)
     from azure_tenant_audit.run_files import read_run_file
-    manifest = json.loads(read_run_file(root, "run-manifest.json").decode("utf-8"))
+    try:
+        manifest = json.loads(read_run_file(root, "run-manifest.json").decode("utf-8"),
+                              object_pairs_hook=strict_pairs, parse_constant=reject_json_constant)
+    except (ValueError, RecursionError):
+        raise ValueError("Run manifest is not valid JSON") from None
     if not isinstance(manifest, dict) or not isinstance(manifest.get("run_id"), str) or not manifest["run_id"]:
         raise ValueError("Run manifest requires a run_id")
-    catalogue = policy_catalogue()
-    selected = _selected_policies(catalogue, policies)
+    google = manifest.get("platform") == "google_workspace"
+    catalogue = policy_catalogue(GWS_BASELINE if google else M365_BASELINE)
+    selected = _selected_policies(catalogue, policies, GWS_POLICY_ID if google else _POLICY_ID)
     # Never replace a file already sealed into the original bundle.
     from azure_tenant_audit.bundle_integrity import listed_artifact_paths
     if filename in (listed_artifact_paths(root) or ()):
@@ -328,13 +338,13 @@ def _admit_run(run_dir: str | Path, policies: list[str] | None,
     return root, manifest, catalogue, selected
 
 
-def _envelope(projection: Any, records: list[dict[str, Any]], scope: Any, *, generated_at: str,
-              run_id: str) -> dict[str, Any]:
-    return {"schema_version": SCHEMA_VERSION, "generated_at": generated_at, "run_id": run_id,
+def _envelope(projection: Any, records: list[dict[str, Any]], scope: dict[str, Any], *, generated_at: str,
+              run_id: str, schema_version: str = SCHEMA_VERSION) -> dict[str, Any]:
+    return {"schema_version": schema_version, "generated_at": generated_at, "run_id": run_id,
             "endpoint_host": "none", "model_name": "rules-only",
             "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
             "totals": _totals(records), "policies": records,
-            "projection": projection.report, "scope_post_check": scope.summary,
+            "projection": projection.report, "scope_post_check": scope,
             "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
 
 
@@ -348,16 +358,33 @@ def assess_run(run_dir: str | Path, *, policies: list[str] | None = None,
     root, manifest, catalogue, selected = _admit_run(run_dir, policies, ASSESSMENT_FILENAME)
     target = root / ASSESSMENT_FILENAME
     generated_at = datetime.now(UTC).isoformat()
-    projection = project_run(root, redact=True, max_items=projection_max_items,
-                             max_chars=projection_max_chars, scan_max_rows=projection_scan_max_rows,
-                             scan_max_bytes=projection_scan_max_bytes, scan_max_chunks=projection_scan_max_chunks)
+    bounds = dict(max_items=projection_max_items, max_chars=projection_max_chars,
+                  scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
+                  scan_max_chunks=projection_scan_max_chunks)
+    if manifest.get("platform") == "google_workspace":
+        from .gws_assessment import assess_google_run
+        assess = assess_google_run
+    else:
+        assess = _assess_m365_run
+    result = assess(root, selected, catalogue, generated_at=generated_at, run_id=manifest["run_id"], **bounds)
+    from azure_tenant_audit.scuba_assessment import validate_assessment
+    validate_assessment(result)
+    write_private_text(target, json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+    return result
+
+
+def _assess_m365_run(root: Path, selected: list[str], catalogue: dict[str, Any], *, generated_at: str,
+                     run_id: str, max_items: int, max_chars: int, scan_max_rows: int, scan_max_bytes: int,
+                     scan_max_chunks: int) -> dict[str, Any]:
+    projection = project_run(root, redact=True, max_items=max_items, max_chars=max_chars,
+                             scan_max_rows=scan_max_rows, scan_max_bytes=scan_max_bytes,
+                             scan_max_chunks=scan_max_chunks)
     baseline = _baseline_statuses(root / "reports" / "report-pack.json")
     # Read-only and verdict-independent: which enabled Conditional Access policies carry a scope condition the
     # pinned Rego ignores. The envelope carries this caveat.
     scope = collect_scope_evidence(
-        root, projection, redact=True, max_items=projection_max_items,
-        scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
-        scan_max_chunks=projection_scan_max_chunks)
+        root, projection, redact=True, max_items=max_items, scan_max_rows=scan_max_rows,
+        scan_max_bytes=scan_max_bytes, scan_max_chunks=scan_max_chunks)
     explainer_context = None
     explainer_context_error = None
     try:
@@ -368,11 +395,7 @@ def assess_run(run_dir: str | Path, *, policies: list[str] | None = None,
         explainer_context_error = type(exc).__name__
     records = _assess_policies(projection, selected, catalogue, generated_at, baseline=baseline,
                                explainer_context=explainer_context, explainer_context_error=explainer_context_error)
-    result = _envelope(projection, records, scope, generated_at=generated_at, run_id=manifest["run_id"])
-    from azure_tenant_audit.scuba_assessment import validate_assessment
-    validate_assessment(result)
-    write_private_text(target, json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
-    return result
+    return _envelope(projection, records, scope.summary, generated_at=generated_at, run_id=run_id)
 
 
 def _export_view(export_path: str | Path, output_dir: str | Path, *, results_path: str | Path | None,
@@ -472,7 +495,7 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, *,
                                baseline=view["baseline"], explainer_context=RedactionContext())
     sidecar = _export_sidecar(view, scope, verdict_map)
     loaded = view["loaded"]
-    result = _envelope(projection, records, scope, generated_at=view["generated_at"],
+    result = _envelope(projection, records, scope.summary, generated_at=view["generated_at"],
                        run_id="scubagear-" + (loaded.report_uuid or loaded.sha256[:16]))
     from azure_tenant_audit.scuba_assessment import validate_assessment
     validate_assessment(result)

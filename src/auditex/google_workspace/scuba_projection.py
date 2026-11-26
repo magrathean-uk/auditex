@@ -24,8 +24,8 @@ does for Microsoft 365.
   is emitted as a resolver error, with no resolver details.
 - Output keys are written as values (``_obj``), never as mapping keys or module constants, so none becomes a product
   field name the shareable redaction keeps (``output_redaction._D5_FIELD_NAMES``, DEC-171).
-- ``gws_tenant.as_of`` is the run's collection end. An offline replay is evaluated at an instant the manifest does not
-  record (its ``--as-of``), so its ``as_of`` is null and the 2SV kinds answer ``not_assessed``.
+- ``gws_tenant.as_of`` uses the run's recorded evaluation instant. Older live runs fall back to their collection end.
+  Older offline runs have no recorded instant and their 2SV kinds answer ``not_assessed``.
 """
 from __future__ import annotations
 
@@ -270,7 +270,10 @@ def _duration_ns(value: Any) -> int | None:
 
 
 def _as_of(manifest: dict[str, Any]) -> str | None:
-    """Compute the end of a live collection exactly at the rule engine's nanosecond precision."""
+    """Use the recorded instant or derive the end of an older live collection at nanosecond precision."""
+    if "as_of" in manifest:
+        recorded = manifest["as_of"]
+        return recorded if instant_ns(recorded) is not None else None
     if ("mode" in manifest and manifest["mode"] not in ("domain-delegation", "service_account", "oauth")
             or manifest.get("replay_source") is not None):
         return None

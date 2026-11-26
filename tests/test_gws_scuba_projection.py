@@ -365,15 +365,15 @@ def replay(tmp_path: Path, policies: list[dict], *, as_of: datetime | None = Non
 ENROLLED = _policy("security.two_step_verification_enrollment", {"allowEnrollment": True})
 
 
-def test_an_offline_replay_has_no_collection_end_and_no_2sv_answer(tmp_path: Path) -> None:
-    # B3: the replay was judged at --as-of 2024-01-01, which the manifest does not record; enforcement from 2025 was not
-    # in force then, so the bundle's creation time must not stand in for it.
+def test_an_offline_replay_keeps_the_evaluation_time_for_2sv(tmp_path: Path) -> None:
+    # Enforcement begins in 2025, after the replay's evaluation time in 2024.
     run_dir = replay(tmp_path, [ENROLLED, _policy("security.two_step_verification_enforcement",
                                                   {"enforcedFrom": "2025-01-01T00:00:00Z"})],
                      as_of=datetime(2024, 1, 1, tzinfo=UTC))
     projection = project_gws_run(run_dir)
-    assert projection["gws_tenant"]["as_of"] is None
-    assert verdict(projection, "GWS.COMMONCONTROLS.1.2v1") == ("not_assessed", "data_unusable_section_shape")
+    assert load(run_dir, "run-manifest.json")["as_of"] == "2024-01-01T00:00:00Z"
+    assert projection["gws_tenant"]["as_of"] == "2024-01-01T00:00:00Z"
+    assert verdict(projection, "GWS.COMMONCONTROLS.1.2v1") == ("not_met", "unit_violates")
 
 
 @pytest.mark.parametrize("manifest,expected", [({"mode": "offline"}, None), ({"replay_source": {"kind": "x"}}, None),

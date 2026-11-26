@@ -77,6 +77,11 @@
     "created_utc": {
       "type": "string"
     },
+    "as_of": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Google Workspace assessment instant: the offline replay's evaluation time or the live collection end."
+    },
     "overall_status": {
       "type": "string"
     },

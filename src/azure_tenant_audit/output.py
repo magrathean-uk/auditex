@@ -183,6 +183,7 @@ SESSION_SCOPED_MANIFEST_KEYS = frozenset(
         "preflight_path",
         "throttle_mode",
         "replay_source",
+        "as_of",
         "fixture_provenance",
         "waiver_path",
         "top_limit",
@@ -961,6 +962,7 @@ class AuditWriter:
             "truncated_sections",
             "rule_parameters",
             "replay_source",
+            "as_of",
         ):
             value = metadata.get(key)
             if value is not None:
