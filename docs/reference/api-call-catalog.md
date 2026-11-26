@@ -179,6 +179,22 @@ SPF, DKIM and DMARC raw-record collection uses complete `exchange_policy.accepte
 
 Public HTTPS lookups target only domains that Microsoft Graph reports as verified for the audited tenant. The OpenID discovery read covers the first 25 verified domains. The MTA-STS policy read is not capped: it covers every verified domain outside `onmicrosoft.com` whose `_mta-sts` TXT record exists. Both are unauthenticated, never probe usernames, and do not use `getuserrealm.srf`. Offline runs make none of these calls. Entra diagnostic-settings export (Azure Resource Manager `microsoft.aadiam/diagnosticSettings`) is not collected, so the `siem_log_export` signal is always `unknown`.
 
+## Google Workspace SCuBA Reads
+
+These reads feed the Google Workspace SCuBA value rules (ScubaGoggles v1.1.0). Each is read-only and none reads
+message bodies or file content.
+
+| Collector | Call | Fields kept | Scope |
+| --- | --- | --- | --- |
+| `google_policies` | `GET https://cloudidentity.googleapis.com/v1/policies`, filter `customer == "customers/<id>" && setting.type.matches(...)`, paged, no operator `--top` (an internal 20,000-row cap and a 1,000-request budget; a cut read is incomplete) | Setting type, OU or group target, sort order, policy type and the allow-listed value fields; the 2-step verification policies are a subset of the same read. The filter is an allow-list of the service prefixes the baselines read (`gmail`, `security`, `drive_and_docs`, `calendar`, `chat`, `meet`, `classroom`, `groups_for_business`, `sites`, `takeout`, `data_regions`, `workspace_marketplace`, `api_controls`, `provisioning`, `multi_party_approval`, `enterprise_service_restrictions`, `early_access_apps`, `gemini_app`, `access_approval`, `access_management`), the exact Takeout types and `rule.system_defined_alerts`; `rule.dlp` is never requested | `cloud-identity.policies.readonly`, on its own token |
+| `google_setting_events` | `GET https://admin.googleapis.com/admin/reports/v1/activity/users/all/applications/admin?eventName=<event>` for each of the 16 pinned admin events (the union of ScubaGoggles' provider events: the application, Docs, Gmail and email setting changes, `TOGGLE_SERVICE_ENABLED`, `TOGGLE_CAA_ENABLEMENT`, `SYSTEM_DEFINED_RULE_UPDATED` and the OAuth access events), over the full retention, up to 20,000 activities per event | Activity time, event name and the `SETTING_NAME`, `NEW_VALUE`, `ORG_UNIT_NAME`, `GROUP_EMAIL` and `APPLICATION_NAME` parameters; no actor, IP address or `OLD_VALUE` | `admin.reports.audit.readonly` |
+| `google_sso_assignments` | `GET https://cloudidentity.googleapis.com/v1/inboundSsoAssignments?filter=customer=="customers/<id>"`, paged | `targetOrgUnit`, `targetGroup` and `ssoMode` only | `cloud-identity.inboundsso.readonly`, on its own token |
+| `google_dns_posture` | Public DNS over the configured DoH resolver (see the table above) | SPF, DMARC (with alias domains and the parent walk) and DKIM (`google`, `selector1`, `selector2`) answers | none |
+
+`<id>` is `my_customer` unless `--customer-id` is given; the configured ID is used for the calls only and is never
+written to the run. The `core-security`, `identity` and `everything` presets include the policies, setting-event and
+inbound SSO reads.
+
 ## Device, Update And Mail Protection Reads
 
 These reads feed the Cyber Essentials update and malware rules (see

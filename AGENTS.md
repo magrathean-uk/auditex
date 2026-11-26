@@ -43,9 +43,11 @@ Setup and the full command list: `docs/development/runbook.md`.
 - `src/azure_tenant_audit/` is the M365 engine (collection, normalisation, value rules, findings, bundle
   finalisation, the `azure-tenant-audit` CLI) and never imports from `auditex`.
 - `src/auditex/` is the product layer (CLI, guided flows, Google Workspace provider, reporting, exporters, compare
-  and drift, MCP server in `mcp_registry.py` and `mcp_server.py`).
-- SCuBA answers come only from `src/azure_tenant_audit/value_rules/` and `configs/scuba-value-rules.json`
-  (spec v3.9.1). No model layer or fallback; the template explainer never decides a verdict.
+  and drift, MCP server in `mcp_registry.py` and `mcp_server.py`, the Google Workspace SCuBA projection).
+- SCuBA answers come only from `src/azure_tenant_audit/value_rules/`: Microsoft 365 from
+  `configs/scuba-value-rules.json` (spec v3.9.1), Google Workspace from `value_rules/gws/` with
+  `configs/scuba-gws-value-rules.json` and its `scuba-gws-rules-*.json` fragments (ScubaGoggles v1.1.0 at
+  `08a08ce1`). No model layer or fallback; the template explainer never decides a verdict.
 - Collection scope is data-driven from `configs/`. Shipped content (`configs/`, `profiles/`, `schemas/`, `docs/`,
   `agent/`, `skills/`, `assets/`, `examples/`) is listed in both `pyproject.toml` `[tool.setuptools.data-files]`
   and `shipped_content.py`; a test checks they match.
@@ -59,7 +61,7 @@ Setup and the full command list: `docs/development/runbook.md`.
 | Change | Required before merge |
 |---|---|
 | Collectors, normalisation, findings, reports, schemas, evidence refs, API inventory, customer packs | focused tests, `make contract-smoke`, independent review |
-| Value rules or rule configs | focused rule and vector tests, `generate-rule-packs.py` with no drift |
+| Value rules or rule configs | focused rule and vector tests, `generate-rule-packs.py` with no drift, the GWS catalogue and explainer generators with no drift |
 | Shipped content | the shipped-content parity test |
 | CLI flags or argv handling | abbreviation and redaction tests |
 | Docs only | read-through |

@@ -25,6 +25,7 @@ The public audit surface does not write to production tenants. It also does not 
 - Guided setup and audit flows, capability probes, and diagnostics. Microsoft 365 is audited one way: as a reader app that signs in with a certificate.
 - Offline fixtures for contract checks and demonstrations.
 - Report rendering, CSV/JSON and other exporters, comparison and drift gates, customer handoff packs, and a local MCP server.
+- Rule-only answers to the CISA SCuBA baselines: the 102 Microsoft 365 policies (spec v3.9.1) and the 138 Google Workspace policies (ScubaGoggles v1.1.0), each with a fixed reason. Evidence that could not be read never counts as a pass.
 - Offline imports and control-by-control review of Maester, ScubaGear and Monkey365 JSON assessments, with source hashes and strict tenant identity checks.
 - Read-only privilege graph: potential routes from users, groups and applications to tier-0 control, with evidence per hop, explicit unverified prerequisites and candidate breakpoints.
 - Detection coverage ("could this tenant see an attack?") and the tenant's public footprint, including MTA-STS and TLS-RPT.
@@ -167,7 +168,8 @@ Each finalized run contains a manifest, summary, report pack, evidence index, AI
 
 For an optional rule-only SCuBA assessment, `auditex assess <run-dir>` has
 value rules for all 102 catalogue policies across Entra ID, Exchange Online, Power BI, Power Platform, Defender,
-SharePoint and Teams. Rule availability does not guarantee a verdict: available evidence, the adapter and
+SharePoint and Teams. On a Google Workspace run it answers the 138 ScubaGoggles v1.1.0 policies with value rules;
+17 of them have no read-only API and always read not assessed. Rule availability does not guarantee a verdict: available evidence, the adapter and
 permissions determine whether a policy can be assessed. A policy without a rule reports not assessed
 (`rule_not_implemented`): "Not assessed: Auditex has no rule for this policy yet."
 Assessment runs locally from the run bundle; no endpoint or model name is involved.

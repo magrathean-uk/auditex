@@ -84,6 +84,14 @@ The pre-existing keys (`nist_800_53`, `iso_27001`, `soc2`, `nis2`, `dora`, `mitr
 `google_workspace_baseline`) keep their earlier values. The catalog does not list their control
 ids.
 
+The CISA SCuBA Google Workspace baselines (ScubaGoggles v1.1.0, tag `v1.1.0`, commit `08a08ce1`) are not a mapping
+key. `auditex assess` answers their 138 policies on a Google Workspace run with value rules, as it answers the
+Microsoft 365 baselines, and writes the answers to `model_assessment.json`, not to `baseline_alignment`. Per product:
+Assured Controls 3, Calendar 6, Chat 7, Classroom 6, Common Controls 42, Drive and Docs 17, Gemini 5, Gmail 36,
+Groups 6, Meet 9 and Sites 1; 17 of them have no read-only API and always read `not_assessed` with
+`data_unavailable_manual_check`. Google findings keep their `google_workspace_baseline` taxonomy and gain no
+`cisa_scuba` mapping. See "SCuBA answers for Google Workspace" in [the output contract](output-contract.md).
+
 ## Why `cis_m365_v3` was retired
 
 The earlier `cis_m365_v3` values could not be verified. Several were wrong. For example, SPF,

@@ -47,6 +47,14 @@ order; the model only chooses which prepared sentences and values to show for ea
 Without the runtime, or when a model cannot run, every check shows its fixed text and the answer says what to install or
 why the model did not run. The audit is never lost.
 
+## Google Workspace runs
+
+`auditex explain` answers a Google Workspace run the same way. When the run has no rule assessment yet it writes one
+against the 138 policies of the CISA SCuBA Google Workspace baselines (ScubaGoggles v1.1.0), the model is told the
+tenant is a Google Workspace tenant, and the same checks apply to every selection. An assessment that covers only part
+of the catalogue says so in its first line ("Partial: the rules assessed N of the 138 SCuBA Google Workspace checks in
+the shipped catalogue; ..."). A Google run has more checks than the 64-check run timed below, so it takes longer.
+
 ## What it downloads
 
 The first use of a model downloads one file from the Hugging Face site (`huggingface.co` and its download servers), at

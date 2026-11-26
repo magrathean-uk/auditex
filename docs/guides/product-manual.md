@@ -174,6 +174,33 @@ auditex google run \
 
 OAuth is available when domain-wide delegation is not possible. Treat OAuth output as potentially partial because some domain-wide surfaces require service-account delegation.
 
+### SCuBA answers for Google Workspace
+
+After a Google run, `auditex assess <run-dir>` answers the 138 policies of the CISA SCuBA Google Workspace baselines
+(ScubaGoggles v1.1.0) from the run's evidence, with value rules only and no network call:
+
+```bash
+auditex assess outputs/google/<run-folder>
+```
+
+Each policy is `met`, `not_met`, `not_applicable` (the service is off in every organisational unit) or
+`not_assessed`. `not_assessed` always carries a reason and is never a pass: a read was missing, cut or unreadable, a
+setting was absent with no documented default, no admin log event records the setting (logs older than about six
+months are gone, so a long-stable setting often reads this way; check it in the Admin console), or the value was one
+Auditex does not recognise. A policy is `not_met` only when a violating value was positively read, or when Google's documented default fails the baseline and nothing overrides it. The answers go into
+the run's `model_assessment.json`; `auditex report render` shows them under "CISA SCuBA Google Workspace (ScubaGoggles
+v1.1.0)", and `auditex explain` answers them in plain sentences.
+
+Seventeen policies have no read-only API and always read `not_assessed` with "check it by hand in the Admin console":
+CALENDAR 3.2; COMMONCONTROLS 8.3, 9.1, 9.2, 14.1, 14.2, 16.3, 16.4, 18.1 and 18.2; DRIVEDOCS 1.10, 1.11 and 5.2;
+GEMINI 3.1, 3.2 and 4.1; and MEET 6.3. Where Auditex reads the setting differently from ScubaGoggles (unknown never passes), the output contract
+lists each difference under "SCuBA answers for Google Workspace".
+
+The answers need the `google_policies`, `google_setting_events` and `google_sso_assignments` collectors (in the
+`core-security`, `identity` and `everything` presets) and `google_dns_posture` for the Gmail DNS policies. The
+`cloud-identity.inboundsso.readonly` scope is needed only for COMMONCONTROLS.6.1; without it that one policy reads
+`not_assessed`.
+
 ```bash
 auditex google run \
   --auth oauth \
@@ -481,7 +508,8 @@ for supported exports, synthetic rehearsal files and control-mapping limits.
 
 For an optional rule-only SCuBA assessment, `auditex assess <run-dir>` has
 value rules for all 102 catalogue policies across Entra ID, Exchange Online, Power BI, Power Platform, Defender,
-SharePoint and Teams. Rule availability does not guarantee a verdict: available evidence, the adapter and
+SharePoint and Teams, and on a Google Workspace run for all 138 ScubaGoggles v1.1.0 policies (see
+[SCuBA answers for Google Workspace](#scuba-answers-for-google-workspace)). Rule availability does not guarantee a verdict: available evidence, the adapter and
 permissions determine whether a policy can be assessed. A policy without a rule reports not assessed
 (`rule_not_implemented`): "Not assessed: Auditex has no rule for this policy yet."
 Assessment runs locally from the run bundle; no endpoint or model name is involved.
