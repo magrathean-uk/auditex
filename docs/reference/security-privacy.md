@@ -682,6 +682,30 @@ Compare, drift and shareable SARIF and OSCAL deduplication use the recorded Work
 retain their original contract and can be compared with current bundles using the same domain. Compare and
 drift mask the legacy customer ID in the result.
 
+DNS record text is public data the operator queried, and the local report keeps it: SPF, DMARC, DKIM, MTA-STS,
+TLS-RPT and BIMI TXT text, DMARC `rua`/`ruf` and TLS-RPT report addresses, SPF mechanisms and DMARC query names.
+The shareable, customer-pack and explainer profiles replace it, because a DMARC record names report mailboxes and an
+SPF record names the domains and addresses allowed to send (`dns_shareable.py`, applied by the redactor to every
+record). Each Google Workspace or Microsoft 365 record section becomes fixed-vocabulary predicates marked
+`record_text: "withheld"`:
+
+| Record | Shareable, customer-pack and explainer output | Withheld |
+|---|---|---|
+| SPF | `present`, `all_qualifier` (`+`, `-`, `~`, `?`), `multiple_records`, `mechanism_count`, `record_count` | `raw`, `records`, `mechanisms` |
+| DMARC | `present`, `policy` and `subdomain_policy` (`none`, `quarantine`, `reject`), `subdomain_policy_present`, `pct`, `pct_partial`, `rua_count`, `rua_invalid_count`, `ruf_count`, `ruf_invalid_count`, `cisa_rua_present`, `inherited`, `multiple_records`, `record_count`, `query_domain` (a keyed `Id` pseudonym of the query name) | `raw`, `records`, report addresses, `query_name` |
+| DKIM | selector names (Auditex's fixed probe list), `selector_record_count` | `selectors` and `selector_details` record text |
+| MTA-STS, TLS-RPT, BIMI | `dns_present`, `id_present`, `policy_mode`; `present`, `rua_count`; `present`, `logo_url_present`, `authority_url_present` and their `_is_https` flags | `raw`, `id`, report addresses, URLs |
+
+A flat Microsoft 365 `dns_posture` record, in the normalised section and as the `evidence` of a DNS finding, shows
+`spf_mechanism_count`, `dmarc_rua_count`, `dmarc_rua_invalid_count`, `dmarc_cisa_rua_present`, `tls_rpt_rua_count`
+and `mta_sts_id_present` in place of `spf_mechanisms`, `dmarc_aggregate_addresses`, `dmarc_aggregate_invalid`,
+`tls_rpt_rua` and `mta_sts_id`; the `dns_posture.dmarc_rua_invalid` finding's `returned_value` is the invalid entry
+count. Raw SCuBA DNS rows show `rdata_count`, and their resolver log entries `query_answer_count` and `query_domain`.
+A policy, qualifier or mode outside its vocabulary reads `unrecognised` (a DMARC tag missing its `;` can fold an
+address into `p=`), and a wrong-typed value reads `null`; neither is shown as its text. Domain labels themselves stay
+as they do elsewhere in shareable output. Older bundles, whose posture records predate record text, render with the
+predicates they can supply. The run bundle, its evidence index and the local report are unchanged.
+
 Shareable SARIF and OSCAL exports withhold waiver reasons, which can include identifiers unavailable to the audit.
 They retain the accepted-risk status and expiry date. Local output includes the reason with known customer IDs masked.
 

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .citations import build_citation_summary, dedupe_citations
+from .dns_shareable import shareable_dns_record
 from .guarded_io import (
     PRIVATE_DIRECTORY,
     PSEUDONYM_KEY_NAME,
@@ -2105,6 +2106,10 @@ class _Redactor:
     def _identifier(self, match: re.Match[str]) -> str:
         return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.key, self.id_canonical.get(match["hit"].lower(), match["hit"]))
 
+    def _dns_name(self, name: str) -> str:
+        """The keyed pseudonym of a DNS name that DNS record text carried (``dns_shareable``)."""
+        return _IMMUTABLE_PREFIX + pseudonym(self.key, name)
+
     # -- structure ----------------------------------------------------------------------------------------
     def walk(self, value: Any, controlled: bool = False, *, contextual_key: str | None = None) -> Any:
         if isinstance(value, str):
@@ -2141,7 +2146,7 @@ class _Redactor:
 
     def mapping(self, record: Mapping[Any, Any], controlled: bool = False, *,
                 contextual_key: str | None = None) -> dict[Any, Any]:
-        record = _without_local_proof(record)
+        record = shareable_dns_record(_without_local_proof(record), self._dns_name)
         normed = {_norm(k): v for k, v in record.items()}
         person = _person(normed) if _is_directory_person(normed) else None
         group = str(normed.get("principaltype", "")).lower() == "group"
@@ -2887,5 +2892,9 @@ writecapable writecapablescopes writecapablescopesusedforreadonlymethods writeen
 writeexportcheckpoint writeexportrecords writeexportsummary writelikepermissioncount writerisk
 x509certificatemultifactor x509certificatesinglefactor xdgdatahome xgithubapiversion xhttpmethod xhttpmethodoverride
 xmethodoverride xrefs yammerenterprise zapenabled
+dmarcaggregateaddresses dmarcaggregateinvalid dmarccisaruapresent dmarcpolicy dmarcruacount dmarcruainvalidcount
+dmarcsubdomainpolicy idpresent mtastsid mtastsidpresent mtastspolicymode policymode queryanswercount querydomain
+rdatacount recordtext selectorrecordcount spfallqualifier spfmechanismcount spfmechanisms subdomainpolicypresent
+tlsrptrua tlsrptruacount withheld
     """.split()
 )
