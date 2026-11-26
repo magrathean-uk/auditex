@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .citations import build_citation_summary, dedupe_citations
+from .dns_shareable import dns_ref_text, shareable_dns_record
 from .guarded_io import (
     PRIVATE_DIRECTORY,
     PSEUDONYM_KEY_NAME,
@@ -2038,6 +2039,8 @@ class _Redactor:
                 return embedded
         if self.roots:
             value = scrub_run_paths(value, self.roots)
+        # A DNS-derived id (``dns_posture:<domain>:...``) names its domain wherever it is quoted (DNS-SHAREABLE).
+        value = dns_ref_text(value, self._dns_name)
         value = self._secrets(value, minimal=self.markup)
         value = OUTPUT_EMAIL_RE.sub(self._mask_email, value)
         value = _ENCODED_EMAIL_RE.sub(self._mask_encoded_email, value)
@@ -2105,6 +2108,14 @@ class _Redactor:
     def _identifier(self, match: re.Match[str]) -> str:
         return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.key, self.id_canonical.get(match["hit"].lower(), match["hit"]))
 
+    def _dns_name(self, name: str) -> str:
+        """The keyed pseudonym of a DNS name from DNS posture output (``dns_shareable``): one per name whatever its
+        case or trailing dot, and a pseudonym stays as it is."""
+        text = name.strip()
+        if _PSEUDONYM_RE.match(text):
+            return text
+        return _IMMUTABLE_PREFIX + pseudonym(self.key, text.lower().rstrip("."))
+
     # -- structure ----------------------------------------------------------------------------------------
     def walk(self, value: Any, controlled: bool = False, *, contextual_key: str | None = None) -> Any:
         if isinstance(value, str):
@@ -2141,7 +2152,7 @@ class _Redactor:
 
     def mapping(self, record: Mapping[Any, Any], controlled: bool = False, *,
                 contextual_key: str | None = None) -> dict[Any, Any]:
-        record = _without_local_proof(record)
+        record = shareable_dns_record(_without_local_proof(record), self._dns_name)
         normed = {_norm(k): v for k, v in record.items()}
         person = _person(normed) if _is_directory_person(normed) else None
         group = str(normed.get("principaltype", "")).lower() == "group"
@@ -2387,7 +2398,7 @@ authenticationmethodconfigurations authenticationmethodfeaturesettings authentic
 authenticationmethodspolicy authenticationplans authenticationstrength authenticationstrengthcollection
 authenticationstrengthpolicies authenticationstrengthunverified authenticationtype authenticatorduplicated
 authenticatorentryabsent authenticatorstateunusable authmethodregistrationobjects authmethods authmode authoritative
-authority authorityurl authorityurlishttps authorization authorizationpolicies authorizationpolicy authpath
+authority authorityurl authorityurlishttps authorityurlpresent authorization authorizationpolicies authorizationpolicy authpath
 authrequirements authscope authscopesummary authstrength authtype authz auto autoadmittedusers autoforwardenabled
 autoforwarding automated automaticrepliessetting automaticupdatemode automaticuserconsentinboundallowed
 automaticuserconsentoutboundallowed automationdetails autopilotquality autoupdateexpiration available
@@ -2396,7 +2407,7 @@ azureclientsecret azuretenantaudit azuretenantid b2bcollaborationinboundaccess b
 b2bdirectconnectinboundaccess b2bdirectconnectoutboundaccess backoffseconds badrequest badvalues banners barlow barlow400
 barlow600 barlowcondensed600 baseline baselinealignment baselineattribution baselinecompleted baselinediff baselinematch
 baselinepin baselinerundir baselines baselinesourcesha256 baselinestatus baselinesteps baselinetext basis basissummary
-batch batchinnerrequests batchrequests bccmessage bearer because before beta betacalls billingdisabled bimi blastradius block
+batch batchinnerrequests batchrequests bccmessage bearer because before beta betacalls billingdisabled bimi bimilogohttps bimipresent blastradius block
 blockaccess blockaccessscope blockallthirdpartyapiaccess blocked blockedaddresslist blockedapplist blockedcollectors blockedconnectorcount blockeddomaincount
 blockeddomains blockedgatecount blockedpermission blockedsenders blockedwithexclusions blockercount blockerhint blockerkind
 blockerreason blockers blockerspath blockersummary blockflagunusable blockingpolicies blocklegacyauthentication
@@ -2418,7 +2429,7 @@ certificatethumbprintinvalid certificatethumbprintmismatch certificatetokenfaile
 changedpaths changeemailsetting changegmailsetting changes channels charsfull charskept check checkedcount checkedfilecount checkedgws checkid checkids
 checklicenceorpermissions checkpointentries checkpointresume checkpointresumed checkpointstate checkpointstatepath
 checks checksumlinecount checksumssha256 choice chromeosdevices chunkcount chunkcounts chunkfiles chunkpaths chunks
-chunkwriter cisascuba cism365v3 cism365v7 citation citationcount citations citationsomitted citationsummary
+chunkwriter cisaruapresent cisascuba cism365v3 cism365v7 citation citationcount citations citationsomitted citationsummary
 citationsummaryomitted cited citedsections citedvariants claim claims class classes classic classification
 classifications classificationsunusable clean client clientall clientapplications clientapptypes clientconfiguration
 clientemail clienterror clientid clientlegacy clientsecret closed closedcount closedgate closedvalues cloudinstancename
@@ -2483,9 +2494,9 @@ directoryrelationshipcoverage directoryrelationshipobjects directoryrelationship
 disabled disabledtier0principals disableenvironmentcreationbynonadminusers disableportalscreationbynonadminusers
 disablesharewitheveryone disabletrialenvironmentcreationbynonadminusers disagree disagreement disagreementpaircount
 disagreements disallowserviceforoauth2access disclaimer discoveredgroupcount discoverystatus displayconcealednames displayname disposition dkim
-dkimconfig dkimenabled dkimnotenabled dkimrecords dkimsigningconfig dkimstatus dlpcompliancepolicies dlpcompliancerules
+dkimconfig dkimenabled dkimnotenabled dkimrecords dkimselectorsmissing dkimselectorspresent dkimselectorsunresolved dkimsigningconfig dkimstatus dlpcompliancepolicies dlpcompliancerules
 dlplicencenotdetected dlplicense dlppolicies dlppolicyscopes dlppolicyunusable dlprules dlpstructureunusable dmarc dmarcagencycontact
-dmarcagencycontacts dmarccisacontact dmarcdhsrua dmarcpublished dmarcrecords dmarcreject dnsposture dnsposturefailed dnspostureobjects
+dmarcagencycontacts dmarccisacontact dmarcdhsrua dmarcmultiplerecords dmarcpct dmarcpctpartial dmarcpresent dmarcpublished dmarcrecordcount dmarcrecords dmarcreject dnsposture dnsposturefailed dnspostureobjects
 dnspresent dnsreadincomplete dnsresolver dnsresolvererror doamin docs docsguides docslegal docsprovenance docsreference doctor
 documenttitle documenturl dodcon dohendpoint domain domainaliases domainaliasname domaindelegation domainentrycount domainhybridobjects domainjoineddevice domainname
 domainposture domainrecordunusable domains domainsettings domainshybrid domaintype domainuniverse domainunlabelled domainunusable
@@ -2622,7 +2633,7 @@ licensestate licensetier licensetiers licensing limit limitationids limitations 
 limits line lineageunresolved lineend lines lineskept linestart linestotal link linked linkpermissioncount list listblockers listcount
 listelementunusable listexists listfield listkey listrules liveread livereadiness livereadinesspath llamacpp llamacpppython loaded
 loadrunindexsummary loadtemplates local localanswer localanswerv1 localauth localtool location locationnotcovered
-locations logicallocations loginactivities logourl logourlishttps lonesurrogatesreplaced longlivedsecret lookups lord
+locations logicallocations loginactivities logourl logourlishttps logourlpresent lonesurrogatesreplaced longlivedsecret lookups lord
 lost lowconfidencefindings lowerbound lowwithrisky ltscendofsupport m365 m365cli m365cliappid m365cliclientid
 m365clinotused m365dsc m365edua3faculty m365edua3student m365edua5faculty m365edua5student m365environment machine macos
 macoscompliancepolicy maester mail mailbox mailboxauditbypass mailboxauditbypassclear mailboxauditdefault
@@ -2633,7 +2644,7 @@ malwarefilterrules malwareprotection malwareprotectionenabled manageasapp manage
 manifestmissing manifestmissingreason manifestpath manifestsha256 manual manualcheck manualonly mappingconfidence markdown marketing
 maskedrepairedkeys match matchedfields matchesvalidationjson maxage maxchars maxd maxdepth maxemptypages maximum
 maximumduration maxitems maxlifetime maxpaths maxresults maxrows maxscore maxsteps maxtop mcostandard mcsb mdelite
-mdesmb mdoautoforwardingmode mdoblockmailforward measureobject mechanisms medium meeting meetingpolicies meetings member
+mdesmb mdoautoforwardingmode mdoblockmailforward measureobject mechanismcount mechanisms medium meeting meetingpolicies meetings member
 memberof members membershipincomplete membershipkind membersread message messagemoderationlevel messagerules messages messagetrace
 messagingpolicies meta metadata method methodenabled methodentrymissing methods methodsseen methodstateunusable
 metlownorisk metnoselfgrant metpolicyclean metpolicydeclaredexclusions metric mfacombinations mfaenrollmentratio
@@ -2647,7 +2658,7 @@ missingpermissions mistral mitigations mitigationsobserved mitreattack mobileand
 modelabel modelfailed modelname modelshadow modelstatus modelunverified modevalid modified modifiedat modifiedcount
 modifieddatetime modifiedpaths modifiedtime modifysubject modulecompatibility modulecompatibilityunverified
 moduleincompatible modulename modulenotfound moduleversion monkey365 moot mootadditionblocked mootscopeunknown
-morefields mostpermissivecapability movetofolder movetojmf mssecurescore msstatus mszerotrust mtasts multiplerecords
+morefields mostpermissivecapability movetofolder movetojmf mssecurescore msstatus mszerotrust mtasts mtastsdnspresent mtastspolicyfetchstatus mtastspolicyhttpstatus multiplerecords
 multitenantapp mutatingcalls mycustomer name namearguments namedenumsv1 namedlocation namedlocations nearmissexclusions need
 negatedquery neither nestedgroup network networkinspectionsystemenabled never neverconfigured newaccepted
 newacceptedcount newatorabovethreshold newcount newcountatorabovethreshold newest newfindings newgroupsarehidden newlyassessed
@@ -2704,7 +2715,7 @@ phishingresistantrolecatalogverdict phishingresistantverdict phishspamaction pic
 pinnedreference pinnedrevision pinvalid placeholders plane plannedcommands platform platformcounts platformkey
 platformlabel platformmissing platformnotcovered platforms platformunrecognised pnotreject policies
 policiesexclusionunverified policiesmissingbreakglassexclusion policiesread policieswithoutexclusion policy
-policycascade policycollection policycount policyduplicated policyexclusions policyexplanations policyfieldunusable
+policycascade policycollection policycount policyduplicated policyexclusions policyexplanations policyfetchstatus policyfieldunusable
 policyflagoff policyflagsok policyflagunusable policyid policyids policyinvalid policyitem policyleafunusable policymigrationstate
 policyname policynames policynotincatalogue policynotinexport policyobjectabsent policyquery policyreadincomplete policyrowvalidation policysampletruncated policyscope
 policyscopeunusable policysections policysettings policyunusable policywithoutexportablerules policywithoutrules position possible post
@@ -2770,7 +2781,7 @@ roledefinitions roledisplayname roleeligibilityschedule roleeligibilityschedulec
 roleexclusions rolefieldunusable roleflagged roleid rolemanagementpolicyassignment rolemanagementpolicyassignments
 rolemanagementpolicyrule rolemanagementpolicyrules rolemanagementpolicyrulesfanout rolename rolenames roleoverlap roles
 roletemplateid roleunlabelled rolewithoutname rolewithoutpolicy rolloutsettings room root rootidknown rootsite route routed routes
-rowcount rowindex rows rowscollected rtype ruaabsent rufabsent rule ruleabsent ruleanswered ruleevaluationfailed
+rowcount rowindex rows rowscollected rtype ruaabsent ruacount ruainvalidcount rufabsent rufcount rufinvalidcount rule ruleabsent ruleanswered ruleevaluationfailed
 rulefailure rulefailuregws ruleid ruleids ruleindex rulenotblocking rulenotimplemented rulenotnotifying ruleparameters rulepolicies
 ruleprecheck ruleprioritytie rules rulesacceptedrisk rulesaffected rulescopeunusable rulesevaluated rulesfailed
 rulesmapped rulesnotassessed rulesnotevaluated rulesource rulesourcetype rulespassed rulesspec rulessupporting
@@ -2822,7 +2833,7 @@ smbbusinesspremium smtpauthenabledmailboxcount smtpclientauthdisabled smtpclient
 snapshot soc2 softwareoath sortobject sortorder source sourceartifactcount sourceartifacts sourcecollector sourcecommit sourcefile
 sourceid sourceintegritystatus sourcelinks sourcename sourcepath sourcereferences sources sourcesection sourcesha256
 sourcetype sourceurl sourceversion spamaction spamcascade specificpeople specversion spee3 spee3usgovdod
-spee3usgovgcchigh spee5 spef1 spfrecords spgated spoempty spoexternalsharingmanaged sponotsingleton sposhapeunusable
+spee3usgovgcchigh spee5 spef1 spfmultiplerecords spfpresent spfrecords spgated spoempty spoexternalsharingmanaged sponotsingleton sposhapeunusable
 spotenant spscalar ssomode ssoreadincomplete stage stagecount stale staleacceptedriskcount staleacceptedriskcountatorabovethreshold
 staleacceptedrisks staleacceptedrisksatorabovethreshold staleaccountdays staleafterdays stalecount staledevicedays
 staleguestdays stalesyncdays staleuserdays standard standardcoverscompliant standardpack
@@ -2849,7 +2860,7 @@ tenantidunusable tenantisolation tenantkey tenantname tenantpolicy tenantregions
 tenantsettings termsofuse test testing text that theme themes then thinkingdisabled thinkingstripped third thirdparty
 thirdpartyapp threads threatintelligence threatprotectionrequired thresholddays thresholdfindings thresholdpercent
 throttlemode thumbprint tier0 tier0principallabels tier0principals tier0targets timeline timeout timestamp timewindow
-title tlsrpt tlsverificationrelaxed todo togglecaaenablement toggleserviceenabled toid token tokencache tokencachepresent tokenclaims tokenfailed tokenfile
+title tlsrpt tlsrptpresent tlsverificationrelaxed todo togglecaaenablement toggleserviceenabled toid token tokencache tokencachepresent tokenclaims tokenfailed tokenfile
 tokenpath tokenpreview tokenrequests tokensucceeded tokenuri tokenurl tolower tool toolchain toolchaincount toolchainreadiness
 toolchainreadinesspath toolchains toolchainunavailable tooldependencies toolrequirements tools toomanytokens tooshort topdelete
 topfindings toplimit topopenfindings toseverity tostatus tostring total totals totype toupper traceback trackclicks
@@ -2887,5 +2898,9 @@ writecapable writecapablescopes writecapablescopesusedforreadonlymethods writeen
 writeexportcheckpoint writeexportrecords writeexportsummary writelikepermissioncount writerisk
 x509certificatemultifactor x509certificatesinglefactor xdgdatahome xgithubapiversion xhttpmethod xhttpmethodoverride
 xmethodoverride xrefs yammerenterprise zapenabled
+dmarcaggregateaddresses dmarcaggregateinvalid dmarccisaruapresent dmarcpolicy dmarcruacount dmarcruainvalidcount
+dmarcsubdomainpolicy idpresent mtastsid mtastsidpresent mtastspolicymode policymode queryanswercount querydomain
+rdatacount recordtext selectorrecordcount spfallqualifier spfmechanismcount spfmechanisms subdomainpolicypresent
+tlsrptrua tlsrptruacount withheld
     """.split()
 )

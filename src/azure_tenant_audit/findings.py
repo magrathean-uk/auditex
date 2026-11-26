@@ -3833,7 +3833,7 @@ def _normalized_findings(
                     }
                 )
             )
-        elif not item.get("dmarc_present"):
+        elif item.get("dmarc_present") is False:
             findings.append(
                 _finalize_finding(
                     {
@@ -3907,7 +3907,10 @@ def _normalized_findings(
                     }
                 )
             )
-        if item.get("dmarc_present") and item.get("dmarc_pct_partial"):
+        pct = item.get("dmarc_pct")
+        # Partial enforcement from a readable percentage below 100, whatever the companion flag says: the flag alone
+        # neither proves nor disproves it.
+        if item.get("dmarc_present") is True and type(pct) is int and 0 <= pct < 100:
             policy = str(item.get("dmarc_policy") or "").lower()
             # ``p=none`` already captured by dmarc_monitor_only — only flag partial
             # enforcement when the policy is meant to enforce.

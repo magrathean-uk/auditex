@@ -804,7 +804,15 @@ def test_google_dns_field_names_survive_a_matching_person_name(field: str) -> No
 def test_contextual_google_dns_fields_survive_in_posture_records() -> None:
     source = {"domain": "example.com", "alias": False,
               "dmarc": {"inherited": False}, "dkim": {"selectors": {"google": []}}}
-    assert redact_output(source, context=_people("Inherited", "Selectors")) == source
+    # Record text is withheld in the shareable profiles (DNS-SHAREABLE): ``selectors`` becomes a count and the
+    # posture domain a pseudonym.
+    out = redact_output(source, context=_people("Inherited", "Selectors"))
+    assert re.fullmatch(r"Id [0-9a-f]{16}", out.pop("domain"))
+    assert out == {
+        "alias": False,
+        "dmarc": {"record_text": "withheld", "inherited": False},
+        "dkim": {"record_text": "withheld", "selector_record_count": 0},
+    }
 
 
 @pytest.mark.parametrize("name", ["Chat", "Time", "Parameters"])
