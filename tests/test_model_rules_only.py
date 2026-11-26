@@ -67,7 +67,7 @@ def test_uncovered_contract_and_legacy_rejection(tmp_path, uncovered_policy):
     assert row['limitations'] == row['recommendations'] == []
     assert result['totals']['unknown'] == 1 and result['totals']['rule_answered'] == 0
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
     result['schema_version'] = '2026-10-29'
     with pytest.raises(ValueError):
         validate_assessment(result)

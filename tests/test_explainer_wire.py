@@ -283,7 +283,7 @@ def test_demo_budget_and_suppressed_rows(tmp_path):
 
 def test_schema_mirrors_standalone_and_explainer_is_optional(assessment):
     standalone = json.loads((ROOT / "schemas/explainer.schema.json").read_text())
-    current = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())
+    current = json.loads((ROOT / "schemas/model_assessment-2026-11-22.schema.json").read_text())
     assert current["$defs"]["explainer"] == {k: standalone[k] for k in
                                                ("type", "additionalProperties", "required", "properties")}
     payload = assessment_with_row(assessment, "not_met")
@@ -387,7 +387,7 @@ def test_no_rule_has_no_explainer_and_schema_rejects_one(tmp_path, monkeypatch):
     assert payload["policies"][0]["reason"] == "rule_not_implemented"
     assert "explainer" not in payload["policies"][0]
     payload["policies"][0]["explainer"] = {"explanation": "Unavailable.", "remediation_steps": [], "evidence_refs": ["e0"]}
-    schema = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())
+    schema = json.loads((ROOT / "schemas/model_assessment-2026-11-22.schema.json").read_text())
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(payload, schema)
     with pytest.raises(ValueError):

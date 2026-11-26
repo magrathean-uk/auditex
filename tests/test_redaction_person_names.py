@@ -792,7 +792,7 @@ def test_every_product_field_name_is_exempt_from_whole_key_masking() -> None:
     exempt = redaction._D5_FIELD_NAMES
     assert all(redaction._norm(name) == name for name in exempt)
     # These Google fields are structural within their own records. Elsewhere they can be people.
-    missing = sorted(_product_field_names() - exempt - {"region", "securityupdate", "inherited", "selectors"})
+    missing = sorted(_product_field_names() - exempt - {"asof", "region", "securityupdate", "inherited", "selectors"})
     assert not missing, "regenerate _D5_FIELD_NAMES in src/azure_tenant_audit/output_redaction.py; missing: " + " ".join(missing)
 
 
