@@ -353,12 +353,13 @@ def test_r125_a_shareable_export_withholds_the_waiver_reason(
 
 
 @pytest.mark.parametrize("format_name", ["sarif", "oscal"])
-def test_r125_a_local_export_keeps_the_waiver_reason(tmp_path: Path, format_name: str) -> None:
+def test_r125_a_local_export_keeps_the_waiver_reason_with_the_customer_id_masked(tmp_path: Path, format_name: str) -> None:
     reason = _REASON_SPELLINGS["underscore"]
     run = _write_google_run(tmp_path / "run-a", domain="alpha.example", customer_id=_CUSTOMER,
                             findings=[_google_waived(reason)])
     content = preview_report(run_dir=str(run), format_name=format_name, profile="local")["content"]
-    assert reason in _accepted_text(content, format_name)
+    assert "Approved under workspace_<customer-id>_rollout" in _accepted_text(content, format_name)
+    assert _CUSTOMER not in content
 
 
 # R126 ---------------------------------------------------------------------------------------------------------------

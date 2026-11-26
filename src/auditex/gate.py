@@ -62,7 +62,13 @@ from azure_tenant_audit.waivers import (
     waiver_expiry,
 )
 
-from .compare import NormalizedSections, reassessment_gap, require_same_tenant_runs
+from .compare import (
+    NormalizedSections,
+    compare_customer_ids,
+    reassessment_gap,
+    require_same_tenant_runs,
+)
+from .google_workspace.customer_id import CustomerIds
 from .run_bundle import RunBundle
 
 SEVERITY_RANKS = {"low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -653,9 +659,13 @@ def gate_drift(
     current_context().bind_run(current_run_dir)
     threshold, threshold_rank = _threshold(fail_on)
     context = {"fail_on": threshold, "baseline_run_dir": str(baseline_run_dir), "current_run_dir": str(current_run_dir)}
+    ids = CustomerIds()
     try:
         baseline_bundle = _open_run(baseline_run_dir, "baseline run")
+        baseline_manifest = baseline_bundle.manifest()
+        ids = compare_customer_ids([baseline_manifest])
         current_bundle = _open_run(current_run_dir, "current run")
+        ids = compare_customer_ids([baseline_manifest, current_bundle.manifest()])
         # A run that is not the one its digest names is refused before the runs are read or compared.
         for bundle, label, expected in (
             (baseline_bundle, "baseline run", expect_baseline_manifest_sha256),
@@ -664,7 +674,7 @@ def gate_drift(
             if expected:
                 _verify_expected_digest(bundle, label, expected)
     except GateInputError as error:
-        return _blocked(error, **context)
+        return ids.scrub_legacy_output(_blocked(error, **context))
     try:
         tenant_context = require_same_tenant_runs([baseline_run_dir, current_run_dir])
     except ValueError as exc:
@@ -702,7 +712,7 @@ def gate_drift(
                 )
             warnings.append(f"{message}; accepted by --allow-partial")
     except GateInputError as error:
-        return _blocked(error, **context)
+        return ids.scrub_legacy_output(_blocked(error, **context))
 
     current_collectors = current_bundle.collector_coverage()
     current_sections = NormalizedSections(current_bundle)
@@ -788,7 +798,7 @@ def gate_drift(
     ]
 
     passed = not (new_above_threshold or reactivated_above_threshold or stale_accepted_above_threshold)
-    return {
+    return ids.scrub_legacy_output({
         "pass": passed,
         "status": "pass" if passed else "fail",
         "fail_on": threshold,
@@ -822,4 +832,4 @@ def gate_drift(
         "stale_accepted_risk_count_at_or_above_threshold": len(stale_accepted_above_threshold),
         "stale_accepted_risks_at_or_above_threshold": stale_accepted_above_threshold,
         "warnings": warnings,
-    }
+    })

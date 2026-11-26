@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,8 +14,8 @@ from azure_tenant_audit.assurance import build_live_readiness_summary
 from azure_tenant_audit.auth_runtime import local_path_argument
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.collector_runner import (
-    AuditWriterCollectorAdapter,
     CollectorRunContext,
+    CollectorRunHooks,
     CollectorRunner,
 )
 from azure_tenant_audit.dns_lookup import (
@@ -31,7 +31,7 @@ from azure_tenant_audit.offline_replay import (
     replay_coverage_rows,
     replay_source,
 )
-from azure_tenant_audit.output import AuditWriter
+from azure_tenant_audit.output import AuditWriter, validate_bundle_name
 from azure_tenant_audit.provider_runtime import (
     ProviderFinalizePlan,
     write_provider_bundle,
@@ -70,6 +70,12 @@ from .collectors import (
     replay_scuba_payload,
     scuba_probe_rows,
 )
+from .customer_id import (
+    CustomerIds,
+    bundle_customer_id,
+    collect_customer_ids,
+    withheld_coverage_row,
+)
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
     DEFAULT_STALE_USER_DAYS,
@@ -100,8 +106,9 @@ def _merged_fixture_provenance(
                 merged[key] = value
     return fixture_provenance_for_bundle(merged) or None
 # --doh-endpoint: a DoH resolver URL path can carry an account token.
+# ``--customer-id`` is not a secret, but no customer id may enter a bundle (PRIV-CUSTOMER-ID).
 _SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache",
-                            "--doh-endpoint"}
+                            "--doh-endpoint", "--customer-id"}
 
 
 @dataclass(frozen=True)
@@ -132,6 +139,29 @@ class GoogleRunConfig:
     stale_device_days: int = DEFAULT_STALE_DEVICE_DAYS
     # The DNS-over-HTTPS resolver for google_dns_posture: this option, else AUDITEX_DOH_ENDPOINT, else Cloudflare.
     doh_endpoint: str | None = None
+
+
+def _validate_google_labels(tenant_name: str, run_name: str | None, ids: CustomerIds) -> bool:
+    try:
+        validate_bundle_name(tenant_name, "tenant name")
+        validate_bundle_name(run_name, "run name")
+    except ValueError as exc:
+        LOG.error("%s", ids.text(str(exc)))
+        return False
+    return True
+
+
+def _output_config(config: GoogleRunConfig, ids: CustomerIds) -> GoogleRunConfig:
+    return replace(
+        config,
+        tenant_name=ids.text(config.tenant_name, "customer-id-withheld"),
+        run_name=ids.text(config.run_name, "customer-id-withheld") if config.run_name is not None else None,
+        domain=ids.scrub(config.domain),
+        collectors=ids.scrub(config.collectors),
+        since=ids.scrub(config.since),
+        until=ids.scrub(config.until),
+        waiver_file=Path(ids.text(local_path_argument(str(config.waiver_file)))) if config.waiver_file else None,
+    )
 
 
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
@@ -182,7 +212,7 @@ def build_google_auth_context_payload(config: GoogleRunConfig, auth_config: Goog
         ),
         "subject": auth_config.subject,
         "workspace_domain": config.domain,
-        "customer_id": config.customer_id,
+        "customer_id": bundle_customer_id(config.customer_id),
         "scope_count": len(auth_config.scopes),
         "scopes": list(auth_config.scopes),
         "service_account_key_present": auth_summary["service_account_key_present"],
@@ -530,7 +560,7 @@ def _write_google_bundle(
         run_id=writer.run_id,
         collector_payloads=collector_payloads,
         domain=config.domain,
-        customer_id=config.customer_id,
+        customer_id=bundle_customer_id(config.customer_id),
         diagnostics=diagnostics,
         result_rows=result_rows,
         coverage_rows=coverage_rows,
@@ -564,7 +594,7 @@ def _write_google_bundle(
             "platform": "google_workspace",
             "tenant_name": config.tenant_name,
             "workspace_domain": config.domain,
-            "customer_id": config.customer_id,
+            "customer_id": bundle_customer_id(config.customer_id),
             "run_id": writer.run_id,
             "finding_count": len(findings),
             "collector_count": len(result_rows),
@@ -592,7 +622,7 @@ def _write_google_bundle(
         writer=writer,
         plan=ProviderFinalizePlan(
             tenant_name=config.tenant_name,
-            tenant_id=config.customer_id,
+            tenant_id=None,
             executed_by="auditex_google_workspace",
             selected_collectors=[row["name"] for row in result_rows],
             overall_status=overall_status,
@@ -614,9 +644,9 @@ def _write_google_bundle(
                 "until": config.until,
                 "platform": "google_workspace",
                 "workspace_domain": config.domain,
-                "customer_id": config.customer_id,
+                "customer_id": bundle_customer_id(config.customer_id),
                 "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path is not None else None,
-                "command_line": scrub_google_command_line(command_line or []),
+                "command_line": command_line or [],
                 "coverage_count": len(coverage_rows),
                 "waiver_path": str(config.waiver_file) if config.waiver_file else None,
                 "top_limit": config.top or None,
@@ -730,11 +760,8 @@ def run_google_offline(
     as_of: datetime | None = None,
 ) -> int:
     """Replay a Google Workspace sample. ``as_of`` pins the instant date-derived findings are judged at."""
-    # An unreadable or invalid waiver file stops the run before anything is written.
-    try:
-        waiver_rows = load_waivers(waiver_file) if waiver_file else []
-    except WaiverFileError as exc:
-        LOG.error("%s", exc)
+    ids = CustomerIds(customer_id)
+    if not _validate_google_labels(tenant_name, run_name, ids):
         return 2
     from azure_tenant_audit.resources import (
         read_selected_resource,
@@ -757,11 +784,29 @@ def run_google_offline(
     # Resolver diagnostics in the sample are untrusted (a full resolver URL may carry user info, a path token or a
     # query): every copy below (raw payloads, coverage, diagnostics, normalised records) sees only the safe form.
     sample = sanitise_resolver_fields(sample)
-    fixture_provenance = _merged_fixture_provenance(
+    ids.learn(sample)
+    sample_record = ids.scrub(sample_record)
+    # A value used to identify evidence (for example an OU path) can become unusable after masking.
+    withheld_collectors: set[str] = set()
+    safe_sample: dict[str, Any] = {}
+    for key, value in sample.items():
+        safe_key = ids.text(key, "customer-id-withheld")
+        if key not in _OFFLINE_SAMPLE_METADATA_KEYS:
+            value = replay_scuba_payload(key, replay_policy_payload(key, value))
+        safe_sample[safe_key], changed = ids.evidence(value)
+        if changed or safe_key != key:
+            withheld_collectors.add(safe_key)
+    sample = safe_sample
+    fixture_provenance = ids.scrub(_merged_fixture_provenance(
         sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
         fixture_provenance_override,
-    )
-    config = GoogleRunConfig(
+    ))
+    try:
+        waiver_rows = load_waivers(waiver_file) if waiver_file else []
+    except WaiverFileError as exc:
+        LOG.error("%s", ids.text(str(exc)))
+        return 2
+    config = _output_config(GoogleRunConfig(
         tenant_name=tenant_name,
         out=out,
         domain=domain,
@@ -773,8 +818,8 @@ def run_google_offline(
         waiver_file=waiver_file,
         stale_user_days=stale_user_days,
         stale_device_days=stale_device_days,
-    )
-    writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
+    ), ids)
+    writer = AuditWriter(out, tenant_name=config.tenant_name, run_name=config.run_name)
     writer.log_event(
         "run.started",
         "Google Workspace offline run started",
@@ -782,10 +827,7 @@ def run_google_offline(
     )
     # ``null``, a list or an empty object under a collector's name is a collector that delivered nothing, not one that is
     # absent from the sample: it stays in the run, with every section it should have carried recorded as absent.
-    sample_collectors = {
-        str(key): replay_scuba_payload(str(key), replay_policy_payload(str(key), value))
-        for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS
-    }
+    sample_collectors = {key: value for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS}
     collector_payloads = {name: value for name, value in sample_collectors.items() if isinstance(value, dict)}
     result_rows: list[dict[str, Any]] = []
     # A sample section that carries an error or a cut-list marker replays as the failed or partial read it was,
@@ -808,6 +850,7 @@ def run_google_offline(
             *absent_section_rows(name, held, COLLECTOR_SECTIONS.get(name, ())),
             *_replayed_mailbox_rows(name, payload),
             *policy_replay_rows(name, payload),
+            *([withheld_coverage_row(name)] if name in withheld_collectors else []),
         ]
         coverage_rows.extend(replayed)
         diagnostics.extend(dict(row) for row in replayed if row.get("status") != "ok")
@@ -844,7 +887,7 @@ def run_google_offline(
         duration=0,
         mode="offline",
         command_line=[],
-        waiver_rows=waiver_rows,
+        waiver_rows=ids.scrub(waiver_rows),
         replay=replay_source(sample_record["sample"], data=sample_bytes),
         as_of=as_of,
     )
@@ -880,12 +923,15 @@ def _auth_config(config: GoogleRunConfig, selected: list[str]) -> GoogleAuthConf
 
 
 def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None = None) -> int:
+    ids = CustomerIds(config.customer_id)
+    if not _validate_google_labels(config.tenant_name, config.run_name, ids):
+        return 2
     # Read the waiver file once, before any API call: a file that cannot be trusted must not let the run
     # finish with no waivers applied. The rows loaded here are the ones applied later.
     try:
         waiver_rows = load_waivers(config.waiver_file) if config.waiver_file else []
     except WaiverFileError as exc:
-        LOG.error("%s", exc)
+        LOG.error("%s", ids.text(str(exc)))
         return 2
     dependency_status = google_dependency_status()
     if not dependency_status["available"]:
@@ -898,13 +944,14 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         try:
             doh_endpoint = resolve_doh_endpoint(config.doh_endpoint)
         except ValueError as exc:
-            print(json.dumps({"error": "invalid_doh_endpoint", "message": str(exc)}, indent=2), file=sys.stderr)
+            print(json.dumps({"error": "invalid_doh_endpoint", "message": ids.text(str(exc))}, indent=2), file=sys.stderr)
             return 2
     auth_config = _auth_config(config, selected)
     try:
         credentials = build_google_credentials(auth_config)
     except (RuntimeError, ValueError, OSError) as exc:
-        print(json.dumps({"error": "google_auth_failed", "message": str(exc)}, indent=2), file=sys.stderr)
+        message = ids.failure_text(str(exc))
+        print(json.dumps({"error": "google_auth_failed", "message": message}, indent=2), file=sys.stderr)
         return 2
     client = GoogleWorkspaceClient(
         credentials,
@@ -912,45 +959,78 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         page_size=config.page_size,
         delegated=auth_config.supports_user_delegation,
     )
+    # One collector can disclose the ID of a customer another already mentioned in free text.
+    # Buffer the runner's events and results in memory until all reads have supplied their IDs.
+    events: list[tuple[str, str, dict[str, Any] | None]] = []
+    hooks = CollectorRunHooks(audit_logger=lambda event, message, details: events.append((event, message, details)))
+    start = time.time()
+    runner = CollectorRunner()
+    with collect_customer_ids(ids):
+        outputs = [
+            runner.run(
+                REGISTRY[name],
+                CollectorRunContext(
+                    client=_collector_client(client, name),
+                    top=config.top,
+                    page_size=config.page_size,
+                    plane="inventory",
+                    since=config.since,
+                    until=config.until,
+                    hooks=hooks,
+                    extra={"domain": config.domain, "customer_id": config.customer_id, "doh_endpoint": doh_endpoint},
+                ),
+                name=name,
+            )
+            for name in selected
+        ]
+    for output in outputs:
+        ids.learn(output.result.payload)
+        ids.learn(output.coverage_rows)
+    ids.learn([detail for _, _, detail in events])
+
+    config = _output_config(config, ids)
     writer = AuditWriter(config.out, tenant_name=config.tenant_name, run_name=config.run_name)
-    auth_context_path = writer.write_json_artifact("auth-context.json", build_google_auth_context_payload(config, auth_config))
+    auth_context_path = writer.write_json_artifact(
+        "auth-context.json", ids.scrub(build_google_auth_context_payload(config, auth_config)),
+    )
     writer.log_event(
         "run.started",
         "Google Workspace live run started",
-        {"platform": "google_workspace", "domain": config.domain, "customer_id": config.customer_id, "auth": safe_auth_summary(auth_config)},
+        ids.scrub({
+            "platform": "google_workspace", "domain": config.domain,
+            "customer_id": bundle_customer_id(config.customer_id), "auth": safe_auth_summary(auth_config),
+        }),
     )
+    notices = []
     if doh_endpoint is not None:
-        notice = google_dns_notice(doh_endpoint)
+        notice = ids.text(google_dns_notice(doh_endpoint))
+        notices.append(notice)
         LOG.info("%s", notice)
-        # The auditex CLI configures no log handler, so the operator sees the notice only through this line (stderr
-        # keeps stdout for the run's JSON).
         print(f"Collection notice: {notice}", file=sys.stderr)
-        writer.log_event("run.notice", notice, {"collector": "google_dns_posture", "resolver": _resolver_label(doh_endpoint)})
-    start = time.time()
-    writer_adapter = AuditWriterCollectorAdapter(writer)
-    runner = CollectorRunner(writer_adapter)
+        writer.log_event("run.notice", notice, {"collector": "google_dns_posture", "resolver": ids.text(_resolver_label(doh_endpoint))})
+    for event, message, detail in events:
+        writer.log_event(event, ids.text(message), ids.scrub(detail))
     result_rows: list[dict[str, Any]] = []
     coverage_rows: list[dict[str, Any]] = []
     collector_payloads: dict[str, dict[str, Any]] = {}
-    diagnostics: list[dict[str, Any]] = []
-    for name in selected:
-        output = runner.run(
-            REGISTRY[name],
-            CollectorRunContext(
-                client=_collector_client(client, name),
-                top=config.top,
-                page_size=config.page_size,
-                plane="inventory",
-                since=config.since,
-                until=config.until,
-                hooks=writer_adapter.hooks(),
-                extra={"domain": config.domain, "customer_id": config.customer_id, "doh_endpoint": doh_endpoint},
-            ),
-            name=name,
-        )
-        result_rows.append(dict(output.result_row))
-        coverage_rows.extend(output.coverage_rows)
-        collector_payloads[name] = output.result.payload
+    for name, output in zip(selected, outputs, strict=True):
+        payload, changed = ids.evidence(output.result.payload)
+        payload = writer.valid_text(payload)
+        rows = writer.valid_text(ids.scrub(output.coverage_rows))
+        row = writer.valid_text(ids.scrub(dict(output.result_row)))
+        if changed:
+            rows.append(withheld_coverage_row(name))
+            row["coverage_rows"] = len(rows)
+            if row["status"] == "ok":
+                row["status"] = "partial"
+        if rows:
+            writer.write_index_records(rows)
+        if not output.crashed or payload:
+            writer.write_raw(name, payload)
+        writer.write_checkpoint(name, row)
+        result_rows.append(row)
+        coverage_rows.extend(rows)
+        collector_payloads[name] = payload
     if placement := _record_policy_placement(writer, collector_payloads, result_rows, coverage_rows):
         writer.write_index_records(placement)
     for row in result_rows:
@@ -977,10 +1057,10 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         duration=round(time.time() - start, 2),
         mode=config.auth,
         auth_context_path=auth_context_path,
-        command_line=command_line,
-        waiver_rows=waiver_rows,
-        data_handling_notices=[google_dns_notice(doh_endpoint)] if doh_endpoint is not None else [],
-        doh_endpoint=doh_endpoint,
+        command_line=ids.scrub(scrub_google_command_line(command_line or [])),
+        waiver_rows=ids.scrub(waiver_rows),
+        data_handling_notices=notices,
+        doh_endpoint=ids.scrub(doh_endpoint),
     )
 
 
@@ -1008,14 +1088,15 @@ def google_doctor(config: GoogleRunConfig | None = None) -> dict[str, Any]:
             "oauth_client_present": bool(config.oauth_client and config.oauth_client.expanduser().exists()),
             "token_cache_present": bool(config.token_cache and config.token_cache.expanduser().exists()),
         }
-        payload["target"] = {"domain": config.domain, "customer_id": config.customer_id}
+        # The console and MCP copies carry no customer id either (PRIV-CUSTOMER-ID).
+        payload["target"] = {"domain": config.domain, "customer_id": bundle_customer_id(config.customer_id)}
         payload["selected_collectors"] = selected
         payload["live_readiness"] = build_google_live_readiness(
             selected,
             [],
             dependency_available=bool(dependency_status.get("available")),
         )
-    return payload
+    return CustomerIds(config.customer_id).scrub(payload) if config is not None else payload
 
 
 def _google_probe_summary_rows(selected: list[str], preflight_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1055,6 +1136,7 @@ def _write_google_probe_bundle(
     dependency_status: dict[str, Any],
     command_line: list[str] | None,
 ) -> None:
+    ids = CustomerIds(config.customer_id)
     preflight_rows = [dict(row) for row in payload.get("preflight", []) if isinstance(row, dict)]
     capability_rows = [dict(row) for row in payload.get("capability_matrix", []) if isinstance(row, dict)]
     if not capability_rows:
@@ -1078,11 +1160,11 @@ def _write_google_probe_bundle(
     writer.log_event(
         "probe.started",
         "Google Workspace probe started",
-        {"platform": "google_workspace", "domain": config.domain, "customer_id": config.customer_id},
+        {"platform": "google_workspace", "domain": config.domain, "customer_id": bundle_customer_id(config.customer_id)},
     )
     for row in _google_probe_summary_rows(selected, preflight_rows):
         writer.write_summary(row)
-    auth_context_path = writer.write_json_artifact("auth-context.json", build_google_auth_context_payload(config, auth_config))
+    auth_context_path = writer.write_json_artifact("auth-context.json", ids.scrub(build_google_auth_context_payload(config, auth_config)))
     preflight_path = writer.write_json_artifact("preflight.json", preflight_rows)
     writer.write_index_records(preflight_rows)
     capability_path = writer.write_json_artifact("capability-matrix.json", capability_rows)
@@ -1103,7 +1185,7 @@ def _write_google_probe_bundle(
             "tenant_name": config.tenant_name,
             "run_id": writer.run_id,
             "workspace_domain": config.domain,
-            "customer_id": config.customer_id,
+            "customer_id": bundle_customer_id(config.customer_id),
             "collector_count": len(selected),
             "coverage_row_count": len(preflight_rows),
             "blocker_count": sum(1 for row in preflight_rows if row.get("status") != "ok"),
@@ -1145,7 +1227,7 @@ def _write_google_probe_bundle(
         writer=writer,
         plan=ProviderFinalizePlan(
             tenant_name=config.tenant_name,
-            tenant_id=config.customer_id,
+            tenant_id=None,
             executed_by="auditex_google_probe",
             selected_collectors=selected,
             overall_status=overall_status,
@@ -1172,7 +1254,7 @@ def _write_google_probe_bundle(
             bundle_metadata={
                 "since": config.since,
                 "until": config.until,
-                "command_line": scrub_google_command_line(command_line or []),
+                "command_line": command_line or [],
                 "probe_mode": config.auth,
                 "probe_surface": config.collectors or config.collector_preset or "",
                 "capability_matrix_path": str(capability_path.relative_to(writer.run_dir)),
@@ -1183,7 +1265,7 @@ def _write_google_probe_bundle(
                 "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)),
                 "platform": "google_workspace",
                 "workspace_domain": config.domain,
-                "customer_id": config.customer_id,
+                "customer_id": bundle_customer_id(config.customer_id),
                 "collector_preset": config.collector_preset,
                 "top_limit": config.top,
             },
@@ -1197,104 +1279,71 @@ def _write_google_probe_bundle(
 
 
 def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None = None) -> int:
+    ids = CustomerIds(config.customer_id)
+    if not _validate_google_labels(config.tenant_name, config.run_name, ids):
+        return 2
     dependency_status = google_dependency_status()
     selected = _selected_collectors(config)
     payload = google_doctor(config)
     auth_config = _auth_config(config, selected)
-    writer = AuditWriter(config.out, tenant_name=config.tenant_name, run_name=config.run_name)
-    if not dependency_status["available"]:
-        payload["capability_matrix"] = build_google_capability_rows(
-            selected,
-            auth_mode=config.auth,
-            dependency_status=dependency_status,
-        )
-        payload["live_readiness"] = build_google_live_readiness(
-            selected,
-            payload["capability_matrix"],
-            dependency_available=False,
-        )
-        _write_google_probe_bundle(
-            writer=writer,
-            config=config,
-            selected=selected,
-            auth_config=auth_config,
-            payload=payload,
-            dependency_status=dependency_status,
-            command_line=command_line,
-        )
-        print(json.dumps(payload, indent=2))
-        return 2
-    try:
-        credentials = build_google_credentials(auth_config)
-        client = GoogleWorkspaceClient(
-            credentials,
-            customer_id=config.customer_id,
-            page_size=config.page_size,
-            delegated=auth_config.supports_user_delegation,
-        )
-        preflight_rows = build_google_preflight_rows(client, selected, domain=config.domain, top=5 if config.top is None else max(1, min(config.top, 5)))
+    exit_code = 2
+    if dependency_status["available"]:
+        try:
+            with collect_customer_ids(ids):
+                credentials = build_google_credentials(auth_config)
+                client = GoogleWorkspaceClient(
+                    credentials,
+                    customer_id=config.customer_id,
+                    page_size=config.page_size,
+                    delegated=auth_config.supports_user_delegation,
+                )
+                preflight_rows = build_google_preflight_rows(
+                    client, selected, domain=config.domain, top=5 if config.top is None else max(1, min(config.top, 5)),
+                )
+            exit_code = 0 if all(row.get("status") == "ok" for row in preflight_rows) else 1
+        except Exception as exc:  # noqa: BLE001
+            with collect_customer_ids(ids):
+                error_class, message = classify_google_error(exc)
+            if isinstance(exc, OSError):
+                message = exc.strerror or type(exc).__name__
+            preflight_rows = [
+                {
+                    "collector": name,
+                    "name": "probe",
+                    "status": "failed",
+                    "item_count": 0,
+                    "duration_ms": 0,
+                    "error_class": error_class,
+                    "error": message,
+                }
+                for name in selected
+            ]
+            payload["preflight_error"] = {"error": "google_probe_failed", "message": message}
         payload["preflight"] = preflight_rows
-        payload["capability_matrix"] = build_google_capability_rows(
-            selected,
-            auth_mode=config.auth,
-            dependency_status=dependency_status,
-            coverage_rows=preflight_rows,
-        )
-        payload["live_readiness"] = build_google_live_readiness(
-            selected,
-            payload["capability_matrix"],
-            dependency_available=bool(dependency_status.get("available")),
-            coverage_rows=preflight_rows,
-        )
-    except Exception as exc:  # noqa: BLE001
-        error_class, message = classify_google_error(exc)
-        if isinstance(exc, OSError):
-            # A file error names its path; the bundle keeps only the reason (the console may still show the path).
-            message = exc.strerror or type(exc).__name__
-        payload["preflight"] = [
-            {
-                "collector": name,
-                "name": "probe",
-                "status": "failed",
-                "item_count": 0,
-                "duration_ms": 0,
-                "error_class": error_class,
-                "error": message,
-            }
-            for name in selected
-        ]
-        payload["preflight_error"] = {"error": "google_probe_failed", "message": message}
-        payload["capability_matrix"] = build_google_capability_rows(
-            selected,
-            auth_mode=config.auth,
-            dependency_status=dependency_status,
-            coverage_rows=payload["preflight"],
-        )
-        payload["live_readiness"] = build_google_live_readiness(
-            selected,
-            payload["capability_matrix"],
-            dependency_available=bool(dependency_status.get("available")),
-            coverage_rows=payload["preflight"],
-        )
-        _write_google_probe_bundle(
-            writer=writer,
-            config=config,
-            selected=selected,
-            auth_config=auth_config,
-            payload=payload,
-            dependency_status=dependency_status,
-            command_line=command_line,
-        )
-        print(json.dumps(payload, indent=2))
-        return 2
+        ids.learn(preflight_rows)
+    payload["capability_matrix"] = build_google_capability_rows(
+        selected,
+        auth_mode=config.auth,
+        dependency_status=dependency_status,
+        coverage_rows=payload.get("preflight"),
+    )
+    payload["live_readiness"] = build_google_live_readiness(
+        selected,
+        payload["capability_matrix"],
+        dependency_available=bool(dependency_status.get("available")),
+        coverage_rows=payload.get("preflight"),
+    )
+    payload = ids.scrub(payload)
+    config = _output_config(config, ids)
+    writer = AuditWriter(config.out, tenant_name=config.tenant_name, run_name=config.run_name)
     _write_google_probe_bundle(
         writer=writer,
         config=config,
         selected=selected,
-        auth_config=auth_config,
+        auth_config=replace(auth_config, subject=ids.scrub(auth_config.subject)),
         payload=payload,
-        dependency_status=dependency_status,
-        command_line=command_line,
+        dependency_status=ids.scrub(dependency_status),
+        command_line=ids.scrub(scrub_google_command_line(command_line or [])),
     )
     print(json.dumps(payload, indent=2))
-    return 0 if all(row.get("status") == "ok" for row in payload["preflight"]) else 1
+    return exit_code

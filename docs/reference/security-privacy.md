@@ -664,13 +664,26 @@ Credential masking in the shareable profiles covers:
   authorization, assertion, private key, shared key), including numbered or `...Value` forms;
 - lists and mappings under such keys, except mappings under a `...Credential` key, which hold credential metadata.
 
-Google customer ids (under `tenant_id` and `customer_id` keys) are masked as `Id <pseudonym>` in shareable output;
-local output keeps the real id.
+Auditex withholds the configured Google Workspace customer ID from run folders, console output, logs and exports.
+The manifest, snapshot, `ai_safe/run_summary.json`, auth context, and probe and doctor payloads retain the
+`my_customer` alias and omit explicit customer IDs. The recorded command line masks `--customer-id`.
+Offline replay retains the SHA-256 of the sample bytes and masks known customer IDs in the sample filename.
+Run and tenant labels also have known customer IDs masked.
 
-Shareable SARIF and OSCAL exports withhold a waiver's free-text `reason` altogether: pattern matching cannot be
-trusted to find every spelling of an identifier an operator types (a customer id inside `workspace_<id>_rollout`, a
-URL, or an id the run never discovered). They keep the structured facts: that the finding is accepted under a waiver,
-its status and the waiver's expiry date, and say the reason is withheld. Local output keeps the reason.
+Auditex learns exact customer IDs from explicit API fields such as `customerId` and Cloud Identity's
+`customer: "customers/<id>"`, and from named customer parameters in API failure URLs. It masks those values in
+evidence strings, mapping keys and diagnostics before writing a run. A malformed object or list under
+`customerId` is withheld whole. Unrelated organisational unit names and paths are preserved even when they
+resemble a customer ID. If masking changes evidence outside an explicit ID field or diagnostic, a
+`customer_id_withheld` coverage row marks that collector partial. An organisational unit reference that was
+changed cannot establish complete setting-event coverage.
+
+Compare, drift and shareable SARIF and OSCAL deduplication use the recorded Workspace domain. Older bundles
+retain their original contract and can be compared with current bundles using the same domain. Compare and
+drift mask the legacy customer ID in the result.
+
+Shareable SARIF and OSCAL exports withhold waiver reasons, which can include identifiers unavailable to the audit.
+They retain the accepted-risk status and expiry date. Local output includes the reason with known customer IDs masked.
 
 The report structure is redacted before rendering, so free-text keys work in
 Markdown and HTML as well as JSON. Customer-pack source JSON is a redacted

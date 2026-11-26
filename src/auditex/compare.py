@@ -31,6 +31,7 @@ from azure_tenant_audit.rule_parameters import (
 from azure_tenant_audit.run_files import read_run_file
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
+from .google_workspace.customer_id import CustomerIds, legacy_google_customer_ids
 from .reporting import markdown_inline
 from .run_bundle import RunBundle
 
@@ -93,7 +94,7 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     same_platform = len(set(platforms)) <= 1
     tenant_ids = [
         (canonical_tenant_uuid(run.get("tenant_id")) or run.get("tenant_id"))
-        if platform == "m365" else (run.get("tenant_id") if run.get("tenant_id") != "my_customer" else None)
+        if platform == "m365" else None
         for run, platform in zip(runs, platforms, strict=False)
     ]
     tenant_names = [run.get("tenant_name") for run in runs]
@@ -143,12 +144,17 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return context
 
 
+def compare_customer_ids(runs: Iterable[Mapping[str, Any]]) -> CustomerIds:
+    return CustomerIds(*(value for run in runs for value in legacy_google_customer_ids(run).values))
+
+
 def require_same_tenant_runs(run_dirs: Iterable[str | Path]) -> dict[str, Any]:
     """Shared identity guard for finding-only consumers such as drift gates."""
-    context = _tenant_gate([RunBundle(run_dir).metadata() for run_dir in run_dirs])
+    runs = [RunBundle(run_dir).metadata() for run_dir in run_dirs]
+    context = _tenant_gate(runs)
     if context["gate"] != "same_tenant":
         raise ValueError(f"refusing to compare runs: {context['gate']}")
-    return context
+    return compare_customer_ids(runs).scrub_legacy_output(context)
 
 
 def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -303,7 +309,7 @@ def diff_two_runs(
     result = _compare_pair(left, right, _tenant_gate([left, right]), allow_cross_tenant=allow_cross_tenant, classic=classic)
     result.setdefault("run_a", str(paths[0]))
     result.setdefault("run_b", str(paths[1]))
-    return result
+    return compare_customer_ids([left, right]).scrub_legacy_output(result)
 
 
 def compare_run_directories(
@@ -374,7 +380,7 @@ def compare_run_directories(
         }
     )
 
-    return {
+    return compare_customer_ids(runs).scrub_legacy_output({
         "runs": ordered_runs_public,
         "timeline": timeline,
         "adjacent_diffs": adjacent_diffs,
@@ -384,7 +390,7 @@ def compare_run_directories(
         "citations": citations,
         "citation_summary": build_citation_summary(citations),
         "evidence_missing": evidence_missing,
-    }
+    })
 
 
 def compare_runs(

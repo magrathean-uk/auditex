@@ -49,7 +49,7 @@ from azure_tenant_audit.dns_lookup import (
     unknown_posture,
 )
 from azure_tenant_audit.exposure_lookup import is_safe_domain_name
-from azure_tenant_audit.google_policy_schema import CUSTOMER_ID, TWO_STEP_VALUE_FIELDS
+from azure_tenant_audit.google_policy_schema import TWO_STEP_VALUE_FIELDS
 from azure_tenant_audit.offline_replay import OFFLINE_ROW_TYPE
 from azure_tenant_audit.value_rules.gws.catalogue import catalogue
 from azure_tenant_audit.value_rules.gws.events import _categories, _time
@@ -66,6 +66,7 @@ from .client import (
     minimise_gmail_settings,
     policy_malformed_error,
 )
+from .customer_id import WITHHELD
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
@@ -995,13 +996,13 @@ def _event_parameters(event: dict[str, Any]) -> dict[str, str | None] | None:
 
 
 def _scuba_group_email(value: str) -> bool:
-    return len(value) <= 254 and bool(_GROUP_EMAIL.fullmatch(value)) and CUSTOMER_ID.search(value) is None
+    return len(value) <= 254 and bool(_GROUP_EMAIL.fullmatch(value))
 
 
 def _scuba_org_unit(value: str) -> bool:
     return (
         value.isprintable() and len(value) <= 512 and not any(part in ("..", ".") for part in value.split("/"))
-        and not _TARGET_PATH_OR_URI.search(value) and not CUSTOMER_ID.search(value) and "\\" not in value
+        and not _TARGET_PATH_OR_URI.search(value) and WITHHELD not in value and "\\" not in value
     )
 
 

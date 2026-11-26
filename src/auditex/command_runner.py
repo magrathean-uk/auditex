@@ -29,6 +29,7 @@ SENSITIVE_ARGS = {
     "--oauth-client",
     "--token-cache",
     "--token-file",
+    "--customer-id",
     "--env",
     "--break-glass-accounts",
     # A DoH resolver URL path can carry an account token.

@@ -76,6 +76,7 @@ from azure_tenant_audit.waivers import (
     is_accepted_status,
 )
 
+from .google_workspace.customer_id import legacy_google_customer_ids
 from .run_bundle import RunBundle, summarize_recomputed_validation
 
 DEFAULT_SECTION_REGISTRY_PATH = Path("configs/report-sections.json")
@@ -4117,20 +4118,12 @@ def _disposition_at(finding: Mapping[str, Any], position: int, dispositions: lis
 
 
 def export_tenant_scope(manifest: Mapping[str, Any]) -> str | None:
-    """Review R066: the tenant a shareable export's dedup ids are scoped to, or ``None`` when the run names none.
-
-    Microsoft 365: the Entra tenant UUID. Google Workspace: a value shaped like a customer id (``C03az79cb``), never
-    the ``my_customer`` alias (it means "the signed-in customer", so every tenant has it), a domain, the default tenant
-    label or a placeholder such as ``unknown``, which every tenant could carry. ``None`` makes the caller scope the
-    ids to the run instead."""
+    """Use the Entra UUID or Google Workspace domain to scope shareable finding deduplication."""
     platform = _text(manifest.get("platform")).strip().lower() or "m365"
     if platform == "m365":
         return canonical_tenant_uuid(manifest.get("tenant_id"))
-    for value in (manifest.get("customer_id"), manifest.get("tenant_id")):
-        customer = google_customer_id(value)
-        if customer is not None:
-            return customer
-    return None
+    domain = _text(manifest.get("workspace_domain")).strip().lower()
+    return f"google_workspace/{domain}" if domain else None
 
 
 _WITHHELD_WAIVER_REASON = "the waiver reason is withheld from shareable output"
@@ -4681,22 +4674,23 @@ def preview_report(
         "sarif": _render_sarif,
         "oscal": _render_oscal,
     }
+    manifest = RunBundle(run_path).manifest()
+    ids = legacy_google_customer_ids(manifest)
     if profile == PROFILE_LOCAL:
-        return {
+        return ids.scrub_legacy_output({
             "format": format_name,
-            "content": renderers[format_name](selected),
+            "content": renderers[format_name](ids.scrub_legacy_output(selected)),
             "sections": list(selected.keys()),
             "citations": citations,
             "citation_summary": build_citation_summary(citations),
             "evidence_missing": evidence_missing,
-        }
+        })
     # The output redaction boundary: the sections are redacted as structure before rendering (so key-based
     # rules such as privileged-user names apply in every format) and the rendered text is passed through the
     # same function again (idempotent) as the last step. Citations above were built from the real paths.
     redaction = context_for_run(run_path)
     # The run's Google customer id is masked wherever it appears, also in free text of an export
     # that leaves the manifest section out.
-    manifest = RunBundle(run_path).manifest()
     customer_ids = {
         value for value in (google_customer_id(manifest.get(key)) for key in ("customer_id", "tenant_id")) if value
     }
@@ -4707,9 +4701,8 @@ def preview_report(
         # Review R066: dedup keys and waiver dispositions come from the unredacted findings, before redaction
         # (masking can make two ids, and so a waiver and the wrong finding, equal). With the operator's private key
         # the keys are scoped to the tenant, so they are the same in every run of it and reveal nothing to a
-        # recipient. Without the key, or when the run names no tenant (a Google run with no customer id or the
-        # my_customer alias), they are scoped to the run under a secret derived from the run's own pseudonym key:
-        # private and never shared with another run.
+        # recipient. Without the key or a usable tenant scope, a secret derived from the run's own pseudonym
+        # key scopes those IDs to the run.
         rows = _dict_rows(selected.get("findings"))
         run_secret = hmac.new(redaction.key, b"auditex|export-ids", hashlib.sha256).digest()
         secret = export_fingerprint_key()
@@ -4725,7 +4718,7 @@ def preview_report(
         )
     # Masking can make two citations equal: every nested citation list, count and summary is re-derived after
     # redaction, before any format renders the sections.
-    safe_sections = _settle_citations(redact_output(selected, profile=profile, context=redaction))
+    safe_sections = _settle_citations(ids.scrub_legacy_output(redact_output(selected, profile=profile, context=redaction)))
     safe_citations = _settle_citations(
         {"citations": redact_output(citations, profile=profile, context=redaction), "citation_summary": None}
     )
@@ -4752,7 +4745,7 @@ def preview_report(
     }
     if redaction.temporary_key:
         result["pseudonym_notice"] = TEMPORARY_KEY_NOTICE
-    return result
+    return ids.scrub_legacy_output(result)
 
 
 def render_report(
