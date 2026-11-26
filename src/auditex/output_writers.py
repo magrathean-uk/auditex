@@ -105,7 +105,6 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("auditex.notify:_jira_search_existing", "private", "GET carrying the project key and the fingerprint digest only"),
     SinkEntry("auditex.notify:_github_search_existing_issue", "private", "GET carrying the repository and the fingerprint digest only"),
     SinkEntry("auditex.google_workspace.auth:build_google_credentials", "private", "operator's Google credential file (0600)"),
-    SinkEntry("auditex.tenant_pseudonym:tenant_key", "private", "operator's tenant pseudonym key (0600, 32 random bytes) outside every run folder"),
     SinkEntry("auditex.google_workspace.collectors:GoogleDnsPostureCollector._DohSession.get", "private", "forwards the shared DNS-over-HTTPS GET to the configured resolver with a DNS query name and TXT type"),
     SinkEntry("auditex.bootstrap:print_doctor_report", "private", "operator terminal: toolchain status; diagnostics masked by the command-output boundary"),
     SinkEntry("auditex.bootstrap:run_setup", "private", "operator terminal: the install command for an optional extra (fixed text plus the interpreter and wheel paths)"),

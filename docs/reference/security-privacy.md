@@ -664,38 +664,26 @@ Credential masking in the shareable profiles covers:
   authorization, assertion, private key, shared key), including numbered or `...Value` forms;
 - lists and mappings under such keys, except mappings under a `...Credential` key, which hold credential metadata.
 
-The Google Workspace customer id never enters a run bundle, a log, console JSON or an export (PRIV-CUSTOMER-ID).
-The configured `--customer-id` is used for the API calls only: the manifest, snapshot, `ai_safe/run_summary.json`,
-`auth-context.json`, the probe result and the `google doctor --json` and `google probe` console payloads record the
-`my_customer` alias as it is and any other configured value as `null`, and the recorded command line redacts
-`--customer-id`. An offline replay names its sample file without a customer id in the name (the SHA-256 of the
-bytes is kept).
+Auditex withholds the configured Google Workspace customer ID from run folders, console output, logs and exports.
+The manifest, snapshot, `ai_safe/run_summary.json`, auth context, and probe and doctor payloads retain the
+`my_customer` alias and omit explicit customer IDs. The recorded command line masks `--customer-id`.
+Offline replay retains the SHA-256 of the sample bytes and masks known customer IDs in the sample filename.
+Run and tenant labels also have known customer IDs masked.
 
-Any other customer id is withheld by its spelling (the configured value) and by its shape (`C`, a digit, then five
-to eleven lower-case letters and digits, as a whole token or after `customers%2F`) in every string a collector or a
-replayed sample returns, in API failure text (a request URL or an error reason such as `Customer C0... was not
-found`) and in exception text, before it reaches a raw file, coverage row, blocker, finding, checkpoint, index or log.
-A `customerId` value (also a malformed object or list under that key) and a Cloud Identity `customers/<id>` name
-become the marker `<customer-id>`. Only id-shaped text changes: an organisational-unit path such as
-`/customers/Finance` is kept. When evidence text (not an id field or failure text) held a withheld value, the
-collector gets a `partial` coverage row (`error_class: customer_id_withheld`), so a read such as the setting-event
-stream that may have lost an organisational unit's name is never shown complete.
+Auditex learns exact customer IDs from explicit API fields such as `customerId` and Cloud Identity's
+`customer: "customers/<id>"`, and from named customer parameters in API failure URLs. It masks those values in
+evidence strings, mapping keys and diagnostics before writing a run. A malformed object or list under
+`customerId` is withheld whole. Unrelated organisational unit names and paths are preserved even when they
+resemble a customer ID. If masking changes evidence outside an explicit ID field or diagnostic, a
+`customer_id_withheld` coverage row marks that collector partial. An organisational unit reference that was
+changed cannot establish complete setting-event coverage.
 
-Compare, drift and shareable SARIF and OSCAL dedup ids still tell customers apart: a Google run's `tenant_id` is
-`gws-<key id>-<digest>`, an HMAC-SHA256 of the configured customer id under the operator's tenant key. The key is 32
-random bytes in an owner-only file outside every run folder (`AUDITEX_TENANT_KEY_PATH`, else
-`tenant-pseudonym.key` in the user's auditex config folder: `~/Library/Application Support/auditex/` on macOS,
-`%APPDATA%\auditex\` on Windows, `$XDG_CONFIG_HOME/auditex/` or `~/.config/auditex/` elsewhere), made on the first
-run that needs it; a run that cannot read or make it stops with exit 2 before anything is written. Runs made with
-different keys are refused as `tenant_key_mismatch`, never matched on the domain label; copy the key file to compare
-runs made on two machines. `my_customer` runs carry no tenant id and keep the domain-alias fallback. Bundles written
-before this change still load and validate; their raw Google customer ids are pseudonymised with this machine's key for
-compare and drift, and masked as `Id <pseudonym>` under `tenant_id` and `customer_id` keys in shareable output.
+Compare, drift and shareable SARIF and OSCAL deduplication use the recorded Workspace domain. Older bundles
+retain their original contract and can be compared with current bundles using the same domain. Compare and
+drift mask the legacy customer ID in the result.
 
-Shareable SARIF and OSCAL exports withhold a waiver's free-text `reason` altogether: pattern matching cannot be
-trusted to find every spelling of an identifier an operator types (a customer id inside `workspace_<id>_rollout`, a
-URL, or an id the run never discovered). They keep the structured facts: that the finding is accepted under a waiver,
-its status and the waiver's expiry date, and say the reason is withheld. Local output keeps the reason.
+Shareable SARIF and OSCAL exports withhold waiver reasons, which can include identifiers unavailable to the audit.
+They retain the accepted-risk status and expiry date. Local output includes the reason with known customer IDs masked.
 
 The report structure is redacted before rendering, so free-text keys work in
 Markdown and HTML as well as JSON. Customer-pack source JSON is a redacted

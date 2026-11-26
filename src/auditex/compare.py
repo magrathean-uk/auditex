@@ -31,13 +31,9 @@ from azure_tenant_audit.rule_parameters import (
 from azure_tenant_audit.run_files import read_run_file
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
+from .google_workspace.customer_id import CustomerIds, legacy_google_customer_ids
 from .reporting import markdown_inline
 from .run_bundle import RunBundle
-from .tenant_pseudonym import (
-    is_tenant_pseudonym,
-    local_pseudonym,
-    tenant_pseudonym_parts,
-)
 
 
 def _parse_utc(value: Any) -> datetime | None:
@@ -98,7 +94,7 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     same_platform = len(set(platforms)) <= 1
     tenant_ids = [
         (canonical_tenant_uuid(run.get("tenant_id")) or run.get("tenant_id"))
-        if platform == "m365" else _provider_tenant_id(run.get("tenant_id"))
+        if platform == "m365" else None
         for run, platform in zip(runs, platforms, strict=False)
     ]
     tenant_names = [run.get("tenant_name") for run in runs]
@@ -117,13 +113,6 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     }
     if any(identity.get("status") == "conflict" for identity in identities):
         return {**context, "gate": "tenant_identity_conflict", "identity_basis": "conflict", "identity_verified": False}
-    # PRIV-CUSTOMER-ID: a Google run's tenant id is a pseudonym under the operator's tenant key. Pseudonyms from two
-    # keys (runs made on two machines), or one beside a legacy raw id this machine has no key to pseudonymise, cannot
-    # say whether the customers differ, so neither a match nor the domain label decides it.
-    google_ids = [value for value, platform in zip(tenant_ids, platforms, strict=False) if platform != "m365" and value]
-    key_ids = {parts[0] for value in google_ids if (parts := tenant_pseudonym_parts(value))}
-    if same_platform and (len(key_ids) > 1 or (key_ids and any(not is_tenant_pseudonym(v) for v in google_ids))):
-        return {**context, "gate": "tenant_key_mismatch", "identity_basis": "different_tenant_keys", "identity_verified": False}
     established_uuids = {canonical_tenant_uuid(value) for value, platform in zip(tenant_ids, platforms, strict=False) if platform == "m365"}
     established_uuids.discard(None)
     if same_platform and len(established_uuids) > 1:
@@ -155,22 +144,17 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return context
 
 
-def _provider_tenant_id(value: Any) -> str | None:
-    """A non-Microsoft run's tenant id for the gate: a tenant pseudonym as it is; a legacy bundle's raw Google customer
-    id as this machine's tenant key pseudonymises it (as is when there is no key); never the ``my_customer`` alias."""
-    if not isinstance(value, str) or not value.strip() or value.strip() == "my_customer":
-        return None
-    if is_tenant_pseudonym(value):
-        return value
-    return local_pseudonym(value) or value
+def compare_customer_ids(runs: Iterable[Mapping[str, Any]]) -> CustomerIds:
+    return CustomerIds(*(value for run in runs for value in legacy_google_customer_ids(run).values))
 
 
 def require_same_tenant_runs(run_dirs: Iterable[str | Path]) -> dict[str, Any]:
     """Shared identity guard for finding-only consumers such as drift gates."""
-    context = _tenant_gate([RunBundle(run_dir).metadata() for run_dir in run_dirs])
+    runs = [RunBundle(run_dir).metadata() for run_dir in run_dirs]
+    context = _tenant_gate(runs)
     if context["gate"] != "same_tenant":
         raise ValueError(f"refusing to compare runs: {context['gate']}")
-    return context
+    return compare_customer_ids(runs).scrub_legacy_output(context)
 
 
 def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -325,7 +309,7 @@ def diff_two_runs(
     result = _compare_pair(left, right, _tenant_gate([left, right]), allow_cross_tenant=allow_cross_tenant, classic=classic)
     result.setdefault("run_a", str(paths[0]))
     result.setdefault("run_b", str(paths[1]))
-    return result
+    return compare_customer_ids([left, right]).scrub_legacy_output(result)
 
 
 def compare_run_directories(
@@ -396,7 +380,7 @@ def compare_run_directories(
         }
     )
 
-    return {
+    return compare_customer_ids(runs).scrub_legacy_output({
         "runs": ordered_runs_public,
         "timeline": timeline,
         "adjacent_diffs": adjacent_diffs,
@@ -406,7 +390,7 @@ def compare_run_directories(
         "citations": citations,
         "citation_summary": build_citation_summary(citations),
         "evidence_missing": evidence_missing,
-    }
+    })
 
 
 def compare_runs(

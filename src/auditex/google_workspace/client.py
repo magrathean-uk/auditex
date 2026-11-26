@@ -23,7 +23,7 @@ from .auth import (
     POLICIES_SCOPE,
     user_delegated_credentials,
 )
-from .customer_id import withhold_customer_text
+from .customer_id import learn_response_customer_ids, withhold_request_customer_ids
 
 # Per-user services kept at once. The Gmail collector reads one user at a time, so a few are enough;
 # the bound keeps a 10,000-user run from holding 10,000 discovery clients.
@@ -292,7 +292,7 @@ def classify_google_error(exc: Exception) -> tuple[str, str]:
     """Class and text of a Google error. The library's text names the request URL, whose path or query holds the
     customer id: it is replaced by a marker, so no coverage row, blocker or log carries it (PRIV-CUSTOMER-ID)."""
     error_class, message = _classify_google_error(exc)
-    return error_class, withhold_customer_text(message)
+    return error_class, withhold_request_customer_ids(message)
 
 
 def _classify_google_error(exc: Exception) -> tuple[str, str]:
@@ -354,7 +354,9 @@ def _execute(call: Callable[[], Any]) -> Any:
     """Run one API call, retrying 429 and 5xx answers with backoff; other errors are raised at once."""
     for delay in (*RETRY_DELAYS, None):
         try:
-            return call()
+            response = call()
+            learn_response_customer_ids(response)
+            return response
         except Exception as exc:
             if delay is None or not _retryable(exc):
                 raise

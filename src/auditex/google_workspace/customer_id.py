@@ -1,112 +1,174 @@
-"""The Google Workspace customer id never enters a run bundle, a log, a console payload or an export (PRIV-CUSTOMER-ID).
-
-The configured ``--customer-id`` is used only for the API calls. The bundle records the ``my_customer`` alias as it is
-(it names "the signed-in customer", so every tenant has it) and any other configured value as ``null``. Its tenant
-identity is a keyed pseudonym of the configured id (``tenant_pseudonym``) under the operator's private tenant key, so
-compare and drift still tell tenants apart without the id.
-
-A customer id the API returns or an error quotes is withheld by shape (``C``, a digit, then five to eleven lower-case
-letters and digits) and the configured value by its spelling.
-Only a value under an id-bearing key (``customerId``, a policy's ``customers/...`` name) or text matching that shape
-is changed: an organisational-unit path such as ``/customers/Finance`` is kept as it is. A value under ``customerId``
-that is not text (a malformed object or list) is withheld whole.
-"""
+"""Learn Google customer IDs from explicit fields and requests, then withhold their values."""
 
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import cached_property
 from typing import Any
-
-from ..tenant_pseudonym import TenantKeyError, tenant_pseudonym  # noqa: F401 (re-exported for the run)
+from urllib.parse import unquote
 
 MY_CUSTOMER = "my_customer"
 WITHHELD = "<customer-id>"
-# The coverage row a collector gets when its evidence (not its error text) held a customer id that was withheld: the
-# read can no longer be shown complete, since a withheld value may have been an organisational unit's name.
 WITHHELD_ERROR_CLASS = "customer_id_withheld"
 
-_WORD = "0-9A-Za-z_"
-# Google's customer id: ``C``, a digit, then its alphabet of lower-case letters and digits (``C03az79cb``). Inside text
-# it is a whole token, never part of a longer word, so a word such as ``Config2`` is not one.
-_ID = "C[0-9][0-9a-z]{5,11}"
-_ID_RE = re.compile(rf"(?<![{_WORD}]){_ID}(?![{_WORD}])")
-# A URL-encoded resource name (``customers%2FC0abc``) puts a letter right before the id.
-_ENCODED_RE = re.compile(rf"(?i:(customers?%2F)){_ID}(?![{_WORD}])")
-# Keys whose text is failure text (a coverage row's ``error``, an exception message, an API error reason).
 _ERROR_KEYS = frozenset({"error", "errors", "message", "reason", "detail", "details", "errormessage", "statusmessage"})
+_URL = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+_REQUEST_CUSTOMER = re.compile(
+    r"(?:[?&]customer(?:Id)?=|/customers?/|customers?%2F)([A-Za-z0-9_%+-]+)", re.IGNORECASE,
+)
+_MISSING_CUSTOMER = re.compile(r"(?i:\bcustomer\s+)(C[0-9][A-Za-z0-9_-]*)(?=\s+was not found\b)")
+_ENCODED_CUSTOMER_FILTER = re.compile(r"customer%3D(?:%3D)?%22customers%2F[A-Za-z0-9_%+-]+", re.IGNORECASE)
 
 
 def bundle_customer_id(value: Any) -> str | None:
-    """The configured customer id as a bundle records it: the ``my_customer`` alias, else ``None``."""
     return MY_CUSTOMER if isinstance(value, str) and value.strip() == MY_CUSTOMER else None
-
-
-def _configured(value: Any) -> str | None:
-    text = value.strip() if isinstance(value, str) else ""
-    return text if len(text) >= 4 and text != MY_CUSTOMER else None
-
-
-def withhold_customer_text(text: str, configured: Any = None) -> str:
-    """``text`` with every customer-id-shaped token and the configured id itself replaced by the marker."""
-    literal = _configured(configured)
-    if literal:
-        text = text.replace(literal, WITHHELD)
-    text = _ENCODED_RE.sub(lambda m: m.group(1) + WITHHELD, text)
-    return _ID_RE.sub(WITHHELD, text)
 
 
 def _norm(key: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(key).lower())
 
 
-class _Walk:
-    def __init__(self, configured: Any) -> None:
-        self.configured = configured
-        self.evidence_changed = False
+class CustomerIds:
+    def __init__(self, *values: Any) -> None:
+        self.values: set[str] = set()
+        for value in values:
+            self.add(value)
 
-    def text(self, value: str, *, error: bool) -> str:
-        safe = withhold_customer_text(value, self.configured)
-        if safe != value and not error:
-            self.evidence_changed = True
-        return safe
+    def add(self, value: Any) -> None:
+        if isinstance(value, str):
+            value = value.strip()
+            if value and value not in {MY_CUSTOMER, WITHHELD} and value not in self.values:
+                self.values.add(value)
+                self.__dict__.pop("_pattern", None)
 
-    def value(self, value: Any, *, error: bool = False) -> Any:
+    @cached_property
+    def _pattern(self) -> re.Pattern[str] | None:
+        if not self.values:
+            return None
+        values = "|".join(map(re.escape, sorted(self.values, key=lambda value: (-len(value), value))))
+        return re.compile(rf"(?<![A-Za-z0-9])(?:{values})(?![A-Za-z0-9])")
+
+    def text(self, value: str, marker: str = WITHHELD) -> str:
+        return self._pattern.sub(lambda _: marker, value) if self._pattern else value
+
+    def _request_text(self, text: str, *, learn: bool) -> str:
+        """Learn from the named customer parameter of an API URL or an encoded Cloud Identity filter."""
+        def mask(match: re.Match[str]) -> str:
+            encoded = match[1].split("%22", 1)[0]
+            value = unquote(encoded)
+            if value == MY_CUSTOMER or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+                return match[0]
+            if learn:
+                self.add(value)
+            elif value not in self.values:
+                return match[0]
+            return match[0][:match.start(1) - match.start()] + WITHHELD + match[1][len(encoded):]
+
+        text = _URL.sub(lambda url: _REQUEST_CUSTOMER.sub(mask, url[0]), text)
+        return _ENCODED_CUSTOMER_FILTER.sub(lambda query: _REQUEST_CUSTOMER.sub(mask, query[0]), text)
+
+    def learn_error(self, text: str) -> str:
+        for match in _MISSING_CUSTOMER.finditer(text):
+            self.add(match[1])
+        return self._request_text(text, learn=True)
+
+    def learn(self, value: Any, *, error: bool = False) -> None:
         if isinstance(value, dict):
-            out: dict[Any, Any] = {}
             for key, member in value.items():
                 norm = _norm(key)
                 if norm == "customerid":
-                    keep = member is None or member == "" or (isinstance(member, str) and member.strip() == MY_CUSTOMER)
-                    out[key] = member if keep else WITHHELD
+                    self.add(member)
                 elif norm == "customer" and isinstance(member, str) and member.startswith("customers/"):
-                    rest = member.removeprefix("customers/")
-                    out[key] = member if rest == MY_CUSTOMER else "customers/" + WITHHELD
+                    self.add(member.removeprefix("customers/"))
+                self.learn(member, error=error or norm in _ERROR_KEYS)
+        elif isinstance(value, (list, tuple)):
+            for member in value:
+                self.learn(member, error=error)
+        elif error and isinstance(value, str):
+            self.learn_error(value)
+
+    def scrub(self, value: Any) -> Any:
+        return self._scrub(value, error=True)[0]
+
+    def scrub_legacy_output(self, value: Any) -> Any:
+        return self.scrub(value) if self.values else value
+
+    def evidence(self, value: Any) -> tuple[Any, bool]:
+        """Return scrubbed evidence and whether a field used as evidence could have changed."""
+        return self._scrub(value, error=False)
+
+    def _scrub(self, value: Any, *, error: bool) -> tuple[Any, bool]:
+        if isinstance(value, dict):
+            out: dict[Any, Any] = {}
+            changed = False
+            for key, member in value.items():
+                norm = _norm(key)
+                safe_key = self.text(key) if isinstance(key, str) else key
+                if norm == "customerid" and member is not None and member != "" and bundle_customer_id(member) is None:
+                    # A malformed ID field can contain arbitrary nested data.
+                    safe_member = WITHHELD
+                    member_changed = False
+                elif norm == "customer" and isinstance(member, str) and member.startswith("customers/"):
+                    safe_member = self.text(member)
+                    member_changed = False
                 else:
-                    out[key] = self.value(member, error=error or norm in _ERROR_KEYS)
-            return out
-        if isinstance(value, list):
-            return [self.value(member, error=error) for member in value]
-        if isinstance(value, tuple):
-            return tuple(self.value(member, error=error) for member in value)
+                    safe_member, member_changed = self._scrub(member, error=error or norm in _ERROR_KEYS)
+                out[safe_key] = safe_member
+                changed |= member_changed or (not error and safe_key != key)
+            return out, changed
+        if isinstance(value, (list, tuple)):
+            members = [self._scrub(member, error=error) for member in value]
+            safe_list = [member for member, _ in members]
+            return (tuple(safe_list) if isinstance(value, tuple) else safe_list), any(changed for _, changed in members)
         if isinstance(value, str):
-            return self.text(value, error=error)
-        return value
+            safe = self.text(self._request_text(value, learn=False) if "://" in value or "%2" in value else value)
+            return safe, not error and safe != value
+        return value, False
 
 
-def withhold_customer_ids(value: Any, configured: Any = None) -> Any:
-    """A copy of ``value`` with no customer id. Keys, types and shapes are unchanged except that a non-text value under
-    a ``customerId`` key becomes the marker."""
-    return _Walk(configured).value(value)
+_active_ids: ContextVar[CustomerIds | None] = ContextVar("google_customer_ids", default=None)
 
 
-def withhold_customer_evidence(value: Any, configured: Any = None) -> tuple[Any, bool]:
-    """``withhold_customer_ids`` and whether any evidence text (not an id-bearing field, not failure text) changed."""
-    walk = _Walk(configured)
-    return walk.value(value), walk.evidence_changed
+@contextmanager
+def collect_customer_ids(ids: CustomerIds) -> Iterator[None]:
+    token = _active_ids.set(ids)
+    # The discovery library can log entire HTTP error responses before our classifier sees them.
+    # Auditex emits its own diagnostics after it has learned and masked the customer IDs.
+    library_log = logging.getLogger("googleapiclient.http")
+
+    def outside_collection(_record: logging.LogRecord) -> bool:
+        return _active_ids.get() is not ids
+
+    library_log.addFilter(outside_collection)
+    try:
+        yield
+    finally:
+        library_log.removeFilter(outside_collection)
+        _active_ids.reset(token)
+
+
+def learn_response_customer_ids(response: Any) -> None:
+    ids = _active_ids.get()
+    if ids is not None:
+        ids.learn(response)
+
+
+def withhold_request_customer_ids(text: str) -> str:
+    ids = _active_ids.get() or CustomerIds()
+    return ids.text(ids.learn_error(text))
+
+
+def legacy_google_customer_ids(manifest: Mapping[str, Any]) -> CustomerIds:
+    if manifest.get("platform") == "google_workspace":
+        return CustomerIds(*(manifest.get(key) for key in ("customer_id", "tenant_id", "tenant_id_requested")))
+    return CustomerIds()
 
 
 def withheld_coverage_row(collector: str) -> dict[str, Any]:
-    """The partial coverage row for a collector whose evidence text held a customer id."""
     return {
         "collector": collector,
         "name": "customer_id_withheld",
@@ -114,38 +176,5 @@ def withheld_coverage_row(collector: str) -> dict[str, Any]:
         "status": "partial",
         "item_count": 0,
         "error_class": WITHHELD_ERROR_CLASS,
-        "error": "a value shaped like a Google customer id was withheld from the collected evidence",
+        "error": "a Google customer id was withheld from the collected evidence",
     }
-
-
-class CustomerIdWithheldCollector:
-    """A collector whose result (payload, coverage rows, message, error) and crash text carry no customer id, so the
-    runner writes none to the raw file, the coverage index, the checkpoint or the run log. Evidence that held one is
-    reported partial, never complete."""
-
-    def __init__(self, collector: Any, configured: Any) -> None:
-        self._collector = collector
-        self._configured = configured
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._collector, name)
-
-    def run(self, context: Any) -> Any:
-        try:
-            result = self._collector.run(context)
-        except Exception as exc:
-            text = str(exc)
-            safe = withhold_customer_text(text, self._configured)
-            if safe == text:
-                raise
-            raise RuntimeError(safe) from None
-        result.payload, changed = withhold_customer_evidence(result.payload, self._configured)
-        result.coverage = withhold_customer_ids(result.coverage, self._configured)
-        result.message = withhold_customer_text(result.message, self._configured) if isinstance(result.message, str) else result.message
-        result.error = withhold_customer_text(result.error, self._configured) if isinstance(result.error, str) else result.error
-        if changed:
-            name = str(getattr(self._collector, "name", "") or getattr(result, "name", ""))
-            result.coverage = [*(result.coverage or []), withheld_coverage_row(name)]
-            if result.status == "ok":
-                result.status = "partial"
-        return result
