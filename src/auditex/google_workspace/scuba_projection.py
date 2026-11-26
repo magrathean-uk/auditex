@@ -1138,8 +1138,10 @@ def _dns(ctx: _Context) -> dict[str, Any]:
                 and len(raw_rows) == len(raw_names) and len(data) == len(norm_names)
                 and set(raw_names) == set(norm_names) == set(scope))
 
-    complete = complete and {label for label in operations if label.startswith("posture:")} == {
-        "posture:" + row["domain"] for row in data if _domain_name(row.get("domain"))}
+    offline = ctx.manifest.get("mode") == "offline"
+    logged = {label for label in operations if label.startswith("posture:")}
+    expected = {"posture:" + row["domain"] for row in data if _domain_name(row.get("domain"))}
+    complete = complete and (logged <= expected if offline else logged == expected)
     domains = []
     for row in data:
         name = row.get("domain")
@@ -1157,7 +1159,11 @@ def _dns(ctx: _Context) -> dict[str, Any]:
         same_domain = (whole and posture_read and bool(host) and type(listed_alias) is bool and alias is listed_alias
                        and raw_alias is listed_alias and raw_names[label] == norm_names[label] == 1)
         operation = "posture:" + name
-        read = (same_domain and ctx.fanout_ok(collector, operation, 1)
+        # Offline replay omits successful coverage rows. An explicit successful resolver result can stand in
+        # for that row only when the replay has no contradictory coverage and the retained answers corroborate it.
+        replayed = (offline and operation not in operations and operation not in gaps
+                    and twin is not None and twin.get("resolver_error") is False)
+        read = (same_domain and (replayed or ctx.fanout_ok(collector, operation, 1))
                 and _no_resolver_error(row) and _no_resolver_error(twin)
                 and None not in answers and answers == _dns_answers(twin, alias=alias is True))
         complete = complete and (read or same_domain and alias is True
