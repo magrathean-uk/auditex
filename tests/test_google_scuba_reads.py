@@ -232,23 +232,25 @@ def test_ambiguous_and_cut_ou_targets_never_become_root_evidence():
     assert [record.get("org_unit") for record in records[:-1]] == [None, None, None]
 
 
-@pytest.mark.parametrize(("field", "label"), [
-    ("ORG_UNIT_NAME", "/".join(("", "private", "tmp", "example"))),
-    ("ORG_UNIT_NAME", "Example OU https://example.org/private"),
-    ("ORG_UNIT_NAME", "Example OU C0123abc"),
-    ("GROUP_EMAIL", "C0123abc@example.org"),
-    ("GROUP_EMAIL", "team@exämple.org"),
+@pytest.mark.parametrize(("field", "label", "complete"), [
+    ("ORG_UNIT_NAME", "/".join(("", "private", "tmp", "example")), True),
+    ("ORG_UNIT_NAME", "Example OU https://example.org/private", True),
+    ("ORG_UNIT_NAME", "Example OU C0123abc", False),
+    ("GROUP_EMAIL", "C0123abc@example.org", False),
+    ("GROUP_EMAIL", "team@exämple.org", True),
 ])
-def test_event_targets_cannot_carry_paths_urls_or_customer_ids(field, label):
+def test_event_targets_cannot_carry_paths_urls_or_customer_ids(field, label, complete):
     event_name = "DELETE_APPLICATION_SETTING"
     item = _activity(event_name, ("SETTING_NAME", SETTING), (field, label))
     service = _Service({(event_name, None): {"items": [item]}})
     result = REGISTRY[EVENTS].run({"client": _client(service)})
     records = _normalise(result)[EVENTS]["records"]
-    assert label not in json.dumps([result.payload, records, result.coverage], ensure_ascii=False)
+    output = json.dumps([result.payload, records, result.coverage], ensure_ascii=False)
+    assert label not in output
+    assert "C0123abc" not in output
     assert len(records) == 2
     assert {"org_unit", "group_email"}.isdisjoint(records[0])
-    assert records[-1]["complete"] is True
+    assert records[-1]["complete"] is complete
 
 
 def test_guarded_group_does_not_fall_back_to_the_ou():
@@ -291,7 +293,10 @@ def test_unreadable_sso_rows_cannot_be_an_empty_complete_assignment_list(assignm
     service = _Service({(None, None): {"inboundSsoAssignments": [assignment]}})
     result = REGISTRY[SSO].run({"client": _client(service)})
     assert result.status == "partial"
-    assert _normalise(result)[SSO]["records"][-1]["complete"] is False
+    records = _normalise(result)[SSO]["records"]
+    assert len(records) == 1
+    assert records[-1]["complete"] is False
+    assert "C0123abc" not in json.dumps([result.payload, records, result.coverage])
 
 
 def test_sso_paging_filter_and_field_minimisation():
