@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from hashlib import sha256
+from itertools import product
 from typing import Any
 
 from azure_tenant_audit.collection_gaps import (
@@ -15,6 +17,7 @@ from azure_tenant_audit.collection_gaps import (
     truncations_from_payloads,
 )
 from azure_tenant_audit.data_minimisation import (
+    LICENCE_ATOM_MAX,
     UNRECOGNISED_SYSTEM_ALERT_NAME,
     finite_policy_number,
     minimise_gmail_settings,
@@ -23,6 +26,8 @@ from azure_tenant_audit.data_minimisation import (
     policy_unit_id,
 )
 from azure_tenant_audit.google_policy_schema import policy_enforced_at
+from azure_tenant_audit.value_rules.gws.catalogue import section_semantics
+from azure_tenant_audit.value_rules.gws.reduce import UNUSABLE, reduce_ranked
 
 from .client import GMAIL_SERVICE_NOT_ENABLED, gmail_mail_service_not_enabled
 from .collectors import (
@@ -274,44 +279,119 @@ def _query_scope_supported(query: dict[str, Any]) -> bool:
     return query.get("query_scope") in (None, "targets")
 
 
-def _setting_scope_supported(query: dict[str, Any], org_unit: str | None, group: str | None, roots: set[str]) -> bool:
-    """Whether a minimised policy's query lets it stand as its unit's setting, as ScubaGoggles reads it.
+# Query words whose population cannot be bounded to the policy's unit: the policy may hold for users anywhere, so its
+# whole section is unknown. ``licences`` is the legacy word, which also stood for a licence-only query with no
+# org-unit term; it carries no predicate.
+_UNBOUNDED_QUERY_SCOPES = ("other", "licences", "unreadable")
 
-    ScubaGoggles v1.1.0 never reads the query: every policy is its ``orgUnit``'s (and ``group``'s) setting, ranked by
-    ``sortOrder`` (SG:scubagoggles/policy_api.py:776-860). Google's licence clauses (``licences``) only narrow the
-    users of that unit a policy holds for, so it stays the unit's setting. A licence-only conjunction
-    (``licences_wide``) is not bounded to the unit, so it stands only on a top unit with no group. Any other query is
-    a scope the fields cannot show.
-    """
+
+def _setting_scope_unbounded(query: dict[str, Any], org_unit: str | None, roots: set[str]) -> bool:
+    """Whether a minimised policy's query may reach users outside its unit (and group), so that no unit's setting
+    for its section is known: an unrepresentable or unreadable query, the legacy ``licences`` word, or a
+    ``licences_wide`` conjunction (no org-unit term) on any unit but the top unit, which every user is under."""
     scope = query.get("query_scope")
-    if scope in (None, "targets", "licences"):
+    if scope in _UNBOUNDED_QUERY_SCOPES:
         return True
-    return scope == "licences_wide" and group is None and org_unit is not None and org_unit in roots
+    return scope == "licences_wide" and (org_unit is None or org_unit not in roots)
 
 
-def _licence_shadowed_scopes(candidates: list[tuple[str, str | None, str | None, Any, dict[str, Any]]]) -> set[tuple[str, str, str]]:
-    """Units whose ranking hides an administrator's setting behind a licence-scoped policy.
+_NO_POLICY = "<no policy>"
+_IRREDUCIBLE = "<unusable>"
 
-    A licence-scoped policy holds only for some of the unit's users. An ``ADMIN`` (or unspecified) policy ranked
-    below one (or any policy with no rank beside one) still holds for the users it does not cover, so ranking the
-    whole unit by ``sortOrder`` as ScubaGoggles does could hide a value an administrator set: that unit's setting is
-    unknown. Google's own ``SYSTEM`` defaults below a licence-scoped policy are read as ScubaGoggles reads them.
+
+def _licence_terms(item: dict[str, Any]) -> list[dict[str, list[str]]] | None:
+    query = item["policyQuery"]
+    return query.get("licence_terms") if query.get("query_scope") in ("licences_unit", "licences_wide") else None
+
+
+def _meets(terms: list[dict[str, list[str]]] | None, holds: set[str]) -> bool:
+    """Whether a user holding exactly ``holds`` meets a policy's licence predicate (no predicate: every user)."""
+    return terms is None or any(
+        (not term["holds_any"] or holds & set(term["holds_any"])) and not holds & set(term["holds_none"])
+        for term in terms
+    )
+
+
+def _population_outcome(section: str, top_unit: bool, ranked: list[tuple[Any, dict[str, Any]]]) -> str:
+    """The value one licence population of a unit reduces to, as the rule engine reduces a unit's policies
+    (:func:`reduce_ranked`), with the pinned default filled in on the top unit as the engine does. A population no
+    policy holds for takes the pinned default on the top unit (Google's own default, the value ScubaGoggles pins,
+    SG:scubagoggles/policy_api.py:379-455) and its parent's or OU's setting anywhere else, which this unit cannot
+    tell: ``_NO_POLICY``."""
+    try:
+        semantics: dict[str, Any] | None = section_semantics(section)
+    except ValueError:
+        semantics = None  # a section no rule reads: ranked by its highest rank alone
+    default = semantics.get("default") if semantics else None
+    if not ranked:
+        if not top_unit or default is None:
+            return _NO_POLICY
+        ranked_default = {name: part for name, part in default.items() if semantics and name in semantics["fields"]}
+        return json.dumps(ranked_default, sort_keys=True)
+    if semantics is None:
+        top = max(order for order, _ in ranked)
+        values = {json.dumps(value, sort_keys=True) for order, value in ranked if order == top}
+        return values.pop() if len(values) == 1 else _IRREDUCIBLE
+    value = reduce_ranked(section, ranked)
+    if value is UNUSABLE:
+        return _IRREDUCIBLE
+    if top_unit and isinstance(value, dict) and default:
+        value = {**default, **value}
+    if isinstance(value, dict):
+        # Only the fields a rule can read (the section's pinned fields) decide a verdict.
+        value = {name: part for name, part in value.items() if name in semantics["fields"]}
+    return json.dumps(value, sort_keys=True)
+
+
+def _licence_scope_unusable(section: str, top_unit: bool, policies: list[tuple[Any, dict[str, Any]]]) -> bool:
+    """Whether a unit holding licence-scoped policies has no one setting for every licence population.
+
+    ScubaGoggles v1.1.0 never reads the query: each policy is its ``orgUnit``'s (and ``group``'s) setting, ranked by
+    ``sortOrder`` (SG:scubagoggles/policy_api.py:752-860), and the rule engine reduces a unit the same way
+    (:mod:`azure_tenant_audit.value_rules.gws.reduce`). A licence-scoped policy holds only for the users meeting its
+    predicate, so the unit's policies are reduced once per licence population (every assignment of the SKUs the
+    unit's predicates name): each user takes the highest-ranked policies they meet. The unit stands only when every
+    population reduces to what the engine reads from all of the unit's policies, so a licence-scoped value never
+    stands for users it does not hold for and never hides another population's value. Any population that differs,
+    a population no policy holds for below the top unit, a missing rank, or more than ``LICENCE_ATOM_MAX`` SKUs
+    leaves the unit's setting unknown: never a pass, never a violation.
     """
-    groups: dict[tuple[str, str, str], list[tuple[Any, dict[str, Any]]]] = defaultdict(list)
-    for section, org_unit, group, sort_order, item in candidates:
-        groups[(section, org_unit or "", group or "")].append((sort_order, item))
-    shadowed: set[tuple[str, str, str]] = set()
-    for key, policies in groups.items():
-        licensed = [order for order, item in policies if item["policyQuery"].get("query_scope") in ("licences", "licences_wide")]
-        if not licensed:
-            continue
-        if not all(finite_policy_number(order) for order, _ in policies):
-            shadowed.add(key)
-            continue
-        top_licensed = max(licensed)
-        if any(item.get("type") != "SYSTEM" and order < top_licensed for order, item in policies):
-            shadowed.add(key)
-    return shadowed
+    if not all(finite_policy_number(order) for order, _ in policies):
+        return True
+    terms = [_licence_terms(item) for _, item in policies]
+    atoms = sorted({atom for predicate in terms for term in predicate or () for atom in term["holds_any"] + term["holds_none"]})
+    if len(atoms) > LICENCE_ATOM_MAX:
+        return True
+    values = [(order, item["setting"]["value"]) for order, item in policies]
+    everyone = _population_outcome(section, top_unit, values)
+    for held in product((False, True), repeat=len(atoms)):
+        holds = {atom for atom, bit in zip(atoms, held, strict=True) if bit}
+        population = [value for value, predicate in zip(values, terms, strict=True) if _meets(predicate, holds)]
+        if _population_outcome(section, top_unit, population) != everyone:
+            return True
+    return False
+
+
+def _licence_scopes(candidates: list[tuple[str, str | None, str | None, Any, dict[str, Any], tuple[str, str, str]]],
+                    roots: set[str]) -> set[tuple[str, str, str]]:
+    """The units (canonical keys) whose licence-scoped policies leave the setting unknown; see
+    :func:`_licence_scope_unusable`."""
+    grouped: dict[tuple[str, str, str], list[tuple[Any, dict[str, Any]]]] = defaultdict(list)
+    for _, _, _, sort_order, item, key in candidates:
+        grouped[key].append((sort_order, item))
+    return {
+        key for key, policies in grouped.items()
+        if any(_licence_terms(item) is not None for _, item in policies)
+        and _licence_scope_unusable(key[0], key[1] in roots and not key[2], policies)
+    }
+
+
+def _canonical_target(org_unit: str | None, group: str | None, roots: set[str]) -> str:
+    """The unit a policy's setting belongs to, as the projection places it: a group-only policy applies under the
+    top unit (SG:scubagoggles/policy_api.py:804-825), so it shares the top unit's group key."""
+    if group is not None and org_unit is None and len(roots) == 1:
+        return next(iter(roots))
+    return org_unit or ""
 
 
 def _policy_scope(record: dict[str, Any], *, root_ids: set[str], unit_ids: set[str]) -> str:
@@ -547,15 +627,19 @@ def _policy_settings_read(
     :func:`policy_problems`:
 
     - a policy whose section cannot be told is malformed for the whole read;
-    - one whose targets cannot be read makes its section unusable (``unusable_sections``, every record of it left out);
-    - one with any other problem, a scope its targets cannot represent (an exception or another unit in its query,
-      or a licence-only clause on a unit other than the top unit), an administrator's policy ranked below a
-      licence-scoped one (:func:`_licence_shadowed_scopes`), or conflicting values with no order between policies for
-      the same identity, makes that unit's setting unusable (``unusable_scopes``): those records are left out and
-      every other unit's records are kept.
+    - one whose targets cannot be read, or whose query may reach users outside its unit and group
+      (:func:`_setting_scope_unbounded`: an unrepresentable or unreadable query, the legacy ``licences`` word, or a
+      ``licences_wide`` policy on any unit but the top unit), makes its section unusable (``unusable_sections``, every
+      record of it left out);
+    - one with any other problem, a licence-scoped unit whose licence populations do not all reduce to one setting
+      (:func:`_licence_scopes`), or conflicting values with no order between policies for the same identity, makes
+      that unit's setting unusable (``unusable_scopes``): those records are left out and every other unit's records
+      are kept.
 
-    A policy whose query narrows it to licence holders (``licences``, or ``licences_wide`` on a top unit in
-    ``root_units``) is its unit's setting, ranked by ``sortOrder`` with the rest, as ScubaGoggles reads it.
+    Units are keyed as the projection places them (:func:`_canonical_target`): a group-only policy shares the top
+    unit's group key. A policy whose query narrows it to licence holders (``licences_unit``, or ``licences_wide`` on
+    a top unit in ``root_units``) stays its unit's setting, ranked by ``sortOrder`` with the rest, as ScubaGoggles
+    reads it, once every licence population is shown to reduce to the same setting.
 
     Any of these makes the read incomplete: unknown is never safe. The second value is ``None`` without a
     ``policySettings`` key; otherwise whether the read is complete as far as the 2-step verification sections go.
@@ -570,7 +654,8 @@ def _policy_settings_read(
     malformed = unattributed = 0
     unusable: set[str] = set()
     scopes: set[tuple[str, str, str]] = set()
-    candidates: list[tuple[str, str | None, str | None, Any, dict[str, Any]]] = []
+    roots = set(root_units)
+    candidates: list[tuple[str, str | None, str | None, Any, dict[str, Any], tuple[str, str, str]]] = []
     for item in items:
         if policy_is_unrecognised(item):
             continue
@@ -591,23 +676,28 @@ def _policy_settings_read(
         org_unit, group = targets
         if problems:
             malformed += 1
-        if (problems or not _setting_scope_supported(item["policyQuery"], org_unit, group, set(root_units))
-                or (org_unit is not None and org_unit not in known_units)):
-            scopes.add((setting_section, org_unit or "", group or ""))
+        if _setting_scope_unbounded(item["policyQuery"], org_unit, roots):
+            # The policy may hold for users anywhere, so no unit's setting for this section is known.
+            unusable.add(setting_section)
             continue
-        candidates.append((setting_section, org_unit, group, item["policyQuery"].get("sortOrder"), item))
-    scopes |= _licence_shadowed_scopes(candidates)
+        key = (setting_section, _canonical_target(org_unit, group, roots), group or "")
+        if (problems or item["policyQuery"].get("query_scope") == "conditional"
+                or (org_unit is not None and org_unit not in known_units)):
+            scopes.add(key)
+            continue
+        candidates.append((setting_section, org_unit, group, item["policyQuery"].get("sortOrder"), item, key))
+    scopes |= _licence_scopes(candidates, roots)
     by_identity: dict[tuple[str, str, str, str], list[tuple[int | float | None, dict[str, Any]]]] = defaultdict(list)
-    for setting_section, org_unit, group, sort_order, item in candidates:
+    for setting_section, _, _, sort_order, item, key in candidates:
         for identity, value in _policy_values_by_identity(setting_section, item["setting"]["value"]):
-            by_identity[(setting_section, org_unit or "", group or "", identity)].append((sort_order, value))
+            by_identity[(*key, identity)].append((sort_order, value))
     for (setting_section, org_unit, group, _), policies in by_identity.items():
         if _policy_order_conflicts(policies):
             scopes.add((setting_section, org_unit, group))
     records: list[dict[str, Any]] = []
     seen: Counter[str] = Counter()
-    for setting_section, org_unit, group, sort_order, item in candidates:
-        if setting_section in unusable or (setting_section, org_unit or "", group or "") in scopes:
+    for setting_section, org_unit, group, sort_order, item, unit_key in candidates:
+        if setting_section in unusable or unit_key in scopes:
             continue
         key = f"{setting_section}|{org_unit or ''}|{group or ''}|{sort_order if sort_order is not None else ''}"
         seen[key] += 1

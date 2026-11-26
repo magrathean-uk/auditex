@@ -645,7 +645,7 @@ def _policy_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[s
         if isinstance(item, dict) and not _uninterrupted(item):
             return False
         query = item.get("policyQuery") if isinstance(item, dict) else None
-        if isinstance(query, dict) and not set(query) <= {"orgUnit", "group", "sortOrder", "query", "query_scope"}:
+        if isinstance(query, dict) and not set(query) <= {"orgUnit", "group", "sortOrder", "query", "query_scope", "licence_terms"}:
             return False
     operations = {label for owner, label in coverage if owner == collector}
     if operations - {name, "twoStepVerificationPolicies", "policyPlacement"}:

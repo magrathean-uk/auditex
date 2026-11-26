@@ -383,3 +383,14 @@ def service_on(units: Units, unit: str, service: str) -> str:
         return UNKNOWN
     top = _state(units, units.top, section)
     return UNKNOWN if top is None else top
+
+
+def reduce_ranked(section: str, ranked: list[tuple[float, Any]]) -> Any:
+    """What the (rank, value) policies of one (unit, section) reduce to, exactly as :func:`effective_units` reduces
+    them (no defaults); ``UNUSABLE`` when they cannot be reduced. A section without pinned semantics is a
+    ``ValueError``. The normaliser uses it to check that a licence-scoped unit reduces the same for every licence
+    population."""
+    section_semantics(section)
+    return _reduce(section, [_Placed("", section, rank if _sort_order(rank) else math.inf,
+                                     value if _sort_order(rank) and _plain(value) else UNUSABLE)
+                             for rank, value in ranked])

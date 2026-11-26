@@ -653,8 +653,9 @@ POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 # | policyQuery                 | query_object_invalid| same              | -                                          |
 # | policyQuery.orgUnit, group  | fine (one required: target_missing) | org_unit_invalid / group_invalid | not ``orgUnits/<id>`` / ``groups/<id>`` or a system group id |
 # | policyQuery.sortOrder       | fine (proto3 0)     | sort_order_invalid| NaN, infinite or outside the double range  |
-# | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL beyond targets and licence clauses is unsupported scope (collector partial, normaliser unusable scope); a licence-only clause off the top unit is an unusable scope in the normaliser |
-# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets``, ``licences``, ``licences_wide`` or ``other`` |
+# | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL beyond targets and licence clauses, or a licence population no user can meet, is unsupported scope (collector partial, normaliser unusable section); a licence-only clause off the top unit is an unusable section in the normaliser |
+# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets``, ``licences`` (legacy: unsupported scope), ``licences_unit``, ``licences_wide``, ``conditional`` (unusable scope) or ``other`` (unusable section) |
+# | policyQuery.licence_terms   | fine (licence words only) | query_invalid | missing or malformed beside a licence word, present beside any other |
 # | 2SV enforcedFrom            | fine (not enforced) | two_step_value_invalid | blank or not an RFC 3339 timestamp    |
 # | 2SV allowEnrollment         | fine                | two_step_value_invalid | not a Boolean                         |
 # | 2SV allowedSignInFactorSet  | fine                | two_step_value_invalid | not a documented enum member           |
@@ -753,14 +754,16 @@ def policy_row_readable(policy: Any) -> bool:
 
 
 def policy_scope_unrepresentable(policy: Any) -> bool:
-    """Whether a readable policy's CEL query holds a scope its targets cannot show (another unit or group, or any
-    condition beyond Google's licence clauses): its setting for that unit is unknown, so the read is not complete.
-    Licence clauses narrow a policy to the licence holders of its unit and leave it that unit's setting, as
-    ScubaGoggles reads it; whether a licence-only clause (``licences_wide``) stands is the normaliser's call, since
-    only the Directory tree tells whether its unit is the top unit."""
+    """Whether a readable policy's CEL query holds a scope its targets cannot show (another unit or group, any
+    condition beyond Google's licence clauses, or a population no user can meet): its section is unknown, so the
+    read is not complete. Licence clauses narrow a policy to the licence holders of its unit; whether every licence
+    population of the unit reduces to one setting, and whether a licence-only conjunction (``licences_wide``) stands
+    (only on the top unit), is the normaliser's call, since only the Directory tree tells the top unit."""
     if not isinstance(policy, dict) or not isinstance(policy.get("policyQuery"), dict):
         return False
-    return not policy_is_unrecognised(policy) and policy_query_classification(policy["policyQuery"]) == "other"
+    # The legacy ``licences`` word (replayed evidence) also stood for a licence-only query with no org-unit term, so
+    # its reach is unknown as well.
+    return not policy_is_unrecognised(policy) and policy_query_classification(policy["policyQuery"]) in ("conditional", "other", "licences")
 
 
 def _scope_policy_error(count: int, total: int) -> str:

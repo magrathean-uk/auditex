@@ -332,7 +332,7 @@ def _policy(setting: str, value: dict, *, org_unit: str | None = "root01", group
 
 
 def replay(tmp_path: Path, policies: list[dict], *, as_of: datetime | None = None, users=None, org_units=None,
-           sso=None, groups=None, members=None) -> Path:
+           sso=None, groups=None, members=None, expect_rc: int = 0) -> Path:
     two_step = [row for row in policies if row["setting"]["type"].startswith("settings/security.two_step")]
     sample = {
         "google_directory": {
@@ -355,7 +355,7 @@ def replay(tmp_path: Path, policies: list[dict], *, as_of: datetime | None = Non
     path = tmp_path / "sample.json"
     path.write_text(json.dumps(sample))
     assert run_google_offline(sample_path=path, out=tmp_path / "out", tenant_name="E", run_name="g",
-                              domain="example.com", customer_id=CUSTOMER, as_of=as_of) == 0
+                              domain="example.com", customer_id=CUSTOMER, as_of=as_of) == expect_rc
     run = tmp_path / "out" / "E-g"
     (run / "operator-inputs/pseudonym.key").unlink()
     seed_key(run)
@@ -1642,7 +1642,7 @@ def test_an_unsupported_policy_scope_only_weakens_the_confirmed_setting(bundle: 
     attributed(bundle)
     edit_raw(bundle, "raw/google_policies.json", lambda raw: raw["policySettings"]["value"][2].update({
         "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enableAutoForwarding": False}},
-        "policyQuery": {"orgUnit": "orgUnits/root01", "sortOrder": 1, "query_scope": "other"},
+        "policyQuery": {"orgUnit": "orgUnits/root01", "sortOrder": 1, "query_scope": "conditional"},
     }))
     edit_rows(bundle, "google_policy_settings", lambda records: records[-1].update(malformed_count=0))
     projection = project_gws_run(bundle)
@@ -1875,21 +1875,44 @@ RECOVERY = "security.super_admin_account_recovery"
 
 
 @pytest.mark.parametrize("top,expected", [(False, ("met", "no_unit_violates")), (True, ("not_met", "unit_violates"))])
-def test_a_licence_scoped_default_is_ranked_as_its_unit_setting(tmp_path: Path, top, expected) -> None:
+def test_a_licence_scoped_default_agreeing_with_the_unit_setting_stands(tmp_path: Path, top, expected) -> None:
     run = replay(tmp_path, [
         ENROLLED,
         licensed(RECOVERY, {"enableAccountRecovery": top}, 100.00005, f"{ROOT_TERM} && {SKU_A}"),
-        licensed(RECOVERY, {"enableAccountRecovery": not top}, 100.00001, ROOT_TERM),
+        licensed(RECOVERY, {"enableAccountRecovery": top}, 100.00001, ROOT_TERM),
     ])
     state = [row for row in rows(run, "google_policy_settings") if row["id"] == "read_state"][0]
     assert (state["complete"], state["unusable_scopes"]) == (True, [])
     assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == expected
 
 
+@pytest.mark.parametrize("kind", ["ADMIN", "SYSTEM"])
+@pytest.mark.parametrize("top", [False, True])
+def test_r1_b1_a_licence_scoped_value_never_hides_the_value_the_rest_of_the_unit_holds(tmp_path: Path, kind, top) -> None:
+    run = replay(tmp_path, [
+        ENROLLED,
+        licensed(RECOVERY, {"enableAccountRecovery": not top}, 100, ROOT_TERM),
+        licensed(RECOVERY, {"enableAccountRecovery": top}, 300, f"{ROOT_TERM} && {SKU_A}", kind=kind),
+    ])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")
+
+
 def test_a_licence_only_disjunct_stands_on_the_top_unit(tmp_path: Path) -> None:
     wide = f"{ROOT_TERM} && !{SKU_A} || {SKU_B} && !{SKU_A}"
-    run = replay(tmp_path, [ENROLLED, licensed(RECOVERY, {"enableAccountRecovery": True}, 100.00003, wide)])
+    run = replay(tmp_path, [ENROLLED, licensed(RECOVERY, {"enableAccountRecovery": True}, 100.00003, wide),
+                            licensed(RECOVERY, {"enableAccountRecovery": True}, 100.00005, f"{ROOT_TERM} && {SKU_A}")])
     assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_met", "unit_violates")
+
+
+def test_r1_a_licence_population_no_policy_holds_for_takes_the_pinned_default(tmp_path: Path) -> None:
+    # SKU A holders have no policy here: on the top unit they take Google's default, recovery off (pinned by
+    # ScubaGoggles), so a policy enabling it for everyone else cannot stand for them.
+    wide = f"{ROOT_TERM} && !{SKU_A} || {SKU_B} && !{SKU_A}"
+    run = replay(tmp_path, [ENROLLED, licensed(RECOVERY, {"enableAccountRecovery": True}, 100.00003, wide)])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")
+    (tmp_path / "off").mkdir()
+    run = replay(tmp_path / "off", [ENROLLED, licensed(RECOVERY, {"enableAccountRecovery": False}, 100.00003, wide)])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("met", "no_unit_violates")
 
 
 def test_an_admin_value_ranked_below_a_licence_scoped_policy_is_unknown(tmp_path: Path) -> None:
@@ -1902,3 +1925,61 @@ def test_an_admin_value_ranked_below_a_licence_scoped_policy_is_unknown(tmp_path
     assert state["complete"] is False
     assert [scope["section"] for scope in state["unusable_scopes"]] == ["security_super_admin_account_recovery"]
     assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")
+
+
+# LIVE-FIX-1 repair round 1: scopes that cannot be mapped to one unit's population never answer.
+
+GROUP_TERM = "entity.groups.exists(g, g.group_id == groupId('g1'))"
+SALES_TERM = "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('ou0a1'))"
+G1_GROUPS = [{"id": "g1", "email": "team@example.com", "name": "Team"}]
+
+
+def placed_licensed(setting: str, value: dict, order: float, query: str, *, org_unit: str | None = "root01",
+                    group: str | None = None, kind: str = "ADMIN") -> dict:
+    row = _policy(setting, value, org_unit=org_unit, group=group)
+    row["policyQuery"].update(sortOrder=order, query=query)
+    row["type"] = kind
+    return row
+
+
+def test_r1_b2_a_group_only_value_below_a_root_group_licence_policy_is_unknown(tmp_path: Path) -> None:
+    run = replay(tmp_path, [
+        ENROLLED,
+        placed_licensed(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && {GROUP_TERM} && {SKU_A}",
+                        group="g1", kind="SYSTEM"),
+        placed_licensed(RECOVERY, {"enableAccountRecovery": True}, 201, GROUP_TERM, org_unit=None, group="g1"),
+        placed_licensed(RECOVERY, {"enableAccountRecovery": False}, 100, ROOT_TERM, kind="SYSTEM"),
+    ], groups=G1_GROUPS)
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1")[0] == "not_assessed"
+
+
+@pytest.mark.parametrize("query,group", [
+    (f"{SALES_TERM} && {SKU_A} || {SKU_B}", None),
+    (f"{SALES_TERM} && {GROUP_TERM} && {SKU_A} || {GROUP_TERM} && {SKU_B}", "g1"),
+])
+def test_r1_b3_delegation_enabled_by_a_disjunct_beyond_a_gmail_off_unit_is_not_met_never(tmp_path: Path, query, group) -> None:
+    run = replay(tmp_path, [
+        ENROLLED,
+        _policy("gmail.service_status", {"serviceState": "ENABLED"}),
+        _policy("gmail.mail_delegation", {"enableMailDelegation": False}),
+        _policy("gmail.service_status", {"serviceState": "DISABLED"}, org_unit="ou0a1", group=group),
+        placed_licensed("gmail.mail_delegation", {"enableMailDelegation": True}, 201, query, org_unit="ou0a1",
+                        group=group),
+    ], groups=G1_GROUPS)
+    assert verdict(project_gws_run(run), "GWS.GMAIL.1.1v1")[0] == "not_assessed"
+
+
+def test_r1_b3_a_legacy_licences_row_below_the_top_unit_never_answers(tmp_path: Path) -> None:
+    legacy = _policy(RECOVERY, {"enableAccountRecovery": True}, org_unit="ou0a1", order=201)
+    legacy["policyQuery"]["query_scope"] = "licences"
+    run = replay(tmp_path, [ENROLLED, _policy(RECOVERY, {"enableAccountRecovery": False}), legacy], expect_rc=1)
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1")[0] == "not_assessed"
+
+
+def test_r1_b4_an_impossible_licence_population_never_supplies_a_violation(tmp_path: Path) -> None:
+    run = replay(tmp_path, [
+        ENROLLED,
+        licensed(RECOVERY, {"enableAccountRecovery": True}, 300, f"{ROOT_TERM} && {SKU_A} && !{SKU_A}"),
+        licensed(RECOVERY, {"enableAccountRecovery": False}, 100, ROOT_TERM),
+    ], expect_rc=1)
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1")[0] == "not_assessed"
