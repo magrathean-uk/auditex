@@ -558,13 +558,23 @@ def _ou_path(value: Any) -> bool:
             and (value == "/" or all(part.strip() and part not in (".", "..") for part in value[1:].split("/"))))
 
 
-def _rows_agree(records: list[dict] | None, whole: bool, raw: list, normalised_key: Callable, raw_key: Callable) -> bool:
-    """Require the same unique, readable row identities and values on both sides of a join."""
+def _rows_agree(records: list[dict] | None, whole: bool, raw: list, normalised_key: Callable, raw_key: Callable, *,
+                repeats: bool = False) -> bool:
+    """Require the same unique, readable row identities and values on both sides of a join.
+
+    ``repeats`` admits rows whose identities repeat, as long as each repeats as often on both sides: Google writes
+    one admin action that changes several settings as several events at the same instant, and the minimised event
+    (an unlisted setting becomes ``unrecognised``) need not tell them apart; it also writes the same setting at the
+    same rank once per licence population.
+    """
     if records is None:
         return not raw
     if (not whole or len(records) != len(raw) or not all(map(_uninterrupted, records))
             or any(isinstance(row, dict) and not _uninterrupted(row) for row in raw)):
         return False
+    if repeats:
+        counted = Counter(normalised_key(row) for row in records)
+        return None not in counted and counted == Counter(raw_key(row) for row in raw)
     normalised = {normalised_key(row) for row in records}
     source = {raw_key(row) for row in raw}
     return None not in normalised and len(normalised) == len(records) and source == normalised
@@ -659,7 +669,8 @@ def _policy_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[s
                 and state.get("complete") is False):
             return False
     replayed, _ = _policy_settings_read(raw, [_obj(("name", collector), ("status", "ok"))], [],
-                                       {unit[3:] for unit in org_units})
+                                       {unit[3:] for unit in org_units},
+                                       {unit[3:] for unit, parent in org_units.items() if parent is None})
     expected, _, read_state = _split(replayed, "google_policy_settings", "google_policy_setting")
 
     def policy_key(row: dict) -> str:
@@ -670,7 +681,9 @@ def _policy_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[s
             not ctx.read_ok(raw, collector, "twoStepVerificationPolicies", direct_count=False)
             or two_step_subset_differs(raw)):
         return False
-    if not _rows_agree(data, True, expected, policy_key, policy_key):
+    # Equal policies may repeat: Google writes one value per licence population at one rank, and ScubaGoggles ranks
+    # each copy (DEC-193), so the join counts them.
+    if not _rows_agree(data, True, expected, policy_key, policy_key, repeats=True):
         return False
     for key in ("complete", "malformed_count", "unusable_sections", "unusable_scopes"):
         if key not in state or _json(state[key]) != _json(read_state.get(key)):
@@ -831,7 +844,8 @@ def _event_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[st
         event_org_units=_event_org_units(ctx.directory(), {unit[3:] for unit in org_units}),
     )
     expected, _, read_state = _split(replayed, collector, "google_setting_event")
-    if read_state.get("complete") is not True or not _rows_agree(data, True, expected, _event_key, _event_key):
+    if read_state.get("complete") is not True or not _rows_agree(data, True, expected, _event_key, _event_key,
+                                                                 repeats=True):
         return False
     start, end = (instant_ns(state.get(key)) for key in ("window_start", "window_end"))
     if start is None or end is None or start >= end or (start, end) != tuple(

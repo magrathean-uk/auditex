@@ -1,6 +1,7 @@
 """GWS SCuBA projection (M13 L06): synthetic Google bundles only; expected values are literals."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -332,7 +333,7 @@ def _policy(setting: str, value: dict, *, org_unit: str | None = "root01", group
 
 
 def replay(tmp_path: Path, policies: list[dict], *, as_of: datetime | None = None, users=None, org_units=None,
-           sso=None, groups=None, members=None) -> Path:
+           sso=None, groups=None, members=None, expect_rc: int = 0) -> Path:
     two_step = [row for row in policies if row["setting"]["type"].startswith("settings/security.two_step")]
     sample = {
         "google_directory": {
@@ -355,7 +356,7 @@ def replay(tmp_path: Path, policies: list[dict], *, as_of: datetime | None = Non
     path = tmp_path / "sample.json"
     path.write_text(json.dumps(sample))
     assert run_google_offline(sample_path=path, out=tmp_path / "out", tenant_name="E", run_name="g",
-                              domain="example.com", customer_id=CUSTOMER, as_of=as_of) == 0
+                              domain="example.com", customer_id=CUSTOMER, as_of=as_of) == expect_rc
     run = tmp_path / "out" / "E-g"
     (run / "operator-inputs/pseudonym.key").unlink()
     seed_key(run)
@@ -1452,11 +1453,11 @@ def test_domain_proof_requires_agreement_at_each_source(bundle: Path, fault: str
     assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "not_assessed"
 
 
-@pytest.mark.parametrize("fault", ["unsupported scope", "wrong-typed cut"])
+@pytest.mark.parametrize("fault", ["unrecorded policy", "wrong-typed cut"])
 def test_policy_attribution_requires_agreement_at_each_source(bundle: Path, fault: str) -> None:
     attributed(bundle)
     assert verdict(project_gws_run(bundle), "GWS.COMMONCONTROLS.1.2v1")[0] == "met"
-    if fault == "unsupported scope":
+    if fault == "unrecorded policy":
         policy = _policy("security.two_step_verification_enrollment", {"allowEnrollment": False}, order=2)
         policy["policyQuery"].update(query_scope="other")
         edit_raw(bundle, "raw/google_policies.json", lambda raw: raw["policySettings"]["value"].append(policy))
@@ -1638,18 +1639,6 @@ def test_an_independently_proven_dns_violation_survives_another_domains_missing_
     assert verdict(projection, "GWS.GMAIL.3.1v1") == ("not_met", "domain_violates")
 
 
-def test_an_unsupported_policy_scope_only_weakens_the_confirmed_setting(bundle: Path) -> None:
-    attributed(bundle)
-    edit_raw(bundle, "raw/google_policies.json", lambda raw: raw["policySettings"]["value"][2].update({
-        "setting": {"type": "settings/gmail.auto_forwarding", "value": {"enableAutoForwarding": False}},
-        "policyQuery": {"orgUnit": "orgUnits/root01", "sortOrder": 1, "query_scope": "other"},
-    }))
-    edit_rows(bundle, "google_policy_settings", lambda records: records[-1].update(malformed_count=0))
-    projection = project_gws_run(bundle)
-    assert projection["gws_policies"]["complete"] is True
-    assert verdict(projection, "GWS.COMMONCONTROLS.1.2v1")[0] == "met"
-
-
 def test_policy_identifiers_and_ip_addresses_are_redacted_after_reconciliation(bundle: Path) -> None:
     from auditex.google_workspace.normalize import _policy_settings_read
 
@@ -1829,3 +1818,209 @@ def test_a_failed_resolver_configuration_withholds_apparently_readable_txt(bundl
     projection = project_gws_run(bundle)
     assert projection["gws_dns"]["complete"] is False
     assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "not_assessed"
+
+
+# LIVE-FIX-1: one admin action that creates several settings is logged as several events at the same instant. Once
+# minimised (a setting outside the vocabulary becomes ``unrecognised``, no unit) they share one identity; the join
+# must count them, not refuse them.
+
+def same_instant_creates(count: int) -> list[dict]:
+    return [event("2026-10-03T10:00:00Z", "CREATE_APPLICATION_SETTING", setting="unrecognised")
+            for _ in range(count)]
+
+
+def test_repeated_identical_events_keep_the_event_read_complete(bundle: Path) -> None:
+    recorded_events(bundle, [*same_instant_creates(4), state("google_setting_events", 4, **WINDOW)])
+    section = project_gws_run(bundle)["gws_setting_events"]
+    assert section["complete"] is True
+    assert len(section["events"]) == 4
+
+
+def test_repeats_must_match_the_raw_read_one_for_one(bundle: Path) -> None:
+    other = event("2026-10-04T10:00:00Z", "CREATE_APPLICATION_SETTING", setting="unrecognised")
+    recorded_events(bundle, [*same_instant_creates(3), other, state("google_setting_events", 4, **WINDOW)])
+    # The normalised side now says the other way round: one repeat, three of the other. Same set, same length.
+    normalised(bundle, "google_setting_events", [*same_instant_creates(1), other, other, other,
+                                                  state("google_setting_events", 4, **WINDOW)])
+    assert project_gws_run(bundle)["gws_setting_events"]["complete"] is False
+
+
+# --- LIVE-FIX-1 / DEC-193: the same effective value per unit and group as ScubaGoggles v1.1.0 ----------------------
+
+
+def scubagoggles_reduce(policies: list[dict], top: str, orgunits: dict[str, str], groups: dict[str, str],
+                        reducers: dict[str, str]) -> dict[tuple[str, str], object]:
+    """A literal transcription of ScubaGoggles v1.1.0 ``PolicyAPI._reduce`` (SG:scubagoggles/policy_api.py:752-871)
+    with its reducers ``_max_map``, ``_merge`` and ``_list`` (:973-1095) and ``_settings`` (:948-960). The query is
+    never read. ``reducers`` maps a section to ``_merge``, ``_list``, ``_max_map`` (with its key) or ``""``."""
+    reduction: dict[tuple[str, str], object] = {}
+    policies = copy.deepcopy(policies)
+    policies.sort(key=lambda policy: policy["policyQuery"]["sortOrder"], reverse=True)
+
+    def settings(policy):
+        return [p["setting"]["value"] for p in policy] if isinstance(policy, list) else policy["setting"]["value"]
+
+    for policy in policies:
+        if "orgUnit" in policy["policyQuery"]:
+            orgunit_id = policy["policyQuery"]["orgUnit"].removeprefix("orgUnits/")
+            if orgunit_id not in orgunits:
+                continue
+            orgunit_name = orgunits[orgunit_id]
+        else:
+            orgunit_name = top
+        if "group" in policy["policyQuery"]:
+            group_id = policy["policyQuery"]["group"].removeprefix("groups/")
+            orgunit_name += f" (group {groups.get(group_id, group_id)})"
+        section = policy["setting"]["type"].removeprefix("settings/").replace(".", "_")
+        key = (orgunit_name, section)
+        reduce_name = reducers.get(section, "")
+        if key not in reduction:
+            reduction[key] = [policy] if reduce_name == "_list" else policy
+            continue
+        if reduce_name == "_merge":
+            current_settings = settings(reduction[key])
+            for setting, value in settings(policy).items():
+                if setting not in current_settings:
+                    current_settings[setting] = value
+        elif reduce_name == "_list":
+            reduction[key].append(policy)
+        elif reduce_name.startswith("_max_map:"):
+            primary_key_name, setting_name = reduce_name.split(":")[1:]
+            current_settings = settings(reduction[key])
+            key_map = {e[primary_key_name]: e for e in current_settings[setting_name]}
+            for entry in settings(policy)[setting_name]:
+                if entry[primary_key_name] in key_map:
+                    current_entry = key_map[entry[primary_key_name]]
+                    for field_name, field_value in entry.items():
+                        if field_name not in current_entry:
+                            current_entry[field_name] = field_value
+                else:
+                    current_settings[setting_name].append(entry)
+                    key_map[entry[primary_key_name]] = entry
+    return {key: settings(policy) for key, policy in reduction.items()}
+
+
+SG_REDUCERS = {"security_super_admin_account_recovery": "_merge", "gmail_mail_delegation": "_merge",
+               "security_session_controls": "", "gmail_service_status": ""}
+PARITY_SECTIONS = tuple(SG_REDUCERS)
+ROOT_TERM = "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root01'))"
+SALES_TERM = "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('ou0a1'))"
+GROUP_TERM = "entity.groups.exists(g, g.group_id == groupId('g1'))"
+SKU_A = "entity.licenses.exists(license, license in ['/product/Google-Apps/sku/9990000001'])"
+SKU_B = "entity.licenses.exists(license, license in ['GOOGLE-IDENTITY'])"
+RECOVERY, SESSION, GMAIL, DELEGATION = ("security.super_admin_account_recovery", "security.session_controls",
+                                        "gmail.service_status", "gmail.mail_delegation")
+
+
+def ranked(setting: str, value: dict, order: float, query: str | None = None, *, org_unit: str | None = "root01",
+           group: str | None = None, kind: str = "SYSTEM", scope: str | None = None) -> dict:
+    row = _policy(setting, value, org_unit=org_unit, group=group, order=order)
+    if query is not None:
+        row["policyQuery"]["query"] = query
+    if scope is not None:
+        row["policyQuery"]["query_scope"] = scope  # an older minimised row: no query, only its word
+    row["type"] = kind
+    return row
+
+
+# Each case: the policies, in the order the API returns them, and the (unit, section) keys where equal ranks
+# disagree at the deciding rank: ScubaGoggles takes the first returned, Auditex leaves the value unknown (D11).
+PARITY_CASES = {
+    "licence-scoped ranks over the unconditional default": ([
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 100, ROOT_TERM),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && {SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 201, f"{ROOT_TERM} && !{SKU_A}", kind="ADMIN"),
+        ranked(DELEGATION, {"enableMailDelegation": True}, 100, ROOT_TERM),
+        ranked(DELEGATION, {"enableMailDelegation": False}, 300, f"{ROOT_TERM} && {SKU_A} || {SKU_B}"),
+        ranked(GMAIL, {"serviceState": "ENABLED"}, 100, ROOT_TERM),
+        ranked(GMAIL, {"serviceState": "DISABLED"}, 300, f"{ROOT_TERM} && {SKU_A}"),
+    ], set()),
+    "equal ranks on complementary licence populations": ([
+        ranked(SESSION, {"webSessionDuration": "3600s"}, 300, f"{ROOT_TERM} && {SKU_A}"),
+        ranked(SESSION, {"webSessionDuration": "7200s"}, 300, f"{ROOT_TERM} && !{SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && {SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && !{SKU_A}"),
+    ], {("root", "security_session_controls")}),
+    "group-only and root-plus-group policies are one group unit": ([
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 100, ROOT_TERM),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && {GROUP_TERM} && {SKU_A}", group="g1"),
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 201, GROUP_TERM, org_unit=None, group="g1", kind="ADMIN"),
+        ranked(SESSION, {"webSessionDuration": "3600s"}, 201, f"{ROOT_TERM} && {GROUP_TERM}", group="g1", kind="ADMIN"),
+        ranked(SESSION, {"webSessionDuration": "86400s"}, 201, GROUP_TERM, org_unit=None, group="g1", kind="ADMIN"),
+    ], {("root (group g1)", "security_session_controls")}),
+    "child unit: negated, disjunctive, unreadable and legacy scopes rank as the child's own": ([
+        ranked(GMAIL, {"serviceState": "ENABLED"}, 1, ROOT_TERM, kind="ADMIN"),
+        ranked(DELEGATION, {"enableMailDelegation": False}, 1, ROOT_TERM, kind="ADMIN"),
+        ranked(GMAIL, {"serviceState": "DISABLED"}, 10, SALES_TERM, org_unit="ou0a1", kind="ADMIN"),
+        ranked(GMAIL, {"serviceState": "ENABLED"}, 20, f"{SALES_TERM} && {SKU_A}", org_unit="ou0a1", kind="ADMIN"),
+        ranked(DELEGATION, {"enableMailDelegation": True}, 201, f"!({SKU_A} && {SALES_TERM} && {SKU_B})",
+               org_unit="ou0a1", kind="ADMIN"),
+        ranked(SESSION, {"webSessionDuration": "3600s"}, 201, "x" * 5000, org_unit="ou0a1", kind="ADMIN"),
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 201, org_unit="ou0a1", kind="ADMIN", scope="licences"),
+    ], set()),
+}
+
+
+@pytest.mark.parametrize("case", PARITY_CASES)
+def test_dec_193_effective_values_match_scubagoggles_ranking(tmp_path: Path, case: str) -> None:
+    from azure_tenant_audit.value_rules.gws.reduce import UNUSABLE, effective_units
+
+    policies, ties = PARITY_CASES[case]
+    groups = [{"id": "g1", "email": "team@example.com", "name": "Team"}]
+    run = replay(tmp_path, [ENROLLED, *policies], groups=groups)
+    projection = project_gws_run(run)
+    units = effective_units(dict(projection), PARITY_SECTIONS)
+    group_units = [unit for unit in units.values if unit.startswith(f"{ROOT}/group:")]
+    names = {ROOT: "root", SALES: "Sales", **{unit: "root (group g1)" for unit in group_units}}
+    ours = {(names[unit], section): value for unit, values in units.values.items() for section, value in values.items()}
+
+    expected = scubagoggles_reduce(policies, "root", {"root01": "root", "ou0a1": "Sales"}, {"g1": "g1"}, SG_REDUCERS)
+    expected.update({key: UNUSABLE for key in ties})
+    # Auditex also fills ScubaGoggles' pinned defaults on the top unit (:1097-1170); compare where a policy is set.
+    assert {key: ours[key] for key in expected if key in ours} == expected
+    assert set(expected) <= set(ours)
+    assert {key for key, value in ours.items() if key[0] != "root" or key in expected} == set(expected)
+    if not ties:
+        assert projection["gws_policies"]["complete"] is True
+
+
+
+def test_dec_193_equal_policies_repeated_per_licence_population_keep_the_read_complete(tmp_path: Path) -> None:
+    # Google writes the same value at the same rank once per licence population; both copies are ranked, as
+    # ScubaGoggles ranks them, and the join counts them instead of refusing the repeat.
+    run = replay(tmp_path, [
+        ENROLLED,
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && {SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && !{SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 100, ROOT_TERM),
+    ])
+    projection = project_gws_run(run)
+    assert projection["gws_policies"]["complete"] is True
+    assert verdict(projection, "GWS.COMMONCONTROLS.8.1v1") == ("met", "no_unit_violates")
+    # A repeat the raw read does not hold is still refused.
+    records = rows(run, "google_policy_settings")
+    normalised(run, "google_policy_settings", [records[0], *records[:-1], {**records[-1], "record_count": len(records)}])
+    assert project_gws_run(run)["gws_policies"]["complete"] is False
+
+
+def test_live_fix_1_final_m1_a_tie_below_the_winning_rank_never_withholds_the_setting(tmp_path: Path) -> None:
+    # Rank 300 decides; the conflicting pair at rank 100 is shadowed by it (ScubaGoggles fills only missing fields).
+    run = replay(tmp_path, [
+        ENROLLED,
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 300, ROOT_TERM),
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 100, f"{ROOT_TERM} && {SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 100, f"{ROOT_TERM} && !{SKU_A}"),
+    ])
+    projection = project_gws_run(run)
+    assert projection["gws_policies"]["complete"] is True
+    assert verdict(projection, "GWS.COMMONCONTROLS.8.1v1") == ("not_met", "unit_violates")
+
+
+def test_live_fix_1_final_m1_a_tie_at_the_winning_rank_still_withholds_the_setting(tmp_path: Path) -> None:
+    run = replay(tmp_path, [
+        ENROLLED,
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 300, f"{ROOT_TERM} && {SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && !{SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 100, ROOT_TERM),
+    ])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")

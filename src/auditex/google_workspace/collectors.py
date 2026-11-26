@@ -27,12 +27,13 @@ from azure_tenant_audit.data_minimisation import (
     POLICY_TYPE_ALLOWED,
     POLICY_TYPES,
     TWO_STEP_SETTING_PREFIX,
+    UNREADABLE_MAILBOX,
     finite_policy_number,
+    gmail_mailbox_identifier,
     minimise_policy_section,
     minimise_policy_settings,
     minimise_policy_value,
     policy_is_unrecognised,
-    policy_query_classification,
     policy_target,
     policy_value_schema,
 )
@@ -56,12 +57,14 @@ from azure_tenant_audit.value_rules.gws.events import _categories, _time
 
 from .auth import INBOUND_SSO_SCOPE, POLICIES_SCOPE
 from .client import (
+    GMAIL_NOT_APPLICABLE_REASON,
     POLICY_MALFORMED_ERROR_CLASS,
     SCUBA_ADMIN_EVENTS,
     CollectedRows,
     PolicyReadError,
     classify_google_error,
     classify_page_error,
+    gmail_mail_service_not_enabled,
     gmail_settings_status,
     minimise_gmail_settings,
     policy_malformed_error,
@@ -493,6 +496,7 @@ class GoogleGmailSettingsCollector:
         subject_scope = SUBJECT_SCOPE_USER if per_user else SUBJECT_SCOPE_ADMIN
 
         emails: list[str] = []
+        unreadable_users = 0
         skipped_inactive = 0
         for user in users:
             user_email = str(user.get("primaryEmail") or user.get("email") or "")
@@ -500,6 +504,11 @@ class GoogleGmailSettingsCollector:
                 continue
             if user.get("suspended") or user.get("archived"):
                 skipped_inactive += 1
+                continue
+            if not gmail_mailbox_identifier(user_email):
+                # A Directory address that names no single mailbox is never used as a delegated subject, a coverage
+                # name or a bundle value: it is one unreadable mailbox.
+                unreadable_users += 1
                 continue
             emails.append(user_email)
 
@@ -555,6 +564,21 @@ class GoogleGmailSettingsCollector:
             coverage.append(skipped_row)
 
         rows: list[dict[str, Any]] = []
+        for _ in range(unreadable_users if per_user else 0):
+            rows.append({"userEmail": UNREADABLE_MAILBOX})
+            coverage.append(
+                _coverage(
+                    self.name,
+                    "mailboxSettings:unknown",
+                    status="failed",
+                    item_count=0,
+                    duration_ms=0,
+                    endpoint="gmail.users.settings",
+                    error_class="malformed_response",
+                    error="The Directory user record names no readable mailbox.",
+                    subject_scoped=subject_scope,
+                )
+            )
         for user_email in targets:
             start = time.perf_counter()
             try:
@@ -562,23 +586,26 @@ class GoogleGmailSettingsCollector:
                 rows.append(settings)
                 # The client keeps each failed settings read as ``<name>_error``: all failing fails the mailbox.
                 status, error_class, error = gmail_settings_status(settings)
+                not_applicable = gmail_mail_service_not_enabled(settings)
             except Exception as exc:  # noqa: BLE001
-                status = "failed"
+                status, not_applicable = "failed", False
                 error_class, error = classify_google_error(exc)
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
-            coverage.append(
-                _coverage(
-                    self.name,
-                    f"mailboxSettings:{user_email}",
-                    status=status,
-                    item_count=0 if status == "failed" else 1,
-                    duration_ms=duration_ms,
-                    endpoint="gmail.users.settings",
-                    error_class=error_class,
-                    error=error,
-                    subject_scoped=subject_scope,
-                )
+            row = _coverage(
+                self.name,
+                f"mailboxSettings:{user_email}",
+                status=status,
+                item_count=0 if status == "failed" or not_applicable else 1,
+                duration_ms=duration_ms,
+                endpoint="gmail.users.settings",
+                error_class=error_class,
+                error=error,
+                subject_scoped=subject_scope,
             )
+            if not_applicable:
+                # The user has no Gmail service: no mailbox to read, which is not a failed read.
+                row["not_applicable"] = GMAIL_NOT_APPLICABLE_REASON
+            coverage.append(row)
         partial = any(row.get("status") != "ok" for row in coverage)
         return CollectorResult(self.name, "partial" if partial else "ok", {"mailboxSettings": {"value": rows}}, len(rows), coverage=coverage)
 
@@ -648,8 +675,8 @@ POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 # | policyQuery                 | query_object_invalid| same              | -                                          |
 # | policyQuery.orgUnit, group  | fine (one required: target_missing) | org_unit_invalid / group_invalid | not ``orgUnits/<id>`` / ``groups/<id>`` or a system group id |
 # | policyQuery.sortOrder       | fine (proto3 0)     | sort_order_invalid| NaN, infinite or outside the double range  |
-# | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL that the targets cannot represent is unsupported scope (collector partial, normaliser unusable scope) |
-# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets``, ``licences`` or ``other``              |
+# | policyQuery.query           | fine                | fine              | never decides a setting: ranked by target and sortOrder alone, as ScubaGoggles v1.1.0 (DEC-193) |
+# | policyQuery.query_scope     | fine                | fine              | descriptive only; an unknown word replays as ``unreadable`` |
 # | 2SV enforcedFrom            | fine (not enforced) | two_step_value_invalid | blank or not an RFC 3339 timestamp    |
 # | 2SV allowEnrollment         | fine                | two_step_value_invalid | not a Boolean                         |
 # | 2SV allowedSignInFactorSet  | fine                | two_step_value_invalid | not a documented enum member           |
@@ -732,8 +759,6 @@ def policy_problems(policy: Any) -> tuple[str, ...]:
             problems.append("target_missing")
         if "sortOrder" in query and not finite_policy_number(query["sortOrder"]):
             problems.append("sort_order_invalid")
-        if policy_query_classification(query) == "unreadable":
-            problems.append("query_invalid")
     return tuple(sorted(set(problems)))
 
 
@@ -745,18 +770,6 @@ POLICY_TARGET_PROBLEMS = frozenset({"query_object_invalid", "org_unit_invalid", 
 def policy_row_readable(policy: Any) -> bool:
     """Whether one Policy API policy has every field its readers rely on (see :func:`policy_problems`)."""
     return not policy_problems(policy)
-
-
-def policy_scope_unrepresentable(policy: Any) -> bool:
-    """Whether a readable policy's CEL query holds a scope its targets cannot show (another unit or group, an
-    exception or any other condition): its setting for that unit is unknown, so the read is not complete."""
-    if not isinstance(policy, dict) or not isinstance(policy.get("policyQuery"), dict):
-        return False
-    return not policy_is_unrecognised(policy) and policy_query_classification(policy["policyQuery"]) in ("licences", "other")
-
-
-def _scope_policy_error(count: int, total: int) -> str:
-    return f"{count} of {total} policies hold a scope their targets cannot show; the settings they hold for those units are unknown."
 
 
 def _is_two_step_policy(policy: Any) -> bool:
@@ -843,11 +856,8 @@ def policy_replay_rows(collector: str, payload: Any) -> list[dict[str, Any]]:
             status, item_count, error = "failed", 0, f"google_policies.{name}: the offline sample holds no readable policies in this section."
         else:
             bad = sum(1 for policy in values if not policy_row_readable(policy))
-            unscoped = sum(1 for policy in values if policy_row_readable(policy) and policy_scope_unrepresentable(policy))
             if bad:
                 status, item_count, error = "partial", len(values), _malformed_policy_error(bad, len(values))
-            elif unscoped:
-                status, item_count, error = "partial", len(values), _scope_policy_error(unscoped, len(values))
             elif name == "twoStepVerificationPolicies" and two_step_subset_differs(payload):
                 status, item_count = "partial", len(values)
                 error = "google_policies.twoStepVerificationPolicies: the list is not the 2-step verification part of policySettings."
@@ -929,13 +939,8 @@ class GooglePoliciesCollector:
             if row.get("result_limit"):
                 markers["result_limit"] = row["result_limit"]
         bad = sum(1 for policy in policies if not policy_row_readable(policy))
-        unscoped = sum(1 for policy in policies if policy_row_readable(policy) and policy_scope_unrepresentable(policy))
         if bad and row.get("status") == "ok":
             row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_malformed_policy_error(bad, len(policies)), policy_row_validation=True)
-        elif unscoped and row.get("status") == "ok":
-            # A query naming another unit or holding a condition: that unit's setting is unknown, so the read is
-            # partial and the run says so, as the normaliser's read state does.
-            row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_scope_policy_error(unscoped, len(policies)), policy_row_validation=True)
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(
             self.name,

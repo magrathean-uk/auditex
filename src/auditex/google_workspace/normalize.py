@@ -15,8 +15,10 @@ from azure_tenant_audit.collection_gaps import (
     truncations_from_payloads,
 )
 from azure_tenant_audit.data_minimisation import (
+    UNREADABLE_MAILBOX,
     UNRECOGNISED_SYSTEM_ALERT_NAME,
     finite_policy_number,
+    gmail_mailbox_identifier,
     minimise_gmail_settings,
     minimise_policy_settings,
     policy_is_unrecognised,
@@ -24,6 +26,7 @@ from azure_tenant_audit.data_minimisation import (
 )
 from azure_tenant_audit.google_policy_schema import policy_enforced_at
 
+from .client import GMAIL_SERVICE_NOT_ENABLED, gmail_mail_service_not_enabled
 from .collectors import (
     POLICY_SECTION_PROBLEMS,
     POLICY_TARGET_PROBLEMS,
@@ -263,13 +266,22 @@ def _org_unit_tree(units: list[Any]) -> tuple[dict[str, str], set[str], int]:
 
 
 def _query_scope_supported(query: dict[str, Any]) -> bool:
-    """Whether a minimised policy's CEL query applies to exactly what its ``orgUnit`` and ``group`` fields say.
+    """Whether a minimised 2-step verification policy's CEL query applies to exactly what its ``orgUnit`` and
+    ``group`` fields say.
 
     No query (older evidence holds only the fields) or ``query_scope`` ``targets``; see
     :func:`azure_tenant_audit.data_minimisation.policy_query_scope`. Anything else is a scope the fields cannot show,
     so the policy is not unconditional evidence for that unit.
     """
     return query.get("query_scope") in (None, "targets")
+
+
+def _canonical_target(org_unit: str | None, group: str | None, roots: set[str]) -> str:
+    """The unit a policy's setting belongs to, as the projection places it: a group-only policy applies under the
+    top unit (SG:scubagoggles/policy_api.py:804-825), so it shares the top unit's group key."""
+    if group is not None and org_unit is None and len(roots) == 1:
+        return next(iter(roots))
+    return org_unit or ""
 
 
 def _policy_scope(record: dict[str, Any], *, root_ids: set[str], unit_ids: set[str]) -> str:
@@ -484,10 +496,12 @@ def _policy_values_by_identity(section: str, value: dict[str, Any]) -> list[tupl
 
 def _policy_order_conflicts(policies: list[tuple[int | float | None, dict[str, Any]]]) -> bool:
     """Different values for one identity need distinct, known orders."""
-    if any(order is None for order, _ in policies):
+    if any(order is None or not finite_policy_number(order) for order, _ in policies):
         return any(value != policies[0][1] for _, value in policies[1:])
-    ranked: dict[int | float | None, dict[str, Any]] = {}
-    return any(ranked.setdefault(order, value) != value for order, value in policies)
+    # D11 applies at the effective rank only: a tie below the winning rank is shadowed by the policy above it.
+    top = max(order for order, _ in policies)
+    winners = [value for order, value in policies if order == top]
+    return any(value != winners[0] for value in winners[1:])
 
 
 def _policy_settings_read(
@@ -495,6 +509,7 @@ def _policy_settings_read(
     result_rows: list[dict[str, Any]],
     coverage_rows: list[dict[str, Any]],
     known_units: set[str],
+    root_units: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], bool | None]:
     """``google_policy_settings`` records and whether the read can decide the 2-step verification status.
 
@@ -505,9 +520,16 @@ def _policy_settings_read(
 
     - a policy whose section cannot be told is malformed for the whole read;
     - one whose targets cannot be read makes its section unusable (``unusable_sections``, every record of it left out);
-    - one with any other problem, a scope its targets cannot represent (an exception or another unit in its query),
-      or conflicting values with no order between policies for the same identity, makes that unit's setting unusable
-      (``unusable_scopes``): those records are left out and every other unit's records are kept.
+    - one with any other problem, a unit the Directory tree does not hold, or conflicting values with no order between
+      policies for the same identity, makes that unit's setting unusable (``unusable_scopes``): those records are left
+      out and every other unit's records are kept.
+
+    The CEL query never decides where a setting applies (DEC-193). ScubaGoggles v1.1.0 never reads it: it ranks each
+    policy by ``sortOrder`` under its ``orgUnit`` (the top unit when there is none) and ``group``, and the winner
+    applies to the whole unit or group (SG:scubagoggles/policy_api.py:752-860, query unread at :784-825). A
+    licence-scoped policy is therefore its unit's setting, judged as if it applied to every user of the unit. Units
+    are keyed as the projection places them (:func:`_canonical_target`): a group-only policy shares the top unit's
+    group key, so shadowing and order conflicts compare it with a root-plus-group policy for the same group.
 
     Any of these makes the read incomplete: unknown is never safe. The second value is ``None`` without a
     ``policySettings`` key; otherwise whether the read is complete as far as the 2-step verification sections go.
@@ -522,7 +544,8 @@ def _policy_settings_read(
     malformed = unattributed = 0
     unusable: set[str] = set()
     scopes: set[tuple[str, str, str]] = set()
-    candidates: list[tuple[str, str | None, str | None, Any, dict[str, Any]]] = []
+    roots = set(root_units)
+    candidates: list[tuple[str, str | None, str | None, Any, dict[str, Any], tuple[str, str, str]]] = []
     for item in items:
         if policy_is_unrecognised(item):
             continue
@@ -543,21 +566,22 @@ def _policy_settings_read(
         org_unit, group = targets
         if problems:
             malformed += 1
-        if problems or not _query_scope_supported(item["policyQuery"]) or (org_unit is not None and org_unit not in known_units):
-            scopes.add((setting_section, org_unit or "", group or ""))
+        key = (setting_section, _canonical_target(org_unit, group, roots), group or "")
+        if problems or (org_unit is not None and org_unit not in known_units):
+            scopes.add(key)
             continue
-        candidates.append((setting_section, org_unit, group, item["policyQuery"].get("sortOrder"), item))
+        candidates.append((setting_section, org_unit, group, item["policyQuery"].get("sortOrder"), item, key))
     by_identity: dict[tuple[str, str, str, str], list[tuple[int | float | None, dict[str, Any]]]] = defaultdict(list)
-    for setting_section, org_unit, group, sort_order, item in candidates:
+    for setting_section, _, _, sort_order, item, key in candidates:
         for identity, value in _policy_values_by_identity(setting_section, item["setting"]["value"]):
-            by_identity[(setting_section, org_unit or "", group or "", identity)].append((sort_order, value))
+            by_identity[(*key, identity)].append((sort_order, value))
     for (setting_section, org_unit, group, _), policies in by_identity.items():
         if _policy_order_conflicts(policies):
             scopes.add((setting_section, org_unit, group))
     records: list[dict[str, Any]] = []
     seen: Counter[str] = Counter()
-    for setting_section, org_unit, group, sort_order, item in candidates:
-        if setting_section in unusable or (setting_section, org_unit or "", group or "") in scopes:
+    for setting_section, org_unit, group, sort_order, item, unit_key in candidates:
+        if setting_section in unusable or unit_key in scopes:
             continue
         key = f"{setting_section}|{org_unit or ''}|{group or ''}|{sort_order if sort_order is not None else ''}"
         seen[key] += 1
@@ -719,6 +743,59 @@ def _two_step_records(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
     return records
 
 
+def _mailbox_record(item: dict[str, Any]) -> dict[str, Any]:
+    """One ``google_mailbox_setting``; a user with no Gmail service keeps ``mail_service`` and no setting fields. A
+    row naming no readable mailbox keeps ``UNREADABLE_MAILBOX`` in place of its identifier and no setting field."""
+    if not gmail_mailbox_identifier(item.get("userEmail")):
+        return _record(
+            "google_mailbox_setting",
+            "google_gmail_settings.mailboxSettings",
+            UNREADABLE_MAILBOX,
+            user_email=UNREADABLE_MAILBOX,
+            mail_service="unreadable",
+        )
+    if gmail_mail_service_not_enabled(item):
+        return _record(
+            "google_mailbox_setting",
+            "google_gmail_settings.mailboxSettings",
+            str(item.get("userEmail")),
+            user_email=item.get("userEmail"),
+            mail_service=GMAIL_SERVICE_NOT_ENABLED,
+        )
+    if "mailService" in item:
+        # Any other marker shape is unreadable (its coverage row is a failed read), never a mailbox without Gmail,
+        # and none of the row's setting fields is read: they may not be this mailbox's settings.
+        return _record(
+            "google_mailbox_setting",
+            "google_gmail_settings.mailboxSettings",
+            str(item.get("userEmail")),
+            user_email=item.get("userEmail"),
+            mail_service="unreadable",
+        )
+    return _record(
+        "google_mailbox_setting",
+        "google_gmail_settings.mailboxSettings",
+        str(item.get("userEmail")),
+        user_email=item.get("userEmail"),
+        auto_forwarding=item.get("autoForwarding"),
+        auto_forwarding_error=item.get("autoForwarding_error") or {},
+        filters=item.get("filters") or [],
+        filters_error=item.get("filters_error") or {},
+        forwarding_addresses=item.get("forwardingAddresses") or [],
+        forwarding_addresses_error=item.get("forwardingAddresses_error") or {},
+        send_as=minimise_gmail_settings(item).get("sendAs") or [],
+        send_as_error=item.get("sendAs_error") or {},
+        delegates=item.get("delegates") or [],
+        delegates_error=item.get("delegates_error") or {},
+        imap=item.get("imap") or {},
+        imap_error=item.get("imap_error") or {},
+        pop=item.get("pop") or {},
+        pop_error=item.get("pop_error") or {},
+        vacation=minimise_gmail_settings(item).get("vacation") or {},
+        vacation_error=item.get("vacation_error") or {},
+    )
+
+
 def build_google_normalized_snapshot(
     *,
     tenant_name: str,
@@ -825,7 +902,7 @@ def build_google_normalized_snapshot(
         # organisation (root unit, no group), org_unit, group, or unclassified when it cannot be placed
         record["policy_scope"] = _policy_scope(record, root_ids=root_ids, unit_ids=unit_ids)
     policy_setting_records, two_step_widened = _policy_settings_read(
-        collector_payloads.get("google_policies"), result_rows, coverage_rows, root_ids | unit_ids,
+        collector_payloads.get("google_policies"), result_rows, coverage_rows, root_ids | unit_ids, root_ids,
     )
     org_unit_records = _org_unit_records(collector_payloads.get("google_directory"), result_rows, coverage_rows)
     groups = [
@@ -927,28 +1004,7 @@ def build_google_normalized_snapshot(
         if item.get("userKey")
     ]
     mailbox_settings = [
-        _record(
-            "google_mailbox_setting",
-            "google_gmail_settings.mailboxSettings",
-            str(item.get("userEmail")),
-            user_email=item.get("userEmail"),
-            auto_forwarding=item.get("autoForwarding"),
-            auto_forwarding_error=item.get("autoForwarding_error") or {},
-            filters=item.get("filters") or [],
-            filters_error=item.get("filters_error") or {},
-            forwarding_addresses=item.get("forwardingAddresses") or [],
-            forwarding_addresses_error=item.get("forwardingAddresses_error") or {},
-            send_as=minimise_gmail_settings(item).get("sendAs") or [],
-            send_as_error=item.get("sendAs_error") or {},
-            delegates=item.get("delegates") or [],
-            delegates_error=item.get("delegates_error") or {},
-            imap=item.get("imap") or {},
-            imap_error=item.get("imap_error") or {},
-            pop=item.get("pop") or {},
-            pop_error=item.get("pop_error") or {},
-            vacation=minimise_gmail_settings(item).get("vacation") or {},
-            vacation_error=item.get("vacation_error") or {},
-        )
+        _mailbox_record(item)
         for item in _values(collector_payloads.get("google_gmail_settings", {}), "mailboxSettings")
         if item.get("userEmail")
     ]

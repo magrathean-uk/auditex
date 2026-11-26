@@ -51,11 +51,15 @@ from .auth import (
     safe_auth_summary,
 )
 from .client import (
+    GMAIL_NOT_APPLICABLE_REASON,
     GoogleWorkspaceClient,
     classify_google_error,
     classify_page_error,
+    gmail_mail_service_not_enabled,
+    gmail_mailbox_identifier,
     gmail_settings_status,
     is_token_refusal,
+    minimise_gmail_settings,
 )
 from .collectors import (
     COLLECTOR_SECTIONS,
@@ -448,18 +452,30 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
 
 
 def _gmail_preflight_status(row: dict[str, Any], check: Any) -> dict[str, Any]:
-    """A probe read that returned settings whose every read failed is not ready; some failing is partial."""
+    """A probe read that returned settings whose every read failed is not ready; some failing is partial.
+
+    A probed mailbox whose user has no Gmail service (:func:`gmail_mail_service_not_enabled`) read no settings: the
+    row keeps status ``ok`` with ``item_count`` 0 and ``not_applicable``, and it proves no scope
+    (``authenticated_read`` false), so the capability matrix never reports an exact-scope proof from it.
+    """
     if row.get("status") != "ok":
         return {}
-    for payload in getattr(check, "payloads", None) or []:
-        if not isinstance(payload, dict):
-            continue
+    payloads = [payload for payload in getattr(check, "payloads", None) or [] if isinstance(payload, dict)]
+    if not payloads:
+        # No mailbox was sampled (an empty Directory sample): nothing was read, so no scope is proven.
+        return {"item_count": 0, "authenticated_read": False}
+    for payload in payloads:
         status, error_class, error = gmail_settings_status(payload)
         if status != "ok":
             update = {"status": status, "error_class": error_class, "error": error}
             if status == "failed":
                 update["item_count"] = 0
             return update
+    read = [payload for payload in payloads if not gmail_mail_service_not_enabled(payload)]
+    if payloads and not read:
+        return {"item_count": 0, "not_applicable": GMAIL_NOT_APPLICABLE_REASON, "authenticated_read": False}
+    if payloads and len(read) < len(payloads):
+        return {"item_count": len(read)}
     return {}
 
 
@@ -665,6 +681,16 @@ def _write_google_bundle(
     return 1 if overall_status == "partial" else 0
 
 
+def _replay_gmail_payload(collector: str, payload: Any) -> Any:
+    """A sample's Gmail mailbox rows as the live collector keeps them (:func:`minimise_gmail_settings`): a
+    ``userEmail`` naming no readable mailbox is replaced before any raw, coverage or normalised copy is written."""
+    section = payload.get("mailboxSettings") if collector == "google_gmail_settings" and isinstance(payload, dict) else None
+    if not isinstance(section, dict) or not isinstance(section.get("value"), list):
+        return payload
+    rows = [minimise_gmail_settings(row) if isinstance(row, dict) else row for row in section["value"]]
+    return {**payload, "mailboxSettings": {**section, "value": rows}}
+
+
 def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Mailboxes in a sample whose Gmail settings reads failed replay as the failed or partial reads they were."""
     if collector != "google_gmail_settings":
@@ -674,7 +700,7 @@ def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict
     rows: list[dict[str, Any]] = []
     for mailbox in mailboxes if isinstance(mailboxes, list) else []:
         if not isinstance(mailbox, dict):
-            continue
+            mailbox = {}
         status, error_class, error = gmail_settings_status(mailbox)
         if status == "ok":
             continue
@@ -682,7 +708,7 @@ def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict
             {
                 "collector": collector,
                 "type": "google",
-                "name": f"mailboxSettings:{mailbox.get('userEmail') or 'unknown'}",
+                "name": f"mailboxSettings:{mailbox['userEmail'] if gmail_mailbox_identifier(mailbox.get('userEmail')) else 'unknown'}",
                 "endpoint": "gmail.users.settings",
                 "status": status,
                 "item_count": 0 if status == "failed" else 1,
@@ -792,7 +818,7 @@ def run_google_offline(
     for key, value in sample.items():
         safe_key = ids.text(key, "customer-id-withheld")
         if key not in _OFFLINE_SAMPLE_METADATA_KEYS:
-            value = replay_scuba_payload(key, replay_policy_payload(key, value))
+            value = _replay_gmail_payload(key, replay_scuba_payload(key, replay_policy_payload(key, value)))
         safe_sample[safe_key], changed = ids.evidence(value)
         if changed or safe_key != key:
             withheld_collectors.add(safe_key)

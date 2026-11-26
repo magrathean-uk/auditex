@@ -14,6 +14,7 @@ from azure_tenant_audit.collection_gaps import (
 from azure_tenant_audit.data_minimisation import (
     POLICY_TYPE_PATTERN,
     POLICY_UNIT_ID,
+    gmail_mailbox_identifier,
     minimise_gmail_settings,
 )
 
@@ -162,11 +163,72 @@ GMAIL_SETTING_NAMES: tuple[str, ...] = (
 )
 
 
+# A user with no Gmail service (no Gmail licence, or Gmail off for the user) answers every settings read with HTTP 400
+# ``failedPrecondition`` "Mail service not enabled". That mailbox does not exist: it is recorded as not applicable.
+GMAIL_SERVICE_NOT_ENABLED = "not_enabled"
+GMAIL_NOT_APPLICABLE_REASON = "mail_service_not_enabled"
+_GMAIL_NOT_ENABLED_TEXT = "Mail service not enabled"
+
+
+def gmail_mail_service_not_enabled(payload: Any) -> bool:
+    """Whether a mailbox row is exactly the not-applicable marker: a mailbox identifier
+    (:func:`gmail_mailbox_identifier`) in ``userEmail`` and ``mailService: not_enabled``, nothing else."""
+    return (isinstance(payload, dict) and set(payload) == {"userEmail", "mailService"}
+            and payload["mailService"] == GMAIL_SERVICE_NOT_ENABLED and gmail_mailbox_identifier(payload["userEmail"]))
+
+
+def _gmail_not_enabled_error(exc: Exception) -> bool:
+    """HTTP 400 whose top-level message and every structured error are Google's "Mail service not enabled", each
+    structured error with the reason ``failedPrecondition`` beside that message. Anything else (another message, a
+    reason paired with another message, no structured error) is an ordinary failure, left visible."""
+    status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
+    if status != 400:
+        return False
+    entries: list[Any] = []
+    messages: list[Any] = []
+    details = getattr(exc, "error_details", None)
+    if isinstance(details, list):
+        entries.extend(details)
+    elif details is not None and details != "":
+        return False
+    reason = getattr(exc, "reason", None)
+    if reason is not None:
+        messages.append(reason)
+    content = getattr(exc, "content", None)
+    if isinstance(content, (bytes, str)) and content:
+        try:
+            body = json.loads(content)
+        except (ValueError, TypeError):
+            return False
+        error = body.get("error") if isinstance(body, dict) else None
+        if not isinstance(error, dict):
+            return False
+        messages.append(error.get("message"))
+        for key in ("errors", "details"):
+            if key in error:
+                if not isinstance(error[key], list):
+                    return False
+                entries.extend(error[key])
+    return (bool(entries) and bool(messages)
+            and all(isinstance(text, str) and text.strip() == _GMAIL_NOT_ENABLED_TEXT for text in messages)
+            and all(isinstance(entry, dict) and entry.get("reason") == "failedPrecondition"
+                    and isinstance(entry.get("message"), str) and entry["message"].strip() == _GMAIL_NOT_ENABLED_TEXT
+                    for entry in entries))
+
+
 def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str | None]:
     """Status, dominant error class and error of one mailbox's settings read.
 
-    Every settings read failing is ``failed``; some failing is ``partial``; none failing is ``ok``.
+    Every settings read failing is ``failed``; some failing is ``partial``; none failing is ``ok``. A mailbox whose
+    user has no Gmail service (:func:`gmail_mail_service_not_enabled`) is ``ok``: there is nothing to read. A
+    ``mailService`` key in any other shape is an unreadable row, never a mailbox without Gmail.
     """
+    if gmail_mail_service_not_enabled(payload):
+        return "ok", None, None
+    if "mailService" in payload:
+        return "failed", "malformed_response", "The Gmail settings row carries an unreadable mail service marker."
+    if not gmail_mailbox_identifier(payload.get("userEmail")):
+        return "failed", "malformed_response", "The Gmail settings row names no readable mailbox."
     skipped = set(payload.get("skippedSettings") or ())
     attempted = [name for name in GMAIL_SETTING_NAMES if name not in skipped]
     failures = {
@@ -174,6 +236,9 @@ def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str
         for name in attempted
         if isinstance(error := payload.get(f"{name}_error"), dict) and error
     }
+    if not any(name in payload or f"{name}_error" in payload for name in attempted):
+        # A row that supplies no setting and no failed read proves nothing: it is never a complete read.
+        return "failed", "malformed_response", "The Gmail settings row carries no settings."
     if not failures:
         if skipped:
             # A setting these credentials cannot read (delegates under OAuth) is a gap, never a complete read.
@@ -771,7 +836,14 @@ class GoogleWorkspaceClient:
                 error_class, error = classify_google_error(exc)
                 payload[f"{name}_error"] = {"error_class": error_class, "error": error}
 
-        _capture("autoForwarding", lambda: settings.getAutoForwarding(userId=user_email).execute(), default={})
+        try:
+            payload["autoForwarding"] = _execute(lambda: settings.getAutoForwarding(userId=user_email).execute())
+        except Exception as exc:  # noqa: BLE001
+            if _gmail_not_enabled_error(exc):
+                # No Gmail service for this user: no mailbox to read, so no further settings call is made.
+                return {"userEmail": user_email, "mailService": GMAIL_SERVICE_NOT_ENABLED}
+            error_class, error = classify_google_error(exc)
+            payload["autoForwarding_error"] = {"error_class": error_class, "error": error}
         _capture("filters", lambda: settings.filters().list(userId=user_email, fields=GMAIL_FILTERS_FIELDS).execute(), list_key="filter", default=[])
         _capture(
             "forwardingAddresses",

@@ -137,9 +137,29 @@ def minimise_device_configurations(value: Any) -> Any:
     return result
 
 
+# The mailbox a Gmail settings row names: the signed-in mailbox (``me``, OAuth) or one Google account address
+# (domain-wide delegation). A Google username holds letters, digits, ``.``, ``_``, ``-``, ``+`` and ``'``; a domain is
+# dot-separated DNS labels (letters, digits, inner hyphens) under an alphabetic top-level label. A local part made only
+# of dots names nothing.
+_GMAIL_MAILBOX_ADDRESS = re.compile(
+    r"(?!\.+@)[A-Za-z0-9._'+-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}"
+)
+# What a Gmail settings row keeps in place of a ``userEmail`` that names no readable mailbox: never the value itself.
+UNREADABLE_MAILBOX = "redacted:mailbox"
+
+
+def gmail_mailbox_identifier(value: Any) -> bool:
+    """Whether a Gmail settings row's ``userEmail`` names one mailbox: ``me`` or a single Google account address."""
+    return isinstance(value, str) and len(value) <= 254 and (value == "me" or bool(_GMAIL_MAILBOX_ADDRESS.fullmatch(value)))
+
+
 def minimise_gmail_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    """Gmail settings for one user without vacation-responder or signature text."""
+    """Gmail settings for one user without vacation-responder or signature text. A ``userEmail`` that names no
+    readable mailbox (:func:`gmail_mailbox_identifier`) becomes ``UNREADABLE_MAILBOX``, so it never reaches raw or
+    normalised output."""
     result = dict(payload)
+    if "userEmail" in result and not gmail_mailbox_identifier(result["userEmail"]):
+        result["userEmail"] = UNREADABLE_MAILBOX
     vacation = result.get("vacation")
     if isinstance(vacation, dict):
         result["vacation"] = strip_text_fields(vacation, VACATION_TEXT_FIELDS, keep_presence=False)
@@ -402,12 +422,13 @@ def policy_target(value: Any, prefix: str) -> str | None | Literal[False]:
 
 
 # The CEL terms a policy query may hold and still be represented by its ``orgUnit`` and ``group`` fields alone. The
-# captured id must be a sound id and must name the same unit or group as the field.
+# captured id must be a sound id and must name the same unit or group as the field. Google writes the id bare or,
+# for some settings (``provisioning.*``), with its resource prefix (``orgUnitId('orgUnits/<id>')``).
 _QUERY_ORG_UNIT_TERM = re.compile(
-    r"entity\.org_units\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.org_unit_id\s*==\s*orgUnitId\(\s*'([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
+    r"entity\.org_units\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.org_unit_id\s*==\s*orgUnitId\(\s*'(?:orgUnits/)?([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
 )
 _QUERY_GROUP_TERM = re.compile(
-    r"entity\.groups\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.group_id\s*==\s*groupId\(\s*'([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
+    r"entity\.groups\.exists\(\s*([A-Za-z_]\w*)\s*,\s*\1\.group_id\s*==\s*groupId\(\s*'(?:groups/)?([A-Za-z0-9][A-Za-z0-9_-]{0,127})'\s*\)\s*\)"
 )
 _LICENCE_SKU = r"(?:/product/[A-Za-z0-9-]+/sku/[A-Za-z0-9-]+|CHROMEBOOK-SOFTWARE|GOOGLE-IDENTITY)"
 _LICENCE_TERM = re.compile(
@@ -421,10 +442,12 @@ def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
 
     ``targets``: a conjunction (``&&``) of at most one org-unit membership term naming the ``orgUnit`` field's unit
     and at most one group membership term naming the ``group`` field's group, with the group term present exactly
-    when the field is. ``licences``: matching targets with Google's include/exclude SKU clauses. The evidence is
-    conditional. ``other``: any scope beyond these forms or inconsistent with the helpers.
-    ``unreadable``: not a string of bounded length.
-    Only this word is kept; the query text never leaves the minimiser.
+    when the field is. ``licences``: matching targets with Google's include/exclude SKU clauses. ``other``: any scope
+    beyond these forms or inconsistent with the helpers. ``unreadable``: not a string of bounded length.
+    Only this word is kept; the query text never leaves the minimiser. The word describes the evidence and never
+    decides a SCuBA value: Policy API settings are ranked by target and ``sortOrder`` alone, as ScubaGoggles v1.1.0
+    ranks them without reading the query (SG:scubagoggles/policy_api.py:752-860), so a licence-scoped setting stands
+    for its whole unit (DEC-193). The 2-step verification status reads only ``targets`` policies as unconditional.
     """
     if not isinstance(query, str) or len(query) > POLICY_QUERY_MAX:
         return "unreadable"
