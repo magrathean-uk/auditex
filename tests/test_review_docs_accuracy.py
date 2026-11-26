@@ -421,7 +421,8 @@ def test_security_reference_carries_the_earlier_lanes_privacy_facts():
     collected = privacy[privacy.index("## Data collected") : privacy.index("## What is enforced where")]
     assert "field mask" in collected and "recovery e-mail" in collected
     redaction = privacy[privacy.index("## Output redaction boundary") : privacy.index("### Person names")]
-    for needle in ("PEM private-key blocks", "passphrase", "Google customer ids"):
+    for needle in ("PEM private-key blocks", "passphrase",
+                   "withholds the configured Google Workspace customer ID from run folders, console output, logs and exports"):
         assert needle in redaction, needle
     credentials = privacy[privacy.index("## Credentials and local files") : privacy.index("## Suspected exposure")]
     assert "OAuth token cache" in credentials and "0600" in credentials and "0700" in credentials

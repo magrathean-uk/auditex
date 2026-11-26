@@ -93,7 +93,7 @@ class _Bad(Exception):
 
 
 def _strings(value: Any) -> list[str]:
-    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
         raise _Bad
     return value
 

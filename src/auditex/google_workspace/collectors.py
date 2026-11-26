@@ -66,7 +66,7 @@ from .client import (
     minimise_gmail_settings,
     policy_malformed_error,
 )
-from .customer_id import WITHHELD
+from .customer_id import WITHHELD, CustomerIds, withheld_coverage_row
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
@@ -1174,14 +1174,22 @@ def _scuba_read(
     coverage: list[dict[str, Any]] = []
     records: list[dict[str, Any]] = []
     section_name = SCUBA_READ_SECTIONS[collector]
+    ids = CustomerIds(getattr(context.get("client"), "customer_id", None))
     for name, read in requests:
         rows = _call(collector=collector, name=name, coverage=coverage, log_event=context.get("audit_logger"),
                      func=read, endpoint=endpoint)
+        ids.learn(rows)
         kept, readable = scuba_read_rows(rows, collector, event_name=name if collector == "google_setting_events" else None)
         records.extend(kept)
         if not readable and coverage[-1]["status"] == "ok":
             coverage[-1].update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS,
                                 error="Some SCuBA evidence returned by Google could not be read.")
+    # An ID learnt in a later stream can also appear in an earlier target. Revalidate after masking
+    # so a withheld target cannot be used as an event placement or a readable SSO assignment.
+    safe_records, withheld = ids.evidence(records)
+    if withheld:
+        records, _ = scuba_read_rows(safe_records, collector)
+        coverage.append(withheld_coverage_row(collector))
     section: dict[str, Any] = {"value": records}
     cut = next((row for row in coverage if row.get("collection_truncated") is True), None)
     if cut is not None:
