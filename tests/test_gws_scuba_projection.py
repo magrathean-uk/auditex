@@ -1717,3 +1717,27 @@ def test_read_state_cannot_attest_to_an_interrupted_read(bundle: Path, base: str
     assert verdict(project_gws_run(bundle), policy)[0] == expected
     edit_rows(bundle, source, lambda data: data[-1].update(**marker))
     assert verdict(project_gws_run(bundle), policy)[0] == "not_assessed"
+
+
+def test_directory_parent_fields_must_agree_with_its_path_hierarchy(bundle: Path) -> None:
+    third_ou(bundle)
+    def move_other_users_to_root(users: list[dict], field: str) -> None:
+        for user in users[:-1]:
+            user[field] = "/"
+
+    raw_directory(bundle, lambda raw: move_other_users_to_root(raw["users"]["value"], "orgUnitPath"))
+    edit_rows(bundle, "google_users", lambda data: move_other_users_to_root(data, "org_unit_path"))
+    sso(bundle, {"target_org_unit": "orgUnits/ou0a1", "sso_mode": "SAML_SSO"})
+    policy = "GWS.COMMONCONTROLS.6.1v1"
+    assert verdict(project_gws_run(bundle), policy)[0] == "met"
+
+    placed(bundle, "/Sales/Ops")
+    raw_directory(bundle, lambda raw: raw["orgUnits"]["value"][2].update(orgUnitPath="/Sales/Ops"))
+    projection = project_gws_run(bundle)
+    assert projection["gws_tenant"]["complete"] is False
+    assert verdict(projection, policy)[0] == "not_assessed"
+
+    raw_directory(bundle, lambda raw: raw["orgUnits"]["value"][2].update(
+        parentOrgUnitId="id:ou0a1", parentOrgUnitPath="/Sales"))
+    edit_rows(bundle, "google_org_units", lambda data: data[1].update(parent_id="ou0a1"))
+    assert verdict(project_gws_run(bundle), policy)[0] == "not_met"

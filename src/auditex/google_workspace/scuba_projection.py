@@ -478,7 +478,7 @@ class _Context:
                 topology[key] = None
             else:
                 parent, parent_path = _unit_id(row.get("parentOrgUnitId")), row.get("parentOrgUnitPath")
-                if parent is None or not _ou_path(parent_path):
+                if parent is None or parent_path != (path.rsplit("/", 1)[0] or "/"):
                     return {}, {}
                 topology[key] = "ou:" + parent
                 parent_paths[path] = parent_path
