@@ -143,7 +143,7 @@ asks the Admin Reports API for each pinned admin event name separately and reque
 event names and their parameters, so the actor and the IP address are never returned. The collector keeps only the
 `SETTING_NAME`, `NEW_VALUE`, `ORG_UNIT_NAME`, `GROUP_EMAIL` and `APPLICATION_NAME` parameters; `OLD_VALUE` and every
 other parameter are dropped before `raw/`. A value outside the pinned values of an audited setting is kept as
-`unrecognised`, and an application name outside a fixed list is not kept. Each event stream stops at 20,000
+`unrecognised`, and an application name outside a fixed list is recorded as `unrecognised`. Each event stream stops at 20,000
 activities, and a cut read is incomplete. The inbound SSO read requests only `targetOrgUnit`, `targetGroup` and
 `ssoMode`, so profile names, certificates and resource names are never returned. Without the inbound SSO grant only
 COMMONCONTROLS.6.1 loses its evidence and answers `not_assessed`.

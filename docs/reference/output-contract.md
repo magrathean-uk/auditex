@@ -1837,20 +1837,29 @@ directives and modifiers with synthetic arguments, DKIM version markers, DMARC t
 `gws_tenant.as_of` is the run's recorded evaluation instant (an older live run falls back to its collection end; an
 older offline run has none, and its 2-step verification policies answer `not_assessed`). A source that was not
 collected, cannot be read or has the wrong envelope makes the section the `not_collected` marker; a cut, duplicated
-or misjoined input makes its `complete` false. Only each section's `status`, `source` and `reason` and the
+or misjoined input makes its `complete` false. The Microsoft 365 projection budgets apply here too: `auditex assess`
+takes `--projection-max-items` (default 40) and `--projection-max-chars` (default 12,000) per section, and
+`auditex explain` uses the same defaults. A section over either is withheld as `not_collected` with reason `oversize`, and the
+policies that read it answer `required_evidence_section_not_collected`. Only each section's `status`, `source` and `reason` and the
 redaction's `enabled`, `strategy` and `email_addresses` are written to `model_assessment.json`; the section content
 stays in memory and never reaches a report, export, customer pack, local answer or MCP output.
 
-**Decision order.** For every kind the first rule that applies decides: a required section missing or marked
+**Decision order.** The usual order is: a required section missing or marked
 (`required_evidence_section_not_collected`); a section of the wrong shape (`data_unusable_section_shape`) or not
 complete (`data_unavailable_<read>_read_incomplete`); the service read as off in every unit and on in none
-(`not_applicable`, `service_off_everywhere`) or an absent top-level service status with no unit explicitly on
+(`not_applicable`, `service_off_everywhere`) or no unit read as on while some state is unknown
 (`data_unavailable_service_status_absent`); a unit or domain that positively violates (`not_met`, `unit_violates` or
-`domain_violates`), which wins over unusable values elsewhere; an unusable value (`data_unusable_*`); an absent
-top-level value with no pinned default (`data_unavailable_setting_absent`); otherwise `met`. Unknown is never safe: a
-malformed value, a wrong type, an unknown enum, a cut, partial or failed read, a missing section, an absent top-level
-value with no default, an absent service status, a resolver error, an empty domain list or an absent event never
-answers `met`, and `not_met` needs a positively read violation.
+`domain_violates`), which wins over unusable values elsewhere; a unit whose service state is unknown, an unusable value
+(`data_unusable_*`) or an absent top-level value with no pinned default (`data_unavailable_setting_absent`); otherwise
+`met`. The kinds refine it: `gws_dns` answers a positively read `domain_violates` before a malformed section or a cut
+read; `setting_event` answers `data_unusable_section_shape` when the organisational unit tree is incomplete or broken,
+and counts a top-unit violation only when every setting the policy reads has a readable, current top-level event (a
+child-unit or group violation counts on its own); CC.10.1 answers `data_unusable_setting_value` before `unit_violates`
+when an API control entry cannot be read. Unknown is never safe: a malformed value, a wrong type, an unknown enum, a
+cut, partial or failed read, a missing section, an absent top-level value with no default, an absent service status, a
+resolver error, an empty domain list or an absent event never answers `met`. `not_met` needs a positively read
+violation or a pinned default the baseline fails (DRIVEDOCS.1.8, and the CC.13.1 system alert rules whose ScubaGoggles
+default is inactive).
 
 The reason codes are `required_evidence_section_not_collected`, `data_unavailable_manual_check`,
 `data_unavailable_policy_read_incomplete`, `data_unavailable_event_read_incomplete`,
@@ -1865,13 +1874,13 @@ The reason codes are `required_evidence_section_not_collected`, `data_unavailabl
 `count_in_range` and `admins_use_google_sign_in` (`met`), plus the shared `rule_evaluation_failed` and
 `rule_not_implemented`.
 
-**Divergences from ScubaGoggles.** Each is pinned by a rule vector.
+**Divergences from ScubaGoggles.** Each is how the shipped rules behave; the rule vectors tag most of them with their id.
 
 | id | ScubaGoggles v1.1.0 | Auditex | why |
 | --- | --- | --- | --- |
 | D1 | No setting event with a safe default shows "No events found" and passes (GMAIL.13.1, CC.3.2, MEET.6.x, GEMINI.x) | `not_assessed`, `data_unavailable_no_setting_event` | unknown is not safe; admin logs older than about six months are gone |
 | D2 | A setting outside its expected table passes silently when absent (CC.10.x, CC.16.2, GMAIL.12.1, the GEMINI.1.1 gate) | `not_assessed`, `data_unavailable_setting_absent` on a complete read | unknown is not safe |
-| D3 | A missing top-level service status counts as off, so the policy passes | `not_assessed`, `data_unavailable_service_status_absent`, unless a unit is explicitly on | the API may simply not have returned it |
+| D3 | A missing top-level service status counts as off, so the policy passes | `not_assessed`, `data_unavailable_service_status_absent`, unless a unit read as on positively violates | the API may simply not have returned it |
 | D4 | GMAIL.7.5 reads the 7.3 field | reads `detectGroupsSpoofing`, as the baseline text says | ScubaGoggles defect |
 | D5 | CC.1.4 passes a grace period from 1 second to under 1 day | `not_met` below 86,400 seconds ("at least one day") | ScubaGoggles defect |
 | D6 | CC.10.1 with no `api_controls_google_services` section fails every service | `not_assessed`, `data_unavailable_setting_absent` when the section is absent everywhere; `not_met` only when it is present and a service has no restriction | absence of the whole section cannot be told from an API gap |
@@ -1879,18 +1888,18 @@ The reason codes are `required_evidence_section_not_collected`, `data_unavailabl
 | D8 | CC.1.x compares with the wall clock | compares with the run's `as_of` | the same bundle always gives the same answer |
 | D9 | CC.6.2 excludes configured break-glass accounts | counts every super admin | no exclusion input exists yet |
 | D10 | An error when a prerequisite call failed | `required_evidence_section_not_collected` or `data_unavailable_*_read_incomplete` | same meaning, Auditex vocabulary |
-| D11 | Two units with the same sort order: the first one wins | the tie makes that unit and section unusable, so the policy is `not_assessed` | an ambiguous order is unknown |
+| D11 | Two units with the same sort order: the first one wins | the tie makes that unit and section unusable, so the policy is `not_assessed` unless another unit positively violates | an ambiguous order is unknown |
 | D12 | An unrecognised service state is treated as off | the service gate is `not_assessed` | unknown is not safe |
-| D13 | CC.6.2 with zero super admins or an empty privileged list passes or errors | `not_assessed`, `data_unusable_super_admin_count` | an empty admin read is unknown |
+| D13 | CC.6.2 with zero super admins, or CC.6.1 with an empty privileged list, passes or errors | `not_assessed`: `data_unusable_super_admin_count` for CC.6.2; `data_unavailable_user_read_incomplete` for CC.6.1 when the privileged users read fewer than the super admins counted | an empty admin read is unknown |
 | D14 | An unknown 2SV or SSO enum value falls through as compliant | `not_assessed` with the unusable-value reason | unknown is not safe |
-| D15 | A top-level `DELETE_APPLICATION_SETTING` counts as an event and passes | `not_assessed`, `data_unavailable_no_setting_event` | a deleted setting is not a confirmed value |
+| D15 | A top-level `DELETE_APPLICATION_SETTING` counts as an event and passes | `not_assessed`, `data_unavailable_no_setting_event`; for CHAT.5.1 and CHAT.5.2, whose rows mark a top-level delete as a violation, `not_met` | a deleted setting is not a confirmed value |
 | D16 | An event value outside the good value fails | a value outside the pinned good and bad values is `data_unusable_event_value` | unknown is not safe either way |
 | D17 | CHAT.5.1 ignores a child unit without all four event types | each setting is judged per unit | a partial child is still evidence |
 | D18 | The GEMINI.1.1 group event uses the event's unit | a group event has no unit: a bad value is a violation only with the Gemini app on in every unit, else unusable | there is no unit to place it on |
 | D19 | No top-level event is reported before a child violation | a child-unit violation answers `not_met` even with no top-level event | a positively read violation is definite |
 | D20 | DRIVEDOCS.3.1, CHAT.4.1 and CC.11.1 read each unit's own values only | effective values (own, else inherited) are combined per unit | a positively read violating combination is definite |
 | D21 | Top unit with the service off: sub-units without their own values are not judged | the top unit's values are judged for a sub-unit that turns the service on and inherits them | Google applies the inherited value there |
-| D22 | TXT records at `_dmarc` that are not DMARC are ignored | a mixed TXT set at `_dmarc` is read strictly | stricter, towards `not_assessed` or `not_met` |
+| D22 | TXT records at `_dmarc` that are not DMARC are ignored | they are ignored too, and exactly one valid DMARC record must remain: none or several give the domain no DMARC record | a set that is not one policy is not read as one |
 | D23 | GMAIL.14.1 gates on the top unit's Gmail status | the rule applies when Gmail is on in any unit | an enabled unit is in scope |
 
 The DRIVEDOCS.1.8 default is copied, not diverged: ScubaGoggles' pinned default is Google's documented default, and a

@@ -187,7 +187,7 @@ Each policy is `met`, `not_met`, `not_applicable` (the service is off in every o
 `not_assessed`. `not_assessed` always carries a reason and is never a pass: a read was missing, cut or unreadable, a
 setting was absent with no documented default, no admin log event records the setting (logs older than about six
 months are gone, so a long-stable setting often reads this way; check it in the Admin console), or the value was one
-Auditex does not recognise. A policy is `not_met` only when a violating value was positively read. The answers go into
+Auditex does not recognise. A policy is `not_met` only when a violating value was positively read, or when Google's documented default fails the baseline and nothing overrides it. The answers go into
 the run's `model_assessment.json`; `auditex report render` shows them under "CISA SCuBA Google Workspace (ScubaGoggles
 v1.1.0)", and `auditex explain` answers them in plain sentences.
 

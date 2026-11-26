@@ -16,9 +16,9 @@ load and validate.
   SCuBA Google Workspace baselines (ScubaGoggles v1.1.0, 11 baselines) with deterministic value rules, as it does
   for the 102 Microsoft 365 policies. Each policy is met, not met, not applicable or not assessed with a fixed reason;
   unknown is never safe, so a missing, cut or unreadable read, an absent setting with no documented default, an absent
-  log event or an unrecognised value reads not assessed, and not met needs a positively read violation. 17 policies
-  have no read-only API and always ask for a check by hand. The differences from ScubaGoggles (23, each pinned by a
-  test vector) are listed in the output contract.
+  log event or an unrecognised value reads not assessed, and not met needs a positively read violation or a documented default that fails the baseline. 17 policies
+  have no read-only API and always ask for a check by hand. The 23 differences from ScubaGoggles are listed in the
+  output contract.
 - **New reads.** The Cloud Identity policies read is widened from the 2-step verification policies to every setting
   type the baselines read (DLP rules are never requested), admin setting-change events are read from the Admin
   Reports API, inbound SSO assignments from Cloud Identity, and Google DNS posture adds alias domains, the DMARC
