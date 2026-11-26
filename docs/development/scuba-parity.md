@@ -102,7 +102,8 @@ Auditex reason codes, and cites its source row. `error`, `deleted`, overlay and 
 row: a failed prerequisite is not a documented rule difference.
 
 - `gws-design 8.3 Dn` and `gws-design 8.3a Dn`: the M13 design's divergences from ScubaGoggles v1.1.0, rows D1 to
-  D10 and the 25 Nov 2026 addendum rows D11 to D22, with a one-line summary of each under `rows`. Policy scope
+  D10, the 25 Nov 2026 addendum rows D11 to D22 and the 26 Nov 2026 LIVE-FIX-1 licence-rule row D23 (each licence
+  population judged on its own), with a one-line summary of each under `rows`. Policy scope
   comes from the design's per-policy table (rule kind and not_assessed reasons). D10 (Error against
   `section_not_collected`) has no entries: both sides are undecided, so it is `neither_decided` by construction.
 - `m365-spec Dn`: the value-rules spec v3.9.1 divergences from the pinned ScubaGear Rego. These are derived from

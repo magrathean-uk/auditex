@@ -1814,8 +1814,8 @@ def test_m13_followup_n4_all_nine_takeout_types_are_requested_and_projected() ->
 
 
 def test_structural_b4_licence_qualifier_does_not_suppress_readable_2sv() -> None:
-    # LIVE-FIX-1 repair: a licence clause narrows the policy to the unit's licence holders. The users outside it take
-    # Google's default, which ScubaGoggles pins for no Gmail confidential-mode field: that setting is withheld.
+    # LIVE-FIX-1 licence rule (1): a licence clause narrows the policy to the unit's licence holders. ScubaGoggles pins
+    # no default for Gmail confidential mode and the users outside the licence cannot use Gmail, so the policy stands.
     gmail = _policy_setting(
         "gmail.confidential_mode", {"enableConfidentialMode": True},
         query="entity.org_units.exists(o, o.org_unit_id == orgUnitId('root')) && "
@@ -1828,8 +1828,7 @@ def test_structural_b4_licence_qualifier_does_not_suppress_readable_2sv() -> Non
     assert normalized["snapshot"]["two_step_policy_status"] == "partial"
     assert any(f["rule_id"] == "google.org_2sv_policy_not_enforced" for f in build_google_findings(normalized))
     state = _read_state(normalized)
-    assert state["complete"] is False
-    assert state["unusable_scopes"] == [{"section": "gmail_confidential_mode", "org_unit": "root", "group": None}]
+    assert (state["complete"], state["unusable_scopes"]) == (True, [])
 
 
 def test_structural_b5_nanosecond_after_as_of_is_scheduled(tmp_path: Path) -> None:
@@ -1898,7 +1897,7 @@ def test_licence_inclusion_and_exclusion_stand_as_the_unit_setting_on_replay(tmp
     state = json.loads((run_dir / "normalized" / "google_policy_settings.json").read_text(encoding="utf-8"))
     rows = state if isinstance(state, list) else state["records"]
     (read_state,) = [row for row in rows if row.get("id") == "read_state"]
-    assert read_state["unusable_scopes"] == [{"section": "gmail_confidential_mode", "org_unit": "root", "group": None}]
+    assert (read_state["complete"], read_state["unusable_scopes"]) == (True, [])
     for sku in ("1010020020", "GOOGLE-IDENTITY", "1010060005"):
         assert sku not in _bundle_text(run_dir)
 
@@ -2085,25 +2084,34 @@ def test_live_fix_1_system_defaults_per_licence_stand_when_every_population_agre
     assert (result.status, state["complete"], state["unusable_scopes"], state["record_count"]) == ("ok", True, [], 6)
 
 
+def _populations(result: Any) -> list[tuple[str | None, str, Any]]:
+    normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
+    return [(row.get("org_unit"), row["group"][:9], row["value"])
+            for row in normalized["google_policy_settings"]["records"] if row.get("policy_type") == "licence_population"]
+
+
 def test_live_fix_1_r1_a_licence_policy_with_no_policy_for_the_rest_takes_the_pinned_default() -> None:
-    _, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": False}, 201, f"{_OU} && {_SKU_A}", kind="ADMIN"))
+    result, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": False}, 201, f"{_OU} && {_SKU_A}", kind="ADMIN"))
+    assert (state["complete"], state["unusable_scopes"], _populations(result)) == (True, [], [])
+    # Licence rule (2): the rest take the pinned default on the top unit and are judged as a population of their own.
+    result, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": True}, 201, f"{_OU} && {_SKU_A}", kind="ADMIN"))
     assert (state["complete"], state["unusable_scopes"]) == (True, [])
-    _, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": True}, 201, f"{_OU} && {_SKU_A}", kind="ADMIN"))
-    assert state["unusable_scopes"] == [{"section": "security_super_admin_account_recovery", "org_unit": "root", "group": None}]
-    # Below the top unit the users outside the licence clause take the parent's setting, which this unit cannot tell.
-    _, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": False}, 201, f"{_SALES_OU} && {_SKU_A}",
-                                       kind="ADMIN", org_unit="orgUnits/sales"))
-    assert state["unusable_scopes"] == [{"section": "security_super_admin_account_recovery", "org_unit": "sales", "group": None}]
+    assert _populations(result) == [("root", "licences-", {"enableAccountRecovery": False})]
+    # Licence rule (1): below the top unit the users outside the licence clause take an ancestor's setting, which that
+    # ancestor's own reading judges, so the unit's licence policy stands as ScubaGoggles reads it.
+    result, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": False}, 201, f"{_SALES_OU} && {_SKU_A}",
+                                            kind="ADMIN", org_unit="orgUnits/sales"))
+    assert (state["complete"], state["unusable_scopes"], _populations(result)) == (True, [], [])
 
 
 @pytest.mark.parametrize("higher", ["ADMIN", "SYSTEM"])
 def test_live_fix_1_r1_b1_a_licence_policy_never_hides_the_unconditional_value_below_it(higher: str) -> None:
-    _, state = _licence_read(
+    result, state = _licence_read(
         _licensed(_RECOVERY, {"enableAccountRecovery": True}, 100, _OU),
         _licensed(_RECOVERY, {"enableAccountRecovery": False}, 300, f"{_OU} && {_SKU_A}", kind=higher),
     )
-    assert state["complete"] is False
-    assert state["unusable_scopes"] == [{"section": "security_super_admin_account_recovery", "org_unit": "root", "group": None}]
+    assert (state["complete"], state["unusable_scopes"]) == (True, [])
+    assert _populations(result) == [("root", "licences-", {"enableAccountRecovery": True})]
 
 
 def test_live_fix_1_r1_b2_a_group_only_and_a_root_group_policy_are_ranked_as_one_unit() -> None:
@@ -2180,13 +2188,13 @@ def test_live_fix_1_a_licence_only_disjunct_off_the_top_unit_is_unknown_for_the_
     {"kind": "SYSTEM", "order": 201},
     {"kind": "ADMIN", "order": 201, "query": f"{_OU} && {_SKU_B}"},
 ])
-def test_live_fix_1_a_different_value_below_a_licence_scoped_one_is_unknown(lower: dict[str, Any]) -> None:
+def test_live_fix_1_a_different_value_below_a_licence_scoped_one_is_judged_as_its_own_population(lower: dict[str, Any]) -> None:
     result, state = _licence_read(
         _licensed("gmail.web_offline", {"enabled": False}, 300, f"{_OU} && {_SKU_A}"),
         _licensed("gmail.web_offline", {"enabled": True}, lower["order"], lower.get("query", _OU), kind=lower["kind"]),
     )
-    assert state["complete"] is False
-    assert state["unusable_scopes"] == [{"section": "gmail_web_offline", "org_unit": "root", "group": None}]
+    assert (state["complete"], state["unusable_scopes"]) == (True, [])
+    assert _populations(result) == [("root", "licences-", {"enabled": True})]
 
 
 def test_live_fix_1_a_licence_scoped_group_with_a_policy_of_no_rank_is_unknown() -> None:
@@ -2197,14 +2205,15 @@ def test_live_fix_1_a_licence_scoped_group_with_a_policy_of_no_rank_is_unknown()
     assert state["unusable_scopes"] == [{"section": "gmail_web_offline", "org_unit": "root", "group": None}]
 
 
-def test_live_fix_1_an_admin_licence_value_differing_from_the_others_is_unknown() -> None:
+def test_live_fix_1_an_admin_licence_value_differing_from_the_others_is_judged_per_population() -> None:
     # The live gmail.web_offline shape: licence holders get the administrator's value, everyone else Google's.
-    _, state = _licence_read(
+    result, state = _licence_read(
         _licensed("gmail.web_offline", {"enabled": True}, 201.00134, f"{_OU} && {_SKU_A}", kind="ADMIN"),
         _licensed("gmail.web_offline", {"enabled": False}, 100.00009, f"{_OU} && {_SKU_A}"),
         _licensed("gmail.web_offline", {"enabled": False}, 100.00001, _OU),
     )
-    assert state["unusable_scopes"] == [{"section": "gmail_web_offline", "org_unit": "root", "group": None}]
+    assert (state["complete"], state["unusable_scopes"], state["record_count"]) == (True, [], 5)
+    assert _populations(result) == [("root", "licences-", {"enabled": False})]
     _, state = _licence_read(
         _licensed("gmail.web_offline", {"enabled": False}, 201.00134, f"{_OU} && {_SKU_A}", kind="ADMIN"),
         _licensed("gmail.web_offline", {"enabled": True}, 100.00009, f"{_OU} && {_SKU_A}"),

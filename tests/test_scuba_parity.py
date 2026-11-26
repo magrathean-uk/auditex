@@ -172,8 +172,8 @@ def test_scubagoggles_two_input_divergences_and_no_events(tmp_path, capsys):
     code, _, err = _run([GOGGLES, GWS_ASSESSMENT, "--out", out], capsys)
     assert (code, err) == (0, "")
     assert _rows(out) == {
-        "GWS.GMAIL.7.5v1": ("documented_divergence", ["D4", "D21"], "Pass", "pass", "not_met", "unlisted_reason_code"),
-        "GWS.COMMONCONTROLS.1.4v1": ("documented_divergence", ["D5", "D8"], "Pass", "pass", "not_met",
+        "GWS.GMAIL.7.5v1": ("documented_divergence", ["D4", "D21", "D23"], "Pass", "pass", "not_met", "unlisted_reason_code"),
+        "GWS.COMMONCONTROLS.1.4v1": ("documented_divergence", ["D5", "D8", "D23"], "Pass", "pass", "not_met",
                                      "unlisted_reason_code"),
         "GWS.CHAT.5.1v1": ("documented_divergence", ["D19"], "No events found", "no_events", "not_met",
                            "unlisted_reason_code"),
@@ -840,8 +840,8 @@ def test_divergence_map_is_valid_and_cites_its_rows():
     assert {e["cite"].split(" ")[0] for e in gws} == {"gws-design"}
     assert {e["cite"].split(" ")[0] for e in m365} == {"m365-spec"}
     # D10 (Error against section_not_collected) is neither_decided by construction and needs no entry.
-    assert {e["id"] for e in gws} == {f"D{n}" for n in range(1, 23)} - {"D10"}
-    assert set(data["rows"]["gws-design"]) == {f"D{n}" for n in range(1, 23)}
+    assert {e["id"] for e in gws} == {f"D{n}" for n in range(1, 24)} - {"D10"}
+    assert set(data["rows"]["gws-design"]) == {f"D{n}" for n in range(1, 24)}
     for entry in gws:
         assert entry["cite"] == f"gws-design {'8.3' if int(entry['id'][1:]) <= 10 else '8.3a'} {entry['id']}"
     gws_ids = set(json.loads((ROOT / "configs" / "scuba-gws-value-rules.json").read_text())["policy_ids"])

@@ -1894,7 +1894,8 @@ def test_r1_b1_a_licence_scoped_value_never_hides_the_value_the_rest_of_the_unit
         licensed(RECOVERY, {"enableAccountRecovery": not top}, 100, ROOT_TERM),
         licensed(RECOVERY, {"enableAccountRecovery": top}, 300, f"{ROOT_TERM} && {SKU_A}", kind=kind),
     ])
-    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")
+    # Licence rule (2): each population is judged, and one of the two holds recovery on.
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_met", "unit_violates")
 
 
 def test_a_licence_only_disjunct_stands_on_the_top_unit(tmp_path: Path) -> None:
@@ -1909,22 +1910,21 @@ def test_r1_a_licence_population_no_policy_holds_for_takes_the_pinned_default(tm
     # ScubaGoggles), so a policy enabling it for everyone else cannot stand for them.
     wide = f"{ROOT_TERM} && !{SKU_A} || {SKU_B} && !{SKU_A}"
     run = replay(tmp_path, [ENROLLED, licensed(RECOVERY, {"enableAccountRecovery": True}, 100.00003, wide)])
-    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_met", "unit_violates")
     (tmp_path / "off").mkdir()
     run = replay(tmp_path / "off", [ENROLLED, licensed(RECOVERY, {"enableAccountRecovery": False}, 100.00003, wide)])
     assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("met", "no_unit_violates")
 
 
-def test_an_admin_value_ranked_below_a_licence_scoped_policy_is_unknown(tmp_path: Path) -> None:
+def test_an_admin_value_ranked_below_a_licence_scoped_policy_is_judged_for_the_rest(tmp_path: Path) -> None:
     run = replay(tmp_path, [
         ENROLLED,
         licensed(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && {SKU_A}"),
         licensed(RECOVERY, {"enableAccountRecovery": True}, 201, ROOT_TERM, kind="ADMIN"),
     ])
     state = [row for row in rows(run, "google_policy_settings") if row["id"] == "read_state"][0]
-    assert state["complete"] is False
-    assert [scope["section"] for scope in state["unusable_scopes"]] == ["security_super_admin_account_recovery"]
-    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")
+    assert (state["complete"], state["unusable_scopes"]) == (True, [])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_met", "unit_violates")
 
 
 # LIVE-FIX-1 repair round 1: scopes that cannot be mapped to one unit's population never answer.
@@ -1983,3 +1983,76 @@ def test_r1_b4_an_impossible_licence_population_never_supplies_a_violation(tmp_p
         licensed(RECOVERY, {"enableAccountRecovery": False}, 100, ROOT_TERM),
     ], expect_rc=1)
     assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1")[0] == "not_assessed"
+
+
+# LIVE-FIX-1 licence rule (lead's decision, 26 Nov 2026): a section Google holds only for licence holders (no policy
+# for the rest and no pinned default) applies to the unit, as ScubaGoggles reads it; where licence holders and the
+# rest hold different values each population is judged (divergence D23).
+
+SESSION = "security.session_controls"
+
+
+@pytest.mark.parametrize("duration,expected", [("3600s", ("met", "no_unit_violates")),
+                                               ("86400s", ("not_met", "unit_violates"))])
+def test_licence_rule_a_licence_only_section_applies_to_the_unit(tmp_path: Path, duration, expected) -> None:
+    run = replay(tmp_path, [ENROLLED, licensed(SESSION, {"webSessionDuration": duration}, 100.00009,
+                                                f"{ROOT_TERM} && {SKU_A}")])
+    state = [row for row in rows(run, "google_policy_settings") if row["id"] == "read_state"][0]
+    assert (state["complete"], state["unusable_scopes"]) == (True, [])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.4.1v1") == expected
+
+
+@pytest.mark.parametrize("holders,rest", [(True, None), (False, True), (True, False)])
+def test_licence_rule_a_violating_population_answers_not_met(tmp_path: Path, holders, rest) -> None:
+    # rest None: no policy for the rest, so they take the pinned default (recovery off) on the top unit.
+    policies = [ENROLLED, licensed(RECOVERY, {"enableAccountRecovery": holders}, 300, f"{ROOT_TERM} && {SKU_A}")]
+    if rest is not None:
+        policies.append(licensed(RECOVERY, {"enableAccountRecovery": rest}, 100, ROOT_TERM, kind="ADMIN"))
+    run = replay(tmp_path, policies)
+    populations = [row for row in rows(run, "google_policy_settings") if row.get("policy_type") == "licence_population"]
+    assert [(row["unit_kind"], row["group"][:9], row["value"]) for row in populations] == [
+        ("group", "licences-", {"enableAccountRecovery": not holders})]
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_met", "unit_violates")
+
+
+def test_licence_rule_every_population_complying_answers_met(tmp_path: Path) -> None:
+    run = replay(tmp_path, [ENROLLED,
+                            licensed(SESSION, {"webSessionDuration": "3600s"}, 300, f"{ROOT_TERM} && {SKU_A}"),
+                            licensed(SESSION, {"webSessionDuration": "43200s"}, 100, ROOT_TERM, kind="ADMIN")])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.4.1v1") == ("met", "no_unit_violates")
+
+
+@pytest.mark.parametrize("sku_a,expected", [("3600s", ("not_assessed", "data_unusable_setting_value")),
+                                            ("86400s", ("not_met", "unit_violates"))])
+def test_licence_rule_an_unreadable_population_is_unknown_unless_another_violates(tmp_path: Path, sku_a, expected) -> None:
+    # Holders of both SKUs meet two equal-ranked policies that disagree: their value is unknown (D11).
+    run = replay(tmp_path, [ENROLLED,
+                            licensed(SESSION, {"webSessionDuration": sku_a}, 300, f"{ROOT_TERM} && {SKU_A}"),
+                            licensed(SESSION, {"webSessionDuration": "7200s"}, 300, f"{ROOT_TERM} && {SKU_B}"),
+                            licensed(SESSION, {"webSessionDuration": "43200s"}, 100, ROOT_TERM, kind="ADMIN")])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.4.1v1") == expected
+
+
+def test_licence_rule_a_population_takes_its_own_units_service_state(tmp_path: Path) -> None:
+    # Meet is off in Sales, so Sales users outside the licence never answer, whatever the top unit's state.
+    meet = "meet.safety_access"
+    run = replay(tmp_path, [
+        ENROLLED,
+        _policy("meet.service_status", {"serviceState": "ENABLED"}),
+        _policy(meet, {"meetingsAllowedToJoin": "SAME_ORGANIZATION_ONLY"}),
+        _policy("meet.service_status", {"serviceState": "DISABLED"}, org_unit="ou0a1"),
+        placed_licensed(meet, {"meetingsAllowedToJoin": "ALL"}, 100, SALES_TERM, org_unit="ou0a1"),
+        placed_licensed(meet, {"meetingsAllowedToJoin": "SAME_ORGANIZATION_ONLY"}, 300, f"{SALES_TERM} && {SKU_A}",
+                        org_unit="ou0a1", kind="SYSTEM"),
+    ])
+    assert verdict(project_gws_run(run), "GWS.MEET.2.1v1") == ("met", "no_unit_violates")
+    (tmp_path / "on").mkdir()
+    run = replay(tmp_path / "on", [
+        ENROLLED,
+        _policy("meet.service_status", {"serviceState": "ENABLED"}),
+        _policy(meet, {"meetingsAllowedToJoin": "SAME_ORGANIZATION_ONLY"}),
+        placed_licensed(meet, {"meetingsAllowedToJoin": "ALL"}, 100, SALES_TERM, org_unit="ou0a1"),
+        placed_licensed(meet, {"meetingsAllowedToJoin": "SAME_ORGANIZATION_ONLY"}, 300, f"{SALES_TERM} && {SKU_A}",
+                        org_unit="ou0a1", kind="SYSTEM"),
+    ])
+    assert verdict(project_gws_run(run), "GWS.MEET.2.1v1") == ("not_met", "unit_violates")
