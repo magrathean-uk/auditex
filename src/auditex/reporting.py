@@ -3259,10 +3259,21 @@ def _append_local_answer_markdown(lines: list[str], payload: Mapping[str, Any]) 
         lines.append("")
 
 
+# The section title by assessment baseline (design M13 section 9.3). ``validate_assessment`` refuses a row whose id
+# prefix does not match the baseline, so the rows' prefix names it; the M365 title stays as it always was.
+POLICY_EXPLANATIONS_TITLE = "Policy explanations"
+GWS_POLICY_EXPLANATIONS_TITLE = "CISA SCuBA Google Workspace (ScubaGoggles v1.1.0)"
+
+
+def _policy_explanations_title(rows: list[dict[str, Any]]) -> str:
+    google = bool(rows) and all(str(row.get("policy_id", "")).startswith("GWS.") for row in rows)
+    return GWS_POLICY_EXPLANATIONS_TITLE if google else POLICY_EXPLANATIONS_TITLE
+
+
 def _append_policy_explanations_markdown(lines: list[str], rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
-    lines.extend(["", "## Policy explanations", ""])
+    lines.extend(["", f"## {_policy_explanations_title(rows)}", ""])
     for row in rows:
         explainer = row["explainer"]
         verdict = row["verdict"].replace("_", " ").capitalize()
@@ -3799,7 +3810,7 @@ def _render_json_section(title: str, payload: Any) -> str:
 
 
 def _render_policy_explanations_html(rows: list[dict[str, Any]]) -> str:
-    parts = ["<section><h2>Policy explanations</h2>"]
+    parts = [f"<section><h2>{_html(_policy_explanations_title(rows))}</h2>"]
     for row in rows:
         explainer = row["explainer"]
         verdict = row["verdict"].replace("_", " ").capitalize()

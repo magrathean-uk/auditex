@@ -41,6 +41,7 @@ VERDICT_ORDER = ("not_met", "met", "not_assessed", "not_applicable")
 VERDICT_TEXT = {"met": "met", "not_met": "not met", "not_assessed": "not assessed",
                 "not_applicable": "not applicable"}          # the customer terms of the output contract
 SEVERITY_ORDER = ("Shall", "Should")
+GWS_SEVERITY = {"SHALL": "Shall", "SHOULD": "Should"}
 VALUE_NAMES = ("check", "verdict", "severity", "requirement", "reason", "field", "setting")
 CATALOGUE, TENANT = "catalogue", "tenant"
 SOURCE_TEXT = {CATALOGUE: "catalogue", TENANT: "tenant data"}
@@ -66,6 +67,15 @@ def _natural(policy_id: str) -> tuple:
                  for part in re.findall(r"[0-9]+|[^0-9]+", policy_id))
 
 
+def _gws_requirements() -> dict[str, str]:
+    """Per ScubaGoggles policy id, its baseline text as the GWS explainer template holds it (the text the policy
+    explanation opens with)."""
+    from azure_tenant_audit.explainer.gws import _templates
+
+    return {pid: entry["baseline_text"] for pid, entry in _templates()["policies"].items()
+            if isinstance(entry.get("baseline_text"), str) and entry["baseline_text"].strip()}
+
+
 def _requirements() -> dict[str, str]:
     from azure_tenant_audit.explainer.baselines import load_baselines
     from azure_tenant_audit.resources import open_text_resource
@@ -87,6 +97,21 @@ def _catalogue() -> tuple[frozenset, dict[str, frozenset]]:
                | ({optional["reason_text"]} if pid in optional["policies"] else set())
                for pid, row in data["policies"].items()}
     return frozenset(reasons), reasons
+
+
+def _gws_catalogue() -> tuple[frozenset, dict[str, frozenset]]:
+    """``_catalogue`` for the shipped GWS value-rule catalogue: its 138 ScubaGoggles policy ids (the GWS check count)
+    and, per policy, its kind's cell reason texts and the shared reasons. Read only for a Google assessment, so an
+    M365 digest never depends on the Google files and a GWS reason text is catalogue text only on a GWS policy."""
+    from azure_tenant_audit.value_rules.gws.catalogue import catalogue
+
+    data = catalogue()
+    shared = frozenset(entry["reason_text"] for entry in data["shared_reasons"].values())
+    reasons = {pid: shared | {text for cell in row["cells"].values() for text in cell["reason_texts"]}
+               for pid, row in data["policies"].items()}
+    # A ScubaGoggles policy with no rule row yet answers only a shared reason (``rule_not_implemented``).
+    reasons.update((pid, shared) for pid in data["policy_ids"] if pid not in reasons)
+    return frozenset(data["policy_ids"]), reasons
 
 
 class FramesError(ValueError):
@@ -205,6 +230,25 @@ def _catalogue_sentences() -> dict[str, dict[str, Any]]:
             for pid, policy in templates["policies"].items()}
 
 
+@lru_cache(maxsize=1)
+def _gws_catalogue_sentences() -> dict[str, dict[str, Any]]:
+    """Per ScubaGoggles policy: its baseline text and the fixed what-to-do step of its kind's not met cells in the
+    GWS explainer template (no step when the policy has no rule row yet or its not met steps disagree)."""
+    from azure_tenant_audit.explainer.gws import _templates
+    from azure_tenant_audit.value_rules.gws.catalogue import catalogue as gws_catalogue
+
+    template, catalogue = _templates(), gws_catalogue()
+    kinds, rows = catalogue["kinds"], catalogue["policies"]
+    out = {}
+    for pid, text in _gws_requirements().items():
+        kind = rows[pid]["kind"] if pid in rows else None
+        cells = template["kinds"].get(kind, {}) if kind else {}
+        found = {cells[name]["remediation_steps"] for name, cell in kinds[kind]["cells"].items()
+                 if cell["verdict"] == "not_met" and name in cells} if kind else set()
+        out[pid] = {"requirement": text, "steps": (next(iter(found)),) if len(found) == 1 else ()}
+    return out
+
+
 def frame_holds(frame: Mapping[str, Any], item: Mapping[str, Any], sentence_names: frozenset | set) -> bool:
     """Whether an item frame's precondition holds on the item's rule facts: its verdict, its catalogue severity, the
     values it holds and the catalogue sentences its bank holds."""
@@ -220,7 +264,8 @@ def item_bank(item: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     admits the verdict, the remediation steps (``step-1`` and on). Recomputed from the item's rule facts and the
     shipped files on every call; tenant text never enters it."""
     table = frames()
-    shipped = _catalogue_sentences().get(item["policy_id"]) or {"requirement": None, "steps": ()}
+    catalogue = _gws_catalogue_sentences() if item["policy_id"].startswith("GWS.") else _catalogue_sentences()
+    shipped = catalogue.get(item["policy_id"]) or {"requirement": None, "steps": ()}
     sentences: dict[str, tuple[str, str]] = {}
     if shipped["requirement"] and item["verdict"] in table["catalogue"]["requirement"]:
         sentences["requirement"] = ("requirement", shipped["requirement"])
@@ -314,9 +359,18 @@ def digest_from_assessment(assessment: Mapping[str, Any]) -> dict[str, Any]:
             raise DigestError(f"policy {item['policy_id']} appears twice")
         seen.add(item["policy_id"])
         facts.append(item)
+    from azure_tenant_audit.scuba_assessment import GWS_BASELINE, M365_BASELINE
+
+    baseline = assessment.get("baseline", M365_BASELINE)
+    google = baseline == GWS_BASELINE
+    if google:
+        # A Google row states its criticality as the ScubaGoggles catalogue does (SHALL, SHOULD); the digest uses
+        # the customer terms, so severity order and the Shall frames hold for both baselines.
+        for item in facts:
+            item["severity"] = GWS_SEVERITY.get(item["severity"], item["severity"])
     facts.sort(key=_order)
-    requirements = _requirements()
-    policies, reasons = _catalogue()
+    requirements = _gws_requirements() if google else _requirements()
+    policies, reasons = _gws_catalogue() if google else _catalogue()
     items, counter = [], 0
     for number, item in enumerate(facts, 1):
         pid = item["policy_id"]
@@ -337,8 +391,11 @@ def digest_from_assessment(assessment: Mapping[str, Any]) -> dict[str, Any]:
     counts = {verdict: sum(1 for item in items if item["verdict"] == verdict) for verdict in VERDICT_ORDER}
     # R096: how much of the shipped catalogue the rows cover, so an answer over part of it says so.
     coverage = {"policies": len(policies), "assessed": sum(1 for item in items if item["policy_id"] in policies)}
-    return {"digest_version": DIGEST_VERSION, "run_id": assessment.get("run_id"), "counts": counts,
-            "skipped": skipped, "catalogue": coverage, "items": items}
+    digest = {"digest_version": DIGEST_VERSION, "run_id": assessment.get("run_id"), "counts": counts,
+              "skipped": skipped, "catalogue": coverage, "items": items}
+    if google:
+        digest["baseline"] = GWS_BASELINE      # only a Google digest names it, so the M365 digest stays as it was
+    return digest
 
 
 def build_digest(run_dir: str | Path) -> dict[str, Any]:
