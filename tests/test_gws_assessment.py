@@ -6,13 +6,25 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from test_gws_scuba_projection import CUSTOMER, dns_only, good_domain, load, write
+from test_gws_scuba_projection import (
+    CUSTOMER,
+    _policy,
+    dns_only,
+    good_domain,
+    load,
+    replay,
+    write,
+)
 
 from auditex.cli import main
 from auditex.google_workspace.scuba_projection import project_gws_run
 from auditex.reporting import _load_policy_explanations
 from auditex.rule_assessment import assess_run
-from azure_tenant_audit.scuba_assessment import derive_explainer, validate_assessment
+from azure_tenant_audit.scuba_assessment import (
+    derive_explainer,
+    validate_assessment,
+    value_rule_verdict,
+)
 from azure_tenant_audit.value_rules import gws
 
 pytest_plugins = ("test_gws_scuba_projection",)
@@ -58,6 +70,31 @@ def test_google_assessment_writes_only_the_public_rule_answer(bundle: Path) -> N
     assert after == before
     for value in ("v=DMARC1", "mailto:", "reports@example.com", CUSTOMER):
         assert value.encode() not in new
+
+
+@pytest.mark.parametrize("bounds,reason,verdict", [
+    pytest.param([], None, "met", id="google-defaults"),
+    pytest.param(["--projection-max-items", "40"], "oversize", "not_assessed", id="explicit-items"),
+    pytest.param(["--projection-max-chars", "12000"], "oversize", "not_assessed", id="explicit-chars"),
+])
+def test_assess_cli_budgets_for_300_google_policy_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], bounds: list[str], reason: str | None, verdict: str,
+) -> None:
+    groups = [{"id": f"group{i:03d}", "email": f"group{i:03d}@example.com"} for i in range(299)]
+    password = {"minimumLength": 16}
+    run = replay(tmp_path, [
+        _policy("security.password", password),
+        *(_policy("security.password", password, group=group["id"], order=2) for group in groups),
+    ], groups=groups)
+
+    assert main(["assess", str(run), *bounds]) == 0
+    capsys.readouterr()
+    assessment = load(run, "model_assessment.json")
+    section = assessment["projection"]["sections"]["gws_policies"]
+    assert section["status"] == ("projected" if reason is None else "not_collected")
+    assert section["reason"] == reason
+    row = next(row for row in assessment["policies"] if row["policy_id"] == "GWS.COMMONCONTROLS.5.3v1")
+    assert value_rule_verdict(row) == verdict
 
 
 @pytest.mark.parametrize("mutation", [

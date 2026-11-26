@@ -293,7 +293,7 @@ def test_assess_command_passes_policies_and_projection_flags(tmp_path, monkeypat
         (str(tmp_path), {'policies': ['MS.AAD.1.1v1', 'MS.EXO.4.1v1'], 'projection_max_items': 7,
                          'projection_max_chars': 800, 'projection_scan_max_rows': 11,
                          'projection_scan_max_bytes': 1234, 'projection_scan_max_chunks': 5}),
-        (str(tmp_path), {'policies': None, 'projection_max_items': 40, 'projection_max_chars': 12000,
+        (str(tmp_path), {'policies': None, 'projection_max_items': None, 'projection_max_chars': None,
                          'projection_scan_max_rows': 250000, 'projection_scan_max_bytes': 268435456,
                          'projection_scan_max_chunks': 10000}),
     ]

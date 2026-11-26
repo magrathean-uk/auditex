@@ -729,12 +729,12 @@ def _build_assess_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("run_dir", help="Existing audit run directory.")
     parser.add_argument("--policies", help="Comma-separated SCuBA policy IDs; defaults to the shipped policy set.")
-    parser.add_argument("--projection-max-items", type=int, default=40,
+    parser.add_argument("--projection-max-items", type=int,
                         help="Projection budget: maximum items in each projected section, counted on the "
-                             "projected object, not the source (default: 40).")
-    parser.add_argument("--projection-max-chars", type=int, default=12000,
+                             "projected object (defaults: 40 for Microsoft 365, 300000 for Google Workspace).")
+    parser.add_argument("--projection-max-chars", type=int,
                         help="Projection budget: maximum canonical JSON characters in each projected section "
-                             "(default: 12000).")
+                             "(defaults: 12000 for Microsoft 365, 134217728 for Google Workspace).")
     parser.add_argument("--projection-scan-max-rows", type=int, default=250000,
                         help="Scan bound: most rows examined in one source read; beyond it the section is "
                              "withheld as oversize/scan_bound (default: 250000).")
