@@ -1758,6 +1758,68 @@ def test_an_accounted_alias_failure_leaves_base_domain_rules_answerable(bundle: 
     assert verdict(projection, "GWS.GMAIL.3.1v1")[0] == "not_assessed"
 
 
+@pytest.mark.parametrize("problem", ["retired_ou", "value", "application"])
+def test_unusable_event_only_withholds_its_own_setting(bundle: Path, problem: str) -> None:
+    changed = event("2026-10-03T10:00:00Z", "CHANGE_APPLICATION_SETTING",
+                    setting="AttachmentDeepScanningSettingsProto deep_scanning_enabled", new_value="true")
+    if problem == "value":
+        changed.update(org_unit="ou0a1", new_value="unrecognised")
+    elif problem == "application":
+        changed.update(org_unit="ou0a1", application="unrecognised")
+    recorded_events(bundle, [
+        event("2026-10-01T10:00:00Z", "CHANGE_APPLICATION_SETTING", setting=SETTING, new_value="false",
+              org_unit="root01"),
+        event("2026-10-02T10:00:00Z", "CHANGE_APPLICATION_SETTING", setting=SETTING, new_value="false",
+              org_unit="ou0a1"),
+        changed, state("google_setting_events", 3, **WINDOW)])
+    if problem == "retired_ou":
+        edit_raw(bundle, "raw/google_setting_events.json", lambda raw: (
+            raw["settingEvents"]["value"][-1]["events"][0]["event_parameters"].append(
+                {"name": "ORG_UNIT_NAME", "value": "/Retired"})))
+    projection = project_gws_run(bundle)
+    assert projection["gws_setting_events"]["complete"] is True
+    assert verdict(projection, "GWS.GMAIL.13.1v1") == ("met", "no_unit_violates")
+    assert verdict(projection, "GWS.GMAIL.16.1v1") == ("not_assessed", "data_unusable_event_value")
+
+
+def test_dns_scope_accounts_for_unverified_directory_domains(bundle: Path) -> None:
+    dns_only(bundle, good_domain(spf={"records": []}))
+    edit_rows(bundle, "google_domains", lambda data: data.extend([
+        {"kind": "google_domain", "domain_name": "example.org", "domain_kind": "secondary", "verified": False},
+        {"kind": "google_domain", "domain_name": "example.net", "domain_kind": "alias", "verified": False,
+         "parent_domain": "example.com"},
+        {"kind": "google_domain", "domain_name": "mail.example.org", "domain_kind": "alias", "verified": True,
+         "parent_domain": "example.org"},
+    ]))
+    edit_coverage(bundle, "domains", item_count=2)
+    projection = project_gws_run(bundle)
+    assert projection["gws_dns"]["complete"] is True
+    assert [row["resolver_error"] for row in projection["gws_dns"]["domains"]] == [False]
+    assert verdict(projection, "GWS.GMAIL.3.1v1") == ("not_met", "domain_violates")
+    edit_coverage(bundle, "domains", item_count=3)
+    assert verdict(project_gws_run(bundle), "GWS.GMAIL.3.1v1")[0] == "not_assessed"
+
+
+@pytest.mark.parametrize("resolver_failed", [False, True])
+def test_l05_dns_alias_has_dmarc_evidence_or_a_scoped_failure(bundle: Path, resolver_failed: bool) -> None:
+    alias = {"kind": "google_domain_posture", "domain": "example.net", "alias": True,
+             "resolver_error": resolver_failed}
+    if not resolver_failed:
+        alias["dmarc"] = {"query_name": "_dmarc.example.net", "inherited": False, "records": [DMARC]}
+    dns_only(bundle, good_domain(), alias)
+    if resolver_failed:
+        edit_raw(bundle, "raw/google_dns_posture.json", lambda raw: raw["domainPosture"]["value"][1].update(
+            resolver_error="DNS resolver could not answer."))
+        edit_coverage(bundle, "posture:example.net", status="failed", error_class="dns_resolver_error")
+    projection = project_gws_run(bundle)
+    assert projection["gws_dns"]["complete"] is True
+    assert [row["resolver_error"] for row in projection["gws_dns"]["domains"]] == [False, resolver_failed]
+    for policy in ("GWS.GMAIL.2.1v1", "GWS.GMAIL.3.1v1"):
+        assert verdict(projection, policy) == ("met", "no_domain_violates")
+    expected = ("not_assessed", "data_unavailable_resolver_error") if resolver_failed else ("met", "no_domain_violates")
+    assert verdict(projection, "GWS.GMAIL.4.1v1") == expected
+
+
 def test_a_failed_resolver_configuration_withholds_apparently_readable_txt(bundle: Path) -> None:
     dns_only(bundle, good_domain(spf={"records": []}))
     coverage = load(bundle, "coverage.json")

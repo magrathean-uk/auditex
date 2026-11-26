@@ -412,7 +412,8 @@ class _Context:
         self.charge(f"raw:{collector}:{name}", len(section["value"]))
         return True
 
-    def read_ok(self, raw: Any, collector: str, name: str, *, direct_count: bool = True) -> bool:
+    def read_ok(self, raw: Any, collector: str, name: str, *, direct_count: bool = True,
+                coverage_count: int | None = None) -> bool:
         """Prove a retained list against its own operation log. Offline replays omit successful coverage."""
         if not self.has_whole_list(raw, collector, name):
             return False
@@ -423,7 +424,8 @@ class _Context:
         if not rows:
             return (not direct_count or self.manifest.get("mode") == "offline"
                     or "coverage_path" not in self.manifest)
-        return len(rows) == 1 and _row_ok(rows[0], len(raw[name]["value"]))
+        count = len(raw[name]["value"]) if coverage_count is None else coverage_count
+        return len(rows) == 1 and _row_ok(rows[0], count)
 
     def fanout_ok(self, collector: str, name: str, count: int) -> bool:
         coverage, gaps = self.coverage(), self.gaps()
@@ -796,8 +798,7 @@ def _event_fields(row: dict[str, Any], fields: dict[str, tuple[frozenset[str], b
     elif value is not None:
         value = None
     application = row.get("application")
-    if "application" in row and not (isinstance(application, str) and (
-            _scuba_application_allowed(application) or application == "unrecognised")):
+    if "application" in row and not (isinstance(application, str) and _scuba_application_allowed(application)):
         application = ""
     return name, setting, value, application
 
@@ -885,11 +886,7 @@ def _events(ctx: _Context) -> dict[str, Any]:
             # and the events kind holds it ambiguous rather than a reset or a delete it can rank.
             unit = None
         time = _instant(row.get("event_time"))
-        relevant = name in fields or isinstance(setting, str) and setting in fields
-        if (time is None or not name or relevant and (application in ("", "unrecognised")
-                or name != "TOGGLE_CAA_ENABLEMENT" and unit is None
-                or name != "DELETE_APPLICATION_SETTING" and value in (None, "unrecognised"))):
-            complete = False
+        # The reducer handles unreadable values and ambiguous placement for the setting the event names.
         events.append(_obj(("time", time), ("event", name), ("setting", setting),
                            ("new_value", value), ("unit", unit), ("application", application)))
     # The log window is the read's own record; without one it is null and the events kind concludes nothing.
@@ -1008,27 +1005,45 @@ def _listed(rows: list[Any]) -> dict[str, tuple[bool, bool]] | None:
 
 
 def _dns_scope(ctx: _Context, raw: Any) -> dict[str, bool] | None:
-    if not ctx.read_ok(raw, "google_dns_posture", "domains"):
+    collector = "google_dns_posture"
+    if not ctx.has_whole_list(raw, collector, "domains"):
         return None
-    listed = _listed(raw["domains"]["value"])
+    values = raw["domains"]["value"]
+    listed = _listed(values)
     if listed is None:
         return None
+    count = len(values)
     rows, whole = ctx.records("google_domains", required=False)
     if rows is not None:
         if not whole:
             return None
-        scope: dict[str, bool] = {}
+        directory: dict[str, dict[str, Any]] = {}
         for row in rows:
             name, kind = row.get("domain_name"), row.get("domain_kind")
-            if (row.get("kind") != "google_domain" or not _domain_name(name) or name.lower() in scope
-                    or kind not in ("alias", "primary", "secondary")):
+            if (row.get("kind") != "google_domain" or not _domain_name(name) or name.lower() in directory
+                    or kind not in ("alias", "primary", "secondary")
+                    or "verified" in row and type(row["verified"]) is not bool):
                 return None
-            scope[name.lower()] = kind == "alias"
-            if "verified" in row and (type(row["verified"]) is not bool or name.lower() not in listed
-                                      or row["verified"] != listed[name.lower()][0]):
-                return None
-        if scope != {name: alias for name, (_, alias) in listed.items()}:
+            directory[name.lower()] = row
+        if not listed.keys() <= directory.keys():
             return None
+        unverified_bases = {name for name, row in directory.items()
+                            if row["domain_kind"] != "alias" and row.get("verified") is False}
+        for name, row in directory.items():
+            alias, verified = row["domain_kind"] == "alias", row.get("verified")
+            if name in listed:
+                if listed[name][1] != alias or verified is not None and listed[name][0] != verified:
+                    return None
+                continue
+            parent = row.get("parent_domain")
+            parent_unverified = alias and isinstance(parent, str) and parent.lower() in unverified_bases
+            if verified is not False and not parent_unverified:
+                return None
+            # The collector logs the Directory response count before filtering. Aliases are nested within its rows.
+            if not alias:
+                count += 1
+    if not ctx.read_ok(raw, collector, "domains", coverage_count=count):
+        return None
     return {name: alias for name, (verified, alias) in listed.items() if verified}
 
 
@@ -1040,23 +1055,26 @@ def _txt_list(value: Any) -> list[str] | None:
     return records
 
 
-def _dns_answers(row: dict[str, Any]) -> tuple[tuple | None, tuple | None, tuple | None]:
-    """Read each retained TXT answer without applying its baseline predicate."""
-    spf, dkim, dmarc = (row.get(part) if isinstance(row.get(part), dict) else {} for part in ("spf", "dkim", "dmarc"))
-    spf_records = _txt_list(spf.get("records")) if _markers_ok(spf) else None
-    selectors = dkim.get("selectors") if _markers_ok(dkim) else None
-    dkim_records = [_txt_list(selectors.get(selector)) if isinstance(selectors, dict) else None
-                    for selector in _dkim_selectors()]
+def _dns_answers(row: dict[str, Any], *, alias: bool) -> tuple[tuple | None, ...]:
+    """Read the retained TXT answers for the domain's scope without applying baseline predicates."""
+    dmarc = row.get("dmarc") if isinstance(row.get("dmarc"), dict) else {}
     query, inherited, dmarc_records = dmarc.get("query_name"), dmarc.get("inherited"), _txt_list(dmarc.get("records"))
     name = row.get("domain")
     own = isinstance(name, str) and query == "_dmarc." + name
     parent = (isinstance(name, str) and isinstance(query, str) and query.startswith("_dmarc.")
               and _domain_name(query[7:]) and name.endswith("." + query[7:]))
-    return (tuple(sorted(spf_records)) if spf_records is not None else None,
-            tuple(tuple(sorted(records)) for records in dkim_records) if None not in dkim_records else None,
-            (query, inherited, tuple(sorted(dmarc_records)))
-            if _markers_ok(dmarc) and dmarc_records is not None
-            and (inherited is True and parent or inherited is False and own) else None)
+    dmarc_answer = ((query, inherited, tuple(sorted(dmarc_records)))
+                    if _markers_ok(dmarc) and dmarc_records is not None
+                    and (inherited is True and parent or inherited is False and own) else None)
+    if alias:
+        return (dmarc_answer,)
+    spf, dkim = (row.get(part) if isinstance(row.get(part), dict) else {} for part in ("spf", "dkim"))
+    spf_records = _txt_list(spf.get("records")) if _markers_ok(spf) else None
+    selectors = dkim.get("selectors") if _markers_ok(dkim) else None
+    dkim_records = [_txt_list(selectors.get(selector)) if isinstance(selectors, dict) else None
+                    for selector in _dkim_selectors()]
+    return (dmarc_answer, tuple(sorted(spf_records)) if spf_records is not None else None,
+            tuple(tuple(sorted(records)) for records in dkim_records) if None not in dkim_records else None)
 
 
 def _no_resolver_error(row: dict[str, Any]) -> bool:
@@ -1066,8 +1084,7 @@ def _no_resolver_error(row: dict[str, Any]) -> bool:
 def _dns_failure_accounted(ctx: _Context, operation: str, row: dict, twin: dict) -> bool:
     """A corroborated resolver failure accounts for an alias that base-domain rules do not read."""
     collector = "google_dns_posture"
-    evidence = row.get("resolver_error")
-    if not (evidence is True or _label(evidence)) or evidence != twin.get("resolver_error"):
+    if not all(error is True or _label(error) for error in (row.get("resolver_error"), twin.get("resolver_error"))):
         return False
     if not (_markers_ok(row) and _markers_ok(twin)):
         return False
@@ -1133,13 +1150,13 @@ def _dns(ctx: _Context) -> dict[str, Any]:
             alias = None
         twin = raw_by_name.get(label)
         raw_alias = twin.get("alias", listed_alias) if twin is not None else None
-        answers = _dns_answers(row)
+        answers = _dns_answers(row, alias=alias is True)
         same_domain = (whole and posture_read and bool(host) and type(listed_alias) is bool and alias is listed_alias
                        and raw_alias is listed_alias and raw_names[label] == norm_names[label] == 1)
         operation = "posture:" + name
         read = (same_domain and ctx.fanout_ok(collector, operation, 1)
                 and _no_resolver_error(row) and _no_resolver_error(twin)
-                and answers == _dns_answers(twin) and None not in answers)
+                and None not in answers and answers == _dns_answers(twin, alias=alias is True))
         complete = complete and (read or same_domain and alias is True
                                  and _dns_failure_accounted(ctx, operation, row, twin))
         domains.append(_project_domain(ctx, row, name, host, alias, bool(read)))
