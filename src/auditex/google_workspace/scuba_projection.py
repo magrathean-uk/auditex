@@ -16,19 +16,12 @@ does for Microsoft 365.
   ``complete`` false, never a pass. Where the bundle attributes a failure to one setting or unit, only that one is
   marked unknown, in the engine's own terms: a ``gws_policies`` entry without a value (the reducer's ``UNUSABLE``), an
   ambiguous event (blank name, no setting) or an unplaceable privileged entry (``user:unresolved``, no OU).
-- Redaction is an allow-list. A section holds only fixed vocabulary (event and setting names, values and applications
-  the shipped catalogue names, SSO modes, ``unrecognised`` for anything else), keyed pseudonyms of user and group ids
-  (``user:<hex>``, ``group:<hex>``, stable within a run and unlinkable across runs), OU ids, counts, times in strict
-  RFC 3339 and verdict-relevant DNS text. Policy values must equal their own schema projection
-  (``data_minimisation.minimise_policy_value``), else the value is dropped and the entry is unusable. DMARC records are
-  rewritten to the tags the rows read, with every reporting address other than CISA's replaced by a placeholder, so the
-  engine's contact count and exact CISA check give the same answer; an SPF answer becomes ``v=spf1 -all`` or
-  ``v=spf1 ?all`` as GMAIL.3.1 would judge it, and a DKIM answer keeps only its ``v=DKIM1;`` prefix. A domain is a
-  keyed pseudonym (``domain:<hex>.invalid``) and its DMARC query name says only whether the record is the domain's own
-  (``_dmarc.<pseudonym>``), a parent's (``_dmarc.invalid``) or neither (``unrecognised``), so a label that holds the
-  customer id never leaves the bundle. A domain whose own posture read is not proven (its ``posture:<domain>``
-  coverage row, one raw record with no resolver failure, a whole posture read) is a resolver failure: unknown.
-  OU names and paths, addresses, the customer id, display names and free text never reach a section.
+- Redaction is an allow-list. Sections carry fixed catalogue vocabulary, counts, strict RFC 3339 times and
+  run-key pseudonyms for users, groups, organisational units and domains. Policy values must match their schema
+  projection. DNS TXT records retain only fixed syntax needed by the rule parsers: SPF directives and modifiers
+  with synthetic arguments, DKIM version markers, and DMARC policy tags and synthetic contact URIs. The fixed
+  public CISA contact uses URI encoding so the parser can still match it. A domain whose own read cannot be proven
+  is emitted as a resolver error, with no resolver details.
 - Output keys are written as values (``_obj``), never as mapping keys or module constants, so none becomes a product
   field name the shareable redaction keeps (``output_redaction._D5_FIELD_NAMES``, DEC-171).
 - ``gws_tenant.as_of`` is the run's collection end. An offline replay is evaluated at an instant the manifest does not
@@ -36,14 +29,13 @@ does for Microsoft 365.
 """
 from __future__ import annotations
 
-import math
+import json
 import os
 import re
 from collections import Counter
 from collections.abc import Callable
-from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from fractions import Fraction
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -56,20 +48,32 @@ from azure_tenant_audit.data_minimisation import (
     policy_is_unrecognised,
     policy_unit_id,
 )
-from azure_tenant_audit.google_policy_schema import POLICY_VALUE_SCHEMAS
+from azure_tenant_audit.google_policy_schema import (
+    POLICY_VALUE_SCHEMAS,
+    RequiredPolicyField,
+)
 from azure_tenant_audit.guarded_io import guarded_operation
 from azure_tenant_audit.output_redaction import PSEUDONYM_STRATEGY, pseudonym
+from azure_tenant_audit.run_files import (
+    MAX_RUN_FILE_BYTES,
+    UnsafeRunFileError,
+    read_run_file,
+)
 from azure_tenant_audit.value_rules.gws.dns import (
+    _MODIFIER,
     _WSP,
+    _directive,
+    _domain_spec,
     _is_dmarc,
     _is_spf,
+    _macro_string,
     _policy,
-    _spf_passes,
     _tag_list,
     _uri,
     _uris,
 )
-from azure_tenant_audit.value_rules.gws.events import _categories, _time
+from azure_tenant_audit.value_rules.gws.events import _categories
+from azure_tenant_audit.value_rules.gws.identity import instant_ns
 
 from ..scuba_projection import (
     DEFAULT_SCAN_MAX_BYTES,
@@ -77,25 +81,35 @@ from ..scuba_projection import (
     DEFAULT_SCAN_MAX_ROWS,
     Bundle,
     Unavailable,
+    _clean_text,
     _collector_error,
+    _invalid_constant,
     _json,
     _oversize,
     _projection_key,
     _require,
     _scan_bound,
+    _shallow,
+    _unique_pairs,
 )
 from .client import SCUBA_ADMIN_EVENTS
 from .collectors import (
     POLICY_SECTION_PROBLEMS,
-    POLICY_TARGET_PROBLEMS,
+    SCUBA_READ_SECTIONS,
     _event_value_fields,
     _scuba_application_allowed,
     _scuba_group_email,
     policy_problems,
+    two_step_subset_differs,
 )
-from .normalize import _policy_section, _policy_targets
+from .normalize import (
+    _event_org_units,
+    _policy_section,
+    _policy_settings_read,
+    _scuba_read_records,
+)
 
-GWS_PROJECTION_VERSION = "2026-11-25.3"
+GWS_PROJECTION_VERSION = "2026-11-25.4"
 SECTIONS = ("gws_tenant", "gws_policies", "gws_setting_events", "gws_dns", "gws_admins", "gws_sso")
 # The projected-section budget. These sections are rule input, never prompt text, so the budget is sized to the
 # largest read the collectors make (20,000 events for each of 13 event names) rather than to a prompt; the scan
@@ -103,6 +117,7 @@ SECTIONS = ("gws_tenant", "gws_policies", "gws_setting_events", "gws_dns", "gws_
 DEFAULT_MAX_ITEMS = 300_000
 DEFAULT_MAX_CHARS = 128 * 1024 * 1024
 _DIRECTORY = "google_directory"
+_ABSENT = object()
 _DOMAIN = re.compile(r"(?=.{1,253}\Z)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}"
                      r"[A-Za-z0-9])?)+", re.ASCII)
 
@@ -154,6 +169,10 @@ def _ident(value: Any) -> bool:
     return isinstance(value, str) and bool(value) and all(char.isprintable() and not char.isspace() for char in value)
 
 
+def _label(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and value.isprintable()
+
+
 def _role_key(value: Any) -> str | None:
     """A role id (a string or an integer, never a boolean) as text; None unless it is a readable identity."""
     if isinstance(value, bool) or not isinstance(value, (str, int)):
@@ -172,50 +191,95 @@ def _strings(value: Any) -> list[str] | None:
 
 
 def _instant(value: Any) -> str | None:
-    """A strict RFC 3339 time as the events kind reads it (``events._time``); anything else is null."""
-    return value if isinstance(value, str) and _time(value) is not None else None
+    """A strict RFC 3339 timestamp with at most nine fractional digits."""
+    return value if instant_ns(value) is not None else None
+
+
+def _uncut(row: dict[str, Any]) -> bool:
+    return (all(key not in row or type(row[key]) is bool
+                for key in ("collection_truncated", "collection_limit_reached", "partial"))
+            and not section_was_cut(row) and row.get("partial") is not True
+            and row.get("truncation_reason") is None)
+
+
+def _count_agrees(row: dict[str, Any], count: int) -> bool:
+    return type(row.get("item_count")) is int and row["item_count"] == count
+
+
+def _markers_ok(row: dict[str, Any]) -> bool:
+    """Reject explicit incompleteness and continuation markers even when a list and its count agree."""
+    return (_uncut(row) and row.get("status", "ok") == "ok"
+            and row.get("collection_status", "collected") == "collected"
+            and row.get("complete", True) is True
+            and all(row.get(key) is None for key in ("error", "error_class", "nextPageToken", "next_page_token")))
 
 
 def _whole(section: Any) -> bool:
-    """A raw list section that is a list, uncut, and carries no error, partial or non-ok status marker. A cut marker
-    of any value but false (``"true"``, ``1``) is a cut."""
-    return (isinstance(section, dict) and isinstance(section.get("value"), list) and not section_was_cut(section)
-            and section.get("collection_truncated") in (None, False) and section.get("status") in (None, "ok")
-            and not section.get("error") and not section.get("error_class") and not section.get("partial")
-            and not section.get("truncation_reason"))
+    """A whole, readable list with no contradictory status or count."""
+    return (isinstance(section, dict) and isinstance(section.get("value"), list) and _markers_ok(section)
+            and ("item_count" not in section or _count_agrees(section, len(section["value"]))))
 
 
-def _row_ok(row: dict[str, Any]) -> bool:
-    return (row.get("status") in (None, "ok") and row.get("collection_truncated") in (None, False)
-            and not row.get("truncation_reason") and not row.get("partial"))
+def _row_ok(row: dict[str, Any], count: int) -> bool:
+    return row.get("status") == "ok" and _markers_ok(row) and _count_agrees(row, count)
 
 
 def _envelope_whole(data: dict[str, Any], name: str) -> bool:
-    """A normalised section's envelope as the writer makes it (``kind`` and ``records``, and at most the
-    ``collected`` status): any other key (``complete``, ``status``, ``partial``, a cut marker, an ``item_count``) is a
-    claim about the list the writer never makes, so it proves nothing and the list is not taken as whole."""
-    return set(data) <= {"kind", "records", "collection_status"} and data.get("kind", name) == name
+    """The writer's normalised envelope carries only its kind, records and optional collection status."""
+    return set(data) <= {"kind", "records", "collection_status"} and data.get("kind") == name
+
+
+def _read_manifest(bundle: Bundle) -> dict[str, Any]:
+    """Use the common guarded opener, preserving the exact decimal token from the manifest."""
+    try:
+        data = read_run_file(bundle.root, "run-manifest.json", max_bytes=min(bundle.scan_max_bytes, MAX_RUN_FILE_BYTES))
+        value = json.loads(data, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant, parse_float=Decimal)
+    except FileNotFoundError:
+        raise Unavailable("missing_artifact") from None
+    except UnsafeRunFileError as exc:
+        if exc.reason == "oversize" and bundle.scan_max_bytes < MAX_RUN_FILE_BYTES:
+            raise _scan_bound("scan_max_bytes") from None
+        raise
+    except (OSError, ValueError, InvalidOperation, RecursionError):
+        raise Unavailable() from None
+    _require(isinstance(value, dict) and _shallow(value), kind="invalid_type")
+    return value
+
+
+def _duration_ns(value: Any) -> int | None:
+    if type(value) is int:
+        return value * 10**9 if 0 <= value < 10**12 else None
+    if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+        return None
+    if not value:
+        return 0
+    if not -9 <= value.adjusted() < 12:
+        return None
+    _, digits, exponent = value.as_tuple()
+    places = exponent + 9
+    if places < 0:
+        if any(digits[places:]):
+            return None
+        digits, places = digits[:places], 0
+    return int("".join(map(str, digits))) * 10**places
 
 
 def _as_of(manifest: dict[str, Any]) -> str | None:
-    """The run's collection end: ``created_utc`` plus ``duration_seconds``, in UTC. None when either is unusable, and
-    for an offline replay: it is evaluated at its ``--as-of`` or its own clock, which the manifest does not record."""
-    if manifest.get("mode") == "offline" or manifest.get("replay_source"):
+    """Compute the end of a live collection exactly at the rule engine's nanosecond precision."""
+    if ("mode" in manifest and manifest["mode"] not in ("domain-delegation", "service_account", "oauth")
+            or manifest.get("replay_source") is not None):
         return None
-    created, duration = manifest.get("created_utc"), manifest.get("duration_seconds")
-    # Strict RFC 3339 with a zone, as the events kind parses a time; Python's permissive ISO parser would take a
-    # malformed separator (``2026-11-20X10:00:00Z``) for a time.
-    start = _time(created)
-    if start is None or isinstance(duration, bool) or not isinstance(duration, (int, float)):
+    start = instant_ns(manifest.get("created_utc"))
+    duration = _duration_ns(manifest.get("duration_seconds"))
+    if start is None or duration is None:
         return None
+    seconds, nanos = divmod(start + duration, 10**9)
     try:
-        if not math.isfinite(duration) or duration < 0:
-            return None
-        micros = math.floor((start + Fraction(duration)) * 1_000_000)
-        end = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(microseconds=micros)
-    except (ValueError, OverflowError):
+        end = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds)
+    except OverflowError:
         return None
-    return end.isoformat(timespec="microseconds").replace("+00:00", "Z")
+    fraction = f"{nanos:09d}" if nanos % 1000 else f"{nanos // 1000:06d}"
+    return end.isoformat(timespec="seconds").removesuffix("+00:00") + "." + fraction + "Z"
 
 
 class GwsProjection(dict):
@@ -234,6 +298,8 @@ class _Context:
         self.groups: set[str] = set()
         self.domains: set[str] = set()
         self.addresses = 0
+        self._coverage_index: dict[tuple[str, str], list[dict[str, Any]]] | None = None
+        self._gap_index: dict[str, set[str]] | None = None
         self.begin()
 
     def begin(self) -> None:
@@ -273,7 +339,7 @@ class _Context:
             return self.read(relative)
         except Unavailable as exc:
             if exc.reason == "missing_artifact":
-                return None
+                return _ABSENT
             raise
 
     def records(self, name: str, *, required: bool = True) -> tuple[list[dict[str, Any]] | None, bool]:
@@ -281,7 +347,7 @@ class _Context:
         ``(None, False)`` when an optional one is absent. A wrong envelope withholds."""
         relative = f"normalized/{name}.json"
         data = self.read(relative) if required else self.optional(relative)
-        if data is None:
+        if data is _ABSENT:
             return None, False
         _require(isinstance(data, dict), kind="invalid_type")
         if data.get("error") or data.get("error_class"):
@@ -293,64 +359,81 @@ class _Context:
         self.charge(relative, len(records))
         return records, _envelope_whole(data, name)
 
-    def coverage(self) -> list[dict[str, Any]] | None:
-        """The coverage rows; None when they cannot be read. The writer leaves the file out only when no row was
-        recorded."""
+    def coverage(self) -> dict[tuple[str, str], list[dict[str, Any]]] | None:
         rows = self.optional("coverage.json")
-        if rows is None and "coverage_path" not in self.manifest:
+        if rows is _ABSENT and "coverage_path" not in self.manifest:
             rows = []
-        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        if not isinstance(rows, list):
             return None
         self.charge("coverage.json", len(rows))
-        return rows
+        if self._coverage_index is None:
+            index: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            for row in rows:
+                if not isinstance(row, dict) or not all(_label(row.get(key)) for key in ("collector", "name")):
+                    return None
+                index.setdefault((row["collector"], row["name"]), []).append(row)
+            self._coverage_index = index
+        return self._coverage_index
 
-    def gaps(self) -> list[dict[str, Any]] | None:
+    def gaps(self) -> dict[str, set[str]] | None:
         data = self.optional("normalized/collection_gaps.json")
-        if data is None:
-            return []
+        if data is _ABSENT:
+            return {}
         rows = data.get("records") if isinstance(data, dict) else None
-        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        if not isinstance(rows, list) or not _envelope_whole(data, "collection_gaps"):
             return None
         self.charge("normalized/collection_gaps.json", len(rows))
-        return rows
+        if self._gap_index is None:
+            index: dict[str, set[str]] = {}
+            for row in rows:
+                if not isinstance(row, dict) or not _ident(row.get("collector")):
+                    return None
+                # Section-scoped and list gaps use different keys.
+                labels = [row[key] for key in ("list", "section") if key in row]
+                if not labels or any(not _label(label) for label in labels):
+                    return None
+                index.setdefault(row["collector"], set()).update(labels)
+            self._gap_index = index
+        return self._gap_index
 
     def directory(self) -> dict[str, Any] | None:
         raw = self.optional(f"raw/{_DIRECTORY}.json")
         return raw if isinstance(raw, dict) else None
 
-    def read_ok(self, raw: dict[str, Any] | None, collector: str, name: str, *, fanout: bool = False) -> bool:
-        """Whether one list read is complete: its raw section is whole, and no coverage row or collection gap of it
-        reports a failure or a cut. ``fanout`` covers the per-object reads (``name:<key>``)."""
+    def has_whole_list(self, raw: Any, collector: str, name: str) -> bool:
         section = raw.get(name) if isinstance(raw, dict) else None
         if not _whole(section):
             return False
         self.charge(f"raw:{collector}:{name}", len(section["value"]))
+        return True
+
+    def read_ok(self, raw: Any, collector: str, name: str, *, direct_count: bool = True) -> bool:
+        """Prove a retained list against its own operation log. Offline replays omit successful coverage."""
+        if not self.has_whole_list(raw, collector, name):
+            return False
         coverage, gaps = self.coverage(), self.gaps()
-        if coverage is None or gaps is None:
+        if coverage is None or gaps is None or name in gaps.get(collector, ()):
             return False
+        rows = coverage.get((collector, name), [])
+        if not rows:
+            return (not direct_count or self.manifest.get("mode") == "offline"
+                    or "coverage_path" not in self.manifest)
+        return len(rows) == 1 and _row_ok(rows[0], len(raw[name]["value"]))
 
-        def about(row: Any, field: str) -> bool:
-            label = row.get(field) if isinstance(row, dict) else None
-            return isinstance(label, str) and (label == name or fanout and label.startswith(name + ":"))
-
-        if any(row.get("collector") == collector and about(row, "name") and not _row_ok(row) for row in coverage):
+    def fanout_ok(self, collector: str, name: str, count: int) -> bool:
+        coverage, gaps = self.coverage(), self.gaps()
+        if coverage is None or gaps is None or name in gaps.get(collector, ()):
             return False
-        return not any(row.get("collector") == collector and about(row, "list") for row in gaps)
-
-    def fanout_ok(self, collector: str, name: str, count: int | None = None) -> bool:
-        """Positive evidence that one per-object read ran and finished: a coverage row of that exact name, all ok,
-        and, given ``count``, each row's ``item_count`` equal to the rows the bundle kept for that object."""
-        rows = [row for row in self.coverage() or [] if row.get("collector") == collector and row.get("name") == name]
-        return bool(rows) and all(
-            _row_ok(row) and row.get("status") == "ok"
-            and (count is None or type(row.get("item_count")) is int and row["item_count"] == count) for row in rows)
+        rows = coverage.get((collector, name), [])
+        return len(rows) == 1 and _row_ok(rows[0], count)
 
     def tree(self) -> tuple[str | None, dict[str, str | None], bool]:
         """The top unit, the ``ou:<id>`` parent map and whether the topology is complete and sound: one root, every
         unit's chain reaching it with no dangling parent or cycle (as ``value_rules.gws.reduce._topology`` checks)."""
         rows, whole = self.records("google_org_units")
         units, consistent, state = _split(rows or [], "google_org_units", "google_org_unit")
-        complete = consistent and whole and state.get("complete") is True and state.get("root_id_known") is True
+        complete = (consistent and whole and state.get("complete") is True and state.get("root_id_known") is True
+                    and type(state.get("malformed_count")) is int and state["malformed_count"] == 0)
         org_units: dict[str, str | None] = {}
         roots: list[str] = []
         for row in units:
@@ -363,9 +446,46 @@ class _Context:
             if root:
                 roots.append("ou:" + unit)
         top = roots[0] if len(roots) == 1 else None
-        if top is None or not _sound(org_units, top):
+        raw_tree, _ = self.directory_tree()
+        if top is None or raw_tree != org_units or not _sound(org_units, top):
             complete = False
         return top, org_units, complete
+
+    def directory_tree(self) -> tuple[dict[str, str | None], dict[str, str]]:
+        """Read unique Directory ids and paths, including a root inferred from its children in legacy runs."""
+        raw = self.directory()
+        if not self.read_ok(raw, _DIRECTORY, "orgUnits"):
+            return {}, {}
+        topology: dict[str, str | None] = {}
+        paths: dict[str, str] = {}
+        parent_paths: dict[str, str] = {}
+        for row in raw["orgUnits"]["value"]:
+            if not isinstance(row, dict):
+                return {}, {}
+            unit, path = _unit_id(row.get("orgUnitId")), row.get("orgUnitPath")
+            if unit is None or not _ou_path(path) or path in paths or "ou:" + unit in topology:
+                return {}, {}
+            key = "ou:" + unit
+            paths[path] = key
+            if path == "/":
+                if row.get("parentOrgUnitId") not in (None, "") or row.get("parentOrgUnitPath") not in (None, ""):
+                    return {}, {}
+                topology[key] = None
+            else:
+                parent, parent_path = _unit_id(row.get("parentOrgUnitId")), row.get("parentOrgUnitPath")
+                if parent is None or not _ou_path(parent_path):
+                    return {}, {}
+                topology[key] = "ou:" + parent
+                parent_paths[path] = parent_path
+        if "/" not in paths:
+            roots = {topology[paths[path]] for path, parent in parent_paths.items() if parent == "/"}
+            if len(roots) != 1 or (root := next(iter(roots))) in topology:
+                return {}, {}
+            paths["/"] = root
+            topology[root] = None
+        if any(paths.get(parent) != topology[paths[path]] for path, parent in parent_paths.items()):
+            return {}, {}
+        return topology, paths
 
     def known_tree(self) -> tuple[str | None, dict[str, str | None], bool]:
         """``tree()``, or no tree when ``google_org_units`` cannot be read (an older bundle); a scan bound still
@@ -378,46 +498,30 @@ class _Context:
             return None, {}, False
 
     def group_ids(self) -> dict[str, str] | None:
-        """Lower-case address and id to group id, from a whole Directory group list; None when it is not whole."""
+        """Reconcile group ids and addresses before using them for a join."""
         raw = self.directory()
         if not self.read_ok(raw, _DIRECTORY, "groups"):
             return None
+        records, whole = self.records("google_groups", required=False)
+        groups = raw["groups"]["value"]
+        if not _rows_agree(records, whole, groups, _group_row, _raw_group_row):
+            return None
         index: dict[str, str] = {}
-        for group in raw["groups"]["value"]:
-            group_id, email = (group.get("id"), group.get("email")) if isinstance(group, dict) else (None, None)
-            if not _bare(group_id) or group_id in index:
+        for row in groups:
+            group, email = _raw_group_row(row)
+            if group in index or email in index or group == email:
                 return None
-            index[group_id] = group_id
-            if isinstance(email, str) and email:
-                if email.lower() in index:
-                    return None
-                index[email.lower()] = group_id
+            index[group] = index[email] = group
         return index
 
-    def path_index(self) -> dict[str, str | None]:
-        """Org unit path to ``ou:<id>`` from the raw Directory list (``None``: two units share it), checked against
-        the complete normalised topology; empty when either cannot be trusted. An older read lists no root row: its
-        root is the parent of the top-level units (``parentOrgUnitPath`` ``/``), as the normaliser infers it."""
-        top, org_units, complete = self.known_tree()
-        raw = self.directory()
-        if not complete or top is None or not self.read_ok(raw, _DIRECTORY, "orgUnits"):
+    def path_index(self) -> dict[str, str]:
+        """A user's path is usable only against the reconciled topology."""
+        if not self.known_tree()[2]:
             return {}
-        by_path: dict[str, str | None] = {}
-        inferred: set[str | None] = set()
-        for row in raw["orgUnits"]["value"]:
-            unit = _unit_id(row.get("orgUnitId")) if isinstance(row, dict) else None
-            path = row.get("orgUnitPath") if isinstance(row, dict) else None
-            if unit is None or "ou:" + unit not in org_units or not isinstance(path, str) or not path.startswith("/"):
-                return {}
-            by_path[path] = None if path in by_path else "ou:" + unit
-            if path != "/" and row.get("parentOrgUnitPath") == "/":
-                inferred.add(_unit_id(row.get("parentOrgUnitId")))
-        if "/" in by_path:
-            return by_path if by_path["/"] == top and inferred <= {top[3:]} else {}
-        if inferred != {top[3:]}:
-            return {}
-        by_path["/"] = top
-        return by_path
+        return self.directory_tree()[1]
+
+    def ou(self, unit: str) -> str:
+        return "ou:" + pseudonym(self.key, unit)
 
     def user(self, user_id: str) -> str:
         self.users.add(user_id)
@@ -439,14 +543,45 @@ class _Context:
         return "group:" + pseudonym(self.key, "group-email:" + address.lower())
 
 
+def _ou_path(value: Any) -> bool:
+    return (isinstance(value, str) and value.isprintable() and value.startswith("/")
+            and (value == "/" or all(part.strip() and part not in (".", "..") for part in value[1:].split("/"))))
+
+
+def _rows_agree(records: list[dict] | None, whole: bool, raw: list, normalised_key: Callable, raw_key: Callable) -> bool:
+    """Require the same unique, readable row identities and values on both sides of a join."""
+    if records is None:
+        return not raw
+    if not whole or len(records) != len(raw):
+        return False
+    normalised = {normalised_key(row) for row in records}
+    source = {raw_key(row) for row in raw}
+    return None not in normalised and len(normalised) == len(records) and source == normalised
+
+
+def _group_row(row: dict) -> tuple[str, str] | None:
+    group, email = row.get("id"), row.get("email")
+    if row.get("kind") == "google_group" and _bare(group) and isinstance(email, str) and _scuba_group_email(email):
+        return group, email.lower()
+    return None
+
+
+def _raw_group_row(row: Any) -> tuple[str, str] | None:
+    if not isinstance(row, dict):
+        return None
+    return _group_row(_obj(("kind", "google_group"), ("id", row.get("id")), ("email", row.get("email"))))
+
+
 def _sound(org_units: dict[str, str | None], top: str) -> bool:
+    rooted = {top}
     for start in org_units:
         seen, unit = set(), start
-        while unit != top:
+        while unit not in rooted:
             if unit in seen or unit not in org_units or org_units[unit] is None:
                 return False
             seen.add(unit)
             unit = org_units[unit]
+        rooted.update(seen)
     return True
 
 
@@ -456,7 +591,8 @@ def _split(records: list[dict[str, Any]], section: str, kind: str) -> tuple[list
     states = [row for row in records if row.get("kind") == f"{section}_read_state"]
     state = states[0] if len(states) == 1 else {}
     count = state.get("record_count")
-    consistent = len(states) == 1 and len(data) + 1 == len(records) and type(count) is int and count == len(data)
+    consistent = (len(states) == 1 and state.get("id") == "read_state" and len(data) + 1 == len(records)
+                  and type(count) is int and count == len(data))
     return data, consistent, state
 
 
@@ -466,92 +602,154 @@ def _split(records: list[dict[str, Any]], section: str, kind: str) -> tuple[list
 def _tenant(ctx: _Context) -> dict[str, Any]:
     top, org_units, complete = ctx.tree()
     _require(top is not None, "top_unit", "missing_field")
-    return _obj(("as_of", ctx.as_of), ("top_unit", top), ("org_units", org_units), ("complete", complete))
+    units = {ctx.ou(unit): ctx.ou(parent) if parent is not None else None for unit, parent in org_units.items()}
+    return _obj(("as_of", ctx.as_of), ("top_unit", ctx.ou(top)), ("org_units", units), ("complete", complete))
 
 
-def _attributed(ctx: _Context, state: dict[str, Any]) -> list[tuple[str, str | None, str | None]] | None:
-    """The (section, org unit, group) failures the normaliser attributed (``unusable_sections``: every unit), when
-    they are the only reason the read is not complete: the Policy API read itself whole, and every unreadable raw row
-    covered by an attribution of its own section and unit, worked out from the raw row as the normaliser does. An
-    attribution the raw read contradicts (it names one setting, the failed row is another's) proves nothing. None
-    otherwise."""
-    sections, scopes, types = state.get("unusable_sections"), state.get("unusable_scopes"), _section_types()
-    if not isinstance(sections, list) or not isinstance(scopes, list) or not (sections or scopes):
-        return None
-    found: list[tuple[str, str | None, str | None]] = []
-    for section in sections:
-        if section not in types:
-            return None
-        found.append((section, None, None))
-    for scope in scopes:
-        section = scope.get("section") if isinstance(scope, dict) else None
-        org_unit, group = (scope.get("org_unit"), scope.get("group")) if isinstance(scope, dict) else (None, None)
-        if section not in types or not (org_unit is None or _bare(org_unit)) or not (group is None or _bare(group)):
-            return None
-        found.append((section, org_unit, group))
-    raw = ctx.optional("raw/google_policies.json")
-    section = raw.get("policySettings") if isinstance(raw, dict) else None
-    if not _whole(section) or not section["value"]:
-        return None
-    ctx.charge("raw:google_policies:policySettings", len(section["value"]))
+def _policy_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[str, str | None]) -> bool:
+    """Rebuild the policy read from raw rows and require the retained rows and failure attribution to agree.
+
+    Transport failures can hide any policy. Only row validation failures confirmed by the normaliser's own
+    classification can be attributed to individual settings.
+    """
+    collector, name = "google_policies", "policySettings"
+    raw = ctx.optional(f"raw/{collector}.json")
+    if not ctx.has_whole_list(raw, collector, name):
+        return False
     coverage, gaps = ctx.coverage(), ctx.gaps()
-    if coverage is None or gaps is None or any(row.get("collector") == "google_policies" for row in gaps):
+    if coverage is None or gaps is None or gaps.get(collector):
+        return False
+    values = raw[name]["value"]
+    for item in values:
+        query = item.get("policyQuery") if isinstance(item, dict) else None
+        if isinstance(query, dict) and not set(query) <= {"orgUnit", "group", "sortOrder", "query", "query_scope"}:
+            return False
+    operations = {label for owner, label in coverage if owner == collector}
+    if operations - {name, "twoStepVerificationPolicies", "policyPlacement"}:
+        return False
+    placement = coverage.get((collector, "policyPlacement"), [])
+    if placement and (len(placement) != 1 or not _placement_failure(placement[0], state, org_units)):
+        return False
+    if "twoStepVerificationPolicies" in operations and "twoStepVerificationPolicies" not in raw:
+        return False
+    read_rows = coverage.get((collector, name), [])
+    if len(read_rows) != 1 and (read_rows or ctx.manifest.get("mode") != "offline"):
+        return False
+    if read_rows:
+        row = read_rows[0]
+        if "policy_row_validation" in row and type(row["policy_row_validation"]) is not bool:
+            return False
+        if not _row_ok(row, len(values)) and not (
+                row.get("status") == "partial" and row.get("policy_row_validation") is True and _uncut(row)
+                and _count_agrees(row, len(values)) and row.get("error_class") == "malformed_response"
+                and state.get("complete") is False):
+            return False
+    replayed, _ = _policy_settings_read(raw, [_obj(("name", collector), ("status", "ok"))], [],
+                                       {unit[3:] for unit in org_units})
+    expected, _, read_state = _split(replayed, "google_policy_settings", "google_policy_setting")
+
+    def policy_key(row: dict) -> str:
+        return _json(_obj(*((key, row.get(key)) for key in
+                            ("section", "org_unit", "group", "unit_kind", "sort_order", "value"))))
+
+    if "twoStepVerificationPolicies" in raw and (
+            not ctx.read_ok(raw, collector, "twoStepVerificationPolicies", direct_count=False)
+            or two_step_subset_differs(raw)):
+        return False
+    if not _rows_agree(data, True, expected, policy_key, policy_key):
+        return False
+    for key in ("complete", "malformed_count", "unusable_sections", "unusable_scopes"):
+        if key not in state or _json(state[key]) != _json(read_state.get(key)):
+            return False
+    if state.get("complete") is True:
+        return True
+    # Unattributed malformed rows are counted by the normaliser too. They cannot be restored to a scoped read.
+    return bool(read_state.get("unusable_sections") or read_state.get("unusable_scopes")) and _all_failures_attributed(raw)
+
+
+def _placement_failure(row: dict, state: dict, org_units: dict[str, str | None]) -> bool:
+    """A derived placement diagnostic is covered only by a saved scope outside the Directory tree."""
+    scopes = state.get("unusable_scopes")
+    return (row.get("status") == "partial" and row.get("policy_row_validation") is True
+            and _uncut(row) and _count_agrees(row, 0) and row.get("error_class") == "malformed_response"
+            and isinstance(scopes, list) and any(
+                isinstance(scope, dict) and _bare(scope.get("org_unit"))
+                and "ou:" + scope["org_unit"] not in org_units for scope in scopes))
+
+
+def _all_failures_attributed(raw: dict) -> bool:
+    """Reject any raw row whose setting the normaliser cannot identify."""
+    return all(policy_is_unrecognised(row) or (
+        not (set(policy_problems(row)) & POLICY_SECTION_PROBLEMS)
+        and _policy_section(row["setting"].get("type")) is not None)
+        for row in minimise_policy_settings(raw["policySettings"]["value"]))
+
+
+def _policy_value(ctx: _Context, value: Any, schema: Any) -> Any:
+    """Redact identifiers using the schema, keeping equality across rule and list references."""
+    if value is None:
         return None
-    for row in coverage:
-        # A row validation failure is the attributed one; any other failed or cut row may hide any setting.
-        if row.get("collector") == "google_policies" and not (
-                _row_ok(row) or row.get("policy_row_validation") is True
-                and row.get("collection_truncated") is not True and not row.get("truncation_reason")):
-            return None
-    every_unit = {name for name, org_unit, group in found if org_unit is None and group is None}
-    scoped = {(name, org_unit, group) for name, org_unit, group in found}
-    for item in minimise_policy_settings(section["value"]):
-        if policy_is_unrecognised(item):
-            continue
-        problems = set(policy_problems(item))
-        setting = item.get("setting") if isinstance(item, dict) else None
-        if not problems:
-            continue
-        name = None if problems & POLICY_SECTION_PROBLEMS or not isinstance(setting, dict) else _policy_section(
-            setting.get("type"))
-        if name is None:
-            return None  # a policy whose section cannot be told may be any rule's
-        if name in every_unit:
-            continue
-        targets = None if problems & POLICY_TARGET_PROBLEMS else _policy_targets(item)
-        if targets is None or (name, targets[0], targets[1]) not in scoped:
-            return None  # the failed row is not the one the normaliser attributed
-    return found
+    if isinstance(schema, RequiredPolicyField):
+        return _policy_value(ctx, value, schema.schema)
+    if isinstance(schema, dict):
+        return {key: _policy_value(ctx, field, schema[key]) for key, field in value.items()}
+    if isinstance(schema, list):
+        return [_policy_value(ctx, item, schema[0]) for item in value]
+    if schema == "address-lists":
+        return [_obj(("id", _policy_value(ctx, item["id"], "reference")),
+                     ("entry_count", item["entry_count"]), ("domain_entry_count", item["domain_entry_count"]))
+                for item in value]
+    if schema == "reference":
+        return "ref:" + pseudonym(ctx.key, "policy-reference:" + value)
+    if schema == "ip":
+        # The list rule tests presence and IP syntax. Keep distinct valid values in documentation space.
+        token = pseudonym(ctx.key, "policy-ip:" + value)
+        return "2001:db8::" + ":".join(token[i:i + 4] for i in range(0, len(token), 4))
+    return value
+
+
+def _unique_policy_members(value: Any) -> bool:
+    if isinstance(value, list):
+        return len({_json(item) for item in value}) == len(value) and all(map(_unique_policy_members, value))
+    if isinstance(value, dict):
+        return all(map(_unique_policy_members, value.values()))
+    return True
 
 
 def _policies(ctx: _Context) -> dict[str, Any]:
     rows, whole = ctx.records("google_policy_settings")
     data, consistent, state = _split(rows or [], "google_policy_settings", "google_policy_setting")
-    top = ctx.known_tree()[0]  # without a unit tree a group-only policy cannot be placed
+    top, org_units, topology_complete = ctx.known_tree()
     types = _section_types()
-    complete = consistent and whole
-    failures = None
-    if complete and state.get("complete") is not True:
-        failures = _attributed(ctx, state)
-        complete = failures is not None
+    complete = consistent and whole and topology_complete and _policy_read(ctx, data, state, org_units)
+    failures = []
+    if complete and state["complete"] is False:
+        failures = [(section, None, None) for section in state["unusable_sections"]]
+        failures.extend((scope["section"], scope["org_unit"], scope["group"]) for scope in state["unusable_scopes"])
     policies, units = [], {}
     for row in data:
         org_unit, group, kind, section = row.get("org_unit"), row.get("group"), row.get("unit_kind"), row.get("section")
         if group is not None and org_unit is None:
             org_unit = top[3:] if top else None  # a group-only policy applies under the top unit (policy_api.py:804-825)
-        if (not _bare(org_unit) or group is not None and not _bare(group) or section not in types
+        if (not _bare(org_unit) or group is not None and not _bare(group) or not isinstance(section, str) or section not in types
                 or kind != ("group" if group is not None else "org_unit")):
             complete = False  # a policy that cannot be placed is left out; the read is no longer the whole
             continue
-        unit = f"ou:{org_unit}/{ctx.group(group)}" if group is not None else f"ou:{org_unit}"
+        unit = ctx.ou("ou:" + org_unit)
+        if group is not None:
+            unit += "/" + ctx.group(group)
         units.setdefault(section, set()).add((unit, kind))
         rank = row.get("sort_order")
         entry = _obj(("unit", unit), ("unit_kind", kind), ("section", section),
                      ("sort_order", rank if finite_policy_number(rank) else None))
         value = row.get("value")
         # Only a value equal to its own schema projection is passed; anything else leaves the entry unusable.
-        if "value" in row and minimise_policy_value(types[section], value) == value:
-            entry.update(_obj(("value", deepcopy(value))))
+        if (isinstance(value, dict) and _unique_policy_members(value)
+                and _json(minimise_policy_value(types[section], value)) == _json(value)):
+            schema = POLICY_VALUE_SCHEMAS[types[section].removeprefix("settings/")]
+            entry.update(_obj(("value", _policy_value(ctx, value, schema))))
+        else:
+            complete = False
         policies.append(entry)
     for section, org_unit, group in failures or ():
         # The engine's own unknown: an entry with no value makes that (unit, section) UNUSABLE in the reducer.
@@ -560,9 +758,10 @@ def _policies(ctx: _Context) -> dict[str, Any]:
             complete = False
             continue
         if org_unit is None and group is None:
-            targets = {*units.get(section, ()), (top, "org_unit")}
+            targets = {*units.get(section, ()), (ctx.ou(top), "org_unit")}
         else:
-            targets = {(f"ou:{base}/{ctx.group(group)}" if group else f"ou:{base}", "group" if group else "org_unit")}
+            unit = ctx.ou("ou:" + base)
+            targets = {(unit + "/" + ctx.group(group), "group")} if group else {(unit, "org_unit")}
         for unit, kind in sorted(targets):
             policies.append(_obj(("unit", unit), ("unit_kind", kind), ("section", section), ("sort_order", None)))
     return _obj(("complete", complete), ("policies", policies))
@@ -592,19 +791,67 @@ def _event_fields(row: dict[str, Any], fields: dict[str, tuple[frozenset[str], b
     return name, setting, value, application
 
 
+def _event_key(row: dict[str, Any]) -> tuple | None:
+    time = instant_ns(row.get("event_time"))
+    fields = ("event", "setting", "new_value", "org_unit", "group_email", "application")
+    if time is None or any(key in row and not isinstance(row[key], str) for key in fields):
+        return None
+    return (time, *(row.get(key) for key in fields))
+
+
+def _event_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[str, str | None]) -> bool:
+    collector = "google_setting_events"
+    name = SCUBA_READ_SECTIONS[collector]
+    raw = ctx.optional(f"raw/{collector}.json")
+    if not ctx.read_ok(raw, collector, name, direct_count=False):
+        return False
+    coverage, gaps = ctx.coverage(), ctx.gaps()
+    if gaps.get(collector):
+        return False
+    saved = raw[name]["value"]
+    replayed = _scuba_read_records(
+        collector, _obj((collector, raw)), [_obj(("name", collector), ("status", "ok"))], [],
+        event_org_units=_event_org_units(ctx.directory(), {unit[3:] for unit in org_units}),
+    )
+    expected, _, read_state = _split(replayed, collector, "google_setting_event")
+    if read_state.get("complete") is not True or not _rows_agree(data, True, expected, _event_key, _event_key):
+        return False
+    start, end = (instant_ns(state.get(key)) for key in ("window_start", "window_end"))
+    if start is None or end is None or start >= end or (start, end) != tuple(
+            instant_ns(read_state.get(key)) for key in ("window_start", "window_end")):
+        return False
+
+    # Live collection logs each event-name stream. Offline replay may only have the saved activities and window.
+    streams = {label for owner, label in coverage if owner == collector and label != name}
+    if not streams:
+        return (collector, name) in coverage or ctx.manifest.get("mode") == "offline"
+    if streams != set(SCUBA_ADMIN_EVENTS):
+        return False
+    counts: Counter[str] = Counter()
+    for activity in saved:
+        labels = {event["name"] for event in activity["events"]}
+        if len(labels) != 1:
+            return False
+        counts.update(labels)
+    return all(ctx.fanout_ok(collector, label, counts[label]) for label in streams)
+
+
 def _events(ctx: _Context) -> dict[str, Any]:
     rows, whole = ctx.records("google_setting_events")
     data, consistent, state = _split(rows or [], "google_setting_events", "google_setting_event")
-    complete = consistent and whole and state.get("complete") is True
-    org_units = ctx.known_tree()[1]  # without a unit tree no OU event can be placed
+    _, org_units, topology_complete = ctx.known_tree()
+    complete = (consistent and whole and state.get("complete") is True and topology_complete
+                and _event_read(ctx, data, state, org_units))
     groups: dict[str, str] = {}
     if any("group_email" in row for row in data):
         try:
-            groups = ctx.group_ids() or {}
+            index = ctx.group_ids()
+            complete = complete and index is not None
+            groups = index or {}
         except Unavailable as exc:
             if exc.reason == "oversize":
                 raise
-            # An unreadable group list leaves group events on their address pseudonym; the events still stand.
+            complete = False
     fields = _event_value_fields()
     events = []
     for row in data:
@@ -617,14 +864,20 @@ def _events(ctx: _Context) -> dict[str, Any]:
                 group_id = groups.get(group.lower())
                 unit = ctx.group(group_id) if group_id else ctx.group_address(group)
         elif _bare(org_unit) and "ou:" + org_unit in org_units:
-            unit = "ou:" + org_unit
+            unit = ctx.ou("ou:" + org_unit)
         told = _event_fields(row, fields)
         name, setting, value, application = told if told else ("", None, None, None)
         if name == "DELETE_APPLICATION_SETTING" and row.get("new_value") is not None:
             # A delete carries no value (L04 drops the target of one that does): malformed, so it cannot be placed
             # and the events kind holds it ambiguous rather than a reset or a delete it can rank.
             unit = None
-        events.append(_obj(("time", _instant(row.get("event_time"))), ("event", name), ("setting", setting),
+        time = _instant(row.get("event_time"))
+        relevant = name in fields or isinstance(setting, str) and setting in fields
+        if (time is None or not name or relevant and (application in ("", "unrecognised")
+                or name != "TOGGLE_CAA_ENABLEMENT" and unit is None
+                or name != "DELETE_APPLICATION_SETTING" and value in (None, "unrecognised"))):
+            complete = False
+        events.append(_obj(("time", time), ("event", name), ("setting", setting),
                            ("new_value", value), ("unit", unit), ("application", application)))
     # The log window is the read's own record; without one it is null and the events kind concludes nothing.
     return _obj(("complete", complete), ("window_start", _instant(state.get("window_start"))),
@@ -642,7 +895,7 @@ def _contact(token: str, ctx: _Context) -> str:
     out = []
     for local, host in found:
         if local == "reports" and host.lower() == "dmarc.cyber.dhs.gov":
-            out.append("reports@dmarc.cyber.dhs.gov")
+            out.append("%72eports@%64marc.cyber.dhs.gov")
         else:
             ctx.addresses += 1
             out.append("contact@example.invalid")
@@ -682,116 +935,195 @@ def _dmarc_text(record: str, ctx: _Context) -> str:
     return text
 
 
-def _listed(rows: list[Any]) -> set[str] | None:
-    """The lower-case names the posture read must cover: every verified Directory domain and verified alias, as the
-    collector picks them; None when a row cannot be read."""
-    names: set[str] = set()
-    for row in rows:
-        if not isinstance(row, dict):
-            return None
-        name, verified, aliases = row.get("domainName", row.get("domain")), row.get("verified", True), row.get(
-            "domainAliases", [])
-        if not isinstance(name, str) or not name.strip() or type(verified) is not bool or not isinstance(aliases, list):
-            return None
-        if not verified:
+def _spf_text(record: str) -> str:
+    """Redact SPF arguments while preserving the terms, their order and their syntax validity."""
+    if not _is_spf(record):
+        return "unrecognised"
+    terms = ["v=spf1"]
+    for term in record[6:].split(" "):
+        if not term:
             continue
-        names.add(name.strip().lower())
+        if not all(0x21 <= ord(char) <= 0x7E for char in term):
+            return "v=spf1 invalid"
+        directive = _directive(term)
+        if isinstance(directive, tuple):
+            qualifier, mechanism = directive
+            suffix = _obj(("include", ":example.invalid"), ("exists", ":example.invalid"),
+                          ("ip4", ":192.0.2.1"), ("ip6", ":2001:db8::1")).get(mechanism, "")
+            terms.append(qualifier.removeprefix("+") + mechanism + suffix)
+            continue
+        modifier = _MODIFIER.fullmatch(term)
+        if directive is False or modifier is None:
+            return "v=spf1 invalid"
+        name, argument = modifier[1].lower(), modifier[2]
+        if name in ("redirect", "exp"):
+            if not _domain_spec(argument):
+                return "v=spf1 invalid"
+            terms.append(name + "=example.invalid")
+        elif _macro_string(argument) is None:
+            return "v=spf1 invalid"
+        else:
+            terms.append("other=redacted")
+    return " ".join(terms)
+
+
+def _domain_name(value: Any) -> bool:
+    return isinstance(value, str) and _DOMAIN.fullmatch(value) is not None
+
+
+def _listed(rows: list[Any]) -> dict[str, tuple[bool, bool]] | None:
+    """Verified flags and alias scope from a unique, readable Directory listing."""
+    names: dict[str, tuple[bool, bool]] = {}
+
+    def add(name: Any, verified: Any, alias: bool) -> bool:
+        if not _domain_name(name) or type(verified) is not bool or name.lower() in names:
+            return False
+        names[name.lower()] = verified, alias
+        return True
+
+    for row in rows:
+        if not isinstance(row, dict) or not add(row.get("domainName", row.get("domain")),
+                                                row.get("verified"), False):
+            return None
+        aliases = row.get("domainAliases", [])
+        if not isinstance(aliases, list):
+            return None
         for alias in aliases:
-            alias_name = alias.get("domainAliasName") if isinstance(alias, dict) else None
-            alias_verified = alias.get("verified", True) if isinstance(alias, dict) else None
-            if not isinstance(alias_name, str) or not alias_name.strip() or type(alias_verified) is not bool:
+            if not isinstance(alias, dict) or not add(alias.get("domainAliasName"), alias.get("verified"), True):
                 return None
-            if alias_verified:
-                names.add(alias_name.strip().lower())
     return names
+
+
+def _dns_scope(ctx: _Context, raw: Any) -> dict[str, bool] | None:
+    if not ctx.read_ok(raw, "google_dns_posture", "domains"):
+        return None
+    listed = _listed(raw["domains"]["value"])
+    if listed is None:
+        return None
+    rows, whole = ctx.records("google_domains", required=False)
+    if rows is not None:
+        if not whole:
+            return None
+        scope: dict[str, bool] = {}
+        for row in rows:
+            name, kind = row.get("domain_name"), row.get("domain_kind")
+            if (row.get("kind") != "google_domain" or not _domain_name(name) or name.lower() in scope
+                    or kind not in ("alias", "primary", "secondary")):
+                return None
+            scope[name.lower()] = kind == "alias"
+            if "verified" in row and (type(row["verified"]) is not bool or name.lower() not in listed
+                                      or row["verified"] != listed[name.lower()][0]):
+                return None
+        if scope != {name: alias for name, (_, alias) in listed.items()}:
+            return None
+    return {name: alias for name, (verified, alias) in listed.items() if verified}
+
+
+def _txt_list(value: Any) -> list[str] | None:
+    records = _strings(value)
+    if records is None or len(set(records)) != len(records) or any(
+            not _clean_text(record) or not record.strip() for record in records):
+        return None
+    return records
+
+
+def _dns_answers(row: dict[str, Any]) -> tuple[tuple | None, tuple | None, tuple | None]:
+    """Read each retained TXT answer without applying its baseline predicate."""
+    spf, dkim, dmarc = (row.get(part) if isinstance(row.get(part), dict) else {} for part in ("spf", "dkim", "dmarc"))
+    spf_records = _txt_list(spf.get("records")) if _markers_ok(spf) else None
+    selectors = dkim.get("selectors") if _markers_ok(dkim) else None
+    dkim_records = [_txt_list(selectors.get(selector)) if isinstance(selectors, dict) else None
+                    for selector in _dkim_selectors()]
+    query, inherited, dmarc_records = dmarc.get("query_name"), dmarc.get("inherited"), _txt_list(dmarc.get("records"))
+    name = row.get("domain")
+    own = isinstance(name, str) and query == "_dmarc." + name
+    parent = (isinstance(name, str) and isinstance(query, str) and query.startswith("_dmarc.")
+              and _domain_name(query[7:]) and name.endswith("." + query[7:]))
+    return (tuple(sorted(spf_records)) if spf_records is not None else None,
+            tuple(tuple(sorted(records)) for records in dkim_records) if None not in dkim_records else None,
+            (query, inherited, tuple(sorted(dmarc_records)))
+            if _markers_ok(dmarc) and dmarc_records is not None
+            and (inherited is True and parent or inherited is False and own) else None)
+
+
+def _no_resolver_error(row: dict[str, Any]) -> bool:
+    return _markers_ok(row) and (row.get("resolver_error") is None or row["resolver_error"] is False)
 
 
 def _dns(ctx: _Context) -> dict[str, Any]:
     records, whole = ctx.records("google_dns_posture")
     data = [row for row in records if row.get("kind") == "google_domain_posture"]
-    states = [row for row in records if row.get("kind") != "google_domain_posture"]
-
-    def new_shape(row: dict[str, Any]) -> bool:
-        return "alias" in row or isinstance(row.get("dmarc"), dict) and "query_name" in row["dmarc"]
-
-    # A bundle collected before the DMARC tree walk and the selector map has none of their fields: not collected.
-    _require(not data or any(new_shape(row) for row in data), "dmarc.query_name", "missing_field")
-    # The posture read itself must be whole, whether or not the normaliser wrote a read-state record, and it must
-    # cover exactly the domains the Directory lists: a domain left unread may be the one that fails.
+    states = len(records) != len(data)
+    _require(not data or any("alias" in row or isinstance(row.get("dmarc"), dict) and "query_name" in row["dmarc"]
+                             for row in data), "dmarc.query_name", "missing_field")
     raw = ctx.optional("raw/google_dns_posture.json")
-    posture_read = ctx.read_ok(raw, "google_dns_posture", "domainPosture")
-    complete = whole and ctx.read_ok(raw, "google_dns_posture", "domains") and posture_read
-    listed = _listed(raw["domains"]["value"]) if complete else None
-    raw_posture: dict[str, list[dict[str, Any]]] = {}
-    for item in raw["domainPosture"]["value"] if posture_read else []:
-        name = item.get("domain") if isinstance(item, dict) else None
-        if not isinstance(name, str) or not name:
-            complete = False
-            continue
-        raw_posture.setdefault(name.lower(), []).append(item)
-    posture_names = {row["domain"].lower() for row in data if isinstance(row.get("domain"), str)}
-    if listed is None or not listed == posture_names == set(raw_posture):
-        complete = False
+    posture_read = ctx.read_ok(raw, "google_dns_posture", "domainPosture", direct_count=False)
+    scope = _dns_scope(ctx, raw)
     if states:
         _, consistent, state = _split(records, "google_dns_posture", "google_domain_posture")
-        complete = complete and consistent and state.get("complete") is True
-    kinds: dict[str, Any] = {}
-    for row in ctx.records("google_domains", required=False)[0] or []:
-        if isinstance(row.get("domain_name"), str):
-            name = row["domain_name"].lower()
-            kinds[name] = row.get("domain_kind") if name not in kinds else None
-    domains, seen = [], set()
+        whole = whole and consistent and state.get("complete") is True
+    raw_rows = raw["domainPosture"]["value"] if posture_read else []
+    raw_names = Counter(row["domain"].lower() for row in raw_rows if isinstance(row, dict)
+                        and _domain_name(row.get("domain")))
+    norm_names = Counter(row["domain"].lower() for row in data if _domain_name(row.get("domain")))
+    raw_by_name = {row["domain"].lower(): row for row in raw_rows if isinstance(row, dict)
+                   and _domain_name(row.get("domain"))}
+    complete = (whole and posture_read and bool(scope)
+                and len(raw_rows) == len(raw_names) and len(data) == len(norm_names)
+                and set(raw_names) == set(norm_names) == set(scope))
+
+    coverage = ctx.coverage() or {}
+    complete = complete and {label for owner, label in coverage if owner == "google_dns_posture"
+                             and label.startswith("posture:")} == {
+        "posture:" + row["domain"] for row in data if _domain_name(row.get("domain"))}
+    domains = []
     for row in data:
         name = row.get("domain")
         if not isinstance(name, str) or not name:
-            complete = False
             continue
-        if name.lower() in seen:
-            complete = False  # one domain read twice may disagree with itself
-        seen.add(name.lower())
-        host = ctx.domain(name) if _DOMAIN.fullmatch(name) else ""  # blank: the kind holds the entry unusable
-        kind = kinds.get(name.lower())
-        listed_alias = (kind == "alias") if kind in ("alias", "primary", "secondary") else None
-        alias = row.get("alias") if "alias" in row else listed_alias
-        if not isinstance(alias, bool) or listed_alias is not None and alias != listed_alias:
-            alias = None  # malformed or contradicting the Directory domain kind: the domain's scope is unknown
-        # This domain's own read must be proven before its answers (even an empty TXT list) count as read: one raw
-        # record with no resolver failure, in a whole posture read, and its own coverage row ok. Otherwise unknown.
-        twins = raw_posture.get(name.lower(), [])
-        read = (posture_read and len(twins) == 1 and twins[0].get("resolver_error") in (None, False)
-                and ctx.fanout_ok("google_dns_posture", "posture:" + name))
-        error = row.get("resolver_error")
-        spf, dkim, dmarc = (row.get(part) if isinstance(row.get(part), dict) else {} for part in ("spf", "dkim", "dmarc"))
-        selectors = dkim.get("selectors") if isinstance(dkim.get("selectors"), dict) else {}
-        inherited, query = dmarc.get("inherited"), dmarc.get("query_name")
-        if isinstance(query, str):
-            # Only the relation the kind reads leaves the bundle: the domain's own name, a parent's, or neither.
-            if host and query == "_dmarc." + name:
-                query = "_dmarc." + host
-            elif host and query.startswith("_dmarc.") and len(query) > 7 and name.endswith("." + query[7:]):
-                query = "_dmarc.invalid"
-            else:
-                query = "unrecognised"  # the kind holds it unusable
-        spf_records, dmarc_records = _strings(spf.get("records")), _strings(dmarc.get("records"))
-        dkim_records = {selector: _strings(selectors.get(selector)) for selector in _dkim_selectors()}
-
-        domains.append(_obj(
-            ("domain", host), ("alias", alias),
-            # Only the fact of a resolver failure is kept, never its message (a resolver URL or local detail).
-            ("resolver_error", not read or not (error is None or error is False)),
-            # An SPF answer becomes what GMAIL.3.1 reads of it (``dns._is_spf``, ``dns._spf_passes``).
-            ("spf", _obj(("records", None if spf_records is None else [
-                ("v=spf1 -all" if _spf_passes(text) else "v=spf1 ?all") if _is_spf(text) else "unrecognised"
-                for text in spf_records]))),
-            ("dkim", _obj(("selectors", {selector: None if answers is None else [
-                "v=DKIM1;" if text.startswith("v=DKIM1;") else "unrecognised" for text in answers]
-                for selector, answers in dkim_records.items()}))),
-            ("dmarc", _obj(("query_name", query if isinstance(query, str) else None),
-                           ("inherited", inherited if isinstance(inherited, bool) else None),
-                           ("records", None if dmarc_records is None else [
-                               _dmarc_text(text, ctx) for text in dmarc_records]))),
-        ))
+        label = name.lower()
+        host = ctx.domain(name) if _domain_name(name) else ""
+        listed_alias = (scope or {}).get(label)
+        alias = row.get("alias", listed_alias)
+        if type(alias) is not bool or listed_alias is not None and alias != listed_alias:
+            alias = None
+        twin = raw_by_name.get(label)
+        raw_alias = twin.get("alias", listed_alias) if twin is not None else None
+        answers = _dns_answers(row)
+        read = (whole and posture_read and host and type(listed_alias) is bool and alias is listed_alias
+                and raw_alias is listed_alias and raw_names[label] == norm_names[label] == 1
+                and ctx.fanout_ok("google_dns_posture", "posture:" + name, 1)
+                and _no_resolver_error(row) and _no_resolver_error(twin)
+                and answers == _dns_answers(twin) and None not in answers)
+        complete = complete and bool(read)
+        domains.append(_project_domain(ctx, row, name, host, alias, bool(read)))
     return _obj(("complete", complete), ("domains", domains))
+
+
+def _project_domain(ctx: _Context, row: dict[str, Any], name: str, host: str, alias: bool | None,
+                    read: bool) -> dict[str, Any]:
+    spf, dkim, dmarc = (row.get(part) if isinstance(row.get(part), dict) else {} for part in ("spf", "dkim", "dmarc"))
+    selectors = dkim.get("selectors") if isinstance(dkim.get("selectors"), dict) else {}
+    inherited, query = dmarc.get("inherited"), dmarc.get("query_name")
+    if isinstance(query, str):
+        if host and query == "_dmarc." + name:
+            query = "_dmarc." + host
+        elif host and query.startswith("_dmarc.") and len(query) > 7 and name.endswith("." + query[7:]):
+            query = "_dmarc.invalid"
+        else:
+            query = "unrecognised"
+    spf_records, dmarc_records = _strings(spf.get("records")), _strings(dmarc.get("records"))
+    dkim_records = {selector: _strings(selectors.get(selector)) for selector in _dkim_selectors()}
+    return _obj(
+        ("domain", host), ("alias", alias), ("resolver_error", not read),
+        ("spf", _obj(("records", None if spf_records is None else [_spf_text(text) for text in spf_records]))),
+        ("dkim", _obj(("selectors", {selector: None if answers is None else [
+            "v=DKIM1;" if text.startswith("v=DKIM1;") else "unrecognised" for text in answers]
+            for selector, answers in dkim_records.items()}))),
+        ("dmarc", _obj(("query_name", query if isinstance(query, str) else None),
+                       ("inherited", inherited if isinstance(inherited, bool) else None),
+                       ("records", None if dmarc_records is None else [_dmarc_text(text, ctx) for text in dmarc_records]))),
+    )
 
 
 def _roles(raw: dict[str, Any] | None) -> dict[str, bool | None]:
@@ -801,22 +1133,37 @@ def _roles(raw: dict[str, Any] | None) -> dict[str, bool | None]:
     for role in raw["roles"]["value"]:
         key = _role_key(role.get("roleId")) if isinstance(role, dict) else None
         if key is None:
-            continue
+            return {}
         # ``isSuperAdminRole`` absent is false, as ScubaGoggles reads it; the privilege list must be read unless the
         # flag or the name already makes the role privileged.
         super_admin, name, privileges = role.get("isSuperAdminRole", False), role.get("roleName"), role.get(
             "rolePrivileges")
+        privileges_seen = set()
+        if "rolePrivileges" in role:
+            if not isinstance(privileges, list):
+                return {}
+            for privilege in privileges:
+                if not isinstance(privilege, dict) or not _ident(privilege.get("privilegeName")):
+                    return {}
+                service = privilege.get("serviceId")
+                if "serviceId" in privilege and not _ident(service):
+                    return {}
+                identity = service, privilege["privilegeName"]
+                if identity in privileges_seen:
+                    return {}
+                privileges_seen.add(identity)
         verdict: bool | None
-        if type(super_admin) is not bool or name is not None and not isinstance(name, str):
+        if type(super_admin) is not bool or "roleName" in role and not _label(name):
             verdict = None
         elif super_admin or isinstance(name, str) and name.upper() in _privileged_role_names():
             verdict = True
-        elif not isinstance(privileges, list) or any(
-                not isinstance(item, dict) or not isinstance(item.get("privilegeName"), str) for item in privileges):
+        elif not isinstance(privileges, list):
             verdict = None
         else:
-            verdict = any(item["privilegeName"] in _privileged_privileges() for item in privileges)
-        roles[key] = verdict if key not in roles or roles[key] == verdict else None
+            verdict = any(name in _privileged_privileges() for _, name in privileges_seen)
+        if key in roles:
+            return {}
+        roles[key] = verdict
     return roles
 
 
@@ -837,12 +1184,13 @@ def _admins(ctx: _Context) -> dict[str, Any]:
             continue
         raw_users[user_id] = row
     people: list[tuple[str, bool, Any]] = []
+    emails: dict[str, str] = {}
     known: set[str] = set()
     super_admins, inventory = 0, True
     for row in users:
         user_id, admin, delegated = row.get("id"), row.get("is_admin"), row.get("is_delegated_admin")
         twin = raw_users.get(user_id) if _ident(user_id) else None
-        if (twin is None or user_id in known or type(admin) is not bool
+        if (row.get("kind") != "google_user" or twin is None or user_id in known or type(admin) is not bool
                 or type(twin.get("isAdmin")) is not bool or twin["isAdmin"] != admin):
             complete = False  # an unread, blank, repeated or coerced account proves no count
             continue
@@ -851,20 +1199,29 @@ def _admins(ctx: _Context) -> dict[str, Any]:
                 or twin["isDelegatedAdmin"] != delegated:
             inventory, delegated = False, False  # a delegated admin may be missed
         super_admins += admin
-        people.append((user_id, admin or delegated, row.get("org_unit_path")))
+        path, email = row.get("org_unit_path"), row.get("primary_email")
+        if not _ou_path(path) or path != twin.get("orgUnitPath"):
+            path = None
+        if not isinstance(email, str) or not _scuba_group_email(email) or email != twin.get("primaryEmail"):
+            inventory = False
+        elif email.lower() in emails:
+            inventory = False
+        else:
+            emails[email.lower()] = user_id
+        people.append((user_id, admin or delegated, path))
     if len(people) != len(raw_users):
         complete = False
-    assigned = _assigned(ctx, raw)
+    assigned = _usable_dependency(lambda: _assigned(ctx, raw), None)
     if assigned is None or assigned - known:
         # An unreadable or misjoined role inventory, or a privileged role held by anything but a user (a group), makes
         # accounts privileged that no user row shows (ScubaGoggles counts user assignees only, provider.py:804-809).
         inventory = False
-    by_path = ctx.path_index()
-    member_of, memberships_complete = _memberships(ctx, raw, known, users)
+    by_path = _usable_dependency(ctx.path_index, {})
+    member_of, memberships_complete = _usable_dependency(lambda: _memberships(ctx, raw, known, emails), ({}, False))
     privileged = [
         _obj(("user", ctx.user(user_id)),
              # Unplaceable (an unknown or shared path, an unproven unit tree): null, which the SSO kind cannot place.
-             ("org_unit", by_path.get(path) if isinstance(path, str) else None),
+             ("org_unit", ctx.ou(by_path[path]) if path in by_path else None),
              ("groups", sorted(member_of.get(user_id, ()))))
         for user_id, flagged, path in people if flagged or user_id in (assigned or ())]
     if not inventory:
@@ -873,98 +1230,166 @@ def _admins(ctx: _Context) -> dict[str, Any]:
                 ("memberships_complete", memberships_complete))
 
 
+def _usable_dependency(read: Callable, fallback: Any) -> Any:
+    """A refused dependent read cannot undo independently proven evidence. A scan bound withholds the section."""
+    try:
+        return read()
+    except Unavailable as exc:
+        if exc.reason == "oversize":
+            raise
+        return fallback
+
+
+def _assignment_key(role: Any, assignee: Any, assignment: Any, scope: Any, unit: Any) -> tuple | None:
+    role = _role_key(role)
+    if role is None or not _ident(assignee) or not _ident(assignment):
+        return None
+    if scope not in (None, "CUSTOMER", "ORG_UNIT") or (unit is not None and not _ident(unit)):
+        return None
+    if (scope == "ORG_UNIT") != (unit is not None):
+        return None
+    return assignment, role, assignee, scope, unit
+
+
+def _raw_assignment_key(row: Any) -> tuple | None:
+    if not isinstance(row, dict):
+        return None
+    role, who = row.get("roleId"), row.get("assignedTo")
+    return _assignment_key(role, who, row.get("roleAssignmentId", f"{role}:{who}"),
+                           row.get("scopeType"), row.get("orgUnitId"))
+
+
+def _normalised_assignment_key(row: dict) -> tuple | None:
+    if row.get("kind") != "google_role_assignment":
+        return None
+    role, who = row.get("role_id"), row.get("assigned_to")
+    return _assignment_key(role, who, row.get("id", f"{role}:{who}"), row.get("scope_type"), row.get("org_unit_id"))
+
+
 def _assigned(ctx: _Context, raw: dict[str, Any] | None) -> set[str] | None:
-    """The assignees of highly privileged roles, or None when the inventory cannot be proven: the role and assignment
-    reads whole, every assignment's role and assignee readable identities, the normalised assignments the same
-    (role, assignee) pairs as the raw read (by identity, never by list length), and every assigned role readable."""
-    rows, rows_whole = ctx.records("google_role_assignments", required=False)
+    """Prove the role inventory independently of the user count."""
+    rows, whole = ctx.records("google_role_assignments", required=False)
     if not (ctx.read_ok(raw, _DIRECTORY, "roles") and ctx.read_ok(raw, _DIRECTORY, "roleAssignments")):
         return None
-    raw_pairs, normalised_pairs = Counter(), Counter()
-    for pairs, items, role_field, who_field in ((raw_pairs, raw["roleAssignments"]["value"], "roleId", "assignedTo"),
-                                                (normalised_pairs, rows or [], "role_id", "assigned_to")):
-        for item in items:
-            key = _role_key(item.get(role_field)) if isinstance(item, dict) else None
-            who = item.get(who_field) if isinstance(item, dict) else None
-            if key is None or not _ident(who):
-                return None
-            pairs[(key, who)] += 1
-    if (rows is None and raw_pairs) or (rows is not None and not rows_whole) or raw_pairs != normalised_pairs:
+    assignments = raw["roleAssignments"]["value"]
+    if not _rows_agree(rows, whole, assignments, _normalised_assignment_key, _raw_assignment_key):
         return None
     roles = _roles(raw)
-    assigned: set[str] = set()
-    for key, who in raw_pairs:
-        verdict = roles.get(key)
-        if verdict is None:
-            return None  # an assignment to a role that cannot be read may make its holder privileged
-        if verdict:
+    if len(roles) != len(raw["roles"]["value"]) or None in roles.values():
+        return None
+    assigned, seen = set(), set()
+    for item in assignments:
+        assignment, role, who, _, _ = _raw_assignment_key(item)
+        if assignment in seen or role not in roles:
+            return None
+        seen.add(assignment)
+        if roles[role]:
             assigned.add(who)
     return assigned
 
 
+def _member_key(group: Any, email: Any, kind: Any, identity: Any) -> tuple | None:
+    if (not isinstance(group, str) or not (_scuba_group_email(group) or _bare(group)) or kind != "USER"
+            or not _ident(identity)):
+        return None
+    if email is not None and (not isinstance(email, str) or not _scuba_group_email(email)):
+        return None
+    return group.lower(), email.lower() if email else None, identity
+
+
+def _raw_member_key(row: Any) -> tuple | None:
+    if not isinstance(row, dict):
+        return None
+    group, email = row.get("groupEmail"), row.get("email")
+    member = row.get("id", email)
+    if not _ident(member) or "email" in row and email is None:
+        return None
+    return _member_key(group, email, row.get("type"), f"{group}:{member}")
+
+
+def _normalised_member_key(row: dict) -> tuple | None:
+    if row.get("kind") != "google_group_member" or "email" in row and row["email"] is None:
+        return None
+    return _member_key(row.get("group_email"), row.get("email"), row.get("type"), row.get("id"))
+
+
 def _memberships(ctx: _Context, raw: dict[str, Any] | None, known: set[str],
-                 users: list[dict[str, Any]]) -> tuple[dict[str, set[str]], bool]:
-    """User id to the pseudonyms of the groups it is a direct member of, and whether that is every membership: the
-    group and member lists whole in the raw and normalised files (the same number of members in both), a finished
-    member read for every group whose coverage count equals the members kept for it, no member error, and every member
-    a user resolved by its stable id (else by its address). A member the tenant's user list does not hold is not one of
-    its admins."""
+                 emails: dict[str, str]) -> tuple[dict[str, set[str]], bool]:
+    """Prove every direct membership and its identity against both lists and each group's coverage."""
     groups = ctx.group_ids()
-    complete = (groups is not None and ctx.read_ok(raw, _DIRECTORY, "groupMembers", fanout=True)
-                and _whole(raw.get("groupMembersErrors", {"value": []})) and not raw.get(
-                    "groupMembersErrors", {"value": []})["value"])
-    errors, _ = ctx.records("google_group_member_errors", required=False)
-    normalised, normalised_whole = ctx.records("google_group_members", required=False)
-    complete = complete and not errors
-    if not complete:
+    if groups is None or not ctx.read_ok(raw, _DIRECTORY, "groupMembers", direct_count=False):
         return {}, False
+    if "groupMembersErrors" in raw and (
+            not ctx.has_whole_list(raw, _DIRECTORY, "groupMembersErrors") or raw["groupMembersErrors"]["value"]):
+        return {}, False
+    errors, errors_whole = ctx.records("google_group_member_errors", required=False)
+    if errors or errors is not None and not errors_whole:
+        return {}, False
+    normalised, whole = ctx.records("google_group_members", required=False)
     members = raw["groupMembers"]["value"]
-    # The normaliser writes no file for an empty section, so an absent one stands only for an empty raw list.
-    if (normalised is None and members) or normalised is not None and (
-            not normalised_whole or len(normalised) != len(members)):
-        complete = False  # the normalised member list is cut or disagrees with the raw one
-    kept = Counter(member.get("groupEmail") for member in members if isinstance(member, dict))
-    for group in raw["groups"]["value"]:
-        key = str(group.get("email") or group.get("id"))
-        if not ctx.fanout_ok(_DIRECTORY, "groupMembers:" + key, kept.get(key, 0)):
-            complete = False  # no proof that this group's members were all read and kept
-    emails: dict[str, str | None] = {}
-    for row in users:
-        email, user_id = row.get("primary_email"), row.get("id")
-        if isinstance(email, str) and email and user_id in known:
-            emails[email.lower()] = None if email.lower() in emails else user_id
+    if not _rows_agree(normalised, whole, members, _normalised_member_key, _raw_member_key):
+        return {}, False
+    kept = Counter(member["groupEmail"] for member in members)
+    labels = {group["email"]: group["id"] for group in raw["groups"]["value"]}
+    if kept.keys() - labels.keys() or any(
+            not ctx.fanout_ok(_DIRECTORY, "groupMembers:" + label, kept[label]) for label in labels):
+        return {}, False
+    coverage, gaps = ctx.coverage(), ctx.gaps()
+    expected = {"groupMembers:" + label for label in labels}
+    if ({name for collector, name in coverage if collector == _DIRECTORY and name.startswith("groupMembers:")}
+            - expected or any(label.startswith("groupMembers:") for label in gaps.get(_DIRECTORY, ()))):
+        return {}, False
+
     member_of: dict[str, set[str]] = {}
+    seen: set[tuple[str, str]] = set()
     for member in members:
-        if not isinstance(member, dict):
-            complete = False
-            continue
-        group_email, member_id, email = member.get("groupEmail"), member.get("id"), member.get("email")
-        group_id = groups.get(group_email.lower()) if isinstance(group_email, str) else None
-        # A nested group or an all-users (CUSTOMER) member makes members no user row lists: not resolved here.
-        if group_id is None or member.get("type") != "USER":
-            complete = False
-            continue
-        if "id" in member:
-            if not _ident(member_id):
-                complete = False  # a blank or malformed member id is no account, nor proof of an outsider
-                continue
-            user_id = member_id if member_id in known else None
-        else:
-            user_id = emails.get(email.lower()) if isinstance(email, str) else None
-            if user_id is None:
-                complete = False  # a member known only by an address no single account holds
-                continue
-        if user_id is not None:
-            member_of.setdefault(user_id, set()).add(ctx.group(group_id))
-    return member_of, complete
+        group = labels[member["groupEmail"]]
+        email = member.get("email")
+        by_email = emails.get(email.lower()) if email else None
+        user = member.get("id", by_email)
+        if user is None or by_email is not None and user != by_email or (group, user) in seen:
+            return {}, False
+        seen.add((group, user))
+        if user in known:
+            member_of.setdefault(user, set()).add(ctx.group(group))
+    return member_of, True
+
+
+def _sso_key(org_unit: Any, group: Any, mode: Any) -> tuple | None:
+    if not isinstance(mode, str) or mode not in _sso_modes():
+        return None
+    if (org_unit is None) == (group is None):
+        return None
+    if isinstance(org_unit, str) and org_unit.startswith("orgUnits/") and _bare(org_unit[9:]):
+        return org_unit, None, mode
+    if isinstance(group, str) and group.startswith("groups/") and (_bare(group[7:]) or _scuba_group_email(group[7:])):
+        return None, group, mode
+    return None
+
+
+def _raw_sso_key(row: Any) -> tuple | None:
+    if not isinstance(row, dict) or ("targetOrgUnit" in row) == ("targetGroup" in row):
+        return None
+    return _sso_key(row.get("targetOrgUnit"), row.get("targetGroup"), row.get("ssoMode"))
+
+
+def _normalised_sso_key(row: dict) -> tuple | None:
+    if ("target_org_unit" in row) == ("target_group" in row):
+        return None
+    return _sso_key(row.get("target_org_unit"), row.get("target_group"), row.get("sso_mode"))
 
 
 def _sso(ctx: _Context) -> dict[str, Any]:
-    rows, whole = ctx.records("google_sso_assignments")
-    data, consistent, state = _split(rows or [], "google_sso_assignments", "google_sso_assignment")
-    complete = consistent and whole and state.get("complete") is True
-    groups: dict[str, str] | None = None
-    assignments = []
+    collector = "google_sso_assignments"
+    rows, whole = ctx.records(collector)
+    data, consistent, state = _split(rows, collector, "google_sso_assignment")
+    name = SCUBA_READ_SECTIONS[collector]
+    raw = ctx.optional(f"raw/{collector}.json")
+    complete = (consistent and whole and state.get("complete") is True and ctx.read_ok(raw, collector, name)
+                and _rows_agree(data, True, raw[name]["value"], _normalised_sso_key, _raw_sso_key))
+    _, units, topology_complete = ctx.known_tree()
+    groups = ctx.group_ids() if any("target_group" in row for row in data) else {}
+    assignments, targets = [], set()
     for row in data:
         org_unit, group, mode = row.get("target_org_unit"), row.get("target_group"), row.get("sso_mode")
         if (group is None) == (org_unit is None) or not isinstance(mode, str):
@@ -972,18 +1397,21 @@ def _sso(ctx: _Context) -> dict[str, Any]:
             continue
         target = None
         if isinstance(org_unit, str) and org_unit.startswith("orgUnits/") and _bare(org_unit[9:]):
-            target = "ou:" + org_unit[9:]
+            unit = "ou:" + org_unit[9:]
+            target = ctx.ou(unit)
+            complete = complete and topology_complete and unit in units
         elif isinstance(group, str) and group.startswith("groups/"):
-            if _bare(group[7:]):
-                target = ctx.group(group[7:])
-            else:
-                if groups is None:
-                    groups = ctx.group_ids() or {}
-                group_id = groups.get(group[7:].lower())
-                target = ctx.group(group_id) if group_id else None
+            label = group[7:]
+            group_id = (groups or {}).get(label, (groups or {}).get(label.lower()))
+            if group_id is None and _bare(label):
+                group_id = label  # retain the projected target for diagnostics, withhold the verdict
+                complete = False
+            target = ctx.group(group_id) if group_id else None
         if target is None:
             complete = False
             continue
+        complete = complete and target not in targets and mode in _sso_modes()
+        targets.add(target)
         assignments.append(_obj(("target", target), ("sso_mode", mode if mode in _sso_modes() else "unrecognised")))
     return _obj(("complete", complete), ("assignments", assignments))
 
@@ -1011,14 +1439,14 @@ def project_gws_run(run_dir: str | Path, *,
     bundle = Bundle(Path(os.path.abspath(run_dir)), scan_max_rows, scan_max_bytes, scan_max_chunks)
     failure: Unavailable | None = None
     manifest: dict[str, Any] = {}
+    manifest_sources = []
     try:
-        manifest = bundle.read("run-manifest.json")
-        _require(isinstance(manifest, dict), kind="invalid_type")
+        manifest = _read_manifest(bundle)
+        manifest_sources = ["run-manifest.json"]
         if manifest.get("platform") != "google_workspace":
             failure = Unavailable("not_applicable_to_platform")
     except Unavailable as exc:
         failure = exc
-    manifest_sources = list(bundle.sources)
     result = GwsProjection()
     report: dict[str, dict[str, Any]] = {}
     ctx = None
