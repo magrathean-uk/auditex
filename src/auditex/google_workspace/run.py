@@ -59,6 +59,7 @@ from .client import (
     gmail_mailbox_identifier,
     gmail_settings_status,
     is_token_refusal,
+    minimise_gmail_settings,
 )
 from .collectors import (
     COLLECTOR_SECTIONS,
@@ -460,6 +461,9 @@ def _gmail_preflight_status(row: dict[str, Any], check: Any) -> dict[str, Any]:
     if row.get("status") != "ok":
         return {}
     payloads = [payload for payload in getattr(check, "payloads", None) or [] if isinstance(payload, dict)]
+    if not payloads:
+        # No mailbox was sampled (an empty Directory sample): nothing was read, so no scope is proven.
+        return {"item_count": 0, "authenticated_read": False}
     for payload in payloads:
         status, error_class, error = gmail_settings_status(payload)
         if status != "ok":
@@ -677,6 +681,16 @@ def _write_google_bundle(
     return 1 if overall_status == "partial" else 0
 
 
+def _replay_gmail_payload(collector: str, payload: Any) -> Any:
+    """A sample's Gmail mailbox rows as the live collector keeps them (:func:`minimise_gmail_settings`): a
+    ``userEmail`` naming no readable mailbox is replaced before any raw, coverage or normalised copy is written."""
+    section = payload.get("mailboxSettings") if collector == "google_gmail_settings" and isinstance(payload, dict) else None
+    if not isinstance(section, dict) or not isinstance(section.get("value"), list):
+        return payload
+    rows = [minimise_gmail_settings(row) if isinstance(row, dict) else row for row in section["value"]]
+    return {**payload, "mailboxSettings": {**section, "value": rows}}
+
+
 def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Mailboxes in a sample whose Gmail settings reads failed replay as the failed or partial reads they were."""
     if collector != "google_gmail_settings":
@@ -804,7 +818,7 @@ def run_google_offline(
     for key, value in sample.items():
         safe_key = ids.text(key, "customer-id-withheld")
         if key not in _OFFLINE_SAMPLE_METADATA_KEYS:
-            value = replay_scuba_payload(key, replay_policy_payload(key, value))
+            value = _replay_gmail_payload(key, replay_scuba_payload(key, replay_policy_payload(key, value)))
         safe_sample[safe_key], changed = ids.evidence(value)
         if changed or safe_key != key:
             withheld_collectors.add(safe_key)

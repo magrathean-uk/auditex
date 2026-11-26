@@ -14,6 +14,7 @@ from azure_tenant_audit.collection_gaps import (
 from azure_tenant_audit.data_minimisation import (
     POLICY_TYPE_PATTERN,
     POLICY_UNIT_ID,
+    gmail_mailbox_identifier,
     minimise_gmail_settings,
 )
 
@@ -169,15 +170,6 @@ GMAIL_NOT_APPLICABLE_REASON = "mail_service_not_enabled"
 _GMAIL_NOT_ENABLED_TEXT = "Mail service not enabled"
 
 
-# The mailbox a settings row names: the signed-in mailbox (``me``, OAuth) or one address (domain-wide delegation).
-_GMAIL_MAILBOX_ADDRESS = re.compile(r"[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+")
-
-
-def gmail_mailbox_identifier(value: Any) -> bool:
-    """Whether a settings row's ``userEmail`` names one mailbox: ``me`` or a single address."""
-    return isinstance(value, str) and len(value) <= 320 and (value == "me" or bool(_GMAIL_MAILBOX_ADDRESS.fullmatch(value)))
-
-
 def gmail_mail_service_not_enabled(payload: Any) -> bool:
     """Whether a mailbox row is exactly the not-applicable marker: a mailbox identifier
     (:func:`gmail_mailbox_identifier`) in ``userEmail`` and ``mailService: not_enabled``, nothing else."""
@@ -235,6 +227,8 @@ def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str
         return "ok", None, None
     if "mailService" in payload:
         return "failed", "malformed_response", "The Gmail settings row carries an unreadable mail service marker."
+    if not gmail_mailbox_identifier(payload.get("userEmail")):
+        return "failed", "malformed_response", "The Gmail settings row names no readable mailbox."
     skipped = set(payload.get("skippedSettings") or ())
     attempted = [name for name in GMAIL_SETTING_NAMES if name not in skipped]
     failures = {

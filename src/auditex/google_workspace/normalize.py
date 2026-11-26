@@ -15,8 +15,10 @@ from azure_tenant_audit.collection_gaps import (
     truncations_from_payloads,
 )
 from azure_tenant_audit.data_minimisation import (
+    UNREADABLE_MAILBOX,
     UNRECOGNISED_SYSTEM_ALERT_NAME,
     finite_policy_number,
+    gmail_mailbox_identifier,
     minimise_gmail_settings,
     minimise_policy_settings,
     policy_is_unrecognised,
@@ -740,7 +742,16 @@ def _two_step_records(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 
 def _mailbox_record(item: dict[str, Any]) -> dict[str, Any]:
-    """One ``google_mailbox_setting``; a user with no Gmail service keeps ``mail_service`` and no setting fields."""
+    """One ``google_mailbox_setting``; a user with no Gmail service keeps ``mail_service`` and no setting fields. A
+    row naming no readable mailbox keeps ``UNREADABLE_MAILBOX`` in place of its identifier and no setting field."""
+    if not gmail_mailbox_identifier(item.get("userEmail")):
+        return _record(
+            "google_mailbox_setting",
+            "google_gmail_settings.mailboxSettings",
+            UNREADABLE_MAILBOX,
+            user_email=UNREADABLE_MAILBOX,
+            mail_service="unreadable",
+        )
     if gmail_mail_service_not_enabled(item):
         return _record(
             "google_mailbox_setting",
