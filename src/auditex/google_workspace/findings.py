@@ -2226,6 +2226,13 @@ def build_google_findings(
             section for section in ("spf", "dmarc", "dkim")
             if posture.get(section) is not None and not isinstance(posture.get(section), dict)
         }
+        # A DMARC section that is missing, empty or incomplete (no readable publication flag, or a published record
+        # without its policy field) is unusable too: nothing was read, so no policy is known to be weak.
+        raw_dmarc = posture.get("dmarc")
+        if not isinstance(raw_dmarc, dict) or not isinstance(raw_dmarc.get("present"), bool) or (
+            raw_dmarc["present"] and "policy" not in raw_dmarc
+        ):
+            unreadable.add("dmarc")
         spf = posture.get("spf") if isinstance(posture.get("spf"), dict) else {}
         dmarc = posture.get("dmarc") if isinstance(posture.get("dmarc"), dict) else {}
         dkim = posture.get("dkim") if isinstance(posture.get("dkim"), dict) else {}

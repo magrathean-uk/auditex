@@ -54,9 +54,11 @@ _M365_DNS_RULES = frozenset(
 )
 _REF_PREFIX = r"dns_posture|google_domain_posture|google\.dns_[a-z_]+"
 _REF_RE = re.compile(r"(?P<prefix>" + _REF_PREFIX + r"):(?P<rest>.*)\Z", re.DOTALL)
-# The domain part ends at the first ``:<rule>``; what follows the rule (a row suffix) is product text.
+# The domain part is all of an id but a final ``:<rule>`` (and an optional numeric row index after it): a real id is
+# ``dns_posture:<domain>:<rule>``, so a rule name inside the domain text (a URL path such as ``/x:spf_missing:y``) stays
+# in the domain part and is pseudonymised with it; any other text after the rule is domain text too.
 _M365_RULE_RE = re.compile(
-    r"(?P<name>.*?):(?P<rule>(?:" + "|".join(sorted(_M365_DNS_RULES)) + r")(?::.*)?)\Z", re.DOTALL
+    r"(?P<name>.*):(?P<rule>(?:" + "|".join(sorted(_M365_DNS_RULES)) + r")(?::[0-9]+)?)\Z", re.DOTALL
 )
 # In free text the domain part of an id runs to the next space, quote or delimiter, whatever its shape (internationalised,
 # single-label, URL-shaped, trailing dots). A pseudonym (``Id <hex>``) is matched first so a rewritten id stays as it is.
@@ -182,10 +184,38 @@ def _resolver_error(value: Any) -> Any:
     return bool(value.strip()) if isinstance(value, str) else UNUSABLE
 
 
+_URL_SHAPED_RE = re.compile(r"[/?#@\\]|:[0-9]+\Z|\A[A-Za-z][A-Za-z0-9+.-]*:")
+_SCHEME_RE = re.compile(r"\A[A-Za-z][A-Za-z0-9+.-]*:(?://)?")
+
+
+def _host(text: str) -> str:
+    """The host a domain value stands for: for a URL-shaped value the scheme, user information, path, query, fragment
+    and port are stripped; trailing dots are removed, the name is lower-cased and IDNA-encoded where it will encode. A
+    plain DNS name (``_dmarc.example.com`` included) only loses case and trailing dots. A pseudonym is returned as it
+    is. No part of the original text beyond the host survives."""
+    host = text.strip()
+    if host.startswith(("User ", "Id ", "Group ", "Guid ")):
+        return host
+    if _URL_SHAPED_RE.search(host):
+        host = _SCHEME_RE.sub("", host, count=1)
+        host = re.split(r"[/?#\\]", host, maxsplit=1)[0].rpartition("@")[2]
+        host = re.sub(r":[0-9]*\Z", "", host)
+    host = host.lower().rstrip(".")
+    try:
+        return host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return host
+
+
+def _pseudo(pseudonymise: Pseudonymise, text: str) -> str:
+    """The pseudonym of the host a domain value names, never of text beyond it."""
+    return pseudonymise(_host(text))
+
+
 def _name(value: Any, pseudonymise: Pseudonymise) -> Any:
     if value is None:
         return None
-    return pseudonymise(value) if isinstance(value, str) and value.strip() else UNUSABLE
+    return _pseudo(pseudonymise, value) if isinstance(value, str) and value.strip() else UNUSABLE
 
 
 def _split_rule(prefix: str, rest: str) -> tuple[str, str]:
@@ -202,9 +232,9 @@ def dns_ref(value: str, pseudonymise: Pseudonymise) -> str:
     shape, or a bare DNS name pseudonymised as a whole."""
     match = _REF_RE.match(value)
     if match is None:
-        return pseudonymise(value)
+        return _pseudo(pseudonymise, value)
     name, rule = _split_rule(match["prefix"], match["rest"])
-    return f"{match['prefix']}:{pseudonymise(name)}{rule}"
+    return f"{match['prefix']}:{_pseudo(pseudonymise, name)}{rule}"
 
 
 def dns_ref_text(text: str, pseudonymise: Pseudonymise) -> str:
@@ -225,7 +255,7 @@ def dns_ref_text(text: str, pseudonymise: Pseudonymise) -> str:
         name, rule = _split_rule(match["prefix"], body)
         if not name:
             return match[0]
-        return f"{match['prefix']}:{pseudonymise(name)}{rule}{tail}"
+        return f"{match['prefix']}:{_pseudo(pseudonymise, name)}{rule}{tail}"
 
     return _DNS_REF_RE.sub(replace, text)
 
@@ -258,17 +288,21 @@ def _spf(record: Mapping[Any, Any]) -> dict[str, Any]:
 
 
 def _dmarc_pct_partial(record: Mapping[Any, Any], pct_key: str, partial_key: str, present_key: str) -> Any:
-    """Partial enforcement, only from a readable parsed percentage: an unreadable or missing percentage proves nothing,
-    and the flag alone never does. A flag that says "not partial" for a record that is positively not published stays
+    """Partial enforcement, asserted only beside a readable affirmative publication flag (``True``) and a readable
+    parsed percentage: a missing, wrong-typed or contradictory flag and an unreadable percentage prove nothing, and the
+    companion flag never does. A record that is positively not published (flag ``False``, no percentage) stays
     ``False`` (nothing published, nothing partial)."""
-    if pct_key in record:
-        pct = _pct(record[pct_key])
+    present = record.get(present_key)
+    pct = _pct(record[pct_key]) if pct_key in record else _MISSING
+    if present is True:
         if _is_int(pct):
             return pct < 100
         return UNUSABLE if partial_key in record else _MISSING
-    if partial_key in record:
-        return False if record[partial_key] is False and record.get(present_key) is False else UNUSABLE
-    return _MISSING
+    if _is_int(pct):
+        return UNUSABLE
+    if present is False and record.get(partial_key) is False and (pct is None or pct is _MISSING):
+        return False
+    return UNUSABLE if partial_key in record else _MISSING
 
 
 def _dmarc(record: Mapping[Any, Any], pseudonymise: Pseudonymise) -> dict[str, Any]:

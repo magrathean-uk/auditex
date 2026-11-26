@@ -1670,6 +1670,17 @@ def _dns_presence(item: dict[str, Any], section: str) -> bool | None:
     return bool((item.get(section) or {}).get("present"))
 
 
+def _dmarc_present(item: dict[str, Any]) -> bool | None:
+    """Whether DMARC is published: only a real boolean ``present`` counts, so a string, ``null`` or missing flag in a
+    DMARC section is unreadable (``None``), never coerced. No section at all, or an unanswered resolver, is as for the
+    other record sections."""
+    section = item.get("dmarc")
+    if section is None or item.get("resolver_error"):
+        return _dns_presence(item, "dmarc")
+    present = section.get("present") if isinstance(section, dict) else None
+    return present if isinstance(present, bool) else None
+
+
 def build_normalized_snapshot(
     *,
     tenant_name: str,
@@ -2747,7 +2758,7 @@ def build_normalized_snapshot(
             spf_all_qualifier=(item.get("spf") or {}).get("all_qualifier"),
             spf_mechanisms=(item.get("spf") or {}).get("mechanisms"),
             spf_multiple_records=bool((item.get("spf") or {}).get("multiple_records")),
-            dmarc_present=_dns_presence(item, "dmarc"),
+            dmarc_present=_dmarc_present(item),
             dmarc_multiple_records=bool((item.get("dmarc") or {}).get("multiple_records")) or None,
             dmarc_record_count=(item.get("dmarc") or {}).get("record_count"),
             dmarc_policy=(item.get("dmarc") or {}).get("policy"),

@@ -709,22 +709,28 @@ evidence `record_key` with the domain pseudonymised, and its `returned_value` as
 word, qualifier, mode, percentage, count, selector list or the pseudonymised domain). Every DNS-derived id and key
 (`dns_posture:<domain>[:<rule>]`, `google_domain_posture:<domain>`, `google.dns_<rule>:<domain>`), as a field value,
 a mapping key or quoted in free text, is built from the pseudonymised domain whatever the domain's shape
-(internationalised, punycode, single-label, URL-shaped or with trailing dots); only the prefix and the Microsoft 365
-rule name stay readable.
+(internationalised, punycode, single-label, URL-shaped or with trailing dots); a URL-shaped domain is reduced to its
+host first (scheme, user information, path, query, port and trailing dots removed, lower-cased, IDNA-encoded), so no
+part of the original text, a rule name in its path included, is emitted. Only the prefix and the Microsoft 365 rule
+name (the last segment of an id, with an optional numeric row index) stay readable.
 Raw SCuBA DNS rows show `rdata_count` and a pseudonymised `domain`, and their resolver log entries
 `query_answer_count` and `query_domain`.
 
 A wrong-typed, unreadable or out-of-vocabulary value, and a count over a list with an unreadable member, reads
 `unusable` (a DMARC tag missing its `;` can fold an address into `p=`); `null` stays `null`. That holds for record
 metadata (`kind`, `source`, `id`) as well, and a predicate that needs a value the record lacks reads `unusable`:
-`pct_partial` without a readable `pct` (unless the record is positively not published), and
+`pct_partial` without a readable `pct` or without a readable affirmative `present` flag (unless the record is positively
+not published), and
 `subdomain_policy_present` beside an unreadable `subdomain_policy`. Neither is shown as its
 text. Older bundles, whose posture records predate record text, render with the predicates they can supply. The run
 bundle, its evidence index and the local report are unchanged. A Microsoft 365 `dns_posture.dmarc_pct_partial` finding
 comes from a readable `pct=` below 100 on a published, enforcing record, whatever the `pct_partial` flag says, and the
-rule reads `not_assessed` (`dmarc_pct_unreadable`) when a domain publishing DMARC has no readable `pct`, or carries a
-`pct` beside an unread presence flag; it passes only on a readable `pct=100` (an absent tag parses as 100). A Google
-DNS section (`spf`, `dmarc`, `dkim`) that is present but not a mapping asserts no missing or monitor-only finding.
+rule reads `not_assessed` (`dmarc_pct_unreadable`) when the presence flag is not a real boolean (a string, `null` or
+missing flag), when a domain publishing DMARC has no readable `pct` or no readable policy, or when DMARC data sits beside a
+`false` flag; it passes only on a readable policy with `pct=100` (an absent tag parses as 100) or an unpublished record. A
+Google DNS section (`spf`, `dmarc`, `dkim`) that is present but not a mapping asserts no missing or monitor-only finding,
+and a `dmarc` section that is `null`, empty or incomplete (no boolean `present`, or a published record without `policy`)
+asserts none either.
 
 Shareable SARIF and OSCAL exports withhold waiver reasons, which can include identifiers unavailable to the audit.
 They retain the accepted-risk status and expiry date. Local output includes the reason with known customer IDs masked.

@@ -48,12 +48,12 @@ M365_PCT_DOMAIN = "zq-pct-m365.test"
 # Posture domains of every shape a DNS-derived id must never carry: internationalised, punycode, single-label,
 # URL-shaped and with a trailing dot. Each has its own ASCII marker so an escaped spelling is still caught.
 SHAPES = ("zq-idn-büro-{}.test", "xn--zq-puny-{}-6qa.test", "zq-single-{}", "https://zq-url-{}.test/private",
-          "zq-dots-{}.test.")
+          "zq-dots-{}.test.", "https://zq-urlrule-{}.test/path:spf_missing:zq-private-tail")
 # Text that must not appear in any shareable file: the mailbox in every spelling, the record text and what it names
 # (the rule title "DMARC rua= URI list ..." is product text, so the tag is matched with its value).
 NEEDLES = (MAILBOX_LOCAL, MAILBOX_DOMAIN, "v=DMARC1", "rua=mailto", "v=spf1", SPF_INCLUDE, SPF_IP, "DKIM1", "zqsynthkey",
            "_dmarc.", "zq-posture-", "zq-alias-", "zq-derived-", "zq-pct-", "zq-idn-", "büro", "zq-puny-", "zq-single-",
-           "zq-url-", "zq-dots-")
+           "zq-url-", "zq-dots-", "zq-urlrule-", "zq-private-tail")
 FORMATS = ("json", "md", "csv", "html", "sarif", "oscal")
 PSEUDONYM = re.compile(r"Id [0-9a-f]{16}")
 
@@ -142,7 +142,7 @@ def test_google_dns_posture_reaches_shareable_exports_and_the_pack_only_as_pseud
     assert PSEUDONYM.fullmatch(derived["dmarc"]["query_domain"])
     # The wrong-typed DMARC section proves no weak policy; each shaped domain's finding id carries only its pseudonym.
     monitor = [row for row in shared["sections"]["findings"] if row["rule_id"] == "google.dns_dmarc_monitor_only"]
-    assert len(shaped) == 5 and len({row["domain"] for row in shaped}) == 5
+    assert len(shaped) == len(SHAPES) and len({row["domain"] for row in shaped}) == len(SHAPES)
     assert sorted(row["id"] for row in monitor) == sorted(f"google.dns_dmarc_monitor_only:{row['domain']}" for row in shaped)
     for row in shaped:
         assert PSEUDONYM.fullmatch(row["domain"]) and row["id"] == row["domain"]
@@ -211,7 +211,7 @@ def test_m365_dns_posture_reaches_shareable_exports_and_the_pack_only_as_pseudon
     assert invalid["returned_value"] == 1
     assert invalid["evidence"]["domain"] == record["domain"]
     shaped = [row for row in records if row.get("dmarc_pct") == 90]
-    assert len(shaped) == 5 and len({row["domain"] for row in shaped}) == 5
+    assert len(shaped) == len(SHAPES) and len({row["domain"] for row in shaped}) == len(SHAPES)
     monitor = sorted(row["id"] for row in shared["sections"]["findings"]
                      if row["rule_id"] == "dns_posture.dmarc_monitor_only")
     for row in shaped:
@@ -282,12 +282,20 @@ def test_rewrite_is_idempotent() -> None:
         ({"pct": "100"}, {"pct": "unusable"}),
         ({"pct": True}, {"pct": "unusable"}),
         ({"pct": 101}, {"pct": "unusable"}),
-        ({"pct": 50}, {"pct": 50, "pct_partial": True}),
+        ({"present": True, "pct": 50}, {"present": True, "pct": 50, "pct_partial": True}),
+        # Asserted only beside a readable affirmative publication flag.
+        ({"pct": 50}, {"pct": 50, "pct_partial": "unusable"}),
+        ({"pct": 50, "pct_partial": False}, {"pct": 50, "pct_partial": "unusable"}),
+        ({"present": False, "pct": 50, "pct_partial": False}, {"present": False, "pct": 50, "pct_partial": "unusable"}),
+        ({"present": False, "pct": 50, "pct_partial": True}, {"present": False, "pct": 50, "pct_partial": "unusable"}),
+        ({"present": "false", "pct": 50, "pct_partial": True},
+         {"present": "unusable", "pct": 50, "pct_partial": "unusable"}),
+        ({"present": None, "pct": 50}, {"present": None, "pct": 50, "pct_partial": "unusable"}),
         # Partial enforcement comes from a readable percentage, never from the flag beside an unreadable one.
         ({"pct": DMARC, "pct_partial": True}, {"pct": "unusable", "pct_partial": "unusable"}),
         ({"pct": None, "pct_partial": True}, {"pct": None, "pct_partial": "unusable"}),
-        ({"pct": 100, "pct_partial": True}, {"pct": 100, "pct_partial": False}),
-        ({"pct": 40, "pct_partial": False}, {"pct": 40, "pct_partial": True}),
+        ({"present": True, "pct": 100, "pct_partial": True}, {"present": True, "pct": 100, "pct_partial": False}),
+        ({"present": True, "pct": 40, "pct_partial": False}, {"present": True, "pct": 40, "pct_partial": True}),
         ({"present": "yes"}, {"present": "unusable"}),
         ({"aggregate_addresses": f"mailto:{MAILBOX}"}, {"rua_count": "unusable", "cisa_rua_present": "unusable"}),
         ({"aggregate_addresses": [None]}, {"rua_count": "unusable", "cisa_rua_present": "unusable"}),
@@ -635,6 +643,18 @@ def test_an_unreadable_percentage_is_never_partial_enforcement_and_never_a_pass(
         ({"policy": "reject", "pct": 50, "pct_partial": False}, False, "not_assessed"),
         # Nothing published: nothing partial.
         ({"present": False}, False, "pass"),
+        # The publication flag counts only as a real boolean: a string, null or missing flag is unreadable, whatever
+        # the percentage and policy beside it say.
+        ({"present": "false", "policy": "reject", "pct": 50, "pct_partial": False}, False, "not_assessed"),
+        ({"present": "true", "policy": "reject", "pct": 100}, False, "not_assessed"),
+        ({"present": None, "policy": "reject", "pct": 50}, False, "not_assessed"),
+        ({"policy": "reject", "pct": None, "pct_partial": True}, False, "not_assessed"),
+        ({"policy": "reject", "pct": 100}, False, "not_assessed"),
+        # A published record passes only with a readable policy: without one there is nothing to evaluate.
+        ({"present": True, "pct": 50, "pct_partial": True}, False, "not_assessed"),
+        ({"present": True, "pct": 100}, False, "not_assessed"),
+        ({"present": True, "policy": 7, "pct": 100}, False, "not_assessed"),
+        ({"present": True, "policy": "none", "pct": 50}, False, "pass"),
     ]
     for dmarc, fires, status in cases:
         data = snapshot(dmarc)
@@ -648,3 +668,67 @@ def test_an_unreadable_percentage_is_never_partial_enforcement_and_never_a_pass(
         statuses = {item["status"] for control in alignment["frameworks"]["cis_m365_v7"]["controls"]
                     for item in control["rule_statuses"] if item["rule_id"] == rule}
         assert statuses == {status}, dmarc
+
+
+def test_a_url_shaped_domain_is_pseudonymised_as_its_host_and_never_in_part() -> None:
+    rule = "dmarc_monitor_only"
+    url = "HTTPS://user:secret@r3-url.test.:8443/path:spf_missing:r3-private-tail?q=1#frag"
+    host = "r3-url.test"
+    proof = {"finding_id": f"dns_posture:{url}:{rule}", "rule_id": f"dns_posture.{rule}",
+             "record_key": f"dns_posture:{url}", "affected_objects": [url]}
+    out = redact_output({"proof_table": [proof], "other": [{"finding_id": f"dns_posture:{host}:{rule}",
+                                                            "rule_id": f"dns_posture.{rule}",
+                                                            "affected_objects": [host]}]},
+                        context=RedactionContext(key=bytes(range(32))))
+    text = json.dumps(out)
+    assert not [part for part in ("r3-private-tail", "spf_missing", "secret", "8443", "frag", "path", "https", host)
+                if part.lower() in text.lower()], text
+    (domain,) = set(PSEUDONYM.findall(text))
+    assert out["proof_table"][0]["finding_id"] == f"dns_posture:{domain}:{rule}"
+    assert out["proof_table"][0]["affected_objects"] == [domain]
+    # The same host spelled plainly, in IDNA or in another case is the same pseudonym.
+    assert out["other"][0]["finding_id"] == f"dns_posture:{domain}:{rule}"
+    assert redact_output(out, context=RedactionContext(key=bytes(range(32)))) == out
+
+
+def test_idna_and_unicode_spellings_of_a_host_share_one_pseudonym() -> None:
+    context = RedactionContext(key=bytes(range(32)))
+    first = redact_output({"affected_objects": ["büro.test"], "rule_id": "dns_posture.spf_missing"}, context=context)
+    second = redact_output({"affected_objects": ["https://XN--BRO-HOA.test/x"], "rule_id": "dns_posture.spf_missing"},
+                           context=context)
+    assert first["affected_objects"] == second["affected_objects"]
+    assert PSEUDONYM.fullmatch(first["affected_objects"][0])
+
+
+def test_the_shareable_pct_predicate_of_a_flat_record_needs_a_readable_affirmative_flag() -> None:
+    flat = {"kind": "dns_posture", "source": "dns_posture.domainPosture", "domain": "example.com"}
+
+    def partial(**fields: object) -> object:
+        return shareable_dns_record({**flat, **fields}, _name).get("dmarc_pct_partial", "absent")
+
+    assert partial(dmarc_present=True, dmarc_pct=50, dmarc_pct_partial=False) is True
+    assert partial(dmarc_present=True, dmarc_pct=100, dmarc_pct_partial=True) is False
+    assert partial(dmarc_present=False, dmarc_pct=50, dmarc_pct_partial=True) == "unusable"
+    assert partial(dmarc_present=None, dmarc_pct=50, dmarc_pct_partial=False) == "unusable"
+    assert partial(dmarc_pct=50, dmarc_pct_partial=True) == "unusable"
+    assert partial(dmarc_present=False, dmarc_pct_partial=False) is False
+
+
+@pytest.mark.parametrize(
+    "dmarc",
+    [None, {}, {"present": True}, {"present": "true", "policy": "none"}, {"policy": "none"}, {"present": None}],
+)
+def test_a_null_empty_or_incomplete_google_dmarc_section_asserts_no_dns_violation(dmarc: object) -> None:
+    from auditex.google_workspace.findings import build_google_findings
+
+    def dns_rules(posture: dict) -> set[str]:
+        snapshot = {"snapshot": {}, "google_dns_posture": {"records": [posture]}}
+        return {row["rule_id"] for row in build_google_findings(snapshot) if row["rule_id"].startswith("google.dns_")}
+
+    base = {"kind": "google_domain_posture", "id": "r3-google-incomplete.test", "domain": "r3-google-incomplete.test",
+            "alias": True, "resolver_error": False}
+    assert dns_rules({**base, "dmarc": dmarc}) == set()
+    # A complete section still asserts what it shows: nothing published, or a monitor-only policy.
+    assert dns_rules({**base, "dmarc": {"present": False}}) == {"google.dns_dmarc_monitor_only"}
+    assert dns_rules({**base, "dmarc": {"present": True, "policy": "none"}}) == {"google.dns_dmarc_monitor_only"}
+    assert dns_rules({**base, "dmarc": {"present": True, "policy": "reject"}}) == set()

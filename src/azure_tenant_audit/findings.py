@@ -3833,7 +3833,7 @@ def _normalized_findings(
                     }
                 )
             )
-        elif not item.get("dmarc_present"):
+        elif item.get("dmarc_present") is False:
             findings.append(
                 _finalize_finding(
                     {

@@ -634,18 +634,23 @@ def _not_applicable_collectors(coverage_ledger: list[dict[str, Any]] | None) -> 
 
 
 def _dmarc_pct_unreadable(record: Mapping[str, Any]) -> bool:
-    """Whether a domain's DMARC enforcement percentage cannot be read, so ``dns_posture.dmarc_pct_partial`` can neither
-    pass nor fail on it. A published record needs a readable ``pct`` (the parser writes 100 for an absent tag, RFC 7489
-    section 6.3); DMARC data beside an unread or false presence flag is unreadable too. The companion
-    ``dmarc_pct_partial`` flag is never read: the finding comes from the percentage alone."""
+    """Whether a domain's DMARC enforcement cannot be read, so ``dns_posture.dmarc_pct_partial`` can neither pass nor
+    fail on it. The publication flag counts only as a real ``True`` or ``False`` (a string, ``None`` or missing flag is
+    unreadable). A published record needs a readable ``pct`` (the parser writes 100 for an absent tag, RFC 7489
+    section 6.3) and a readable policy, since only ``quarantine`` and ``reject`` are evaluated for partial enforcement;
+    DMARC data beside a ``False`` flag is unreadable too. The companion ``dmarc_pct_partial`` flag is never read: the
+    finding comes from the percentage alone."""
     if record.get("managed_by_microsoft") is True:
         return False  # the rule never evaluates a Microsoft-managed domain
-    pct = record.get("dmarc_pct")
-    readable = type(pct) is int and 0 <= pct <= 100
     present = record.get("dmarc_present")
+    if present is not True and present is not False:
+        return True
+    pct = record.get("dmarc_pct")
     if present is True:
-        return not readable
-    return pct is not None or present is not False
+        policy = record.get("dmarc_policy")
+        policy_readable = isinstance(policy, str) and policy.strip().lower() in {"none", "quarantine", "reject"}
+        return not (type(pct) is int and 0 <= pct <= 100) or not policy_readable
+    return pct is not None
 
 
 def _dns_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
