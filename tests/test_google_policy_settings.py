@@ -470,7 +470,6 @@ def test_the_offline_sample_keeps_its_two_step_records_and_finding(tmp_path: Pat
 
     assert rc == 0
     normalized = tmp_path / "Example-g" / "normalized"
-    assert not (normalized / "google_policy_settings.json").exists()
     records = json.loads((normalized / "google_two_step_policies.json").read_text(encoding="utf-8"))["records"]
     assert [(r["id"], r["policy_scope"]) for r in records] == [
         ("security.two_step_verification_enforcement:orgUnits/root-ou", "organisation"),

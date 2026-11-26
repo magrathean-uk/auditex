@@ -173,12 +173,12 @@ def _entries(sections: Any, keys: set[str]) -> tuple[str, bool, bool, list[_Plac
         raise Unusable("gws_policies is not a policy list")
     kept, unplaced = [], set()
     for entry in read["policies"]:
-        if not isinstance(entry, dict) or not isinstance(entry.get("section"), str):
+        if not isinstance(entry, dict) or not isinstance(entry.get("section"), str) or not entry["section"].strip():
             raise Unusable("gws_policies holds an entry without a section")
         if entry["section"] not in keys:
             continue
         unit, kind = entry.get("unit"), entry.get("unit_kind")
-        if (not isinstance(unit, str) or not unit or not isinstance(kind, str) or kind not in {"org_unit", "group"}
+        if (not isinstance(unit, str) or not unit.strip() or not isinstance(kind, str) or kind not in {"org_unit", "group"}
                 or (kind == "group") != ("/group:" in unit) or unit == top and kind == "group"):
             raise Unusable("gws_policies holds an entry that cannot be placed")
         # A malformed or unknown unit key, or an unrankable, valueless or non-plain value: only this (unit, section)
