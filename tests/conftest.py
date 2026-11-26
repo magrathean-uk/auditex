@@ -29,9 +29,9 @@ import pytest
 
 @pytest.fixture(autouse=True, scope="session")
 def _isolate_auditex_secrets():
-    """Redirect AUDITEX_LOCAL_AUTH_ENV, AUDITEX_AUTH_CONTEXTS_PATH and
-    AUDITEX_M365_HOME to a session-scoped tmp directory before any test
-    imports auditex code."""
+    """Redirect AUDITEX_LOCAL_AUTH_ENV, AUDITEX_AUTH_CONTEXTS_PATH,
+    AUDITEX_M365_HOME and the operator tenant key (AUDITEX_TENANT_KEY_PATH)
+    to a session-scoped tmp directory before any test imports auditex code."""
     tmp_dir = tempfile.mkdtemp(prefix="auditex-test-secrets-")
     auth_env_path = Path(tmp_dir) / "m365-auth.env"
     contexts_path = Path(tmp_dir) / "auditex-auth-contexts.json"
@@ -42,6 +42,7 @@ def _isolate_auditex_secrets():
         ("AUDITEX_AUTH_CONTEXTS_PATH", str(contexts_path)),
         ("AUDITEX_M365_HOME", str(Path(tmp_dir) / "m365-home")),
         ("AUDITEX_MODEL_DIR", str(Path(tmp_dir) / "model-cache")),
+        ("AUDITEX_TENANT_KEY_PATH", str(Path(tmp_dir) / "tenant-pseudonym.key")),
     ):
         previous[key] = os.environ.get(key)
         os.environ[key] = value

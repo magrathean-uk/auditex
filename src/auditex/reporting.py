@@ -77,6 +77,7 @@ from azure_tenant_audit.waivers import (
 )
 
 from .run_bundle import RunBundle, summarize_recomputed_validation
+from .tenant_pseudonym import is_tenant_pseudonym
 
 DEFAULT_SECTION_REGISTRY_PATH = Path("configs/report-sections.json")
 FORMAT_EXTENSIONS = {
@@ -4041,13 +4042,17 @@ def _disposition_at(finding: Mapping[str, Any], position: int, dispositions: lis
 def export_tenant_scope(manifest: Mapping[str, Any]) -> str | None:
     """Review R066: the tenant a shareable export's dedup ids are scoped to, or ``None`` when the run names none.
 
-    Microsoft 365: the Entra tenant UUID. Google Workspace: a value shaped like a customer id (``C03az79cb``), never
+    Microsoft 365: the Entra tenant UUID. Google Workspace: the run's tenant pseudonym, else (an older bundle) a value
+    shaped like a customer id (``C03az79cb``), never
     the ``my_customer`` alias (it means "the signed-in customer", so every tenant has it), a domain, the default tenant
     label or a placeholder such as ``unknown``, which every tenant could carry. ``None`` makes the caller scope the
     ids to the run instead."""
     platform = _text(manifest.get("platform")).strip().lower() or "m365"
     if platform == "m365":
         return canonical_tenant_uuid(manifest.get("tenant_id"))
+    # A Google run's tenant pseudonym (PRIV-CUSTOMER-ID) is the same in every run of the customer on this machine.
+    if is_tenant_pseudonym(manifest.get("tenant_id")):
+        return manifest["tenant_id"]
     for value in (manifest.get("customer_id"), manifest.get("tenant_id")):
         customer = google_customer_id(value)
         if customer is not None:

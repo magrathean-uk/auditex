@@ -72,8 +72,13 @@ from .collectors import (
 )
 from .customer_id import (
     CustomerIdWithheldCollector,
+    TenantKeyError,
     bundle_customer_id,
+    tenant_pseudonym,
+    withheld_coverage_row,
+    withhold_customer_evidence,
     withhold_customer_ids,
+    withhold_customer_text,
 )
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
@@ -598,7 +603,7 @@ def _write_google_bundle(
         writer=writer,
         plan=ProviderFinalizePlan(
             tenant_name=config.tenant_name,
-            tenant_id=bundle_customer_id(config.customer_id),
+            tenant_id=tenant_pseudonym(config.customer_id),
             executed_by="auditex_google_workspace",
             selected_collectors=[row["name"] for row in result_rows],
             overall_status=overall_status,
@@ -751,6 +756,9 @@ def run_google_offline(
     # The run log names the file actually read (an operator's local copy, not the shipped sample of the same name),
     # and never by an absolute workstation path.
     sample_record = selected_resource_record(sample_path, default=sample_default)
+    # The operator's file name can spell the customer id (``C0abc1234.json``): the log and the replay record name the
+    # file without it; the digest still identifies the bytes read (PRIV-CUSTOMER-ID).
+    sample_record = {**sample_record, "sample": withhold_customer_text(sample_record["sample"], customer_id)}
     try:
         sample_bytes = read_selected_resource(sample_path, default=sample_default, field="sample")
         sample = json.loads(sample_bytes.decode("utf-8"))
@@ -765,7 +773,19 @@ def run_google_offline(
     sample = sanitise_resolver_fields(sample)
     # A captured sample can carry the customer id (a ``customerId`` field, a policy's ``customer`` name, an error's
     # request URL): no copy of it reaches the bundle (PRIV-CUSTOMER-ID).
-    sample = withhold_customer_ids(sample, customer_id)
+    # Evidence text (not an id field or failure text) that held one makes its collector's read partial.
+    withheld_collectors: set[str] = set()
+    safe_sample: dict[str, Any] = {}
+    for key, value in sample.items():
+        safe_sample[key], changed = withhold_customer_evidence(value, customer_id)
+        if changed and key not in _OFFLINE_SAMPLE_METADATA_KEYS:
+            withheld_collectors.add(str(key))
+    sample = safe_sample
+    try:
+        tenant_pseudonym(customer_id)
+    except TenantKeyError as exc:
+        LOG.error("Unable to pseudonymise the Google customer id: %s.", exc)
+        return 2
     fixture_provenance = _merged_fixture_provenance(
         sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
         fixture_provenance_override,
@@ -817,6 +837,7 @@ def run_google_offline(
             *absent_section_rows(name, held, COLLECTOR_SECTIONS.get(name, ())),
             *_replayed_mailbox_rows(name, payload),
             *policy_replay_rows(name, payload),
+            *([withheld_coverage_row(name)] if name in withheld_collectors else []),
         ]
         coverage_rows.extend(replayed)
         diagnostics.extend(dict(row) for row in replayed if row.get("status") != "ok")
@@ -909,11 +930,17 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         except ValueError as exc:
             print(json.dumps({"error": "invalid_doh_endpoint", "message": str(exc)}, indent=2), file=sys.stderr)
             return 2
+    try:
+        tenant_pseudonym(config.customer_id)
+    except TenantKeyError as exc:
+        print(json.dumps({"error": "tenant_key_unavailable", "message": str(exc)}, indent=2), file=sys.stderr)
+        return 2
     auth_config = _auth_config(config, selected)
     try:
         credentials = build_google_credentials(auth_config)
     except (RuntimeError, ValueError, OSError) as exc:
-        print(json.dumps({"error": "google_auth_failed", "message": str(exc)}, indent=2), file=sys.stderr)
+        message = withhold_customer_text(str(exc), config.customer_id)
+        print(json.dumps({"error": "google_auth_failed", "message": message}, indent=2), file=sys.stderr)
         return 2
     client = GoogleWorkspaceClient(
         credentials,
@@ -1020,7 +1047,8 @@ def google_doctor(config: GoogleRunConfig | None = None) -> dict[str, Any]:
             "oauth_client_present": bool(config.oauth_client and config.oauth_client.expanduser().exists()),
             "token_cache_present": bool(config.token_cache and config.token_cache.expanduser().exists()),
         }
-        payload["target"] = {"domain": config.domain, "customer_id": config.customer_id}
+        # The console and MCP copies carry no customer id either (PRIV-CUSTOMER-ID).
+        payload["target"] = {"domain": config.domain, "customer_id": bundle_customer_id(config.customer_id)}
         payload["selected_collectors"] = selected
         payload["live_readiness"] = build_google_live_readiness(
             selected,
@@ -1162,7 +1190,7 @@ def _write_google_probe_bundle(
         writer=writer,
         plan=ProviderFinalizePlan(
             tenant_name=config.tenant_name,
-            tenant_id=bundle_customer_id(config.customer_id),
+            tenant_id=tenant_pseudonym(config.customer_id),
             executed_by="auditex_google_probe",
             selected_collectors=selected,
             overall_status=overall_status,
@@ -1214,6 +1242,11 @@ def _write_google_probe_bundle(
 
 
 def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None = None) -> int:
+    try:
+        tenant_pseudonym(config.customer_id)
+    except TenantKeyError as exc:
+        print(json.dumps({"error": "tenant_key_unavailable", "message": str(exc)}, indent=2), file=sys.stderr)
+        return 2
     dependency_status = google_dependency_status()
     selected = _selected_collectors(config)
     payload = google_doctor(config)
@@ -1239,7 +1272,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
             dependency_status=dependency_status,
             command_line=command_line,
         )
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(withhold_customer_ids(payload, config.customer_id), indent=2))
         return 2
     try:
         credentials = build_google_credentials(auth_config)
@@ -1302,7 +1335,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
             dependency_status=dependency_status,
             command_line=command_line,
         )
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(withhold_customer_ids(payload, config.customer_id), indent=2))
         return 2
     _write_google_probe_bundle(
         writer=writer,
@@ -1313,5 +1346,5 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
         dependency_status=dependency_status,
         command_line=command_line,
     )
-    print(json.dumps(payload, indent=2))
+    print(json.dumps(withhold_customer_ids(payload, config.customer_id), indent=2))
     return 0 if all(row.get("status") == "ok" for row in payload["preflight"]) else 1

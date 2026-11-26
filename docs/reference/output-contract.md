@@ -424,11 +424,17 @@ input; `tenant_id` contains the canonical observed UUID for Microsoft 365.
 `verified` means the recorded organization/token tenant observations agree;
 it does not authenticate a saved bundle or verify a token signature. Input
 labels and aliases alone produce `unknown`; explicit synthetic fixtures retain
-that status. Google customer identifiers use separate provider semantics.
+that status. Google customer identifiers use separate provider semantics: a Google run's `tenant_id` and
+`tenant_id_requested` hold `gws-<key id>-<digest>`, a keyed pseudonym of the configured customer id under the
+operator's tenant key (see security-privacy.md), or `null` for `my_customer`.
 Conflicting evidence or mirrored metadata invalidates a bundle. Comparisons,
 explorers and drift gates reject conflicting identities and different established
 tenant UUIDs, while allowing renamed labels for the same UUID. Legacy fallback
-is explicit in `compare_context.identity_basis` and `legacy_fallback`.
+is explicit in `compare_context.identity_basis` and `legacy_fallback`. Google pseudonyms made under two
+different tenant keys, or one beside a legacy bundle's raw customer id this machine has no key for, are blocked as
+`tenant_key_mismatch` (`identity_basis: different_tenant_keys`) rather than matched or decided on the domain label.
+A legacy Google bundle's raw customer id is pseudonymised with this machine's key before it is compared, so a
+same-customer pair across versions still compares.
 
 Known-bad or seeded offline bundles may also stamp optional `fixture_provenance` metadata in `run-manifest.json` and `reports/report-pack.json`. This is replay metadata for regression fixtures, not live tenant evidence.
 
@@ -1710,7 +1716,9 @@ What a Google bundle states about how far its evidence reaches, and the sections
 - `google_gmail_settings` is `user` under domain-wide delegation: one delegated read per active user, as that user (`mailboxSettings:<user>`). Without delegation (OAuth) it reads the signed-in mailbox only (`mailboxSettings:me`, `admin`) and records a `mailboxSettingsScope` coverage row, status `partial`, `error_class: subject_scope`, with the number of users not read. Suspended and archived accounts are not read; `mailboxSettingsSkipped` (status `ok`) carries `skipped_suspended` and a `note`.
 - `normalized/snapshot.json` carries `subject_scope` (collector to `admin` or `user`) and `mailbox_settings_skipped_suspended`; `auth-context.json` carries `per_user_delegation` and the `subject_scope` of the selected collectors.
 
-**Internal domains.** `--domain` is a label and never filters users or groups, which are listed for the whole customer (`customer=my_customer` unless `--customer-id` is given). The configured customer id is used for the API calls only and is never written: the manifest `customer_id` and the snapshot `customer_id` hold `my_customer` or `null` (a null manifest value is left out), and `tenant_id` is `null` for a Google run (see security-privacy.md). `normalized/google_domains.json` has one record per primary, secondary and alias domain from the Directory domains list (`domain_name`, `domain_kind`, `verified`, `parent_domain` for an alias). The snapshot carries `internal_domains` (those domains and the `--domain` label), `internal_domains_status` and `internal_domains_source`:
+**Internal domains.** `--domain` is a label and never filters users or groups, which are listed for the whole customer (`customer=my_customer` unless `--customer-id` is given). The configured customer id is used for the API calls only and is never written: the manifest `customer_id` and the snapshot `customer_id` hold `my_customer` or `null` (a null manifest value is left out), and `tenant_id` is the tenant pseudonym (`null` for `my_customer`; see security-privacy.md). An offline replay
+names its sample file (`replay_source.file`, the run log) with any customer id in the name replaced by
+`<customer-id>`; `replay_source.sha256` still identifies the bytes read. `normalized/google_domains.json` has one record per primary, secondary and alias domain from the Directory domains list (`domain_name`, `domain_kind`, `verified`, `parent_domain` for an alias). The snapshot carries `internal_domains` (those domains and the `--domain` label), `internal_domains_status` and `internal_domains_source`:
 
 | `internal_domains_status` | Meaning | External-principal rules |
 | --- | --- | --- |

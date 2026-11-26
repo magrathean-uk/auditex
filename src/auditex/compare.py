@@ -33,6 +33,11 @@ from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
 from .reporting import markdown_inline
 from .run_bundle import RunBundle
+from .tenant_pseudonym import (
+    is_tenant_pseudonym,
+    local_pseudonym,
+    tenant_pseudonym_parts,
+)
 
 
 def _parse_utc(value: Any) -> datetime | None:
@@ -93,7 +98,7 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     same_platform = len(set(platforms)) <= 1
     tenant_ids = [
         (canonical_tenant_uuid(run.get("tenant_id")) or run.get("tenant_id"))
-        if platform == "m365" else (run.get("tenant_id") if run.get("tenant_id") != "my_customer" else None)
+        if platform == "m365" else _provider_tenant_id(run.get("tenant_id"))
         for run, platform in zip(runs, platforms, strict=False)
     ]
     tenant_names = [run.get("tenant_name") for run in runs]
@@ -112,6 +117,13 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     }
     if any(identity.get("status") == "conflict" for identity in identities):
         return {**context, "gate": "tenant_identity_conflict", "identity_basis": "conflict", "identity_verified": False}
+    # PRIV-CUSTOMER-ID: a Google run's tenant id is a pseudonym under the operator's tenant key. Pseudonyms from two
+    # keys (runs made on two machines), or one beside a legacy raw id this machine has no key to pseudonymise, cannot
+    # say whether the customers differ, so neither a match nor the domain label decides it.
+    google_ids = [value for value, platform in zip(tenant_ids, platforms, strict=False) if platform != "m365" and value]
+    key_ids = {parts[0] for value in google_ids if (parts := tenant_pseudonym_parts(value))}
+    if same_platform and (len(key_ids) > 1 or (key_ids and any(not is_tenant_pseudonym(v) for v in google_ids))):
+        return {**context, "gate": "tenant_key_mismatch", "identity_basis": "different_tenant_keys", "identity_verified": False}
     established_uuids = {canonical_tenant_uuid(value) for value, platform in zip(tenant_ids, platforms, strict=False) if platform == "m365"}
     established_uuids.discard(None)
     if same_platform and len(established_uuids) > 1:
@@ -141,6 +153,16 @@ def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
         if tenant_names and all(tenant_names) and len(set(tenant_names)) == 1:
             return matched(tenant_names[0], "legacy_tenant_name", fallback=True)
     return context
+
+
+def _provider_tenant_id(value: Any) -> str | None:
+    """A non-Microsoft run's tenant id for the gate: a tenant pseudonym as it is; a legacy bundle's raw Google customer
+    id as this machine's tenant key pseudonymises it (as is when there is no key); never the ``my_customer`` alias."""
+    if not isinstance(value, str) or not value.strip() or value.strip() == "my_customer":
+        return None
+    if is_tenant_pseudonym(value):
+        return value
+    return local_pseudonym(value) or value
 
 
 def require_same_tenant_runs(run_dirs: Iterable[str | Path]) -> dict[str, Any]:

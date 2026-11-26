@@ -664,15 +664,33 @@ Credential masking in the shareable profiles covers:
   authorization, assertion, private key, shared key), including numbered or `...Value` forms;
 - lists and mappings under such keys, except mappings under a `...Credential` key, which hold credential metadata.
 
-The Google Workspace customer id never enters a run bundle (PRIV-CUSTOMER-ID). The configured `--customer-id` is
-used for the API calls only: the manifest, snapshot, `ai_safe/run_summary.json`, `auth-context.json`, the probe result
-and the tenant identity record the `my_customer` alias as it is and any other configured value as `null`, and the
-recorded command line redacts `--customer-id`. A customer id the API returns (a `customerId` field, a Cloud Identity
-policy's `customer` name) or an error text quotes (the request URL of a failed read) becomes the marker
-`<customer-id>` before it reaches a raw file, coverage row, blocker, checkpoint or log. Google runs therefore carry no
-tenant id: compare and drift match them on the workspace domain, and shareable SARIF and OSCAL dedup ids are scoped
-to the run. Bundles written before this change still load and validate; their customer ids (under `tenant_id` and
-`customer_id` keys) are masked as `Id <pseudonym>` in shareable output.
+The Google Workspace customer id never enters a run bundle, a log, console JSON or an export (PRIV-CUSTOMER-ID).
+The configured `--customer-id` is used for the API calls only: the manifest, snapshot, `ai_safe/run_summary.json`,
+`auth-context.json`, the probe result and the `google doctor --json` and `google probe` console payloads record the
+`my_customer` alias as it is and any other configured value as `null`, and the recorded command line redacts
+`--customer-id`. An offline replay names its sample file without a customer id in the name (the SHA-256 of the
+bytes is kept).
+
+Any other customer id is withheld by its spelling (the configured value) and by its shape (`C`, a digit, then five
+to eleven lower-case letters and digits, as a whole token or after `customers%2F`) in every string a collector or a
+replayed sample returns, in API failure text (a request URL or an error reason such as `Customer C0... was not
+found`) and in exception text, before it reaches a raw file, coverage row, blocker, finding, checkpoint, index or log.
+A `customerId` value (also a malformed object or list under that key) and a Cloud Identity `customers/<id>` name
+become the marker `<customer-id>`. Only id-shaped text changes: an organisational-unit path such as
+`/customers/Finance` is kept. When evidence text (not an id field or failure text) held a withheld value, the
+collector gets a `partial` coverage row (`error_class: customer_id_withheld`), so a read such as the setting-event
+stream that may have lost an organisational unit's name is never shown complete.
+
+Compare, drift and shareable SARIF and OSCAL dedup ids still tell customers apart: a Google run's `tenant_id` is
+`gws-<key id>-<digest>`, an HMAC-SHA256 of the configured customer id under the operator's tenant key. The key is 32
+random bytes in an owner-only file outside every run folder (`AUDITEX_TENANT_KEY_PATH`, else
+`tenant-pseudonym.key` in the user's auditex config folder: `~/Library/Application Support/auditex/` on macOS,
+`%APPDATA%\auditex\` on Windows, `$XDG_CONFIG_HOME/auditex/` or `~/.config/auditex/` elsewhere), made on the first
+run that needs it; a run that cannot read or make it stops with exit 2 before anything is written. Runs made with
+different keys are refused as `tenant_key_mismatch`, never matched on the domain label; copy the key file to compare
+runs made on two machines. `my_customer` runs carry no tenant id and keep the domain-alias fallback. Bundles written
+before this change still load and validate; their raw Google customer ids are pseudonymised with this machine's key for
+compare and drift, and masked as `Id <pseudonym>` under `tenant_id` and `customer_id` keys in shareable output.
 
 Shareable SARIF and OSCAL exports withhold a waiver's free-text `reason` altogether: pattern matching cannot be
 trusted to find every spelling of an identifier an operator types (a customer id inside `workspace_<id>_rollout`, a
