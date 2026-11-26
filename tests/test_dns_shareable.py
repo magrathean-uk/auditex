@@ -45,10 +45,15 @@ GOOGLE_DERIVED = "zq-derived-google.test"
 DERIVED_QUERY = "_dmarc.zq-derived-receiver.test"
 M365_DOMAIN = "zq-posture-m365.test"
 M365_PCT_DOMAIN = "zq-pct-m365.test"
+# Posture domains of every shape a DNS-derived id must never carry: internationalised, punycode, single-label,
+# URL-shaped and with a trailing dot. Each has its own ASCII marker so an escaped spelling is still caught.
+SHAPES = ("zq-idn-büro-{}.test", "xn--zq-puny-{}-6qa.test", "zq-single-{}", "https://zq-url-{}.test/private",
+          "zq-dots-{}.test.")
 # Text that must not appear in any shareable file: the mailbox in every spelling, the record text and what it names
 # (the rule title "DMARC rua= URI list ..." is product text, so the tag is matched with its value).
 NEEDLES = (MAILBOX_LOCAL, MAILBOX_DOMAIN, "v=DMARC1", "rua=mailto", "v=spf1", SPF_INCLUDE, SPF_IP, "DKIM1", "zqsynthkey",
-           "_dmarc.", "zq-posture-", "zq-alias-", "zq-derived-", "zq-pct-")
+           "_dmarc.", "zq-posture-", "zq-alias-", "zq-derived-", "zq-pct-", "zq-idn-", "büro", "zq-puny-", "zq-single-",
+           "zq-url-", "zq-dots-")
 FORMATS = ("json", "md", "csv", "html", "sarif", "oscal")
 PSEUDONYM = re.compile(r"Id [0-9a-f]{16}")
 
@@ -86,7 +91,8 @@ def _exports(run_dir: Path, tmp_path: Path) -> tuple[Path, Path]:
         run_exporter(name=format_name, run_dir=str(run_dir), output_path=str(exports / f"export.{format_name}"))
     pack = tmp_path / "pack"
     write_customer_pack(str(run_dir), str(pack))
-    assert verify_customer_pack(str(pack))["valid"] is True
+    verified = verify_customer_pack(str(pack))
+    assert verified["valid"] is True, verified
     assert len(list(exports.iterdir())) == 6 and any(pack.rglob("*.json"))
     return exports, pack
 
@@ -105,6 +111,9 @@ def test_google_dns_posture_reaches_shareable_exports_and_the_pack_only_as_pseud
         # An input-supplied query_domain in place of query_name.
         {"domain": GOOGLE_DERIVED, "alias": True, "resolver_error": False,
          "dmarc": {"present": True, "policy": "reject", "raw": DMARC, "query_domain": DERIVED_QUERY}},
+        # Monitor-only DMARC on every domain shape, so each yields a finding whose id derives from the domain.
+        *({"domain": shape.format("google"), "alias": True, "resolver_error": False,
+           "dmarc": {"present": True, "policy": "none", "raw": "v=DMARC1; p=none"}} for shape in SHAPES),
     ]
     path = tmp_path / "sample.json"
     path.write_text(json.dumps(sample), encoding="utf-8")
@@ -119,7 +128,7 @@ def test_google_dns_posture_reaches_shareable_exports_and_the_pack_only_as_pseud
     assert _hits(exports) == {}
     assert _hits(pack) == {}
     shared = json.loads((exports / "export.json").read_text(encoding="utf-8"))
-    valid, alias, derived = shared["sections"]["normalized"]["google_dns_posture"]["records"]
+    valid, alias, derived, *shaped = shared["sections"]["normalized"]["google_dns_posture"]["records"]
     assert PSEUDONYM.fullmatch(valid["domain"]) and valid["id"] == valid["domain"]
     assert valid["key"] == f"google_domain_posture:{valid['domain']}"
     assert valid["dmarc"]["record_text"] == "withheld"
@@ -131,9 +140,14 @@ def test_google_dns_posture_reaches_shareable_exports_and_the_pack_only_as_pseud
                             "multiple_records": False, "mechanism_count": 4, "record_count": 1}
     assert alias["dmarc"] == "unusable" and alias["alias"] is True
     assert PSEUDONYM.fullmatch(derived["dmarc"]["query_domain"])
+    # The wrong-typed DMARC section proves no weak policy; each shaped domain's finding id carries only its pseudonym.
     monitor = [row for row in shared["sections"]["findings"] if row["rule_id"] == "google.dns_dmarc_monitor_only"]
-    assert [row["id"] for row in monitor] == [f"google.dns_dmarc_monitor_only:{alias['domain']}"]
-    assert monitor[0]["affected_objects"] == [alias["domain"]]
+    assert len(shaped) == 5 and len({row["domain"] for row in shaped}) == 5
+    assert sorted(row["id"] for row in monitor) == sorted(f"google.dns_dmarc_monitor_only:{row['domain']}" for row in shaped)
+    for row in shaped:
+        assert PSEUDONYM.fullmatch(row["domain"]) and row["id"] == row["domain"]
+        assert row["key"] == f"google_domain_posture:{row['domain']}"
+    assert all(PSEUDONYM.fullmatch(row["affected_objects"][0]) for row in monitor)
     # The private local report keeps the public record text the operator queried.
     local = render_report(run_dir=str(run_dir), format_name="json", profile=PROFILE_LOCAL,
                           output_path=str(tmp_path / "local.json"))
@@ -159,6 +173,13 @@ def test_m365_dns_posture_reaches_shareable_exports_and_the_pack_only_as_pseudon
     rows.append(json.loads(json.dumps(posture)))
     rows[-1]["domain"] = M365_PCT_DOMAIN
     rows[-1]["dmarc"].update(present=True, policy="reject", pct=DMARC, pct_partial=True)
+    # Monitor-only DMARC on every domain shape, so each yields a finding whose id derives from the domain.
+    for shape in SHAPES:
+        rows.append({"domain": shape.format("m365"), "managed_by_microsoft": False,
+                     "spf": {"present": True, "all_qualifier": "-", "mechanisms": ["-all"]},
+                     "dmarc": {"present": True, "policy": "none", "pct": 90, "pct_partial": True,
+                               "aggregate_addresses": [], "aggregate_addresses_invalid": []},
+                     "dkim": {"selectors_present": ["selector1"], "selectors_missing": []}})
     path = tmp_path / "sample.json"
     path.write_text(json.dumps(sample), encoding="utf-8")
     assert audit_main(["--offline", "--sample", str(path), "--tenant-name", "t", "--out", str(tmp_path / "out")]) == 0
@@ -189,6 +210,14 @@ def test_m365_dns_posture_reaches_shareable_exports_and_the_pack_only_as_pseudon
     assert invalid["affected_objects"] == [record["domain"]]
     assert invalid["returned_value"] == 1
     assert invalid["evidence"]["domain"] == record["domain"]
+    shaped = [row for row in records if row.get("dmarc_pct") == 90]
+    assert len(shaped) == 5 and len({row["domain"] for row in shaped}) == 5
+    monitor = sorted(row["id"] for row in shared["sections"]["findings"]
+                     if row["rule_id"] == "dns_posture.dmarc_monitor_only")
+    for row in shaped:
+        assert PSEUDONYM.fullmatch(row["domain"]) and row["id"] == row["domain"]
+        assert row["key"] == f"dns_posture:{row['domain']}"
+        assert f"dns_posture:{row['domain']}:dmarc_monitor_only" in monitor
 
 
 @pytest.mark.parametrize("profile", ["shareable", PROFILE_CUSTOMER_PACK, PROFILE_EXPLAINER])
@@ -277,6 +306,16 @@ def test_rewrite_is_idempotent() -> None:
         ({"query_domain": ["x"]}, {"query_domain": "unusable"}),
         ({"records": "v=DMARC1; p=reject"}, {"record_count": "unusable"}),
         ({"subdomain_policy": None}, {"subdomain_policy": None, "subdomain_policy_present": False}),
+        # An incomplete or wrong-typed nested value never gives a definite predicate.
+        ({"present": True, "pct_partial": True}, {"present": True, "pct_partial": "unusable"}),
+        ({"present": True, "pct_partial": False}, {"present": True, "pct_partial": "unusable"}),
+        ({"pct_partial": True}, {"pct_partial": "unusable"}),
+        ({"present": False, "pct_partial": False}, {"present": False, "pct_partial": False}),
+        ({"present": False, "pct_partial": True}, {"present": False, "pct_partial": "unusable"}),
+        ({"subdomain_policy": []}, {"subdomain_policy": "unusable", "subdomain_policy_present": "unusable"}),
+        ({"subdomain_policy": ""}, {"subdomain_policy": "unusable", "subdomain_policy_present": "unusable"}),
+        ({"subdomain_policy": {}}, {"subdomain_policy": "unusable", "subdomain_policy_present": "unusable"}),
+        ({"subdomain_policy": "reject"}, {"subdomain_policy": "reject", "subdomain_policy_present": True}),
     ],
 )
 def test_malformed_dmarc_values_never_become_predicates(dmarc: dict, expected: dict) -> None:
@@ -324,6 +363,27 @@ def test_a_record_section_that_is_not_a_mapping_is_unusable_without_a_mapping_si
     }
     out = redact_output({"records": [{"domain": "example.com", "alias": True, "dmarc": value}]})
     assert "DMARC1" not in json.dumps(out) and "example.com" not in json.dumps(out)
+
+
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [
+        ({"kind": "google_domain_posture", "domain": "legacy-probe.test", "source": []},
+         {"kind": "google_domain_posture", "domain": "Id <legacy-probe.test>", "source": "unusable"}),
+        ({"kind": {}, "domain": "legacy-probe.test", "dmarc": "v=DMARC1"},
+         {"kind": "unusable", "domain": "Id <legacy-probe.test>", "dmarc": "unusable"}),
+        ({"kind": ["dns_posture"], "domain": "legacy-probe.test", "dmarc_policy": "reject"},
+         {"kind": "unusable", "domain": "Id <legacy-probe.test>", "dmarc_policy": "reject"}),
+        ({"kind": "dns_posture", "domain": "legacy-probe.test", "source": {"x": 1}, "dmarc_present": True},
+         {"kind": "dns_posture", "domain": "Id <legacy-probe.test>", "source": "unusable", "dmarc_present": True}),
+        ({"kind": "dns_posture", "domain": ["legacy-probe.test"], "dmarc_policy": "reject", "id": 7},
+         {"kind": "dns_posture", "domain": "unusable", "dmarc_policy": "reject", "id": "unusable"}),
+    ],
+)
+def test_wrong_typed_posture_metadata_is_unusable_never_an_exception(record: dict, expected: dict) -> None:
+    assert shareable_dns_record(record, _name) == expected
+    text = json.dumps(redact_output({"records": [record]}))
+    assert "legacy-probe" not in text and "DMARC1" not in text
 
 
 def test_older_bundle_posture_without_record_text_still_renders() -> None:
@@ -377,7 +437,7 @@ def test_dns_findings_and_proof_rows_carry_only_pseudonymised_ids_and_predicates
                "title": "DMARC enforcement is partial (pct < 100)", "affected_objects": ["example.com"],
                "returned_value": DMARC, "evidence": evidence,
                "evidence_refs": [{"record_key": "dns_posture:example.com", "artifact_path": "normalized/x.json"}]}
-    proof = {"finding_id": "dns_posture:example.com:dmarc_pct_partial", "id": "dns_posture:example.com:x",
+    proof = {"finding_id": "dns_posture:example.com:dmarc_pct_partial", "id": "dns_posture:example.com:dmarc_pct_partial:1",
              "rule_id": "dns_posture.dmarc_pct_partial", "record_key": "dns_posture:example.com",
              "affected_objects": ["example.com"],
              "blast_radius": {"scope": "single_object", "affected_count": 1, "affected_objects": ["example.com"]}}
@@ -398,8 +458,81 @@ def test_dns_findings_and_proof_rows_carry_only_pseudonymised_ids_and_predicates
     assert second == {"id": f"google.dns_spf_missing:{domain}", "rule_id": "google.dns_spf_missing",
                       "affected_objects": [domain], "returned_value": domain}
     assert out["proof_table"][0]["finding_id"] == first["id"]
+    assert out["proof_table"][0]["id"] == f"dns_posture:{domain}:dmarc_pct_partial:1"
     assert out["proof_table"][0]["blast_radius"]["affected_objects"] == [domain]
     assert out["summary"] == f"dns_posture:{domain}:spf_missing and google_domain_posture:{domain}"
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_every_domain_shape_leaves_dns_ids_keys_and_text_as_pseudonyms(shape: str) -> None:
+    google, m365 = shape.format("google"), shape.format("m365")
+    posture = {"kind": "google_domain_posture", "source": "google_dns_posture.domainPosture", "id": google,
+               "key": f"google_domain_posture:{google}", "domain": google, "dmarc": {"present": True, "policy": "none"}}
+    flat = {"kind": "dns_posture", "source": "dns_posture.domainPosture", "id": m365, "key": f"dns_posture:{m365}",
+            "domain": m365, "dmarc_present": True, "dmarc_policy": "none"}
+    google_finding = {"id": f"google.dns_dmarc_monitor_only:{google}", "rule_id": "google.dns_dmarc_monitor_only",
+                      "affected_objects": [google], "returned_value": "none",
+                      "evidence_refs": [{"record_key": f"google_domain_posture:{google}"}]}
+    m365_finding = {"id": f"dns_posture:{m365}:dmarc_monitor_only", "rule_id": "dns_posture.dmarc_monitor_only",
+                    "affected_objects": [m365], "returned_value": "none", "evidence": flat,
+                    "evidence_refs": [{"record_key": f"dns_posture:{m365}"}]}
+    proof = {"finding_id": f"dns_posture:{m365}:dmarc_monitor_only", "rule_id": "dns_posture.dmarc_monitor_only",
+             "record_key": f"dns_posture:{m365}"}
+    summary = (f"See dns_posture:{m365}:dmarc_monitor_only, google.dns_dmarc_monitor_only:{google} "
+               f"(google_domain_posture:{google}) | dns_posture:{m365}.")
+    out = redact_output({"records": [posture, flat], "findings": [google_finding, m365_finding],
+                         "proof_table": [proof], "summary": summary, "rows": {f"dns_posture:{m365}": 1}})
+    text = json.dumps(out, ensure_ascii=False)
+    assert not [marker for marker in ("zq-", "büro", "https", "private") if marker in text], text
+    g_rec, m_rec = out["records"]
+    g, m = g_rec["domain"], m_rec["domain"]
+    assert PSEUDONYM.fullmatch(g) and PSEUDONYM.fullmatch(m) and g != m
+    assert (g_rec["id"], g_rec["key"]) == (g, f"google_domain_posture:{g}")
+    assert (m_rec["id"], m_rec["key"]) == (m, f"dns_posture:{m}")
+    first, second = out["findings"]
+    assert first["id"] == f"google.dns_dmarc_monitor_only:{g}" and first["affected_objects"] == [g]
+    assert first["evidence_refs"] == [{"record_key": f"google_domain_posture:{g}"}]
+    assert second["id"] == f"dns_posture:{m}:dmarc_monitor_only" and second["affected_objects"] == [m]
+    assert second["evidence"]["domain"] == m and second["evidence"]["key"] == f"dns_posture:{m}"
+    assert second["evidence_refs"] == [{"record_key": f"dns_posture:{m}"}]
+    assert out["proof_table"][0]["finding_id"] == second["id"]
+    assert out["proof_table"][0]["record_key"] == f"dns_posture:{m}"
+    # In free text a domain's own trailing dot stays outside the pseudonym, beside the sentence's full stop.
+    dot = "." if shape.endswith(".") else ""
+    assert out["summary"] == (f"See dns_posture:{m}:dmarc_monitor_only, google.dns_dmarc_monitor_only:{g}{dot} "
+                              f"(google_domain_posture:{g}{dot}) | dns_posture:{m}{dot}.")
+    assert out["rows"] == {f"dns_posture:{m}": 1}
+    # Idempotent: a second pass leaves the rewritten output as it is.
+    assert redact_output(out) == out
+
+
+def test_every_m365_dns_rule_suffix_is_split_from_the_domain_part() -> None:
+    from azure_tenant_audit.dns_shareable import _M365_DNS_RULES
+
+    source = (ROOT / "src" / "azure_tenant_audit" / "findings.py").read_text(encoding="utf-8")
+    assert set(re.findall(r'"dns_posture\.([a-z_]+)"', source)) <= _M365_DNS_RULES
+    assert _M365_DNS_RULES == {
+        "spf_missing", "spf_passthrough", "spf_multiple_records", "dmarc_missing", "dmarc_monitor_only",
+        "dmarc_multiple_records", "dmarc_pct_partial", "dmarc_rua_invalid", "dkim_missing", "bimi_logo_insecure",
+        "mta_sts_missing", "mta_sts_policy_invalid", "mta_sts_testing_mode", "tls_rpt_missing"}
+
+
+@pytest.mark.parametrize("dmarc", ["v=DMARC1; p=reject; rua=mailto:review@receiver-google-malformed.test", ["x"], 5])
+def test_a_wrong_typed_google_section_asserts_no_dns_violation(dmarc: object) -> None:
+    from auditex.google_workspace.findings import build_google_findings
+
+    def dns_rules(posture: dict) -> set[str]:
+        snapshot = {"snapshot": {}, "google_dns_posture": {"records": [posture]}}
+        return {row["rule_id"] for row in build_google_findings(snapshot) if row["rule_id"].startswith("google.dns_")}
+
+    base = {"kind": "google_domain_posture", "id": "review-dns-google.test", "domain": "review-dns-google.test"}
+    assert dns_rules({**base, "alias": True, "dmarc": dmarc}) == set()
+    assert dns_rules({**base, "spf": dmarc, "dmarc": dmarc, "dkim": dmarc}) == set()
+    # A readable section still asserts what it shows.
+    assert dns_rules({**base, "alias": True, "dmarc": {"present": True, "policy": "none"}}) == {
+        "google.dns_dmarc_monitor_only"}
+    assert dns_rules({**base, "spf": {"present": False}, "dmarc": {"present": True, "policy": "reject"},
+                      "dkim": {"selectors_present": []}}) == {"google.dns_spf_missing", "google.dns_dkim_missing"}
 
 
 def test_dmarc_monitor_only_finding_shows_only_a_policy_word() -> None:
@@ -475,9 +608,9 @@ def test_an_unreadable_percentage_is_never_partial_enforcement_and_never_a_pass(
     from azure_tenant_audit.findings import build_findings
     from azure_tenant_audit.normalize import build_normalized_snapshot
 
-    def snapshot(pct: object) -> dict:
+    def snapshot(dmarc: dict) -> dict:
         row = {"domain": "a.example", "managed_by_microsoft": False, "spf": {"present": True, "all_qualifier": "-"},
-               "dmarc": {"present": True, "policy": "reject", "pct": pct, "pct_partial": True},
+               "dmarc": dmarc,
                "dkim": {"selectors_present": ["selector1"], "selectors_missing": []},
                "mta_sts": {"dns_present": True, "policy": {"fetch_status": "ok", "mode": "enforce"}},
                "tls_rpt": {"present": True}, "bimi": {"present": False}}
@@ -485,11 +618,28 @@ def test_an_unreadable_percentage_is_never_partial_enforcement_and_never_a_pass(
                                          collector_payloads={"dns_posture": {"domainPosture": {"value": [row]}}})
 
     rule = "dns_posture.dmarc_pct_partial"
-    for pct, fires, status in ((DMARC, False, "not_assessed"), (None, False, "not_assessed"), ("50", False, "not_assessed"),
-                               (50, True, "fail"), (100, False, "pass")):
-        data = snapshot(pct)
+    flagged = {"present": True, "policy": "reject", "pct_partial": True}
+    cases = [
+        ({**flagged, "pct": DMARC}, False, "not_assessed"),
+        ({**flagged, "pct": None}, False, "not_assessed"),
+        ({**flagged, "pct": "50"}, False, "not_assessed"),
+        ({**flagged, "pct": 50}, True, "fail"),
+        ({**flagged, "pct": 100}, False, "pass"),
+        # Half the mail enforced is partial whatever the companion flag says.
+        ({"present": True, "policy": "reject", "pct": 50, "pct_partial": False}, True, "fail"),
+        ({"present": True, "policy": "reject", "pct": 50}, True, "fail"),
+        ({"present": True, "policy": "reject", "pct": 0, "pct_partial": False}, True, "fail"),
+        ({"present": True, "policy": "reject", "pct": 100, "pct_partial": False}, False, "pass"),
+        # DMARC data beside a missing presence flag is unreadable, never a pass.
+        ({"policy": "reject", "pct": "invalid", "pct_partial": True}, False, "not_assessed"),
+        ({"policy": "reject", "pct": 50, "pct_partial": False}, False, "not_assessed"),
+        # Nothing published: nothing partial.
+        ({"present": False}, False, "pass"),
+    ]
+    for dmarc, fires, status in cases:
+        data = snapshot(dmarc)
         findings = build_findings([], normalized_snapshot=data)
-        assert any(row["rule_id"] == rule for row in findings) is fires, pct
+        assert any(row["rule_id"] == rule for row in findings) is fires, dmarc
         alignment = build_baseline_alignment(
             findings, normalized_snapshot=data, coverage_ledger=[{"collector": "dns_posture",
                                                                   "coverage_status": "complete_exact_scope"}],
@@ -497,4 +647,4 @@ def test_an_unreadable_percentage_is_never_partial_enforcement_and_never_a_pass(
         )
         statuses = {item["status"] for control in alignment["frameworks"]["cis_m365_v7"]["controls"]
                     for item in control["rule_statuses"] if item["rule_id"] == rule}
-        assert statuses == {status}, pct
+        assert statuses == {status}, dmarc

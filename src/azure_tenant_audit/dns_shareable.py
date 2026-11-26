@@ -12,7 +12,9 @@ Applied by ``output_redaction._Redactor.mapping`` to every mapping before it is 
 - A predicate is computed from the parsed value. A wrong-typed, unreadable or out-of-vocabulary value becomes
   ``"unusable"``, never its text; ``None`` (nothing published or nothing read) stays ``None``.
 - Every domain, query name and DNS-derived id (record key, finding id, evidence ``record_key``) goes through the
-  keyed DNS pseudonym, whichever field it arrives in. ``dns_ref_text`` does the same for ids inside free text.
+  keyed DNS pseudonym, whichever field it arrives in and whatever the domain's shape: the domain part of an id is all
+  of it after the prefix (less a Microsoft 365 rule suffix), never a DNS-name match. ``dns_ref_text`` does the same for
+  ids inside free text.
 
 The rewrite is a pure function of the record and the pseudonym key and is idempotent: a record it has already
 rewritten comes back unchanged.
@@ -43,11 +45,27 @@ _SELECTOR_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?")
 # RFC 7489 section 6.2: a ``mailto:`` URI may end in ``!`` and a size (digits and an optional unit).
 _CISA_URI_RE = re.compile(r"mailto:" + re.escape(CISA_RUA) + r"(?:![0-9]+[kmgt]?)?")
 _RECORD_FIELDS = ("spf", "dmarc", "dkim", "mta_sts", "tls_rpt", "bimi")
-# A DNS name: two or more labels (a pseudonym ``Id <hex>`` has no dot, so a rewritten id is never matched again).
-_DNS_NAME = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,62})(?:\.[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,62}))+\.?"
-_DNS_REF_RE = re.compile(
-    r"(?<![\w.])(?P<prefix>dns_posture|google_domain_posture|google\.dns_[a-z_]+):(?P<name>" + _DNS_NAME + r")(?![\w-])"
+# The rule part of a Microsoft 365 DNS finding id (``dns_posture:<domain>:<rule>``), split off before the domain part
+# is pseudonymised. A rule missing here still leaks nothing: its id becomes one pseudonym of ``<domain>:<rule>``.
+_M365_DNS_RULES = frozenset(
+    "spf_missing spf_passthrough spf_multiple_records dmarc_missing dmarc_monitor_only dmarc_multiple_records "
+    "dmarc_pct_partial dmarc_rua_invalid dkim_missing bimi_logo_insecure mta_sts_missing mta_sts_policy_invalid "
+    "mta_sts_testing_mode tls_rpt_missing".split()
 )
+_REF_PREFIX = r"dns_posture|google_domain_posture|google\.dns_[a-z_]+"
+_REF_RE = re.compile(r"(?P<prefix>" + _REF_PREFIX + r"):(?P<rest>.*)\Z", re.DOTALL)
+# The domain part ends at the first ``:<rule>``; what follows the rule (a row suffix) is product text.
+_M365_RULE_RE = re.compile(
+    r"(?P<name>.*?):(?P<rule>(?:" + "|".join(sorted(_M365_DNS_RULES)) + r")(?::.*)?)\Z", re.DOTALL
+)
+# In free text the domain part of an id runs to the next space, quote or delimiter, whatever its shape (internationalised,
+# single-label, URL-shaped, trailing dots). A pseudonym (``Id <hex>``) is matched first so a rewritten id stays as it is.
+_DNS_REF_RE = re.compile(
+    r"(?<![\w.])(?P<prefix>" + _REF_PREFIX + r"):"
+    r"(?P<name>(?:User|Id|Group|Guid) [0-9a-f]{16}(?![0-9a-f])|[^\s\"'`<>|,;&()\[\]{}]+)"
+)
+# Sentence punctuation after an id in free text stays outside the pseudonym.
+_TRAILING = ".:!?"
 _DNS_REF_FIELDS = ("id", "finding_id", "record_key", "key")
 # Flat Microsoft 365 ``dns_posture`` fields that only a posture record carries.
 _FLAT_MARKERS = frozenset(
@@ -170,20 +188,53 @@ def _name(value: Any, pseudonymise: Pseudonymise) -> Any:
     return pseudonymise(value) if isinstance(value, str) and value.strip() else UNUSABLE
 
 
+def _split_rule(prefix: str, rest: str) -> tuple[str, str]:
+    """``rest`` of an id as (domain part, ``:<rule>`` suffix or ``""``)."""
+    if prefix == "dns_posture":
+        match = _M365_RULE_RE.match(rest)
+        if match is not None:
+            return match["name"], ":" + match["rule"]
+    return rest, ""
+
+
+def dns_ref(value: str, pseudonymise: Pseudonymise) -> str:
+    """A whole DNS-derived id or key: ``<prefix>:<domain>[:<rule>]`` with its domain part pseudonymised whatever its
+    shape, or a bare DNS name pseudonymised as a whole."""
+    match = _REF_RE.match(value)
+    if match is None:
+        return pseudonymise(value)
+    name, rule = _split_rule(match["prefix"], match["rest"])
+    return f"{match['prefix']}:{pseudonymise(name)}{rule}"
+
+
 def dns_ref_text(text: str, pseudonymise: Pseudonymise) -> str:
     """``text`` with the DNS name in every DNS-derived id (``dns_posture:<name>``, ``google_domain_posture:<name>``,
     ``google.dns_<rule>:<name>``) replaced by its pseudonym."""
     if ":" not in text:
         return text
-    return _DNS_REF_RE.sub(lambda match: f"{match['prefix']}:{pseudonymise(match['name'])}", text)
+    if not any(char.isspace() for char in text) and _REF_RE.match(text):
+        # A whole value that is one id (a record key in an evidence ref, a mapping key): its domain part is all of it.
+        return dns_ref(text, pseudonymise)
+
+    def replace(match: re.Match[str]) -> str:
+        token = match["name"]
+        if token.startswith(("User ", "Id ", "Group ", "Guid ")):
+            return match[0]
+        body = token.rstrip(_TRAILING)
+        tail = token[len(body):]
+        name, rule = _split_rule(match["prefix"], body)
+        if not name:
+            return match[0]
+        return f"{match['prefix']}:{pseudonymise(name)}{rule}{tail}"
+
+    return _DNS_REF_RE.sub(replace, text)
 
 
 def _ref(value: Any, pseudonymise: Pseudonymise) -> Any:
     """A record id or key: a bare DNS name, or ``<kind>:<name>``."""
     if not isinstance(value, str) or not value.strip():
         return _name(value, pseudonymise)
-    rewritten = dns_ref_text(value, pseudonymise)
-    return rewritten if rewritten != value or ":" in value else pseudonymise(value)
+    return dns_ref(value, pseudonymise)
 
 
 def _put(out: dict[str, Any], key: str, value: Any) -> None:
@@ -206,15 +257,17 @@ def _spf(record: Mapping[Any, Any]) -> dict[str, Any]:
     return out
 
 
-def _dmarc_pct_partial(record: Mapping[Any, Any], pct_key: str, partial_key: str) -> Any:
-    """Partial enforcement, from the parsed percentage when there is one: an unreadable percentage proves nothing."""
+def _dmarc_pct_partial(record: Mapping[Any, Any], pct_key: str, partial_key: str, present_key: str) -> Any:
+    """Partial enforcement, only from a readable parsed percentage: an unreadable or missing percentage proves nothing,
+    and the flag alone never does. A flag that says "not partial" for a record that is positively not published stays
+    ``False`` (nothing published, nothing partial)."""
     if pct_key in record:
         pct = _pct(record[pct_key])
         if _is_int(pct):
             return pct < 100
         return UNUSABLE if partial_key in record else _MISSING
     if partial_key in record:
-        return _bool(record[partial_key])
+        return False if record[partial_key] is False and record.get(present_key) is False else UNUSABLE
     return _MISSING
 
 
@@ -228,12 +281,15 @@ def _dmarc(record: Mapping[Any, Any], pseudonymise: Pseudonymise) -> dict[str, A
         out["policy"] = _vocab(record["policy"], _DMARC_POLICIES)
     if "subdomain_policy" in record:
         out["subdomain_policy"] = _vocab(record["subdomain_policy"], _DMARC_POLICIES)
-        out["subdomain_policy_present"] = record["subdomain_policy"] is not None
+        # An unreadable sp= proves nothing about whether one was published.
+        out["subdomain_policy_present"] = (
+            UNUSABLE if out["subdomain_policy"] == UNUSABLE else out["subdomain_policy"] is not None
+        )
     elif "subdomain_policy_present" in record:
         out["subdomain_policy_present"] = _bool(record["subdomain_policy_present"])
     if "pct" in record:
         out["pct"] = _pct(record["pct"])
-    _put(out, "pct_partial", _dmarc_pct_partial(record, "pct", "pct_partial"))
+    _put(out, "pct_partial", _dmarc_pct_partial(record, "pct", "pct_partial", "present"))
     _put(out, "rua_count", _count(record, "aggregate_addresses", "rua_count"))
     _put(out, "rua_invalid_count", _count(record, "aggregate_addresses_invalid", "rua_invalid_count"))
     _put(out, "cisa_rua_present", _cisa(record, "aggregate_addresses", "cisa_rua_present"))
@@ -340,9 +396,9 @@ def _section(field: str, value: Any, pseudonymise: Pseudonymise) -> Any:
 def _common(key: Any, value: Any, pseudonymise: Pseudonymise) -> Any:
     """The fields a nested and a flat posture record share, or ``_MISSING`` for a field that is not one of them."""
     if key == "kind":
-        return value if value in _POSTURE_KINDS else UNUSABLE
+        return value if isinstance(value, str) and value in _POSTURE_KINDS else UNUSABLE
     if key == "source":
-        return value if value in _POSTURE_SOURCES else UNUSABLE
+        return value if isinstance(value, str) and value in _POSTURE_SOURCES else UNUSABLE
     if key in ("id", "key"):
         return _ref(value, pseudonymise)
     if key == "domain":
@@ -384,12 +440,9 @@ def _flat_field(record: Mapping[Any, Any], key: Any, value: Any, out: dict[Any, 
     elif key == "dmarc_pct":
         out[key] = _pct(value)
     elif key == "dmarc_pct_partial":
-        if "dmarc_pct" not in record and record.get("dmarc_present") is True:
-            # The normalised record drops an unreadable (``None``) percentage, so a published DMARC record without
-            # one had a percentage nobody could read.
-            out[key] = UNUSABLE
-        else:
-            _put(out, key, _dmarc_pct_partial(record, "dmarc_pct", "dmarc_pct_partial"))
+        # The normalised record drops an unreadable (``None``) percentage, so a published DMARC record without one had
+        # a percentage nobody could read.
+        _put(out, key, _dmarc_pct_partial(record, "dmarc_pct", "dmarc_pct_partial", "dmarc_present"))
     elif key == "spf_mechanisms":
         out["spf_mechanism_count"] = _entries(value)
     elif key == "dmarc_aggregate_addresses":
@@ -472,7 +525,7 @@ def _finding(record: Mapping[Any, Any], pseudonymise: Pseudonymise) -> dict[Any,
     out: dict[Any, Any] = {}
     for key, value in record.items():
         if key in _DNS_REF_FIELDS and isinstance(value, str):
-            out[key] = dns_ref_text(value, pseudonymise)
+            out[key] = dns_ref(value, pseudonymise) if _REF_RE.match(value) else dns_ref_text(value, pseudonymise)
         elif key == "affected_objects" and isinstance(value, list):
             out[key] = [_name(item, pseudonymise) for item in value]
         elif key == "blast_radius" and isinstance(value, Mapping) and isinstance(value.get("affected_objects"), list):

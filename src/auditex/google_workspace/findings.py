@@ -2221,11 +2221,16 @@ def build_google_findings(
         if posture.get("resolver_error"):
             # The resolver did not answer for this domain, so no record is known to be missing.
             continue
+        # A section that is there but not a mapping is unreadable: it proves no record missing or weak (DNS-SHAREABLE).
+        unreadable = {
+            section for section in ("spf", "dmarc", "dkim")
+            if posture.get(section) is not None and not isinstance(posture.get(section), dict)
+        }
         spf = posture.get("spf") if isinstance(posture.get("spf"), dict) else {}
         dmarc = posture.get("dmarc") if isinstance(posture.get("dmarc"), dict) else {}
         dkim = posture.get("dkim") if isinstance(posture.get("dkim"), dict) else {}
         is_alias = posture.get("alias") is True
-        if not is_alias and not spf.get("present"):
+        if not is_alias and "spf" not in unreadable and not spf.get("present"):
             findings.append(
                 _finding(
                     rule_id="google.dns_spf_missing",
@@ -2243,7 +2248,7 @@ def build_google_findings(
         policy = dmarc.get("policy")
         if dmarc.get("inherited") is True and dmarc.get("subdomain_policy") is not None:
             policy = dmarc["subdomain_policy"]
-        if policy in (None, "", "none"):
+        if "dmarc" not in unreadable and policy in (None, "", "none"):
             findings.append(
                 _finding(
                     rule_id="google.dns_dmarc_monitor_only",
@@ -2258,7 +2263,7 @@ def build_google_findings(
                     returned_value=policy,
                 )
             )
-        if not is_alias and not dkim.get("selectors_present"):
+        if not is_alias and "dkim" not in unreadable and not dkim.get("selectors_present"):
             findings.append(
                 _finding(
                     rule_id="google.dns_dkim_missing",

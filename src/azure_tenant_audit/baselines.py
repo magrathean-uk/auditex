@@ -633,6 +633,21 @@ def _not_applicable_collectors(coverage_ledger: list[dict[str, Any]] | None) -> 
     return _collectors_with_status(coverage_ledger, lambda status: status == "not_applicable")
 
 
+def _dmarc_pct_unreadable(record: Mapping[str, Any]) -> bool:
+    """Whether a domain's DMARC enforcement percentage cannot be read, so ``dns_posture.dmarc_pct_partial`` can neither
+    pass nor fail on it. A published record needs a readable ``pct`` (the parser writes 100 for an absent tag, RFC 7489
+    section 6.3); DMARC data beside an unread or false presence flag is unreadable too. The companion
+    ``dmarc_pct_partial`` flag is never read: the finding comes from the percentage alone."""
+    if record.get("managed_by_microsoft") is True:
+        return False  # the rule never evaluates a Microsoft-managed domain
+    pct = record.get("dmarc_pct")
+    readable = type(pct) is int and 0 <= pct <= 100
+    present = record.get("dmarc_present")
+    if present is True:
+        return not readable
+    return pct is not None or present is not False
+
+
 def _dns_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
     if snapshot is None:
         return "inputs_not_available"
@@ -644,11 +659,7 @@ def _dns_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | N
     if rule_id == "dns_posture.tls_rpt_missing" and any(record.get("tls_rpt_present") is None for record in records):
         # None means the bundle predates TLS-RPT collection, so absence was never checked.
         return "tls_rpt_not_collected"
-    if rule_id == "dns_posture.dmarc_pct_partial" and any(
-        record.get("dmarc_present") and not (type(record.get("dmarc_pct")) is int and 0 <= record["dmarc_pct"] <= 100)
-        for record in records
-    ):
-        # A published DMARC record whose pct= nobody could read proves neither full nor partial enforcement.
+    if rule_id == "dns_posture.dmarc_pct_partial" and any(_dmarc_pct_unreadable(record) for record in records):
         return "dmarc_pct_unreadable"
     if rule_id in _MTA_STS_POLICY_RULES:
         for record in records:
