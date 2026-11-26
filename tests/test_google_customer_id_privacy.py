@@ -248,7 +248,7 @@ def test_mcp_command_withholds_the_customer_id_in_other_arguments() -> None:
     from auditex.command_runner import redact_command
 
     assert redact_command(["google", "probe", "--customer-id", "C0privA123", "--tenant-name", "C0privA123"]) == [
-        "google", "probe", "--customer-id", "***redacted***", "***redacted***",
+        "google", "probe", "--customer-id", "***redacted***", "--tenant-name", "***redacted***",
     ]
 
 
