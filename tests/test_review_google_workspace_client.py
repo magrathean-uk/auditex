@@ -588,13 +588,14 @@ def test_w2_25_a_completed_google_probe_read_is_still_live_verified() -> None:
 # ---- LIVE-FIX-1: a user with no Gmail service is not applicable, never a failed mailbox -----------------------------
 
 
-class _GmailHttpError(Exception):
-    """The shape googleapiclient raises: ``resp.status`` and the structured ``error_details`` reasons."""
-
-    def __init__(self, status: int, reason: str, message: str) -> None:
-        super().__init__(f'<HttpError {status} returned "{message}". Details: "[{{\'reason\': \'{reason}\'}}]">')
-        self.resp = type("Resp", (), {"status": status})()
-        self.error_details = [{"message": message, "domain": "global", "reason": reason}]
+def _GmailHttpError(status: int, reason: str, message: str, *, top: str | None = None,
+                    errors: list[tuple[str, str]] | None = None) -> Exception:
+    """A real googleapiclient ``HttpError`` with Gmail's JSON error body: the top-level ``message`` and the
+    structured ``errors`` (reason and message pairs)."""
+    pairs = errors if errors is not None else [(reason, message)]
+    return _real_http_error(status, {"error": {
+        "code": status, "message": top if top is not None else message, "status": "FAILED_PRECONDITION",
+        "errors": [{"message": text, "domain": "global", "reason": why} for why, text in pairs]}})
 
 
 _NOT_ENABLED = _GmailHttpError(400, "failedPrecondition", "Mail service not enabled")
@@ -699,3 +700,132 @@ def test_live_fix_1_an_offline_replay_keeps_the_unlicensed_mailbox_not_failed() 
     assert [(row["name"], row["status"]) for row in _replayed_mailbox_rows("google_gmail_settings", payload)] == [
         ("mailboxSettings:c@example.com", "failed")
     ]
+
+
+# ---- LIVE-FIX-1 repair round 1 -------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("error", [
+    # B6: the reason and the text come from different structured errors, and the top-level message is another one.
+    _GmailHttpError(400, "", "", top="Another precondition failed", errors=[
+        ("failedPrecondition", "Another precondition failed"), ("invalidArgument", "Mail service not enabled")]),
+    # The top-level message is the text, but the structured errors pair it with another reason.
+    _GmailHttpError(400, "", "", top="Mail service not enabled", errors=[
+        ("failedPrecondition", "Another precondition failed"), ("invalidArgument", "Mail service not enabled")]),
+    # One matching pair beside an unrelated one: ambiguous.
+    _GmailHttpError(400, "", "", top="Mail service not enabled", errors=[
+        ("failedPrecondition", "Mail service not enabled"), ("invalidArgument", "Bad request")]),
+    # The pair matches but the top-level message names another failure.
+    _GmailHttpError(400, "failedPrecondition", "Mail service not enabled", top="Precondition check failed."),
+    # No structured error at all.
+    _GmailHttpError(400, "", "", top="Mail service not enabled", errors=[]),
+])
+def test_live_fix_1_r1_b6_mixed_gmail_error_fields_stay_a_failed_mailbox(error: Exception) -> None:
+    from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
+
+    settings = _CountingSettings(error)
+    client = _delegated_gmail_client({"b@example.com": settings})
+    result = GoogleGmailSettingsCollector().run({"client": client, "users": [{"primaryEmail": "b@example.com"}]})
+    row = next(item for item in result.coverage if item["name"] == "mailboxSettings:b@example.com")
+    assert (row["status"], result.status) == ("failed", "partial")
+    assert "not_applicable" not in row
+    assert result.payload["mailboxSettings"]["value"][0].get("mailService") is None
+    assert len(settings.calls) == 8  # every setting was still tried
+
+
+def test_live_fix_1_r1_b6_a_non_json_body_is_never_the_not_enabled_marker() -> None:
+    from googleapiclient.errors import HttpError
+
+    from auditex.google_workspace.client import _gmail_not_enabled_error
+
+    resp = type("Resp", (), {"status": 400, "reason": "Mail service not enabled"})()
+    assert _gmail_not_enabled_error(HttpError(resp, b"Mail service not enabled", uri="https://gmail.googleapis.com/x")) is False
+    assert _gmail_not_enabled_error(_NOT_ENABLED) is True
+
+
+@pytest.mark.parametrize("user_email", [None, "", 7, ["b@example.com"], {"a": 1}, "b", "b@", "@example.com",
+                                        "b@example", "b c@example.com", "a@b@example.com", True])
+def test_live_fix_1_r1_b5_a_marker_without_a_mailbox_identifier_is_a_failed_read(user_email: Any) -> None:
+    from auditex.google_workspace.client import (
+        gmail_mail_service_not_enabled,
+        gmail_settings_status,
+    )
+
+    payload = {"userEmail": user_email, "mailService": "not_enabled"}
+    assert gmail_mail_service_not_enabled(payload) is False
+    assert gmail_settings_status(payload) == (
+        "failed", "malformed_response", "The Gmail settings row carries an unreadable mail service marker.")
+
+
+@pytest.mark.parametrize("user_email", ["b@example.com", "me", "first.last+tag@sub.example.co.uk"])
+def test_live_fix_1_r1_b5_a_mailbox_identifier_keeps_the_marker(user_email: str) -> None:
+    from auditex.google_workspace.client import gmail_settings_status
+
+    assert gmail_settings_status({"userEmail": user_email, "mailService": "not_enabled"}) == ("ok", None, None)
+
+
+@pytest.mark.parametrize("row", [
+    {"userEmail": None, "mailService": "not_enabled"},
+    {"userEmail": "", "mailService": "not_enabled"},
+    {"userEmail": 7, "mailService": "not_enabled"},
+    {"userEmail": ["b@example.com"], "mailService": "not_enabled"},
+    {"userEmail": "not an address", "mailService": "not_enabled"},
+    {"userEmail": "b@example.com", "mailService": "not_enabled", "imap": {"enabled": True}},
+])
+def test_live_fix_1_r1_b5_a_malformed_marker_fails_the_replay_and_supplies_no_finding(tmp_path: Any, row: dict) -> None:
+    import json
+
+    from auditex.google_workspace.run import run_google_offline
+
+    sample = tmp_path / "sample.json"
+    sample.write_text(json.dumps({"google_gmail_settings": {"mailboxSettings": {"value": [row]}}}), encoding="utf-8")
+    rc = run_google_offline(sample_path=sample, out=tmp_path / "out", tenant_name="T", run_name="r",
+                            domain="example.com", customer_id=None)
+    run = tmp_path / "out" / "T-r"
+    manifest = json.loads((run / "run-manifest.json").read_text(encoding="utf-8"))
+    assert (rc, manifest["overall_status"]) == (1, "partial")
+    findings = json.loads((run / "findings" / "findings.json").read_text(encoding="utf-8"))
+    rules = {item.get("rule_id") for item in (findings if isinstance(findings, list) else findings.get("findings", []))}
+    assert "google.gmail_imap_enabled" not in rules
+    path = run / "normalized" / "google_mailbox_settings.json"
+    records = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    for record in records if isinstance(records, list) else records.get("records", []):
+        if record.get("user_email") == "b@example.com":
+            assert record == {**{key: record[key] for key in ("kind", "source", "id", "key")},
+                              "user_email": "b@example.com", "mail_service": "unreadable"}
+
+
+def test_live_fix_1_r1_m1_an_unlicensed_probe_mailbox_proves_no_read_and_no_exact_scope() -> None:
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
+
+    client = _delegated_gmail_client({"b@example.com": _CountingSettings(_NOT_ENABLED)})
+    client.list_directory = lambda kind, top=1: [{"primaryEmail": "b@example.com"}]  # type: ignore[method-assign]
+    preflight = build_google_preflight_rows(client, ["google_gmail_settings"], domain="example.com")
+    (row,) = preflight
+    assert (row["status"], row["item_count"], row["not_applicable"]) == ("ok", 0, "mail_service_not_enabled")
+    assert not row.get("authenticated_read")
+    capability = build_google_capability_rows(
+        ["google_gmail_settings"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=preflight,
+    )[0]
+    assert capability["status"] == "supported"
+
+
+def test_live_fix_1_r1_m1_a_licensed_probe_mailbox_still_proves_the_scope() -> None:
+    from auditex.google_workspace.run import (
+        build_google_capability_rows,
+        build_google_preflight_rows,
+    )
+
+    client = _delegated_gmail_client({"a@example.com": _GmailSettings({})})
+    client.list_directory = lambda kind, top=1: [{"primaryEmail": "a@example.com"}]  # type: ignore[method-assign]
+    preflight = build_google_preflight_rows(client, ["google_gmail_settings"], domain="example.com")
+    assert (preflight[0]["status"], preflight[0]["item_count"], "not_applicable" in preflight[0]) == ("ok", 1, False)
+    capability = build_google_capability_rows(
+        ["google_gmail_settings"], auth_mode="domain-delegation", dependency_status={"available": True},
+        coverage_rows=preflight,
+    )[0]
+    assert capability["status"] == "supported_exact_scope"

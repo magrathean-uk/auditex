@@ -869,7 +869,17 @@ def _mailbox_record(item: dict[str, Any]) -> dict[str, Any]:
             user_email=item.get("userEmail"),
             mail_service=GMAIL_SERVICE_NOT_ENABLED,
         )
-    record = _record(
+    if "mailService" in item:
+        # Any other marker shape is unreadable (its coverage row is a failed read), never a mailbox without Gmail,
+        # and none of the row's setting fields is read: they may not be this mailbox's settings.
+        return _record(
+            "google_mailbox_setting",
+            "google_gmail_settings.mailboxSettings",
+            str(item.get("userEmail")),
+            user_email=item.get("userEmail"),
+            mail_service="unreadable",
+        )
+    return _record(
         "google_mailbox_setting",
         "google_gmail_settings.mailboxSettings",
         str(item.get("userEmail")),
@@ -891,10 +901,6 @@ def _mailbox_record(item: dict[str, Any]) -> dict[str, Any]:
         vacation=minimise_gmail_settings(item).get("vacation") or {},
         vacation_error=item.get("vacation_error") or {},
     )
-    if "mailService" in item:
-        # Any other marker shape is unreadable (its coverage row is a failed read), never a mailbox without Gmail.
-        record["mail_service"] = "unreadable"
-    return record
 
 
 def build_google_normalized_snapshot(

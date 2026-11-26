@@ -51,9 +51,12 @@ from .auth import (
     safe_auth_summary,
 )
 from .client import (
+    GMAIL_NOT_APPLICABLE_REASON,
     GoogleWorkspaceClient,
     classify_google_error,
     classify_page_error,
+    gmail_mail_service_not_enabled,
+    gmail_mailbox_identifier,
     gmail_settings_status,
     is_token_refusal,
 )
@@ -448,18 +451,27 @@ def _preflight_call(collector: str, name: str, func: Any) -> dict[str, Any]:
 
 
 def _gmail_preflight_status(row: dict[str, Any], check: Any) -> dict[str, Any]:
-    """A probe read that returned settings whose every read failed is not ready; some failing is partial."""
+    """A probe read that returned settings whose every read failed is not ready; some failing is partial.
+
+    A probed mailbox whose user has no Gmail service (:func:`gmail_mail_service_not_enabled`) read no settings: the
+    row keeps status ``ok`` with ``item_count`` 0 and ``not_applicable``, and it proves no scope
+    (``authenticated_read`` false), so the capability matrix never reports an exact-scope proof from it.
+    """
     if row.get("status") != "ok":
         return {}
-    for payload in getattr(check, "payloads", None) or []:
-        if not isinstance(payload, dict):
-            continue
+    payloads = [payload for payload in getattr(check, "payloads", None) or [] if isinstance(payload, dict)]
+    for payload in payloads:
         status, error_class, error = gmail_settings_status(payload)
         if status != "ok":
             update = {"status": status, "error_class": error_class, "error": error}
             if status == "failed":
                 update["item_count"] = 0
             return update
+    read = [payload for payload in payloads if not gmail_mail_service_not_enabled(payload)]
+    if payloads and not read:
+        return {"item_count": 0, "not_applicable": GMAIL_NOT_APPLICABLE_REASON, "authenticated_read": False}
+    if payloads and len(read) < len(payloads):
+        return {"item_count": len(read)}
     return {}
 
 
@@ -682,7 +694,7 @@ def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict
             {
                 "collector": collector,
                 "type": "google",
-                "name": f"mailboxSettings:{mailbox.get('userEmail') or 'unknown'}",
+                "name": f"mailboxSettings:{mailbox['userEmail'] if gmail_mailbox_identifier(mailbox.get('userEmail')) else 'unknown'}",
                 "endpoint": "gmail.users.settings",
                 "status": status,
                 "item_count": 0 if status == "failed" else 1,

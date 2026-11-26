@@ -169,16 +169,59 @@ GMAIL_NOT_APPLICABLE_REASON = "mail_service_not_enabled"
 _GMAIL_NOT_ENABLED_TEXT = "Mail service not enabled"
 
 
+# The mailbox a settings row names: the signed-in mailbox (``me``, OAuth) or one address (domain-wide delegation).
+_GMAIL_MAILBOX_ADDRESS = re.compile(r"[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+")
+
+
+def gmail_mailbox_identifier(value: Any) -> bool:
+    """Whether a settings row's ``userEmail`` names one mailbox: ``me`` or a single address."""
+    return isinstance(value, str) and len(value) <= 320 and (value == "me" or bool(_GMAIL_MAILBOX_ADDRESS.fullmatch(value)))
+
+
 def gmail_mail_service_not_enabled(payload: Any) -> bool:
-    """Whether a mailbox row is exactly the not-applicable marker: ``userEmail`` and ``mailService: not_enabled``."""
+    """Whether a mailbox row is exactly the not-applicable marker: a mailbox identifier
+    (:func:`gmail_mailbox_identifier`) in ``userEmail`` and ``mailService: not_enabled``, nothing else."""
     return (isinstance(payload, dict) and set(payload) == {"userEmail", "mailService"}
-            and payload["mailService"] == GMAIL_SERVICE_NOT_ENABLED)
+            and payload["mailService"] == GMAIL_SERVICE_NOT_ENABLED and gmail_mailbox_identifier(payload["userEmail"]))
 
 
 def _gmail_not_enabled_error(exc: Exception) -> bool:
-    """HTTP 400 ``failedPrecondition`` with Google's "Mail service not enabled" text; any other error is a failure."""
+    """HTTP 400 whose top-level message and every structured error are Google's "Mail service not enabled", each
+    structured error with the reason ``failedPrecondition`` beside that message. Anything else (another message, a
+    reason paired with another message, no structured error) is an ordinary failure, left visible."""
     status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
-    return status == 400 and "failedPrecondition" in _error_reasons(exc) and _GMAIL_NOT_ENABLED_TEXT in str(exc)
+    if status != 400:
+        return False
+    entries: list[Any] = []
+    messages: list[Any] = []
+    details = getattr(exc, "error_details", None)
+    if isinstance(details, list):
+        entries.extend(details)
+    elif details is not None and details != "":
+        return False
+    reason = getattr(exc, "reason", None)
+    if reason is not None:
+        messages.append(reason)
+    content = getattr(exc, "content", None)
+    if isinstance(content, (bytes, str)) and content:
+        try:
+            body = json.loads(content)
+        except (ValueError, TypeError):
+            return False
+        error = body.get("error") if isinstance(body, dict) else None
+        if not isinstance(error, dict):
+            return False
+        messages.append(error.get("message"))
+        for key in ("errors", "details"):
+            if key in error:
+                if not isinstance(error[key], list):
+                    return False
+                entries.extend(error[key])
+    return (bool(entries) and bool(messages)
+            and all(isinstance(text, str) and text.strip() == _GMAIL_NOT_ENABLED_TEXT for text in messages)
+            and all(isinstance(entry, dict) and entry.get("reason") == "failedPrecondition"
+                    and isinstance(entry.get("message"), str) and entry["message"].strip() == _GMAIL_NOT_ENABLED_TEXT
+                    for entry in entries))
 
 
 def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str | None]:
