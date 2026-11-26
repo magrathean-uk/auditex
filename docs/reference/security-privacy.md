@@ -915,6 +915,11 @@ older `model_assessment.json`; writers emit only the new one. There is no salt a
 no unkeyed pseudonym. Pseudonyms of 1.4.0 and earlier came from the run path and do
 not match those of 1.5.0; they stay confirmable by a holder who knows the path.
 
+The Google Workspace assessment keeps the value-rule projection in memory. Its file
+stores policy answers and projection metadata, including section status, reason and
+source artefact names. Projected DNS record text and reporting addresses stay out of
+the assessment and the reports, exports and customer packs derived from its answers.
+
 Key sources:
 
 - Run key: collection creates `operator-inputs/pseudonym.key` when it seals a run

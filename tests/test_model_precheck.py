@@ -336,7 +336,7 @@ def test_rule_rows_are_valid_and_never_call_model(tmp_path, monkeypatch, project
     assert result["totals"]["rule_answered"] == 1
     assert result["totals"]["answered"] + result["totals"]["unknown"] == 1
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment.schema.json").read_text()))
+    jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment-2026-11-22.schema.json").read_text()))
 
 
 @pytest.mark.parametrize("mutation", ["attempts", "prompt", "response", "reason", "class", "value", "section", "field",
@@ -568,7 +568,7 @@ def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
     assert row["comparison"]["model_status"] == "fail"
     assert result["totals"]["rule_answered"] == result["totals"]["answered"] == 1
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment.schema.json").read_text()))
+    jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment-2026-11-22.schema.json").read_text()))
     for key, value in (("class", "closed_gate"), ("class", "absent_field"), ("field", "conditional_access_policies"),
                        ("value", 0), ("section", ["scuba_config"]),
                        ("rule_id", "MS.AAD.3.1v1.conditional_access_policies_empty")):

@@ -1948,8 +1948,12 @@ def _without_local_proof(record: Mapping[Any, Any]) -> Mapping[Any, Any]:
     return out
 
 
-def _policy_value_key(record: Mapping[Any, Any]) -> str | None:
-    """Two Policy API names are structural only inside their own setting's value."""
+def _contextual_child_key(record: Mapping[Any, Any], field: Any) -> str | None:
+    """Keep Google DNS and Policy API fields only in their own records."""
+    if field in ("dmarc", "dkim") and type(record.get("alias")) is bool and isinstance(record.get("domain"), str):
+        return "inherited" if field == "dmarc" else "selectors"
+    if field != "value":
+        return None
     setting = record.get("type")
     if record.get("kind") == "google_policy_setting":
         setting = record.get("section")
@@ -2102,7 +2106,7 @@ class _Redactor:
         return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.key, self.id_canonical.get(match["hit"].lower(), match["hit"]))
 
     # -- structure ----------------------------------------------------------------------------------------
-    def walk(self, value: Any, controlled: bool = False, *, policy_key: str | None = None) -> Any:
+    def walk(self, value: Any, controlled: bool = False, *, contextual_key: str | None = None) -> Any:
         if isinstance(value, str):
             return self.text(value)
         if not isinstance(value, (Mapping, list, tuple, set, frozenset)):
@@ -2112,7 +2116,7 @@ class _Redactor:
             if self.depth > MAX_DEPTH:
                 raise RedactionDepthError(f"value is nested more than {MAX_DEPTH} levels")
             if isinstance(value, Mapping):
-                return self.mapping(value, controlled, policy_key=policy_key)
+                return self.mapping(value, controlled, contextual_key=contextual_key)
             if isinstance(value, list):
                 return [self.walk(item, controlled) for item in value]
             if isinstance(value, tuple):
@@ -2135,7 +2139,8 @@ class _Redactor:
                 parts[key] = item
         return self.walk(parts, controlled)
 
-    def mapping(self, record: Mapping[Any, Any], controlled: bool = False, *, policy_key: str | None = None) -> dict[Any, Any]:
+    def mapping(self, record: Mapping[Any, Any], controlled: bool = False, *,
+                contextual_key: str | None = None) -> dict[Any, Any]:
         record = _without_local_proof(record)
         normed = {_norm(k): v for k, v in record.items()}
         person = _person(normed) if _is_directory_person(normed) else None
@@ -2182,10 +2187,10 @@ class _Redactor:
                 item = self._name_parts(item, person[0], controlled)
             else:
                 item = self.walk(item, controlled or norm in _CONTROLLED_KEYS,
-                                 policy_key=_policy_value_key(record) if key == "value" else None)
+                                 contextual_key=_contextual_child_key(record, key))
             if self.blank and isinstance(key, str) and key:
                 new_key = TEXT_PLACEHOLDER
-            elif policy_key is not None and key == policy_key:
+            elif contextual_key is not None and key == contextual_key:
                 new_key = key
             else:
                 new_key = self.text(key, key=True) if isinstance(key, str) and key else key
@@ -2588,7 +2593,7 @@ includeauthenticationcontextclassreferences includeauthenticationcontexts includ
 includedgroups includedlocations includedusers includeexchange includegroups includeguestsorexternalusers includehiddenfolders
 includelocations includeplatforms includeroles includeserviceprincipals includeuseractions includeusers incomplete
 incompletecollectors incompleteevidence incompletefiles incompleteomitted incompletereasons incompleteshape index
-inferred info information informational informationuri infrastructure ingestiondisabled ingestionenabled ingraceperiod inherited
+inferred info information informational informationuri infrastructure ingestiondisabled ingestionenabled ingraceperiod
 inline input inputcollectionlimited inputcomplete inputcondition inputcount inputfailedsections inputhmacsha256
 inputissues inputlimited inputlimitedsections inputname inputpath inputrecordcount inputrecordcounts inputsha256
 inputunreadable inscope insiderrisklevels installdelaydays installhint instancediscovery instrheadingline instructions
@@ -2784,7 +2789,7 @@ sectionshapeunusable sectionspruned sectionstats secure securebootrequired secur
 securescorecontrolprofiles securescores security securityalerts securitydefaults securitydirectoryauditevents
 securityonly securityreader securityscorecontrolprofiles securityscores securitysigninevents securitysuite
 securitysuiteunsuccessfulcommands securitytwostepverification securityupdatemanagement seen select selected selectedcollectors selection
-selectobject selector selector1 selector2 selectordetails selectors selectorsmissing selectorspresent selectorsunresolved sendas senderblocklist
+selectobject selector selector1 selector2 selectordetails selectorsmissing selectorspresent selectorsunresolved sendas senderblocklist
 sendercontains sendnotification sensitiveruleunusable sensitiveusers sensitiveusersbinding sentences sentinelxdr
 sentinelxdralertobjects sentinelxdrincidentobjects sentto senttomemberof separator sequence servererror servfail service
 serviceabsent serviceaccount serviceaccountkey serviceaccountkeypresent servicehealth servicehealthobjects serviceissues

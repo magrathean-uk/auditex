@@ -791,14 +791,20 @@ def _product_field_names() -> set[str]:
 def test_every_product_field_name_is_exempt_from_whole_key_masking() -> None:
     exempt = redaction._D5_FIELD_NAMES
     assert all(redaction._norm(name) == name for name in exempt)
-    # These Google fields are structural inside their own policy values. Elsewhere they can be people.
-    missing = sorted(_product_field_names() - exempt - {"region", "securityupdate"})
+    # These Google fields are structural within their own records. Elsewhere they can be people.
+    missing = sorted(_product_field_names() - exempt - {"asof", "region", "securityupdate", "inherited", "selectors"})
     assert not missing, "regenerate _D5_FIELD_NAMES in src/azure_tenant_audit/output_redaction.py; missing: " + " ".join(missing)
 
 
-@pytest.mark.parametrize("field", ["alias", "domainAliases", "domainAliasName", "inherited", "query_name", "selectors"])
+@pytest.mark.parametrize("field", ["alias", "domainAliases", "domainAliasName", "query_name"])
 def test_google_dns_field_names_survive_a_matching_person_name(field: str) -> None:
     assert redact_output({field: False}, context=_people(field)) == {field: False}
+
+
+def test_contextual_google_dns_fields_survive_in_posture_records() -> None:
+    source = {"domain": "example.com", "alias": False,
+              "dmarc": {"inherited": False}, "dkim": {"selectors": {"google": []}}}
+    assert redact_output(source, context=_people("Inherited", "Selectors")) == source
 
 
 @pytest.mark.parametrize("name", ["Chat", "Time", "Parameters"])
@@ -1021,6 +1027,32 @@ def test_gws_setting_words_as_mapping_keys_are_masked_in_the_shareable_json_prev
     assert f'"{_id(_key(root), "Security Update")}": 1' in content  # an identifier-shaped key keeps its shape
     assert f'"{_prose(_key(root), "Region")}": 2' in content
     assert "securityupdate" not in redaction._D5_FIELD_NAMES and "region" not in redaction._D5_FIELD_NAMES
+
+
+def test_gws_projection_words_as_mapping_keys_are_masked_in_the_shareable_json_preview(tmp_path: Path) -> None:
+    # M13-L06 review B2: the GWS projection writes its section keys as values (DEC-171), so a Microsoft 365 person
+    # named like one of them is still pseudonymised where that spelling is a mapping key in shareable output.
+    from auditex.reporting import preview_report
+
+    users = [_user("Top Unit", "directory-fixture-1@example.invalid"),
+             _user("Inherited", "directory-fixture-2@example.invalid"),
+             _user("Selectors", "directory-fixture-3@example.invalid")]
+    root = _run(tmp_path / "run", users, narrative="Top Unit reviewed it")
+    report = root / "reports" / "report-pack.json"
+    payload = json.loads(report.read_text())
+    payload["executive_summary"]["per_reviewer"] = {"top_unit": 1, "Inherited": 2, "Selectors": 3}
+    report.write_text(json.dumps(payload))
+
+    content = preview_report(run_dir=str(root), format_name="json", include_sections=["executive_summary"],
+                             profile="shareable")["content"]
+
+    assert "top_unit" not in content and '"Inherited"' not in content and '"Selectors"' not in content
+    assert f'"{_id(_key(root), "Top Unit")}": 1' in content
+    assert f'"{_prose(_key(root), "Inherited")}": 2' in content
+    assert f'"{_prose(_key(root), "Selectors")}": 3' in content
+    words = {"asof", "topunit", "unit", "unitkind", "time", "spf", "selectors", "inherited", "membershipscomplete",
+             "userids", "groupids"}
+    assert words.isdisjoint(redaction._D5_FIELD_NAMES)
 
 
 def test_contextual_google_policy_fields_survive_in_their_own_setting() -> None:

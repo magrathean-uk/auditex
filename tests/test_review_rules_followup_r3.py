@@ -191,8 +191,10 @@ def test_r106_output_contract_names_the_written_schema_version():
     root = Path(__file__).resolve().parents[1]
     text = (root / "docs/reference/output-contract.md").read_text(encoding="utf-8")
     named = re.search(r"Its schema is `schemas/model_assessment\.schema\.json` \(version `([^`]+)`\)", text).group(1)
-    schema = json.loads((root / "schemas/model_assessment.schema.json").read_text(encoding="utf-8"))
-    assert named == rule_assessment.SCHEMA_VERSION == schema["properties"]["schema_version"]["const"]
+    current_schema = json.loads((root / "schemas/model_assessment.schema.json").read_text(encoding="utf-8"))
+    m365_schema = json.loads((root / "schemas/model_assessment-2026-11-22.schema.json").read_text(encoding="utf-8"))
+    assert named == current_schema["properties"]["schema_version"]["const"] == "2026-11-27"
+    assert rule_assessment.SCHEMA_VERSION == m365_schema["properties"]["schema_version"]["const"] == "2026-11-22"
     paragraph = text[text.index("Its schema is `schemas/model_assessment.schema.json`"):]
     paragraph = paragraph[:paragraph.index("\n\n")]
     assert "`2026-11-05`" in paragraph and "rule_view" in paragraph

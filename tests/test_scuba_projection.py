@@ -291,19 +291,30 @@ def test_rule_only_assessment_keeps_redaction_and_has_no_endpoint(tmp_path):
     validate_assessment(result)
 
 
-def test_other_platform_and_absent_bundle_are_all_markers(tmp_path, monkeypatch):
+def test_other_platform_is_withheld_by_m365_projection_and_dispatched_to_gws(tmp_path):
     write(tmp_path, 'run-manifest.json', {'run_id': 'google', 'platform': 'google_workspace'})
     p = project_run(tmp_path)
     assert all(v == NOT_COLLECTED for v in p.values())
     assert {v['reason'] for v in p.report['sections'].values()} == {'not_applicable_to_platform'}
     result = assess_run(tmp_path)
-    assert result['totals']['rule_answered'] == 102 and result['totals']['unknown'] == 102
+    assert result['baseline'] == 'cisa-scubagoggles-v1.1.0'
+    assert len(result['policies']) == 138
+    assert all(row['policy_id'].startswith('GWS.') for row in result['policies'])
+    assert result['totals']['unknown'] == 138
     assert result['limitations'] == ['projection_not_implemented']
 
 
-def test_previous_schema_is_byte_identical_to_pinned_predecessor():
-    old = (ROOT / 'schemas/model_assessment-2026-10-28.schema.json').read_bytes()
-    assert sha256(old).hexdigest() == '00cf684c8c08f89f8e7ba714155bd3ac3a7f2aa345592fa0d5d4e1f1cd8b157a'
+@pytest.mark.parametrize('version,digest', [
+    ('2026-10-27', '9d75bd3f9b3cb2f1192c224e1401b0f4a27c3ddfe868e0fc50247ada4c0c8663'),
+    ('2026-10-27.1', '5d0d68d43c94c5d188aeaa6ef5366547e3620a10aa69a6db236f5b49f2011573'),
+    ('2026-10-28', '00cf684c8c08f89f8e7ba714155bd3ac3a7f2aa345592fa0d5d4e1f1cd8b157a'),
+    ('2026-10-29', '40bb841796a4d400f7303a0a7dfaa177dc77bccd0ad61e2a499e738ea2880ca3'),
+    ('2026-11-05', 'b7b8bc455ffc35c73cfc7621e9d87bb53e16030514b287875ffcc25b7720e269'),
+    ('2026-11-22', 'de69b12e40dae17316fa98074a7c10c83f7b7dbaf03102c2d05306f1b40d3a5a'),
+])
+def test_previous_schemas_are_byte_identical_to_pinned_predecessors(version, digest):
+    old = (ROOT / f'schemas/model_assessment-{version}.schema.json').read_bytes()
+    assert sha256(old).hexdigest() == digest
 
 
 def test_current_and_historical_schemas_resolve_side_by_side_by_id():
@@ -312,47 +323,47 @@ def test_current_and_historical_schemas_resolve_side_by_side_by_id():
     from referencing import Registry, Resource
 
     historical = json.loads((ROOT / 'schemas/model_assessment-2026-11-05.schema.json').read_text())
+    m365 = json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text())
     current = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
     registry = Registry().with_resources(
-        (schema['$id'], Resource.from_contents(schema)) for schema in (historical, current))
-    resolved = {registry.contents(schema['$id'])['properties']['schema_version']['const'] for schema in (historical, current)}
-    assert resolved == {'2026-11-05', '2026-11-22'}
+        (schema['$id'], Resource.from_contents(schema)) for schema in (historical, m365, current))
+    resolved = {registry.contents(schema['$id'])['properties']['schema_version']['const']
+                for schema in (historical, m365, current)}
+    assert resolved == {'2026-11-05', '2026-11-22', '2026-11-27'}
 
 
 def test_every_shipped_assessment_schema_is_named_by_the_published_id_the_contract_gives():
     # Bot review wave 2 (52): the date-named files keep their published bytes, so the five historical versions share one
-    # $id. The contract must say so, rather than promise a registry keyed by $id that holds every version at once, and
-    # each version must still be reached from its schema_version through its own file.
-    import re
+    # $id. Each version must still be reached from its schema_version through its own file.
 
     from azure_tenant_audit.scuba_assessment import ASSESSMENT_SCHEMAS
-    assert len(ASSESSMENT_SCHEMAS) == 6
+    assert len(ASSESSMENT_SCHEMAS) == 7
     by_id: dict[str, list[str]] = {}
     for version, path in ASSESSMENT_SCHEMAS.items():
         schema = json.loads((ROOT / path).read_text())
         assert schema['properties']['schema_version']['const'] == version
         by_id.setdefault(schema['$id'], []).append(version)
-    current = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())['$id']
-    assert by_id.pop(current) == ['2026-11-22']
+    base = 'https://magrathean.uk/solutions/auditex/schemas/'
+    assert by_id.pop(base + 'model_assessment-2026-11-27.schema.json') == ['2026-11-27']
+    assert by_id.pop(base + 'model_assessment-2026-11-22.schema.json') == ['2026-11-22']
     [(historical_id, historical)] = by_id.items()
+    assert historical_id == base + 'model_assessment.schema.json'
     assert historical == ['2026-10-27', '2026-10-27.1', '2026-10-28', '2026-10-29', '2026-11-05']
 
     text = (ROOT / 'docs/reference/output-contract.md').read_text()
     paragraph = text[text.index('Its schema is `schemas/model_assessment.schema.json`'):]
     paragraph = ' '.join(paragraph[:paragraph.index('\n\n')].split())
-    assert 'every version at once' not in paragraph
-    ids = re.search(r'The older files all keep the `\$id` they were published with, `\.\.\./(schemas/[^`]+)`, which all five '
-                    r'share; the current schema has its own, version-named `\$id` \(`\.\.\./(schemas/[^`]+)`\)', paragraph)
-    assert ids, 'the contract no longer states which published $id each assessment schema carries'
-    assert historical_id.endswith('/' + ids.group(1)) and current.endswith('/' + ids.group(2))
-    for version in historical:
+    for version in [*historical, '2026-11-22', '2026-11-27']:
         assert f'`{version}`' in paragraph
+    assert 'which all five share' in paragraph
+    assert '`.../schemas/model_assessment-2026-11-22.schema.json`' in paragraph
+    assert '`.../schemas/model_assessment-2026-11-27.schema.json`' in paragraph
 
 
 def test_rule_view_on_a_projected_section_fails_the_published_schema(complete_bundle):
     # Bot review wave 2 (53): the published schema itself says a rule view belongs only on a withheld section.
     result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
-    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    schema = json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text())
     sections = result['projection']['sections']
     assert {d['status'] for d in sections.values()} == {'projected', 'not_collected'}
     assert not any('rule_view' in d for d in sections.values())
@@ -391,7 +402,7 @@ def test_projection_envelope_validation_rejects_tampering(complete_bundle, monke
         result['endpoint_host'] = 'remote.invalid'
     with pytest.raises(ValueError):
         validate_assessment(result)
-    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    schema = json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text())
     if mutation in {'missing_section', 'bounds', 'limitations'}:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(result, schema)
@@ -698,7 +709,7 @@ def test_ca_microsoft_managed_policy_beside_a_kit_policy_gives_a_collected_secti
     assert report['status'] == 'projected' and report['dropped_conditions'] == [f'{POLICY_B}:sessionControls']
     result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
     assert result['projection']['sections']['conditional_access_policies']['dropped_conditions'] == [
         f'{POLICY_B}:sessionControls']
 
@@ -755,7 +766,7 @@ def test_ca_section_withheld_oversize_after_redaction_carries_no_record_keys(com
     result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'],
                         projection_max_chars=bound)
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
 
 
 @pytest.mark.parametrize('name,value', [('dropped_conditions', [f'{POLICY_A}:sessionControls']),
@@ -922,7 +933,7 @@ def test_redaction_salt_is_absent_and_rejected_by_both_validators(complete_bundl
     with pytest.raises(ValueError):
         validate_assessment(result)
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+        jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
 
 
 def test_demo_original_sharepoint_settings_and_generated_twin():
@@ -1069,7 +1080,7 @@ def test_numeric_enum_diagnostic_and_optional_detail_validate(complete_bundle):
     result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     assert result['projection']['sections']['SPO_tenant']['detail'] == {
         'field': 'FileAnonymousLinkType', 'kind': 'unseen_enum_value', 'value': 99}
-    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    schema = json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text())
     validate_assessment(result)
     jsonschema.validate(result, schema)
     for section in result['projection']['sections'].values():
@@ -1092,7 +1103,7 @@ def test_projection_diagnostic_both_validators_reject_malformed_detail(complete_
     with pytest.raises(ValueError):
         validate_assessment(result)
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+        jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
 
 
 @pytest.mark.parametrize('section,diagnostic', [
@@ -1633,7 +1644,7 @@ def test_scan_fields_and_detail_validate_in_both_validators(complete_bundle):
     section = result['projection']['sections']['privileged_users']
     assert section['detail'] == {'field': 'scan_max_rows', 'kind': 'scan_bound'} and section['scan']['rows'] == 100
     assert result['projection']['bounds']['scan_max_rows'] == 100
-    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    schema = json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text())
     validate_assessment(result)
     jsonschema.validate(result, schema)
     for mutation in ('reason', 'field', 'kind'):
@@ -2353,7 +2364,7 @@ def test_scuba_config_unresolved_or_unrecorded_list_withholds_exclusion_policies
 
 
 def test_scuba_config_synthesis_validates_and_tampering_is_rejected(complete_bundle):
-    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    schema = json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text())
     config_bundle(complete_bundle)
     result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     validate_assessment(result)
@@ -2387,7 +2398,7 @@ def test_dns_sections_say_why_they_are_missing(complete_bundle, selected, reason
         assert result['projection']['sections'][name]['status'] == 'not_collected'
         assert result['projection']['sections'][name]['reason'] == reason
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
 
 
 # --- Extra Graph fields never withhold; a failed read names its cause -----------------------------------------
@@ -2454,7 +2465,7 @@ def test_collector_error_names_the_error_class_and_operation_never_the_message(c
     assert section['detail'] == {'error_class': 'permission_stop', 'operation': 'licensing.subscribedSkus'}
     assert PERSON not in canonical(result) and EMAIL not in canonical(result)
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
 
 
 @pytest.mark.parametrize('error_class', [None, 'Not A Class', PERSON])
@@ -2497,7 +2508,7 @@ def test_no_p2_privileged_users_project_from_directory_roles(complete_bundle):
     assert p['privileged_roles'] == NOT_COLLECTED and roles['reason'] == 'collector_error'
     assert roles['detail'] == {'error_class': 'license_required', 'operation': 'identity_governance.roleAssignmentScheduleInstances'}
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
 
 
 @pytest.mark.parametrize('error_class', ['permission_stop', 'insufficient_permissions'])
@@ -2773,7 +2784,7 @@ def test_teams_unsupported_environment_error_projects_and_validates(
     assert section['status'] == 'not_collected' and section['reason'] == 'collector_error'
     assert section['detail'] == {'error_class': reported, 'operation': 'teams_policy.meetingPolicies'}
     validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment-2026-11-22.schema.json').read_text()))
     section['detail']['error_class'] = 'alice_smith'
     with pytest.raises(ValueError, match='error class'):
         validate_assessment(result)

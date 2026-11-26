@@ -615,6 +615,7 @@ def _write_google_bundle(
             privacy=privacy,
             bundle_metadata={
                 "fixture_provenance": config.fixture_provenance,
+                "as_of": evaluated_at.isoformat().replace("+00:00", "Z"),
                 "since": config.since,
                 "until": config.until,
                 "platform": "google_workspace",

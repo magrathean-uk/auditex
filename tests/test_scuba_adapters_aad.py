@@ -761,7 +761,7 @@ def test_sp_variant_names_the_recognised_settings_its_rule_view_dropped(run, fie
     assessment = rule_assessment.assess_run(run, policies=["MS.SHAREPOINT.1.1v1"])
     assert assessment["projection"]["sections"]["SPO_tenant"]["rule_view_omitted_fields"] == [field]
     validate_assessment(assessment)
-    schema = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())
+    schema = json.loads((ROOT / "schemas/model_assessment-2026-11-22.schema.json").read_text())
     jsonschema.validate(assessment, schema)
     # Only an allowlisted name, sorted, and only beside a variant rule view.
     section = assessment["projection"]["sections"]["SPO_tenant"]

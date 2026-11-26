@@ -432,6 +432,10 @@ is explicit in `compare_context.identity_basis` and `legacy_fallback`.
 
 Known-bad or seeded offline bundles may also stamp optional `fixture_provenance` metadata in `run-manifest.json` and `reports/report-pack.json`. This is replay metadata for regression fixtures, not live tenant evidence.
 
+Google Workspace run manifests record `as_of` as an RFC 3339 timestamp. It is the replay's
+evaluation instant for offline runs and the collection end for live runs. Assessments of
+older live bundles derive it from the recorded start and duration when both are valid.
+
 New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inventory.json`; validation keeps the required artifact list stable so older bundles remain readable.
 
 ## Evidence discipline
@@ -439,8 +443,13 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 `model_assessment.json` is an optional root artefact written by `auditex assess`.
 Assessment is rules only: the model layer is removed and nothing is called. Current outputs use
 `endpoint_host: "none"`, `model_name: "rules-only"` and omit `serving`.
-Its schema is `schemas/model_assessment.schema.json` (version `2026-11-22`), listed
-by the schema manifest and checked when present by bundle validation. `2026-11-22` is
+Its schema is `schemas/model_assessment.schema.json` (version `2026-11-27`), listed
+by the schema manifest and checked when present by bundle validation. A Google Workspace
+assessment uses this version with `baseline: "cisa-scubagoggles-v1.1.0"` and
+`scope_post_check: {"status": "not_applicable"}`. The version also accepts
+`cisa-scuba-m365-v3.9.1` as a baseline. Every policy id and the projection section catalogue
+must match the envelope baseline. Microsoft 365 writers continue to emit `2026-11-22`,
+which has an implicit Microsoft 365 baseline. `2026-11-22` is
 `2026-11-05` plus the optional projection-section field `rule_view` (`adapter` or `variant`),
 which names the value-rule view still built for a `not_collected` section; the schema itself
 rejects it on a `projected` section. Beside `rule_view: variant`, optional
@@ -459,13 +468,11 @@ rejects both: it must cite what the current rule reads and use its current cells
 differs. The known older versions `2026-10-27`,
 `2026-10-27.1`, `2026-10-28`, `2026-10-29` and `2026-11-05` use their byte-preserved,
 date-named schema files; `2026-11-05` is the most recent of these and never carries `rule_view`.
-The older files all keep the `$id` they were published with, `.../schemas/model_assessment.schema.json`,
-which all five share; the current schema has its own, version-named `$id`
-(`.../schemas/model_assessment-2026-11-22.schema.json`). A JSON Schema registry keyed by `$id`
-therefore holds the current schema beside one of the older files, not all six. Auditex never
-selects a schema by `$id`: it reads the file's `schema_version` and validates against that
-version's file named above.
-Earlier Auditex releases reject a `2026-11-22` file on its version.
+The five oldest files keep their published `$id`, `.../schemas/model_assessment.schema.json`,
+which all five share. The `2026-11-22` and `2026-11-27` schemas have distinct published ids
+(`.../schemas/model_assessment-2026-11-22.schema.json` and
+`.../schemas/model_assessment-2026-11-27.schema.json`). Auditex selects a schema by the
+assessment's `schema_version`. Earlier readers that do not recognise a version reject it.
 Malformed or unknown-version optional assessments produce warnings and never change
 the deterministic gate result. It contains
 `generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention

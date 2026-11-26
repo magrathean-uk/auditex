@@ -854,7 +854,7 @@ def test_11_legacy_bundle_renders_with_a_temporary_key_and_writes_nothing(tmp_pa
     assert not (run / "operator-inputs").exists()
     assessment["projection"]["redaction"]["strategy"] = "run-salted-sha256-v1"  # as 1.4.0 wrote it
     validate_assessment(assessment)
-    jsonschema.validate(assessment, json.loads((ROOT / "schemas/model_assessment.schema.json").read_text()))
+    jsonschema.validate(assessment, json.loads((ROOT / "schemas/model_assessment-2026-11-22.schema.json").read_text()))
 
 
 def test_18_session_keys_are_per_process_and_a_later_key_file_wins(tmp_path: Path) -> None:
