@@ -609,13 +609,18 @@ def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[
     ):
         if key in report_pack:
             sections[key] = report_pack[key]
-    explanations = _load_policy_explanations(run_path, manifest)
+    explanations, heading = _load_policy_section(run_path, manifest)
     if explanations:
         sections["policy_explanations"] = explanations
     local_answer = _load_local_answer(run_path)
     if local_answer:
         sections["local_answer"] = local_answer
-    return {"run_dir": str(run_path), "manifest": manifest, "summary_json": fallback_summary, "sections": sections}
+    bundle = {"run_dir": str(run_path), "manifest": manifest, "summary_json": fallback_summary, "sections": sections}
+    if heading is not None:
+        # The section's heading, outside the sections: chosen from the validated baseline here, before any redaction,
+        # and never part of the JSON report, so the row contract and the Microsoft 365 output stay as they were.
+        bundle["policy_explanations"] = heading
+    return bundle
 
 
 def _load_local_answer(run_path: Path) -> dict[str, Any] | None:
@@ -641,20 +646,28 @@ def _load_local_answer(run_path: Path) -> dict[str, Any] | None:
 
 def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Read the optional assessment through the existing run-file guard and fail closed on damage."""
+    return _load_policy_section(run_path, manifest)[0]
+
+
+def _load_policy_section(run_path: Path, manifest: Mapping[str, Any]
+                         ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """The policy explanation rows and, for a Google Workspace assessment, the section heading: its title and
+    coverage (None for Microsoft 365). Missing, damaged or foreign content gives no rows."""
     from azure_tenant_audit.scuba_assessment import (
-        MODEL_ASSESSMENT_PATH,
+        GWS_BASELINE,
         derive_explainer,
-        validate_assessment,
         value_rule_verdict,
     )
-    from azure_tenant_audit.strict_json import reject_json_constant, strict_pairs
+
+    from .answer_digest import admitted_assessment, gws_coverage
 
     try:
-        assessment = json.loads(read_run_file(run_path, MODEL_ASSESSMENT_PATH).decode("utf-8"),
-                                object_pairs_hook=strict_pairs, parse_constant=reject_json_constant)
-        validate_assessment(assessment)
+        # Validated and admitted against the run's own manifest (its run id and its platform's baseline); a Google
+        # answer from evidence its projection withheld is shown as the rules answer it without that evidence.
+        assessment = admitted_assessment(run_path)
         if assessment["run_id"] != manifest.get("run_id"):
-            return []
+            return [], None
+        google = assessment.get("baseline") == GWS_BASELINE
         candidates = [row for row in assessment["policies"] if "explainer" in row]
         if candidates:
             # Assessment files can be changed after creation, so apply the explainer boundary again even for local reports.
@@ -671,13 +684,21 @@ def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> li
                     rows.append({"policy_id": row["policy_id"], "verdict": value_rule_verdict(row),
                                  "explainer": safe_derived})
             assert_snapshot_stable(run_path, context.snapshot)
-            return rows
+            if not rows or not google:
+                return rows, None
+            # Coverage counts the rows this report shows, not the rows the assessment holds: an explainer the
+            # report drops (missing, mismatched or unredactable) is a check the report does not carry.
+            shown = {row["policy_id"] for row in rows}
+            heading = {"title": GWS_POLICY_EXPLANATIONS_TITLE,
+                       "coverage": gws_coverage({"policies": [row for row in assessment["policies"]
+                                                              if row["policy_id"] in shown]})}
+            return rows, heading
     except (UnsafeRunFileError, MemoryError):
         raise
     except Exception:
-        # Missing, invalid or unredactable optional content is omitted; unsafe admission always refuses.
-        return []
-    return []
+        # Missing, invalid, foreign or unredactable optional content is omitted; unsafe admission always refuses.
+        return [], None
+    return [], None
 
 
 def analyze_report(run_dir: str | Path) -> dict[str, Any]:
@@ -2479,7 +2500,9 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     generated = [
         generated_row("handoff.md", render_enterprise_handoff_markdown(handoff_payload)),
         generated_row("handoff.json", _json(handoff_payload) + "\n"),
-        generated_row("report.md", rendered_report),
+        # The final pass of the pack's report keeps the Google section title, as the preview did.
+        generated_row("report.md", rendered_report, lambda text: keep_gws_title(
+            rendered_report, text, PROFILE_CUSTOMER_PACK, redaction)),
         generated_row("api-calls.md", render_api_call_inventory_markdown(api_payload)),
         generated_row("api-calls.json", _json(api_payload) + "\n"),
         generated_row("permissions.md", render_permissions_ledger_markdown(permissions_payload)),
@@ -3259,10 +3282,60 @@ def _append_local_answer_markdown(lines: list[str], payload: Mapping[str, Any]) 
         lines.append("")
 
 
-def _append_policy_explanations_markdown(lines: list[str], rows: list[dict[str, Any]]) -> None:
+# The section title by assessment baseline (design M13 section 9.3). The heading is chosen from the validated
+# assessment's baseline when the report is loaded (the bundle's ``policy_explanations``), before any redaction, so
+# masking a policy id can never change it; with no heading the Microsoft 365 title stays as it always was.
+POLICY_EXPLANATIONS_TITLE = "Policy explanations"
+GWS_POLICY_EXPLANATIONS_TITLE = "CISA SCuBA Google Workspace (ScubaGoggles v1.1.0)"
+
+
+_GWS_COVERAGE_NOTE = re.compile(
+    r"Partial: the rules assessed \d+ of the \d+ SCuBA Google Workspace checks in the shipped catalogue; "
+    r"the other \d+ are not in this report\.")
+
+
+def keep_gws_title(rendered: str, redacted: str, profile: str, context: RedactionContext) -> str:
+    """Put the Google section's fixed text back after a redaction pass (design M13 section 9.3).
+
+    The title and the coverage line under it are product text, but the name masking pass can take words of them
+    (``Google Workspace``) for a directory person's name. ``rendered`` is the text before the pass and ``redacted``
+    the text after it: only where the rendered text carried the title as a heading (Markdown ``##`` or HTML ``<h2>``)
+    or the coverage line in its own paragraph is that spot, as the same pass spelled it for the fixed text alone, put
+    back byte for byte. Display names never join the field names (``_D5_FIELD_NAMES``) and every other occurrence
+    of a masked word stays masked.
+    """
+    fixed_texts = [(GWS_POLICY_EXPLANATIONS_TITLE, "## ", "\n"), (GWS_POLICY_EXPLANATIONS_TITLE, "<h2>", "</h2>")]
+    for note in {match.group(0) for match in _GWS_COVERAGE_NOTE.finditer(rendered)}:
+        fixed_texts += [(note, "\n\n", "\n"), (note, '<p class="coverage-note">', "</p>")]
+    for text, before, after in fixed_texts:
+        if before + text + after not in rendered:
+            continue
+        masked = redact_output(text, profile=profile, context=context, markup=True)
+        if masked != text:
+            redacted = redacted.replace(before + masked + after, before + text + after)
+    return redacted
+
+
+def _policy_explanations_heading(heading: Any) -> tuple[str, str | None]:
+    """The section title and, for an assessment of part of the Google catalogue, its coverage line (R096)."""
+    if not isinstance(heading, Mapping) or heading.get("title") != GWS_POLICY_EXPLANATIONS_TITLE:
+        return POLICY_EXPLANATIONS_TITLE, None
+    coverage = _mapping(heading.get("coverage"))
+    total, assessed = coverage.get("policies"), coverage.get("assessed")
+    note = None
+    if type(total) is int and type(assessed) is int and 0 <= assessed < total:
+        note = (f"Partial: the rules assessed {assessed} of the {total} SCuBA Google Workspace checks in the shipped "
+                f"catalogue; the other {total - assessed} are not in this report.")
+    return GWS_POLICY_EXPLANATIONS_TITLE, note
+
+
+def _append_policy_explanations_markdown(lines: list[str], rows: list[dict[str, Any]], heading: Any = None) -> None:
     if not rows:
         return
-    lines.extend(["", "## Policy explanations", ""])
+    title, note = _policy_explanations_heading(heading)
+    lines.extend(["", f"## {title}", ""])
+    if note:
+        lines.extend([note, ""])
     for row in rows:
         explainer = row["explainer"]
         verdict = row["verdict"].replace("_", " ").capitalize()
@@ -3475,7 +3548,7 @@ def _append_reviewer_index_markdown(lines: list[str], payload: Mapping[str, Any]
         lines.append("")
 
 
-def _render_markdown(selected_sections: dict[str, Any]) -> str:
+def _render_markdown(selected_sections: dict[str, Any], *, policy_heading: Any = None) -> str:
     summary = _mapping(selected_sections.get("summary"))
     findings = _dict_rows(selected_sections.get("findings"))
     proof_rows = _dict_rows(selected_sections.get("proof_table"))
@@ -3544,7 +3617,8 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     _append_mapping_markdown(lines, "Control Simulator", _mapping(selected_sections.get("control_simulator")))
     if "baseline_alignment" in selected_sections:
         _append_baseline_alignment_markdown(lines, _mapping(selected_sections.get("baseline_alignment")))
-    _append_policy_explanations_markdown(lines, _dict_rows(selected_sections.get("policy_explanations")))
+    _append_policy_explanations_markdown(lines, _dict_rows(selected_sections.get("policy_explanations")),
+                                         policy_heading)
     _append_mapping_markdown(lines, "Report QA", _mapping(selected_sections.get("report_qa")))
     if "detection_coverage" in selected_sections:
         detection = _mapping(selected_sections.get("detection_coverage"))
@@ -3798,8 +3872,11 @@ def _render_json_section(title: str, payload: Any) -> str:
     return f"<section><h2>{_html(title)}</h2><pre>{_html(_json(payload))}</pre></section>"
 
 
-def _render_policy_explanations_html(rows: list[dict[str, Any]]) -> str:
-    parts = ["<section><h2>Policy explanations</h2>"]
+def _render_policy_explanations_html(rows: list[dict[str, Any]], heading: Any = None) -> str:
+    title, note = _policy_explanations_heading(heading)
+    parts = [f"<section><h2>{_html(title)}</h2>"]
+    if note:
+        parts.append(f'<p class="coverage-note">{_html(note)}</p>')
     for row in rows:
         explainer = row["explainer"]
         verdict = row["verdict"].replace("_", " ").capitalize()
@@ -3811,7 +3888,7 @@ def _render_policy_explanations_html(rows: list[dict[str, Any]]) -> str:
     return "".join(parts) + "</section>"
 
 
-def _render_html(selected_sections: dict[str, Any]) -> str:
+def _render_html(selected_sections: dict[str, Any], *, policy_heading: Any = None) -> str:
     summary = _mapping(selected_sections.get("summary"))
     sections = [
         "<!doctype html>",
@@ -3845,7 +3922,8 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
     if "baseline_alignment" in selected_sections:
         sections.append(_render_json_section("Baseline Alignment", selected_sections.get("baseline_alignment")))
     if "policy_explanations" in selected_sections:
-        sections.append(_render_policy_explanations_html(_dict_rows(selected_sections["policy_explanations"])))
+        sections.append(_render_policy_explanations_html(_dict_rows(selected_sections["policy_explanations"]),
+                                                         policy_heading))
     if "limitations" in selected_sections:
         sections.append(_render_json_section("Limitations", selected_sections.get("limitations")))
     if "next_actions" in selected_sections:
@@ -4516,7 +4594,8 @@ def _final_pass(content: str, format_name: str, context: RedactionContext, profi
     were serialised (their text cannot be edited safely), so they are returned as rendered."""
     if format_name in _STRUCTURED_FORMATS:
         return content
-    return redact_output(content, profile=profile, context=context, markup=True)
+    return keep_gws_title(content, redact_output(content, profile=profile, context=context, markup=True), profile,
+                          context)
 
 
 def _with_unmatched_names_note(content: str, format_name: str, context: RedactionContext) -> str:
@@ -4586,6 +4665,8 @@ def preview_report(
     if format_name in {"csv", "sarif", "oscal"}:
         selected.pop("policy_explanations", None)
         selected.pop("local_answer", None)
+    # The Google heading comes from the unredacted, validated baseline, never from the masked rows.
+    heading = bundle.get("policy_explanations") if "policy_explanations" in selected else None
     run_path = Path(run_dir)
     citations, evidence_missing = _preview_section_citations(
         run_path=run_path,
@@ -4594,9 +4675,9 @@ def preview_report(
     )
     renderers = {
         "json": _render_json,
-        "md": _render_markdown,
+        "md": functools.partial(_render_markdown, policy_heading=heading),
         "csv": _render_csv,
-        "html": _render_html,
+        "html": functools.partial(_render_html, policy_heading=heading),
         "sarif": _render_sarif,
         "oscal": _render_oscal,
     }
