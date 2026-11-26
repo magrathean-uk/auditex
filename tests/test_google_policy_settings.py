@@ -794,8 +794,8 @@ def test_b4_a_query_with_an_exception_is_never_unconditional_org_unit_evidence()
         {"policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 1, "query": plain}, "setting": {"type": "settings/gmail.imap_access", "value": {"enableImapAccess": False}}},
     ]
     state = _read_state(_normalise({"policySettings": {"value": rows}}, "ok", [{"collector": "google_policies", "name": "policySettings", "status": "ok"}], _SALES_DIRECTORY))
-    assert (state["complete"], state["record_count"], state["unusable_sections"]) == (False, 1, [])
-    assert state["unusable_scopes"] == [{"section": "gmail_auto_forwarding", "org_unit": "root", "group": None}]
+    # DEC-193: ranked as its unit's setting, as ScubaGoggles ranks it without reading the query.
+    assert (state["complete"], state["record_count"], state["unusable_sections"], state["unusable_scopes"]) == (True, 2, [], [])
 
     # The 2-step verification enforcement at the root, except for group g1: not organisation-wide enforcement.
     enforcing = {
@@ -1095,9 +1095,9 @@ def test_r2_b3_a_query_naming_another_unit_or_a_blank_group_is_not_organisation_
     assert normalized["snapshot"]["two_step_policy_status"] == "unknown"
     assert [(r["policy_scope"], r["scope_supported"]) for r in normalized["google_two_step_policies"]["records"]] == [("unclassified", False)]
     state = _read_state(normalized)
-    # LIVE-FIX-1 repair: the query reaches another unit's users, so the whole section is unknown.
-    assert (state["complete"], state["unusable_sections"], state["unusable_scopes"]) == (
-        False, ["security_two_step_verification_enforcement"], [])
+    # DEC-193: the query never decides a SCuBA setting (ScubaGoggles ranks by target alone), so the read stays
+    # complete; the 2-step verification status above still reads only unconditional policies.
+    assert (state["complete"], state["unusable_scopes"]) == (True, [])
     # The legacy section alone gives the same answer.
     legacy = _normalise({"twoStepVerificationPolicies": {"value": [other_unit]}}, "ok", _OK_COVERAGE, _SALES_DIRECTORY)
     assert legacy["snapshot"]["two_step_policy_status"] == "unknown"
@@ -1199,27 +1199,22 @@ def test_r2_m1_a_list_id_that_needs_redaction_has_unknown_counts() -> None:
     ]
 
 
-def test_r2_m2_an_unsupported_child_scope_keeps_the_root_setting() -> None:
-    # LIVE-FIX-1 repair: the exception is bounded by the child's own org-unit term. Without it the query may reach
-    # users outside the child, and the whole section is unknown (below).
-    child = _gmail_row(orgUnit="orgUnits/sales", sortOrder=2,
-                       query="entity.org_units.exists(o, o.org_unit_id == orgUnitId('sales')) && "
-                             "!entity.groups.exists(g, g.group_id == groupId('restricted'))")
+def test_r2_m2_a_child_policy_with_a_condition_is_ranked_as_the_child_setting() -> None:
+    # DEC-193: ScubaGoggles never reads the query; the exception is the child's setting, as it is there.
+    child = _gmail_row(orgUnit="orgUnits/sales", sortOrder=2, query="!entity.groups.exists(g, g.group_id == groupId('restricted'))")
     normalized = _normalise({"policySettings": {"value": [_gmail_row(), child]}}, "ok", _OK_COVERAGE, _SALES_DIRECTORY)
 
     records = normalized["google_policy_settings"]["records"]
     assert [(r["section"], r["org_unit"], r["value"]) for r in records[:-1]] == [
-        ("gmail_auto_forwarding", "root", {"enableAutoForwarding": False})
+        ("gmail_auto_forwarding", "root", {"enableAutoForwarding": False}),
+        ("gmail_auto_forwarding", "sales", {"enableAutoForwarding": False}),
     ]
     assert {key: records[-1][key] for key in ("complete", "record_count", "unusable_sections", "unusable_scopes")} == {
-        "complete": False,
-        "record_count": 1,
+        "complete": True,
+        "record_count": 2,
         "unusable_sections": [],
-        "unusable_scopes": [{"section": "gmail_auto_forwarding", "org_unit": "sales", "group": None}],
+        "unusable_scopes": [],
     }
-    unbounded = _gmail_row(orgUnit="orgUnits/sales", sortOrder=2, query="!entity.groups.exists(g, g.group_id == groupId('restricted'))")
-    state = _read_state(_normalise({"policySettings": {"value": [_gmail_row(), unbounded]}}, "ok", _OK_COVERAGE, _SALES_DIRECTORY))
-    assert (state["record_count"], state["unusable_sections"], state["unusable_scopes"]) == (0, ["gmail_auto_forwarding"], [])
 
 
 def _base_policy() -> dict[str, Any]:
@@ -1317,13 +1312,13 @@ _FIELD_TABLE: list[tuple[tuple[str, ...], Any, tuple[str, ...]]] = [
     (("policyQuery", "sortOrder"), 10**400, ("sort_order_invalid",)),
     (("policyQuery", "sortOrder"), {"position": 5}, ("sort_order_invalid",)),
     (("policyQuery", "sortOrder"), 2.5, ()),
-    (("policyQuery", "query"), 5, ("query_invalid",)),
-    (("policyQuery", "query"), None, ("query_invalid",)),
-    (("policyQuery", "query_scope"), "unreadable", ("query_invalid",)),
+    (("policyQuery", "query"), 5, ()),
+    (("policyQuery", "query"), None, ()),
+    (("policyQuery", "query_scope"), "unreadable", ()),
     (("policyQuery", "query_scope"), "targets", ()),
     (("setting", "value", "enforcedFrom"), "2020-01-01T00:00:00.123456789Z", ()),
     (("setting", "value", "enforcedFrom"), "2020-01-01T00:00:00.1234567891Z", ("two_step_value_invalid",)),
-    (("policyQuery", "query"), "x" * 5000, ("query_invalid",)),
+    (("policyQuery", "query"), "x" * 5000, ()),
 ]
 
 
@@ -1346,7 +1341,7 @@ def test_r2_every_policy_field_has_a_validation_row_and_no_bad_value_is_complete
         assert normalized["snapshot"]["two_step_policy_status"] == "unknown", (path, value)
 
 
-def test_r2_a_query_scope_the_targets_cannot_represent_is_unsupported() -> None:
+def test_r2_a_query_scope_the_targets_cannot_represent_never_withholds_the_setting() -> None:
     org = "entity.org_units.exists(o, o.org_unit_id == orgUnitId('{}'))"
     group = "entity.groups.exists(g, g.group_id == groupId('{}'))"
     cases = [
@@ -1368,9 +1363,10 @@ def test_r2_a_query_scope_the_targets_cannot_represent_is_unsupported() -> None:
         if "orgUnit" not in targets:
             policy["policyQuery"].pop("orgUnit")
         state = _read_state(_normalise({"policySettings": {"value": [policy]}}, "ok", _OK_COVERAGE, _SALES_DIRECTORY))
-        # LIVE-FIX-1 repair: a query that may reach beyond its unit withholds its section, a bounded one its unit.
-        withheld = bool(state["unusable_scopes"] or state["unusable_sections"])
-        assert (state["record_count"], withheld) == ((1, False) if supported else (0, True)), (targets, query)
+        # DEC-193: ranked by target and sortOrder as ScubaGoggles ranks it; the scope word is descriptive only.
+        assert (state["complete"], state["record_count"], state["unusable_scopes"]) == (True, 1, []), (targets, query)
+        word = minimise_policy_settings([policy])[0]["policyQuery"].get("query_scope")
+        assert word == (None if not query else "targets" if supported else "other"), (targets, query)
 
 
 # ---- M13 L03 repair round three: the round-three review's counterexamples ------------------------------------------
@@ -1521,7 +1517,13 @@ def test_r3_b5_a_nanosecond_enforcement_timestamp_is_readable() -> None:
 
 
 def test_r3_m1_an_explicit_null_scope_field_or_cursor_is_not_an_omitted_one() -> None:
-    for query in ({"group": None}, {"query": None}, {"group": None, "query": None}):
+    # DEC-193: a null query is never read (ScubaGoggles ranks the policy by its targets); it stays out of the 2-step
+    # verification status, which reads only unconditional policies.
+    result, _service = _collect([{"policies": [_two_step("orgUnits/root", _ENFORCED, query=None)]}])
+    assert (result.status, result.coverage[0]["status"]) == ("ok", "ok")
+    normalized = _normalise(result.payload, result.status, [*result.coverage, _DIRECTORY_OK], _SALES_DIRECTORY)
+    assert (_read_state(normalized)["complete"], normalized["snapshot"]["two_step_policy_status"]) == (True, "unknown")
+    for query in ({"group": None}, {"group": None, "query": None}):
         result, _service = _collect([{"policies": [_two_step("orgUnits/root", _ENFORCED, **query)]}])
         (row,) = result.coverage
         assert (result.status, row["status"], row["error_class"]) == ("partial", "partial", "malformed_response"), query
@@ -1539,24 +1541,17 @@ def test_r3_m1_an_explicit_null_scope_field_or_cursor_is_not_an_omitted_one() ->
     assert (row["status"], row["collection_truncated"], row["truncation_reason"]) == ("partial", True, "pagination_failed")
 
 
-def test_r3_m2_a_query_contradicting_its_targets_makes_the_collector_and_replay_partial(tmp_path: Path) -> None:
+def test_r3_m2_a_query_contradicting_its_targets_keeps_the_read_complete_and_2sv_unknown() -> None:
+    # DEC-193: the setting is ranked under its orgUnit as ScubaGoggles ranks it; the 2-step verification status still
+    # takes only an unconditional policy as organisation evidence.
     contradicted = _two_step("orgUnits/root", _ENFORCED, query=_SALES_QUERY)
     result, _service = _collect([{"policies": [contradicted]}])
-
-    assert result.status == "partial"
+    assert result.status == "ok"
     (row,) = result.coverage
-    assert (row["status"], row["error_class"], row["error"]) == (
-        "partial",
-        "malformed_response",
-        "1 of 1 policies hold a scope their targets cannot show; the settings they hold for those units are unknown.",
-    )
+    assert row["status"] == "ok"
 
-    replayed = _two_step("orgUnits/root-ou", _ENFORCED, query="entity.org_units.exists(o, o.org_unit_id == orgUnitId('sales-ou'))")
-    rc, run_dir = _replay(tmp_path, _widened([replayed]))
-    assert rc == 1
-    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-    assert [row["status"] for row in summary["collectors"] if row["name"] == "google_policies"] == ["partial"]
-    assert _bundle_state(run_dir)["complete"] is False
+    normalized = _normalise(result.payload, result.status, [*result.coverage, _DIRECTORY_OK], _SALES_DIRECTORY)
+    assert (_read_state(normalized)["complete"], normalized["snapshot"]["two_step_policy_status"]) == (True, "unknown")
 
 
 def test_r3_m3_the_probe_never_counts_an_unreadable_policy_as_a_read() -> None:
@@ -1814,8 +1809,6 @@ def test_m13_followup_n4_all_nine_takeout_types_are_requested_and_projected() ->
 
 
 def test_structural_b4_licence_qualifier_does_not_suppress_readable_2sv() -> None:
-    # LIVE-FIX-1 licence rule (1): a licence clause narrows the policy to the unit's licence holders. ScubaGoggles pins
-    # no default for Gmail confidential mode and the users outside the licence cannot use Gmail, so the policy stands.
     gmail = _policy_setting(
         "gmail.confidential_mode", {"enableConfidentialMode": True},
         query="entity.org_units.exists(o, o.org_unit_id == orgUnitId('root')) && "
@@ -1823,12 +1816,12 @@ def test_structural_b4_licence_qualifier_does_not_suppress_readable_2sv() -> Non
     )
     rows = [_two_step("orgUnits/root", {}), _two_step("orgUnits/sales", _ENFORCED), gmail]
     result, _service = _collect([{"policies": rows}])
-    assert result.status == "ok"
     normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
     assert normalized["snapshot"]["two_step_policy_status"] == "partial"
     assert any(f["rule_id"] == "google.org_2sv_policy_not_enforced" for f in build_google_findings(normalized))
     state = _read_state(normalized)
-    assert (state["complete"], state["unusable_scopes"]) == (True, [])
+    # DEC-193: the licence-scoped setting is judged as if it applied to the whole unit, as ScubaGoggles judges it.
+    assert (result.status, state["complete"], state["unusable_scopes"]) == ("ok", True, [])
 
 
 def test_structural_b5_nanosecond_after_as_of_is_scheduled(tmp_path: Path) -> None:
@@ -1891,13 +1884,10 @@ def test_licence_inclusion_and_exclusion_stand_as_the_unit_setting_on_replay(tmp
         "!entity.licenses.exists(lic, lic in ['/product/Google-Apps/sku/1010060005'])",
     )
     result, _ = _collect([{"policies": [_two_step(), _two_step("orgUnits/sales", _ENFORCED), gmail]}])
-    assert result.payload["policySettings"]["value"][2]["policyQuery"]["query_scope"] == "licences_unit"
+    assert result.payload["policySettings"]["value"][2]["policyQuery"]["query_scope"] == "licences"
     rc, run_dir = _replay(tmp_path, result.payload)
-    assert (rc, _bundle_two_step_status(run_dir)) == (0, "partial")
-    state = json.loads((run_dir / "normalized" / "google_policy_settings.json").read_text(encoding="utf-8"))
-    rows = state if isinstance(state, list) else state["records"]
-    (read_state,) = [row for row in rows if row.get("id") == "read_state"]
-    assert (read_state["complete"], read_state["unusable_scopes"]) == (True, [])
+    assert _bundle_two_step_status(run_dir) == "partial"
+    assert _bundle_state(run_dir)["complete"] is True
     for sku in ("1010020020", "GOOGLE-IDENTITY", "1010060005"):
         assert sku not in _bundle_text(run_dir)
 
@@ -1960,48 +1950,20 @@ def test_l03b_a_present_but_malformed_org_unit_read_fails_the_replay(tmp_path: P
         assert _bundle_two_step_status(run_dir) == "unknown", orgunits
 
 
-# ---- LIVE-FIX-1: Google's licence-scoped policies, as the live Policy API returned them ------------------------------
+# ---- LIVE-FIX-1 / DEC-193: Policy API policies are ranked as ScubaGoggles v1.1.0 ranks them --------------------------
 
 _OU = "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root'))"
 _SKU_A = "entity.licenses.exists(license, license in ['/product/Google-Apps/sku/9990000001'])"
-_SKU_AB = "entity.licenses.exists(license, license in ['/product/Google-Apps/sku/9990000001','GOOGLE-IDENTITY'])"
-_SKU_B = "entity.licenses.exists(license, license in ['GOOGLE-IDENTITY'])"
-
-
-_SALES_OU = "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('sales'))"
 _G1 = "entity.groups.exists(g, g.group_id == groupId('g1'))"
 
 
 @pytest.mark.parametrize("query,fields,expected", [
-    (f"{_OU} && {_SKU_A}", {"orgUnit": "orgUnits/root"}, "licences_unit"),
-    (f"{_OU} && !{_SKU_A}", {"orgUnit": "orgUnits/root"}, "licences_unit"),
-    (f"{_OU} && {_SKU_B} && !{_SKU_A}", {"orgUnit": "orgUnits/root"}, "licences_unit"),
-    (f"{_OU} && {_SKU_A} || {_OU} && !{_SKU_B}", {"orgUnit": "orgUnits/root"}, "licences_unit"),
-    (f"{_OU} && {_SKU_AB} && !{_SKU_A}", {"orgUnit": "orgUnits/root"}, "licences_unit"),
-    (f"{_OU} && !{_SKU_AB} || {_SKU_A} && !{_SKU_B}", {"orgUnit": "orgUnits/root"}, "licences_wide"),
-    (_SKU_A, {"orgUnit": "orgUnits/root"}, "licences_wide"),
-    (_SKU_A, {"orgUnit": "orgUnits/root", "group": "groups/g1"}, "other"),
-    (_SKU_A, {"group": "groups/g1"}, "other"),
-    (f"{_OU} || {_OU}", {"orgUnit": "orgUnits/root"}, "conditional"),
-    (f"{_OU} && {_SKU_A} || ", {"orgUnit": "orgUnits/root"}, "other"),
-    (f"{_OU} && {_SKU_A} || entity.licenses.exists(l, l.sku == 'x')", {"orgUnit": "orgUnits/root"}, "other"),
-    (f"{_OU} && {_SKU_A} && {_SKU_B}", {"orgUnit": "orgUnits/root"}, "conditional"),
-    (f"{_OU} && {_SKU_A}", {"orgUnit": "orgUnits/sales"}, "other"),
     ("entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('orgUnits/root'))", {"orgUnit": "orgUnits/root"}, "targets"),
     ("entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('orgUnits/sales'))", {"orgUnit": "orgUnits/root"}, "other"),
     ("entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('groups/root'))", {"orgUnit": "orgUnits/root"}, "other"),
     (f"{_OU} && entity.groups.exists(g, g.group_id == groupId('groups/g1'))", {"orgUnit": "orgUnits/root", "group": "groups/g1"}, "targets"),
-    # Repair round 1, B4: a conjunction no user can meet is no population.
-    (f"{_OU} && {_SKU_A} && !{_SKU_A}", {"orgUnit": "orgUnits/root"}, "other"),
-    (f"{_OU} && {_SKU_A} && !{_SKU_AB}", {"orgUnit": "orgUnits/root"}, "other"),
-    (f"{_OU} && {_SKU_B} || {_OU} && {_SKU_A} && !{_SKU_A}", {"orgUnit": "orgUnits/root"}, "other"),
-    # Repair round 1, B3: a disjunct that drops the org-unit term reaches users outside the unit.
-    (f"{_SALES_OU} && {_SKU_A} || {_SKU_B}", {"orgUnit": "orgUnits/sales"}, "licences_wide"),
-    (f"{_SALES_OU} && {_G1} && {_SKU_A} || {_G1} && {_SKU_B}", {"orgUnit": "orgUnits/sales", "group": "groups/g1"},
-     "licences_wide"),
-    (f"{_SALES_OU} && {_G1} && {_SKU_A} || {_SALES_OU} && {_SKU_B}", {"orgUnit": "orgUnits/sales", "group": "groups/g1"},
-     "other"),
-    (f"{_G1} && {_SKU_A}", {"group": "groups/g1"}, "licences_unit"),
+    (f"{_OU} && {_SKU_A}", {"orgUnit": "orgUnits/root"}, "licences"),
+    (f"{_OU} && {_SKU_A} || {_OU}", {"orgUnit": "orgUnits/root"}, "other"),
 ])
 def test_live_fix_1_query_scope_words(query: str, fields: dict[str, Any], expected: str) -> None:
     from azure_tenant_audit.data_minimisation import policy_query_scope
@@ -2009,214 +1971,64 @@ def test_live_fix_1_query_scope_words(query: str, fields: dict[str, Any], expect
     assert policy_query_scope(query, fields.get("orgUnit"), fields.get("group")) == expected
 
 
-def test_live_fix_1_r1_the_licence_predicate_is_kept_as_sku_digests_only() -> None:
-    from azure_tenant_audit.data_minimisation import (
-        licence_atom,
-        minimise_policy_settings,
-    )
-
-    row = _policy_setting("gmail.web_offline", {"enabled": True}, query=f"{_OU} && {_SKU_AB} && !{_SKU_A}")
-    (kept,) = minimise_policy_settings([row])
-    a, b = licence_atom("/product/Google-Apps/sku/9990000001"), licence_atom("GOOGLE-IDENTITY")
-    assert kept["policyQuery"]["query_scope"] == "licences_unit"
-    assert kept["policyQuery"]["licence_terms"] == [{"holds_any": sorted([a, b]), "holds_none": [a]}]
-    assert "9990000001" not in json.dumps(kept) and "GOOGLE-IDENTITY" not in json.dumps(kept)
-    assert minimise_policy_settings([kept]) == [kept]
-
-
-@pytest.mark.parametrize("query", [
-    {"orgUnit": "orgUnits/root", "sortOrder": 1, "query_scope": "licences_unit"},
-    {"orgUnit": "orgUnits/root", "sortOrder": 1, "query_scope": "licences_unit", "licence_terms": []},
-    {"orgUnit": "orgUnits/root", "sortOrder": 1, "query_scope": "licences_unit", "licence_terms": None},
-    {"orgUnit": "orgUnits/root", "sortOrder": 1, "query_scope": "licences_unit", "licence_terms": [{"holds_any": ["x"], "holds_none": []}]},
-    {"orgUnit": "orgUnits/root", "sortOrder": 1, "query_scope": "licences_unit",
-     "licence_terms": [{"holds_any": ["0123456789abcdef"], "holds_none": ["0123456789abcdef"]}]},
-    {"orgUnit": "orgUnits/root", "sortOrder": 1, "query_scope": "licences_unit",
-     "licence_terms": [{"holds_any": ["0123456789abcdef"]}]},
-    {"orgUnit": "orgUnits/root", "sortOrder": 1, "query_scope": "targets",
-     "licence_terms": [{"holds_any": ["0123456789abcdef"], "holds_none": []}]},
-    {"orgUnit": "orgUnits/root", "sortOrder": 1, "licence_terms": [{"holds_any": ["0123456789abcdef"], "holds_none": []}]},
-])
-def test_live_fix_1_r1_an_unreadable_licence_predicate_withholds_the_whole_section(query: dict[str, Any]) -> None:
-    from auditex.google_workspace.normalize import _policy_settings_read
-
-    rows = [{"type": "SYSTEM", "policyQuery": query,
-             "setting": {"type": "settings/security.super_admin_account_recovery", "value": {"enableAccountRecovery": True}}}]
-    records, _ = _policy_settings_read({"policySettings": {"value": rows}}, [{"name": "google_policies", "status": "ok"}],
-                                       [], {"root", "sales"}, {"root"})
-    (state,) = records
-    assert (state["complete"], state["unusable_sections"]) == (False, ["security_super_admin_account_recovery"])
-
-
-def _licensed(section: str, value: dict[str, Any], order: Any, query: str, kind: str | None = "SYSTEM",
-              org_unit: str | None = "orgUnits/root", group: str | None = None) -> dict[str, Any]:
-    row = _policy_setting(section, value, query=query, sortOrder=order)
-    row["policyQuery"].pop("orgUnit", None)
+def _ranked(section: str, value: dict[str, Any], order: Any, query: str | None = None, *, kind: str = "SYSTEM",
+            org_unit: str | None = "orgUnits/root", group: str | None = None) -> dict[str, Any]:
+    row = _policy_setting(section, value, sortOrder=order, **({"query": query} if query is not None else {}))
+    row["policyQuery"].pop("orgUnit")
     if org_unit is not None:
         row["policyQuery"]["orgUnit"] = org_unit
     if group is not None:
         row["policyQuery"]["group"] = group
-    if kind is None:
-        row.pop("type")
-    else:
-        row["type"] = kind
+    row["type"] = kind
     return row
 
 
-def _licence_read(*rows: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+def _ranked_read(*rows: dict[str, Any]) -> tuple[Any, dict[str, Any], list[tuple[Any, ...]]]:
     result, _ = _collect([{"policies": [_two_step(), *rows]}])
-    return result, _read_state(_normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY))
+    normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
+    return result, _read_state(normalized), _policy_records(normalized)
 
 
 _RECOVERY = "security.super_admin_account_recovery"
 
 
-def test_live_fix_1_system_defaults_per_licence_stand_when_every_population_agrees() -> None:
-    # The live shape: one policy for GOOGLE-IDENTITY holders, a disjunction for everyone else, and an unconditional
-    # default below both that no user reaches. Every population takes the same value.
-    result, state = _licence_read(
-        _licensed(_RECOVERY, {"enableAccountRecovery": False}, 100.00005, f"{_OU} && {_SKU_B}"),
-        _licensed(_RECOVERY, {"enableAccountRecovery": False}, 100.00003, f"{_OU} && !{_SKU_AB} || {_SKU_A} && !{_SKU_B}"),
-        _licensed(_RECOVERY, {"enableAccountRecovery": True}, 100.00001, _OU),
-        _licensed("gmail.web_offline", {"enabled": False}, 100.00009, f"{_OU} && {_SKU_A}"),
-        _licensed("gmail.web_offline", {"enabled": False}, 100.00001, _OU),
-    )
-    assert (result.status, state["complete"], state["unusable_scopes"], state["record_count"]) == ("ok", True, [], 6)
-
-
-def _populations(result: Any) -> list[tuple[str | None, str, Any]]:
-    normalized = _normalise(result.payload, result.status, result.coverage, _SALES_DIRECTORY)
-    return [(row.get("org_unit"), row["group"][:9], row["value"])
-            for row in normalized["google_policy_settings"]["records"] if row.get("policy_type") == "licence_population"]
-
-
-def test_live_fix_1_r1_a_licence_policy_with_no_policy_for_the_rest_takes_the_pinned_default() -> None:
-    result, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": False}, 201, f"{_OU} && {_SKU_A}", kind="ADMIN"))
-    assert (state["complete"], state["unusable_scopes"], _populations(result)) == (True, [], [])
-    # Licence rule (2): the rest take the pinned default on the top unit and are judged as a population of their own.
-    result, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": True}, 201, f"{_OU} && {_SKU_A}", kind="ADMIN"))
-    assert (state["complete"], state["unusable_scopes"]) == (True, [])
-    assert _populations(result) == [("root", "licences-", {"enableAccountRecovery": False})]
-    # Licence rule (1): below the top unit the users outside the licence clause take an ancestor's setting, which that
-    # ancestor's own reading judges, so the unit's licence policy stands as ScubaGoggles reads it.
-    result, state = _licence_read(_licensed(_RECOVERY, {"enableAccountRecovery": False}, 201, f"{_SALES_OU} && {_SKU_A}",
-                                            kind="ADMIN", org_unit="orgUnits/sales"))
-    assert (state["complete"], state["unusable_scopes"], _populations(result)) == (True, [], [])
-
-
-@pytest.mark.parametrize("higher", ["ADMIN", "SYSTEM"])
-def test_live_fix_1_r1_b1_a_licence_policy_never_hides_the_unconditional_value_below_it(higher: str) -> None:
-    result, state = _licence_read(
-        _licensed(_RECOVERY, {"enableAccountRecovery": True}, 100, _OU),
-        _licensed(_RECOVERY, {"enableAccountRecovery": False}, 300, f"{_OU} && {_SKU_A}", kind=higher),
-    )
-    assert (state["complete"], state["unusable_scopes"]) == (True, [])
-    assert _populations(result) == [("root", "licences-", {"enableAccountRecovery": True})]
-
-
-def test_live_fix_1_r1_b2_a_group_only_and_a_root_group_policy_are_ranked_as_one_unit() -> None:
-    _, state = _licence_read(
-        _licensed(_RECOVERY, {"enableAccountRecovery": False}, 300, f"{_OU} && {_G1} && {_SKU_A}", group="groups/g1"),
-        _licensed(_RECOVERY, {"enableAccountRecovery": True}, 201, _G1, kind="ADMIN", org_unit=None, group="groups/g1"),
-        _licensed(_RECOVERY, {"enableAccountRecovery": False}, 100, _OU),
-    )
-    assert state["complete"] is False
-    assert state["unusable_scopes"] == [{"section": "security_super_admin_account_recovery", "org_unit": "root", "group": "g1"}]
-
-
-def test_live_fix_1_r1_b2_equal_ranked_root_group_and_group_only_values_conflict() -> None:
-    _, state = _licence_read(
-        _licensed(_RECOVERY, {"enableAccountRecovery": False}, 201, f"{_OU} && {_G1}", kind="ADMIN", group="groups/g1"),
-        _licensed(_RECOVERY, {"enableAccountRecovery": True}, 201, _G1, kind="ADMIN", org_unit=None, group="groups/g1"),
-    )
-    assert state["unusable_scopes"] == [{"section": "security_super_admin_account_recovery", "org_unit": "root", "group": "g1"}]
-
-
-@pytest.mark.parametrize("query,fields", [
-    (f"{_SALES_OU} && {_SKU_A} || {_SKU_B}", {"org_unit": "orgUnits/sales"}),
-    (f"{_SALES_OU} && {_G1} && {_SKU_A} || {_G1} && {_SKU_B}", {"org_unit": "orgUnits/sales", "group": "groups/g1"}),
+@pytest.mark.parametrize("query", [
+    f"{_OU} && {_SKU_A}",
+    f"{_OU} && {_SKU_A} || {_OU} && !{_SKU_A}",
+    f"!({_SKU_A} && {_OU})",
+    _SKU_A,
+    "x" * 5000,
 ])
-def test_live_fix_1_r1_b3_a_disjunct_reaching_beyond_a_child_unit_withholds_the_whole_section(
-        query: str, fields: dict[str, Any]) -> None:
-    result, state = _licence_read(
-        _licensed("gmail.mail_delegation", {"enableMailDelegation": False}, 100, _OU),
-        _licensed("gmail.mail_delegation", {"enableMailDelegation": True}, 201, query, kind="ADMIN", **fields),
+def test_dec_193_a_licence_scoped_or_unreadable_query_is_ranked_as_its_unit_setting(query: str) -> None:
+    result, state, records = _ranked_read(
+        _ranked(_RECOVERY, {"enableAccountRecovery": False}, 300, query),
+        _ranked(_RECOVERY, {"enableAccountRecovery": True}, 100, _OU),
     )
-    assert state["complete"] is False
-    assert (state["unusable_sections"], state["unusable_scopes"]) == (["gmail_mail_delegation"], [])
-
-
-def test_live_fix_1_r1_b3_the_legacy_licences_word_withholds_the_whole_section() -> None:
-    from auditex.google_workspace.normalize import _policy_settings_read
-
-    rows = [
-        {"type": "SYSTEM", "policyQuery": {"orgUnit": "orgUnits/root", "sortOrder": 100, "query_scope": "targets"},
-         "setting": {"type": f"settings/{_RECOVERY}", "value": {"enableAccountRecovery": False}}},
-        {"type": "ADMIN", "policyQuery": {"orgUnit": "orgUnits/sales", "sortOrder": 201, "query_scope": "licences"},
-         "setting": {"type": f"settings/{_RECOVERY}", "value": {"enableAccountRecovery": True}}},
+    assert (result.status, state["complete"], state["unusable_sections"], state["unusable_scopes"]) == ("ok", True, [], [])
+    assert [record for record in records if record[0] == "security_super_admin_account_recovery"] == [
+        ("security_super_admin_account_recovery", "org_unit", "root", None, 300, {"enableAccountRecovery": False}),
+        ("security_super_admin_account_recovery", "org_unit", "root", None, 100, {"enableAccountRecovery": True}),
     ]
-    records, _ = _policy_settings_read({"policySettings": {"value": rows}}, [{"name": "google_policies", "status": "ok"}],
-                                       [], {"root", "sales"}, {"root"})
-    (state,) = records
-    assert (state["complete"], state["unusable_sections"], state["unusable_scopes"]) == (
-        False, ["security_super_admin_account_recovery"], [])
+    kept = json.dumps(result.payload)
+    assert "9990000001" not in kept and "entity." not in kept and "licence_terms" not in kept
 
 
-def test_live_fix_1_r1_b4_an_impossible_licence_population_supplies_no_value() -> None:
-    result, state = _licence_read(
-        _licensed(_RECOVERY, {"enableAccountRecovery": True}, 300, f"{_OU} && {_SKU_A} && !{_SKU_A}"),
-        _licensed(_RECOVERY, {"enableAccountRecovery": False}, 100, _OU),
-    )
-    assert result.status == "partial"
-    assert (state["complete"], state["unusable_sections"]) == (False, ["security_super_admin_account_recovery"])
-
-
-def test_live_fix_1_a_licence_only_disjunct_off_the_top_unit_is_unknown_for_the_section() -> None:
-    result, state = _licence_read(
-        _licensed("security.session_controls", {"webSessionDuration": "1209600s"}, 100.00003,
-                  _SALES_OU + " && !" + _SKU_A + " || " + _SKU_B, org_unit="orgUnits/sales"),
-    )
-    assert result.status == "ok"  # only the Directory tree tells the top unit; the normaliser decides
-    assert state["complete"] is False
-    assert (state["unusable_sections"], state["unusable_scopes"]) == (["security_session_controls"], [])
-
-
-@pytest.mark.parametrize("lower", [
-    {"kind": "ADMIN", "order": 201},
-    {"kind": None, "order": 201},
-    {"kind": "POLICY_TYPE_UNSPECIFIED", "order": 201},
-    {"kind": "SYSTEM", "order": 201},
-    {"kind": "ADMIN", "order": 201, "query": f"{_OU} && {_SKU_B}"},
-])
-def test_live_fix_1_a_different_value_below_a_licence_scoped_one_is_judged_as_its_own_population(lower: dict[str, Any]) -> None:
-    result, state = _licence_read(
-        _licensed("gmail.web_offline", {"enabled": False}, 300, f"{_OU} && {_SKU_A}"),
-        _licensed("gmail.web_offline", {"enabled": True}, lower["order"], lower.get("query", _OU), kind=lower["kind"]),
+def test_live_fix_1_a_group_only_and_a_root_group_policy_are_ranked_as_one_unit() -> None:
+    # ScubaGoggles names both "<top unit> (group G)" (policy_api.py:784-825), so they are one unit for shadowing.
+    _, state, records = _ranked_read(
+        _ranked(_RECOVERY, {"enableAccountRecovery": False}, 300, f"{_OU} && {_G1}", group="groups/g1"),
+        _ranked(_RECOVERY, {"enableAccountRecovery": True}, 201, _G1, kind="ADMIN", org_unit=None, group="groups/g1"),
     )
     assert (state["complete"], state["unusable_scopes"]) == (True, [])
-    assert _populations(result) == [("root", "licences-", {"enabled": True})]
+    assert [record[1:5] for record in records if record[0] == "security_super_admin_account_recovery"] == [
+        ("group", "root", "g1", 300), ("group", None, "g1", 201)]
 
 
-def test_live_fix_1_a_licence_scoped_group_with_a_policy_of_no_rank_is_unknown() -> None:
-    no_rank = _licensed("gmail.web_offline", {"enabled": False}, 1, _OU)
-    del no_rank["policyQuery"]["sortOrder"]
-    _, state = _licence_read(_licensed("gmail.web_offline", {"enabled": False}, 300, f"{_OU} && {_SKU_A}"), no_rank)
-    assert state["complete"] is False
-    assert state["unusable_scopes"] == [{"section": "gmail_web_offline", "org_unit": "root", "group": None}]
-
-
-def test_live_fix_1_an_admin_licence_value_differing_from_the_others_is_judged_per_population() -> None:
-    # The live gmail.web_offline shape: licence holders get the administrator's value, everyone else Google's.
-    result, state = _licence_read(
-        _licensed("gmail.web_offline", {"enabled": True}, 201.00134, f"{_OU} && {_SKU_A}", kind="ADMIN"),
-        _licensed("gmail.web_offline", {"enabled": False}, 100.00009, f"{_OU} && {_SKU_A}"),
-        _licensed("gmail.web_offline", {"enabled": False}, 100.00001, _OU),
+def test_live_fix_1_equal_ranked_root_group_and_group_only_values_conflict() -> None:
+    # Equal ranks that disagree have no order (D11): ScubaGoggles takes the first returned, Auditex leaves it unknown.
+    _, state, _ = _ranked_read(
+        _ranked(_RECOVERY, {"enableAccountRecovery": False}, 201, f"{_OU} && {_G1}", kind="ADMIN", group="groups/g1"),
+        _ranked(_RECOVERY, {"enableAccountRecovery": True}, 201, _G1, kind="ADMIN", org_unit=None, group="groups/g1"),
     )
-    assert (state["complete"], state["unusable_scopes"], state["record_count"]) == (True, [], 5)
-    assert _populations(result) == [("root", "licences-", {"enabled": False})]
-    _, state = _licence_read(
-        _licensed("gmail.web_offline", {"enabled": False}, 201.00134, f"{_OU} && {_SKU_A}", kind="ADMIN"),
-        _licensed("gmail.web_offline", {"enabled": True}, 100.00009, f"{_OU} && {_SKU_A}"),
-        _licensed("gmail.web_offline", {"enabled": False}, 100.00001, _OU),
-    )
-    assert (state["complete"], state["unusable_scopes"], state["record_count"]) == (True, [], 4)
+    assert (state["complete"], state["unusable_scopes"]) == (
+        False, [{"section": "security_super_admin_account_recovery", "org_unit": "root", "group": "g1"}])

@@ -24,8 +24,8 @@ labels are dropped, from every record of the section and before any chunk callba
 Cloud Identity Policy API settings (``minimise_policy_settings``) are admin configuration, but some setting
 values are text an admin typed (a custom user message, a rule name, a description, Gmail address lists) and a
 policy's CEL query can name units and groups. A policy is projected onto the fields the audit reads: its type, its
-targets and order, the parsed scope of its query (``query_scope``, never the query; a licence scope also keeps
-``licence_terms`` over SKU digests, never a SKU id) and its setting's type and value. Each setting has a field allow-list with typed fields and fixed enum membership. Administrator text and
+targets and order, the parsed scope of its query (``query_scope``, never the query) and its setting's type and
+value. Each setting has a field allow-list with typed fields and fixed enum membership. Administrator text and
 unrecognised fields are discarded. An unreadable allow-listed value remains marked as unknown.
 Each Gmail address list becomes its id, its entry count and its count of domain-shaped entries
 (``^[^@]+\\.[^@]+$``, ScubaGoggles' own test). A list whose entries or id cannot be read keeps ``None`` counts
@@ -39,7 +39,6 @@ from __future__ import annotations
 import math
 import re
 import sys
-from hashlib import sha256
 from typing import Any, Literal
 
 from .collection_gaps import REASON_UNKNOWN, TRUNCATION_REASONS, section_was_cut
@@ -161,14 +160,13 @@ def _policy_vocabulary() -> tuple[tuple[str, ...], tuple[str, ...], frozenset[st
         ("addressList", "blockedAddressList"),
         ("ADMIN", "SYSTEM", "POLICY_TYPE_UNSPECIFIED"),
         frozenset({"WORKSPACE_ALL_ADMIN_GROUP", "UNCONSENTED_CHILD_GROUP"}),
-        ("targets", "licences", "licences_unit", "licences_wide", "conditional", "other", "unreadable"),
+        ("targets", "licences", "other", "unreadable"),
     )
 
 
 # Policy API objects. A policy keeps only what the audit reads, in a fixed shape: its ``type``, its targets and order
 # (``policyQuery.orgUnit``, ``group`` and ``sortOrder``), the scope its CEL ``query`` was parsed into
-# (``policyQuery.query_scope``, never the query text, and for a licence scope ``licence_terms`` over SKU digests) and
-# its setting's ``type`` and projected ``value``. The tenant's
+# (``policyQuery.query_scope``, never the query text) and its setting's ``type`` and projected ``value``. The tenant's
 # customer id, the policy resource name and every other field are dropped.
 POLICY_ADDRESS_LIST_KEYS, POLICY_TYPES, POLICY_SYSTEM_GROUPS, POLICY_QUERY_SCOPES = _policy_vocabulary()
 POLICY_SETTING_TYPE = re.compile(r"settings/[a-z0-9_]+(?:\.[a-z0-9_]+)+")
@@ -419,25 +417,25 @@ _LICENCE_TERM = re.compile(
 )
 
 
-def licence_atom(sku: str) -> str:
-    """A fixed-length digest standing for one licence SKU in a minimised query: the same SKU always gives the same
-    atom, so policies can be ranked against one another, but the SKU id itself is not kept."""
-    return sha256(("google-licence-sku:" + sku).encode()).hexdigest()[:16]
+def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
+    """What a policy's CEL ``query`` says about its scope, against its raw ``orgUnit`` and ``group`` fields.
 
-
-LICENCE_ATOM = re.compile(r"[0-9a-f]{16}")
-# Above this many distinct SKUs in one unit and section the populations are not enumerated (2**n assignments).
-LICENCE_ATOM_MAX = 10
-
-
-def _query_conjunction(conjunction: str) -> tuple[list[str], list[str], dict[str, list[str]]] | None:
-    """The org-unit ids, group ids and licence clauses (``holds_any``: SKUs of which the user holds one;
-    ``holds_none``: SKUs the user holds none of) of one ``&&`` conjunction. None for any other term, for two licence
-    clauses of the same polarity, or for a conjunction no user can meet (every SKU it asks for is also excluded)."""
+    ``targets``: a conjunction (``&&``) of at most one org-unit membership term naming the ``orgUnit`` field's unit
+    and at most one group membership term naming the ``group`` field's group, with the group term present exactly
+    when the field is. ``licences``: matching targets with Google's include/exclude SKU clauses. ``other``: any scope
+    beyond these forms or inconsistent with the helpers. ``unreadable``: not a string of bounded length.
+    Only this word is kept; the query text never leaves the minimiser. The word describes the evidence and never
+    decides a SCuBA value: Policy API settings are ranked by target and ``sortOrder`` alone, as ScubaGoggles v1.1.0
+    ranks them without reading the query (SG:scubagoggles/policy_api.py:752-860), so a licence-scoped setting stands
+    for its whole unit (DEC-193). The 2-step verification status reads only ``targets`` policies as unconditional.
+    """
+    if not isinstance(query, str) or len(query) > POLICY_QUERY_MAX:
+        return "unreadable"
+    org_id, group_id = policy_target(org_unit, "orgUnits/"), policy_target(group, "groups/")
     org_ids: list[str] = []
     group_ids: list[str] = []
-    licences: dict[str, list[str]] = {}
-    for term in conjunction.split("&&"):
+    licence_polarities: set[bool] = set()
+    for term in query.split("&&"):
         term = term.strip()
         while term.startswith("(") and term.endswith(")") and _QUERY_ORG_UNIT_TERM.fullmatch(term) is None:
             term = term[1:-1].strip()
@@ -446,122 +444,19 @@ def _query_conjunction(conjunction: str) -> tuple[list[str], list[str], dict[str
         elif match := _QUERY_GROUP_TERM.fullmatch(term):
             group_ids.append(match.group(2))
         elif licence := _LICENCE_TERM.fullmatch(term):
-            key = "holds_none" if licence.group(1) is not None else "holds_any"
-            if key in licences:
-                return None
-            licences[key] = sorted({licence_atom(sku) for sku in re.findall(rf"'({_LICENCE_SKU})'", term)})
+            negated = licence.group(1) is not None
+            if negated in licence_polarities:
+                return "other"
+            licence_polarities.add(negated)
         else:
-            return None
-    if "holds_any" in licences and set(licences["holds_any"]) <= set(licences.get("holds_none", ())):
-        raise _ImpossiblePopulation
-    return org_ids, group_ids, licences
-
-
-class _ImpossiblePopulation(Exception):
-    """A conjunction no user can meet: every SKU it asks for is also excluded."""
-
-
-def _query_bounded(query: str, org_id: Any, group_id: Any) -> bool:
-    """Whether every ``||`` disjunct of a query holds, as one of its ``&&`` terms, the positive org-unit term naming
-    the ``orgUnit`` field's unit (when it is set) and the positive group term naming the ``group`` field's group (when
-    it is set): whatever else it says, the policy then holds only inside its unit and group. A split that breaks a
-    parenthesised term leaves that disjunct without the term, so an unclear query is never read as bounded."""
-    for disjunct in query.split("||"):
-        has_org = has_group = False
-        for term in disjunct.split("&&"):
-            term = term.strip()
-            while term.startswith("(") and term.endswith(")") and _QUERY_ORG_UNIT_TERM.fullmatch(term) is None \
-                    and _QUERY_GROUP_TERM.fullmatch(term) is None:
-                term = term[1:-1].strip()
-            if (match := _QUERY_ORG_UNIT_TERM.fullmatch(term)) and match.group(2) == org_id:
-                has_org = True
-            elif (match := _QUERY_GROUP_TERM.fullmatch(term)) and match.group(2) == group_id:
-                has_group = True
-        if (isinstance(org_id, str) and not has_org) or (isinstance(group_id, str) and not has_group):
-            return False
-    return isinstance(org_id, str) or isinstance(group_id, str)
-
-
-def policy_query_terms(query: Any, org_unit: Any, group: Any) -> tuple[str, list[dict[str, list[str]]] | None]:
-    """What a policy's CEL ``query`` says about its scope, against its raw ``orgUnit`` and ``group`` fields, and the
-    licence predicate it keeps (``None`` unless the word is a licence word).
-
-    The query is read as a disjunction (``||``) of conjunctions (``&&``, which binds tighter in CEL) of org-unit
-    membership, group membership and Google's include/exclude licence SKU clauses (at most one of each polarity).
-
-    ``targets``: one conjunction of at most one org-unit term naming the ``orgUnit`` field's unit and a group term
-    present exactly when the ``group`` field is, naming that group. ``licences_unit``: every conjunction names those
-    targets, and some hold licence clauses: the policy holds for the unit's users who meet one conjunction's
-    clauses. ``licences_wide``: as ``licences_unit``, except that some conjunction leaves out the org-unit term of a
-    policy that names an org unit, so it is not bounded to that unit; only the top unit, which every user is under,
-    can stand for it (the normaliser's call). The predicate is a list of conjunctions, each ``holds_any`` and
-    ``holds_none`` lists of SKU digests (:func:`licence_atom`). ``conditional``: any other scope that every
-    disjunct still bounds to the policy's unit and group (:func:`_query_bounded`), such as an exception: the unit's
-    setting is unknown. ``other``: a scope that may reach users outside the unit or group (a disjunct without the
-    targets, another unit, a conjunction every user meets) or a licence conjunction no user can meet: the section is
-    unknown. ``unreadable``: not a string of bounded length. The query text and the SKU ids never leave the
-    minimiser.
-    """
-    if not isinstance(query, str) or len(query) > POLICY_QUERY_MAX:
-        return "unreadable", None
-    org_id, group_id = policy_target(org_unit, "orgUnits/"), policy_target(group, "groups/")
-    word = _query_word(query, org_id, group_id)
-    if word is not None:
-        return word
-    return "conditional" if _query_bounded(query, org_id, group_id) else "other", None
-
-
-def _query_word(query: str, org_id: Any, group_id: Any) -> tuple[str, list[dict[str, list[str]]] | None] | None:
-    """The scope word and predicate of a query made only of target and licence terms; ``None`` for any other query
-    (:func:`policy_query_terms` then tells a bounded condition from an unbounded one)."""
-    try:
-        conjunctions = [_query_conjunction(part) for part in query.split("||")]
-    except _ImpossiblePopulation:
-        return "other", None  # a population no user can meet is never a value for any unit
-    if any(parts is None for parts in conjunctions):
-        return None
-    licensed = wide = False
-    terms: list[dict[str, list[str]]] = []
-    for org_ids, group_ids, licences in conjunctions:  # type: ignore[misc]
-        if len(org_ids) > 1 or (org_ids and org_ids[0] != org_id):
-            return None
-        if group_ids != ([group_id] if isinstance(group_id, str) else []):
-            return None  # a conjunction without the policy's group reaches users outside it
-        if not org_ids and not group_ids and not licences:
-            return None  # a conjunction every user meets
-        if not org_ids and isinstance(org_id, str):
-            wide = True  # this conjunction is not bounded to the policy's unit
-        licensed = licensed or bool(licences)
-        terms.append({"holds_any": licences.get("holds_any", []), "holds_none": licences.get("holds_none", [])})
-    if not licensed:
-        return ("targets", None) if len(conjunctions) == 1 else None
-    unique = sorted({(tuple(term["holds_any"]), tuple(term["holds_none"])) for term in terms})
-    predicate = [{"holds_any": list(holds_any), "holds_none": list(holds_none)} for holds_any, holds_none in unique]
-    return ("licences_wide" if wide else "licences_unit"), predicate
-
-
-def policy_query_scope(query: Any, org_unit: Any, group: Any) -> str:
-    """The scope word of :func:`policy_query_terms`; only this word and the licence predicate are kept."""
-    return policy_query_terms(query, org_unit, group)[0]
-
-
-def licence_terms_readable(scope: Any, terms: Any) -> bool:
-    """Whether a minimised query's ``licence_terms`` fit its ``query_scope``: present exactly for a licence word, a
-    non-empty list of conjunctions of sorted, distinct SKU digests that some user can meet."""
-    if scope not in ("licences_unit", "licences_wide"):
-        return terms is None
-    if not isinstance(terms, list) or not terms:
-        return False
-    for term in terms:
-        if not isinstance(term, dict) or set(term) != {"holds_any", "holds_none"}:
-            return False
-        for atoms in term.values():
-            if (not isinstance(atoms, list) or not all(isinstance(atom, str) and LICENCE_ATOM.fullmatch(atom) for atom in atoms)
-                    or atoms != sorted(set(atoms))):
-                return False
-        if term["holds_any"] and set(term["holds_any"]) <= set(term["holds_none"]):
-            return False
-    return True
+            return "other"
+    if len(org_ids) > 1 or (org_ids and org_ids[0] != org_id):
+        return "other"
+    if group_ids != ([group_id] if isinstance(group_id, str) else []):
+        return "other"
+    if not org_ids and not group_ids and not licence_polarities:
+        return "other"
+    return "licences" if licence_polarities else "targets"
 
 
 def _minimise_target(value: Any, prefix: str) -> Any:
@@ -571,28 +466,15 @@ def _minimise_target(value: Any, prefix: str) -> Any:
     return "redacted:text"
 
 
-def policy_query_parsed(query: dict[str, Any]) -> tuple[str, list[dict[str, list[str]]] | None] | None:
-    """Parse raw CEL, or retain the fixed classification and licence predicate of minimised evidence (checked);
-    ``None`` when the policy holds no query."""
-    if "query" in query and query["query"] != "":
-        scope, terms = policy_query_terms(query["query"], query.get("orgUnit"), query.get("group"))
-        if "query_scope" in query and (scope != query["query_scope"] or terms != query.get("licence_terms")):
-            return "unreadable", None
-        return scope, terms
-    if "query_scope" in query:
-        value, terms = query["query_scope"], query.get("licence_terms")
-        if value not in POLICY_QUERY_SCOPES or not licence_terms_readable(value, terms):
-            return "unreadable", None
-        return value, terms
-    if "licence_terms" in query:
-        return "unreadable", None
-    return None
-
-
 def policy_query_classification(query: dict[str, Any]) -> str | None:
     """Classify raw CEL or retain the fixed classification from minimised evidence."""
-    parsed = policy_query_parsed(query)
-    return None if parsed is None else parsed[0]
+    if "query" in query and query["query"] != "":
+        scope = policy_query_scope(query["query"], query.get("orgUnit"), query.get("group"))
+        return "unreadable" if "query_scope" in query and scope != query["query_scope"] else scope
+    if "query_scope" in query:
+        value = query["query_scope"]
+        return value if value in POLICY_QUERY_SCOPES else "unreadable"
+    return None
 
 
 def _minimise_policy_query(query: Any) -> Any:
@@ -605,10 +487,8 @@ def _minimise_policy_query(query: Any) -> Any:
             result[key] = _minimise_target(query[key], prefix)
     if "sortOrder" in query:
         result["sortOrder"] = query["sortOrder"] if finite_policy_number(query["sortOrder"]) else None
-    if (parsed := policy_query_parsed(query)) is not None:
-        result["query_scope"] = parsed[0]
-        if parsed[1] is not None:
-            result["licence_terms"] = parsed[1]
+    if (scope := policy_query_classification(query)) is not None:
+        result["query_scope"] = scope
     return result
 
 

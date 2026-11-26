@@ -107,7 +107,6 @@ from .normalize import (
     _policy_section,
     _policy_settings_read,
     _scuba_read_records,
-    licence_population_label,
 )
 
 GWS_PROJECTION_VERSION = "2026-11-25.4"
@@ -565,7 +564,8 @@ def _rows_agree(records: list[dict] | None, whole: bool, raw: list, normalised_k
 
     ``repeats`` admits rows whose identities repeat, as long as each repeats as often on both sides: Google writes
     one admin action that changes several settings as several events at the same instant, and the minimised event
-    (an unlisted setting becomes ``unrecognised``) need not tell them apart.
+    (an unlisted setting becomes ``unrecognised``) need not tell them apart; it also writes the same setting at the
+    same rank once per licence population.
     """
     if records is None:
         return not raw
@@ -646,7 +646,7 @@ def _policy_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[s
         if isinstance(item, dict) and not _uninterrupted(item):
             return False
         query = item.get("policyQuery") if isinstance(item, dict) else None
-        if isinstance(query, dict) and not set(query) <= {"orgUnit", "group", "sortOrder", "query", "query_scope", "licence_terms"}:
+        if isinstance(query, dict) and not set(query) <= {"orgUnit", "group", "sortOrder", "query", "query_scope"}:
             return False
     operations = {label for owner, label in coverage if owner == collector}
     if operations - {name, "twoStepVerificationPolicies", "policyPlacement"}:
@@ -681,7 +681,9 @@ def _policy_read(ctx: _Context, data: list[dict], state: dict, org_units: dict[s
             not ctx.read_ok(raw, collector, "twoStepVerificationPolicies", direct_count=False)
             or two_step_subset_differs(raw)):
         return False
-    if not _rows_agree(data, True, expected, policy_key, policy_key):
+    # Equal policies may repeat: Google writes one value per licence population at one rank, and ScubaGoggles ranks
+    # each copy (DEC-193), so the join counts them.
+    if not _rows_agree(data, True, expected, policy_key, policy_key, repeats=True):
         return False
     for key in ("complete", "malformed_count", "unusable_sections", "unusable_scopes"):
         if key not in state or _json(state[key]) != _json(read_state.get(key)):
@@ -743,27 +745,6 @@ def _unique_policy_members(value: Any) -> bool:
     return True
 
 
-def _policy_group(ctx: _Context, group: str) -> str:
-    """A group unit's group part. A licence population's label (the normaliser's ``licences-`` records) is keyed
-    apart from the Directory's groups and never counted as one."""
-    if licence_population_label(group):
-        return "group:" + pseudonym(ctx.key, "licence-population:" + group)
-    return ctx.group(group)
-
-
-def _population_service_states(policies: list[dict[str, Any]], populations: set[tuple[str, str]]) -> None:
-    """A licence population sits under its unit, so it takes that unit's own service status entries, where it holds
-    none of its own; the engine otherwise reads a group unit's status from the top unit (``reduce.service_on``)."""
-    held = {(entry["unit"], entry["section"]) for entry in policies}
-    statuses = [entry for entry in policies
-                if entry["unit_kind"] == "org_unit" and entry["section"].endswith("_service_status")]
-    for population, base in sorted(populations):
-        for entry in statuses:
-            if entry["unit"] == base and (population, entry["section"]) not in held:
-                policies.append({**entry, **_obj(("unit", population), ("unit_kind", "group"))})
-                held.add((population, entry["section"]))
-
-
 def _policies(ctx: _Context) -> dict[str, Any]:
     rows, whole = ctx.records("google_policy_settings")
     data, consistent, state = _split(rows or [], "google_policy_settings", "google_policy_setting")
@@ -774,7 +755,7 @@ def _policies(ctx: _Context) -> dict[str, Any]:
     if complete and state["complete"] is False:
         failures = [(section, None, None) for section in state["unusable_sections"]]
         failures.extend((scope["section"], scope["org_unit"], scope["group"]) for scope in state["unusable_scopes"])
-    policies, units, populations = [], {}, set()
+    policies, units = [], {}
     for row in data:
         org_unit, group, kind, section = row.get("org_unit"), row.get("group"), row.get("unit_kind"), row.get("section")
         if group is not None and org_unit is None:
@@ -783,11 +764,9 @@ def _policies(ctx: _Context) -> dict[str, Any]:
                 or kind != ("group" if group is not None else "org_unit")):
             complete = False  # a policy that cannot be placed is left out; the read is no longer the whole
             continue
-        unit = base = ctx.ou("ou:" + org_unit)
+        unit = ctx.ou("ou:" + org_unit)
         if group is not None:
-            unit += "/" + _policy_group(ctx, group)
-            if licence_population_label(group):
-                populations.add((unit, base))
+            unit += "/" + ctx.group(group)
         units.setdefault(section, set()).add((unit, kind))
         rank = row.get("sort_order")
         entry = _obj(("unit", unit), ("unit_kind", kind), ("section", section),
@@ -811,12 +790,9 @@ def _policies(ctx: _Context) -> dict[str, Any]:
             targets = {*units.get(section, ()), (ctx.ou(top), "org_unit")}
         else:
             unit = ctx.ou("ou:" + base)
-            targets = {(unit + "/" + _policy_group(ctx, group), "group")} if group else {(unit, "org_unit")}
-            if group and licence_population_label(group):
-                populations.add((unit + "/" + _policy_group(ctx, group), unit))
+            targets = {(unit + "/" + ctx.group(group), "group")} if group else {(unit, "org_unit")}
         for unit, kind in sorted(targets):
             policies.append(_obj(("unit", unit), ("unit_kind", kind), ("section", section), ("sort_order", None)))
-    _population_service_states(policies, populations)
     return _obj(("complete", complete), ("policies", policies))
 
 

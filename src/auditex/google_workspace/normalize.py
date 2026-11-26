@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from hashlib import sha256
-from itertools import product
 from typing import Any
 
 from azure_tenant_audit.collection_gaps import (
@@ -17,7 +15,6 @@ from azure_tenant_audit.collection_gaps import (
     truncations_from_payloads,
 )
 from azure_tenant_audit.data_minimisation import (
-    LICENCE_ATOM_MAX,
     UNRECOGNISED_SYSTEM_ALERT_NAME,
     finite_policy_number,
     minimise_gmail_settings,
@@ -26,8 +23,6 @@ from azure_tenant_audit.data_minimisation import (
     policy_unit_id,
 )
 from azure_tenant_audit.google_policy_schema import policy_enforced_at
-from azure_tenant_audit.value_rules.gws.catalogue import section_semantics
-from azure_tenant_audit.value_rules.gws.reduce import UNUSABLE, reduce_ranked
 
 from .client import GMAIL_SERVICE_NOT_ENABLED, gmail_mail_service_not_enabled
 from .collectors import (
@@ -279,119 +274,6 @@ def _query_scope_supported(query: dict[str, Any]) -> bool:
     return query.get("query_scope") in (None, "targets")
 
 
-# Query words whose population cannot be bounded to the policy's unit: the policy may hold for users anywhere, so its
-# whole section is unknown. ``licences`` is the legacy word, which also stood for a licence-only query with no
-# org-unit term; it carries no predicate.
-_UNBOUNDED_QUERY_SCOPES = ("other", "licences", "unreadable")
-
-
-def _setting_scope_unbounded(query: dict[str, Any], org_unit: str | None, roots: set[str]) -> bool:
-    """Whether a minimised policy's query may reach users outside its unit (and group), so that no unit's setting
-    for its section is known: an unrepresentable or unreadable query, the legacy ``licences`` word, or a
-    ``licences_wide`` conjunction (no org-unit term) on any unit but the top unit, which every user is under."""
-    scope = query.get("query_scope")
-    if scope in _UNBOUNDED_QUERY_SCOPES:
-        return True
-    return scope == "licences_wide" and (org_unit is None or org_unit not in roots)
-
-
-_NO_POLICY = "<no policy>"
-_IRREDUCIBLE = "<unusable>"
-
-
-def _licence_terms(item: dict[str, Any]) -> list[dict[str, list[str]]] | None:
-    query = item["policyQuery"]
-    return query.get("licence_terms") if query.get("query_scope") in ("licences_unit", "licences_wide") else None
-
-
-def _meets(terms: list[dict[str, list[str]]] | None, holds: set[str]) -> bool:
-    """Whether a user holding exactly ``holds`` meets a policy's licence predicate (no predicate: every user)."""
-    return terms is None or any(
-        (not term["holds_any"] or holds & set(term["holds_any"])) and not holds & set(term["holds_none"])
-        for term in terms
-    )
-
-
-def _population_outcome(section: str, top_unit: bool, ranked: list[tuple[Any, dict[str, Any]]]) -> str:
-    """The value one licence population of a unit reduces to, as the rule engine reduces a unit's policies
-    (:func:`reduce_ranked`), with the pinned default filled in on the top unit as the engine does. A population no
-    policy holds for takes the pinned default on the top unit (Google's own default, the value ScubaGoggles pins,
-    SG:scubagoggles/policy_api.py:379-455) and its parent's or OU's setting anywhere else, which this unit cannot
-    tell: ``_NO_POLICY``."""
-    try:
-        semantics: dict[str, Any] | None = section_semantics(section)
-    except ValueError:
-        semantics = None  # a section no rule reads: ranked by its highest rank alone
-    default = semantics.get("default") if semantics else None
-    if not ranked:
-        if not top_unit or default is None:
-            return _NO_POLICY
-        ranked_default = {name: part for name, part in default.items() if semantics and name in semantics["fields"]}
-        return json.dumps(ranked_default, sort_keys=True)
-    if semantics is None:
-        top = max(order for order, _ in ranked)
-        values = {json.dumps(value, sort_keys=True) for order, value in ranked if order == top}
-        return values.pop() if len(values) == 1 else _IRREDUCIBLE
-    value = reduce_ranked(section, ranked)
-    if value is UNUSABLE:
-        return _IRREDUCIBLE
-    if top_unit and isinstance(value, dict) and default:
-        value = {**default, **value}
-    if isinstance(value, dict):
-        # Only the fields a rule can read (the section's pinned fields) decide a verdict.
-        value = {name: part for name, part in value.items() if name in semantics["fields"]}
-    return json.dumps(value, sort_keys=True)
-
-
-# The ``group`` label of a licence population's own unit: the population is judged as a unit of its own, beside the
-# unit's ScubaGoggles reading (DEC LIVE-FIX-1 licence rule, divergence D23). Never a Google group id (those hold no
-# hyphen), and the projection keys it apart from groups.
-LICENCE_POPULATION_PREFIX = "licences-"
-
-
-def licence_population_label(group: Any) -> bool:
-    """Whether a policy record's ``group`` is a licence population's label, not a Google group."""
-    return isinstance(group, str) and group.startswith(LICENCE_POPULATION_PREFIX)
-
-
-def _licence_populations(section: str, top_unit: bool,
-                         policies: list[tuple[Any, dict[str, Any]]]) -> list[tuple[str, str]] | None:
-    """The licence populations of a unit holding licence-scoped policies whose setting differs from the unit's
-    ScubaGoggles reading, as ``(label, outcome)``; ``None`` when the unit cannot be split.
-
-    ScubaGoggles v1.1.0 never reads the query: it ranks a unit's policies by ``sortOrder`` and applies the winner to
-    the whole unit (SG:scubagoggles/policy_api.py:752-860); the rule engine reduces a unit the same way
-    (:mod:`azure_tenant_audit.value_rules.gws.reduce`), and that reading stays the unit's own setting. A
-    licence-scoped policy holds only for the users meeting its predicate, so the unit's policies are also reduced once
-    per licence population (every assignment of the SKUs the unit's predicates name): each user takes the
-    highest-ranked policies they meet.
-
-    - A population no policy holds for takes the pinned default on the top unit. With no pinned default, or below the
-      top unit, it is left out: outside the licence its users cannot use the service, or they take an ancestor's
-      setting, which the ancestor's own reading judges (rule 1).
-    - A population that reduces to the unit's reading adds nothing. Every other distinct value is returned once, to
-      be judged as a unit of its own (rule 2): any violating population answers not met, met only when every
-      population complies. ``_IRREDUCIBLE`` is a population whose value is unknown.
-    - A missing rank or more than ``LICENCE_ATOM_MAX`` SKUs leaves the unit unknown (``None``).
-    """
-    if not all(finite_policy_number(order) for order, _ in policies):
-        return None
-    terms = [_licence_terms(item) for _, item in policies]
-    atoms = sorted({atom for predicate in terms for term in predicate or () for atom in term["holds_any"] + term["holds_none"]})
-    if len(atoms) > LICENCE_ATOM_MAX:
-        return None
-    values = [(order, item["setting"]["value"]) for order, item in policies]
-    everyone = _population_outcome(section, top_unit, values)
-    found: set[str] = set()
-    for held in product((False, True), repeat=len(atoms)):
-        holds = {atom for atom, bit in zip(atoms, held, strict=True) if bit}
-        population = [value for value, predicate in zip(values, terms, strict=True) if _meets(predicate, holds)]
-        outcome = _population_outcome(section, top_unit, population)
-        if outcome not in (everyone, _NO_POLICY):
-            found.add(outcome)
-    return sorted((LICENCE_POPULATION_PREFIX + sha256(outcome.encode()).hexdigest()[:16], outcome) for outcome in found)
-
-
 def _canonical_target(org_unit: str | None, group: str | None, roots: set[str]) -> str:
     """The unit a policy's setting belongs to, as the projection places it: a group-only policy applies under the
     top unit (SG:scubagoggles/policy_api.py:804-825), so it shares the top unit's group key."""
@@ -633,23 +515,17 @@ def _policy_settings_read(
     :func:`policy_problems`:
 
     - a policy whose section cannot be told is malformed for the whole read;
-    - one whose targets cannot be read, or whose query may reach users outside its unit and group
-      (:func:`_setting_scope_unbounded`: an unrepresentable or unreadable query, the legacy ``licences`` word, or a
-      ``licences_wide`` policy on any unit but the top unit), makes its section unusable (``unusable_sections``, every
-      record of it left out);
-    - one with any other problem, a licence-scoped unit that cannot be split into licence populations (a missing
-      rank, too many SKUs, or a group unit whose populations differ), or conflicting values with no order between
-      policies for the same identity, makes that unit's setting unusable (``unusable_scopes``): those records are
-      left out and every other unit's records are kept.
+    - one whose targets cannot be read makes its section unusable (``unusable_sections``, every record of it left out);
+    - one with any other problem, a unit the Directory tree does not hold, or conflicting values with no order between
+      policies for the same identity, makes that unit's setting unusable (``unusable_scopes``): those records are left
+      out and every other unit's records are kept.
 
-    Units are keyed as the projection places them (:func:`_canonical_target`): a group-only policy shares the top
-    unit's group key. A policy whose query narrows it to licence holders (``licences_unit``, or ``licences_wide`` on
-    a top unit in ``root_units``) stays its unit's setting, ranked by ``sortOrder`` with the rest, as ScubaGoggles
-    reads it. Each licence population whose setting differs from that reading (:func:`_licence_populations`) adds one
-    record of its own: ``unit_kind`` ``group``, ``group`` its label (``licences-`` and 16 hex digits of its value's
-    digest), ``policy_type`` ``licence_population``, ``sort_order`` 0 and its reduced value (the fields the rules
-    read, pinned defaults filled on the top unit), so the rules judge it as a unit beside the unit's own reading. A
-    population whose value cannot be reduced, or is not an object, is an ``unusable_scopes`` entry under its label.
+    The CEL query never decides where a setting applies (DEC-193). ScubaGoggles v1.1.0 never reads it: it ranks each
+    policy by ``sortOrder`` under its ``orgUnit`` (the top unit when there is none) and ``group``, and the winner
+    applies to the whole unit or group (SG:scubagoggles/policy_api.py:752-860, query unread at :784-825). A
+    licence-scoped policy is therefore its unit's setting, judged as if it applied to every user of the unit. Units
+    are keyed as the projection places them (:func:`_canonical_target`): a group-only policy shares the top unit's
+    group key, so shadowing and order conflicts compare it with a root-plus-group policy for the same group.
 
     Any of these makes the read incomplete: unknown is never safe. The second value is ``None`` without a
     ``policySettings`` key; otherwise whether the read is complete as far as the 2-step verification sections go.
@@ -686,28 +562,11 @@ def _policy_settings_read(
         org_unit, group = targets
         if problems:
             malformed += 1
-        if _setting_scope_unbounded(item["policyQuery"], org_unit, roots):
-            # The policy may hold for users anywhere, so no unit's setting for this section is known.
-            unusable.add(setting_section)
-            continue
         key = (setting_section, _canonical_target(org_unit, group, roots), group or "")
-        if (problems or item["policyQuery"].get("query_scope") == "conditional"
-                or (org_unit is not None and org_unit not in known_units)):
+        if problems or (org_unit is not None and org_unit not in known_units):
             scopes.add(key)
             continue
         candidates.append((setting_section, org_unit, group, item["policyQuery"].get("sortOrder"), item, key))
-    grouped: dict[tuple[str, str, str], list[tuple[Any, dict[str, Any]]]] = defaultdict(list)
-    for _, _, _, sort_order, item, key in candidates:
-        grouped[key].append((sort_order, item))
-    populations: list[tuple[tuple[str, str, str], str, str]] = []
-    for key, policies in sorted(grouped.items()):
-        if key in scopes or not any(_licence_terms(item) is not None for _, item in policies):
-            continue  # a unit already unknown is never split: a policy left out would change every population
-        found = _licence_populations(key[0], key[1] in roots and not key[2], policies)
-        if found is None or found and key[2]:
-            scopes.add(key)  # a group unit cannot hold populations of its own
-            continue
-        populations.extend((key, label, outcome) for label, outcome in found)
     by_identity: dict[tuple[str, str, str, str], list[tuple[int | float | None, dict[str, Any]]]] = defaultdict(list)
     for setting_section, _, _, sort_order, item, key in candidates:
         for identity, value in _policy_values_by_identity(setting_section, item["setting"]["value"]):
@@ -734,26 +593,6 @@ def _policy_settings_read(
             policy_type=item.get("type"),
         )
         record["value"] = item["setting"]["value"]  # kept even when empty: an empty value is a setting at its defaults
-        records.append(record)
-    for (setting_section, unit, _), label, outcome in populations:
-        if setting_section in unusable:
-            continue
-        value = None if outcome == _IRREDUCIBLE else json.loads(outcome)
-        if not isinstance(value, dict):
-            scopes.add((setting_section, unit, label))
-            continue
-        record = _record(
-            "google_policy_setting",
-            "google_policies.policySettings",
-            f"{setting_section}|{unit}|{label}|0",
-            section=setting_section,
-            unit_kind="group",
-            org_unit=unit or None,
-            group=label,
-            sort_order=0,
-            policy_type="licence_population",
-        )
-        record["value"] = value
         records.append(record)
     read_complete = bool(values) and _read_complete("google_policies", section, result_rows, coverage_rows)
     complete = read_complete and malformed == 0 and not unusable and not scopes

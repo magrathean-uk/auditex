@@ -32,7 +32,6 @@ from azure_tenant_audit.data_minimisation import (
     minimise_policy_settings,
     minimise_policy_value,
     policy_is_unrecognised,
-    policy_query_classification,
     policy_target,
     policy_value_schema,
 )
@@ -653,9 +652,8 @@ POLICY_SECTIONS = ("twoStepVerificationPolicies", "policySettings")
 # | policyQuery                 | query_object_invalid| same              | -                                          |
 # | policyQuery.orgUnit, group  | fine (one required: target_missing) | org_unit_invalid / group_invalid | not ``orgUnits/<id>`` / ``groups/<id>`` or a system group id |
 # | policyQuery.sortOrder       | fine (proto3 0)     | sort_order_invalid| NaN, infinite or outside the double range  |
-# | policyQuery.query           | fine (targets only) | query_invalid     | longer than POLICY_QUERY_MAX; CEL beyond targets and licence clauses, or a licence population no user can meet, is unsupported scope (collector partial, normaliser unusable section); a licence-only clause off the top unit is an unusable section in the normaliser |
-# | policyQuery.query_scope     | fine                | query_invalid     | not ``targets``, ``licences`` (legacy: unsupported scope), ``licences_unit``, ``licences_wide``, ``conditional`` (unusable scope) or ``other`` (unusable section) |
-# | policyQuery.licence_terms   | fine (licence words only) | query_invalid | missing or malformed beside a licence word, present beside any other |
+# | policyQuery.query           | fine                | fine              | never decides a setting: ranked by target and sortOrder alone, as ScubaGoggles v1.1.0 (DEC-193) |
+# | policyQuery.query_scope     | fine                | fine              | descriptive only; an unknown word replays as ``unreadable`` |
 # | 2SV enforcedFrom            | fine (not enforced) | two_step_value_invalid | blank or not an RFC 3339 timestamp    |
 # | 2SV allowEnrollment         | fine                | two_step_value_invalid | not a Boolean                         |
 # | 2SV allowedSignInFactorSet  | fine                | two_step_value_invalid | not a documented enum member           |
@@ -738,8 +736,6 @@ def policy_problems(policy: Any) -> tuple[str, ...]:
             problems.append("target_missing")
         if "sortOrder" in query and not finite_policy_number(query["sortOrder"]):
             problems.append("sort_order_invalid")
-        if policy_query_classification(query) == "unreadable":
-            problems.append("query_invalid")
     return tuple(sorted(set(problems)))
 
 
@@ -751,23 +747,6 @@ POLICY_TARGET_PROBLEMS = frozenset({"query_object_invalid", "org_unit_invalid", 
 def policy_row_readable(policy: Any) -> bool:
     """Whether one Policy API policy has every field its readers rely on (see :func:`policy_problems`)."""
     return not policy_problems(policy)
-
-
-def policy_scope_unrepresentable(policy: Any) -> bool:
-    """Whether a readable policy's CEL query holds a scope its targets cannot show (another unit or group, any
-    condition beyond Google's licence clauses, or a population no user can meet): its section is unknown, so the
-    read is not complete. Licence clauses narrow a policy to the licence holders of its unit; whether every licence
-    population of the unit reduces to one setting, and whether a licence-only conjunction (``licences_wide``) stands
-    (only on the top unit), is the normaliser's call, since only the Directory tree tells the top unit."""
-    if not isinstance(policy, dict) or not isinstance(policy.get("policyQuery"), dict):
-        return False
-    # The legacy ``licences`` word (replayed evidence) also stood for a licence-only query with no org-unit term, so
-    # its reach is unknown as well.
-    return not policy_is_unrecognised(policy) and policy_query_classification(policy["policyQuery"]) in ("conditional", "other", "licences")
-
-
-def _scope_policy_error(count: int, total: int) -> str:
-    return f"{count} of {total} policies hold a scope their targets cannot show; the settings they hold for those units are unknown."
 
 
 def _is_two_step_policy(policy: Any) -> bool:
@@ -854,11 +833,8 @@ def policy_replay_rows(collector: str, payload: Any) -> list[dict[str, Any]]:
             status, item_count, error = "failed", 0, f"google_policies.{name}: the offline sample holds no readable policies in this section."
         else:
             bad = sum(1 for policy in values if not policy_row_readable(policy))
-            unscoped = sum(1 for policy in values if policy_row_readable(policy) and policy_scope_unrepresentable(policy))
             if bad:
                 status, item_count, error = "partial", len(values), _malformed_policy_error(bad, len(values))
-            elif unscoped:
-                status, item_count, error = "partial", len(values), _scope_policy_error(unscoped, len(values))
             elif name == "twoStepVerificationPolicies" and two_step_subset_differs(payload):
                 status, item_count = "partial", len(values)
                 error = "google_policies.twoStepVerificationPolicies: the list is not the 2-step verification part of policySettings."
@@ -940,13 +916,8 @@ class GooglePoliciesCollector:
             if row.get("result_limit"):
                 markers["result_limit"] = row["result_limit"]
         bad = sum(1 for policy in policies if not policy_row_readable(policy))
-        unscoped = sum(1 for policy in policies if policy_row_readable(policy) and policy_scope_unrepresentable(policy))
         if bad and row.get("status") == "ok":
             row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_malformed_policy_error(bad, len(policies)), policy_row_validation=True)
-        elif unscoped and row.get("status") == "ok":
-            # A query naming another unit or holding a condition: that unit's setting is unknown, so the read is
-            # partial and the run says so, as the normaliser's read state does.
-            row.update(status="partial", error_class=POLICY_MALFORMED_ERROR_CLASS, error=_scope_policy_error(unscoped, len(policies)), policy_row_validation=True)
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(
             self.name,
