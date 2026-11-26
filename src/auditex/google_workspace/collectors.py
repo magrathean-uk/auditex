@@ -27,7 +27,9 @@ from azure_tenant_audit.data_minimisation import (
     POLICY_TYPE_ALLOWED,
     POLICY_TYPES,
     TWO_STEP_SETTING_PREFIX,
+    UNREADABLE_MAILBOX,
     finite_policy_number,
+    gmail_mailbox_identifier,
     minimise_policy_section,
     minimise_policy_settings,
     minimise_policy_value,
@@ -494,6 +496,7 @@ class GoogleGmailSettingsCollector:
         subject_scope = SUBJECT_SCOPE_USER if per_user else SUBJECT_SCOPE_ADMIN
 
         emails: list[str] = []
+        unreadable_users = 0
         skipped_inactive = 0
         for user in users:
             user_email = str(user.get("primaryEmail") or user.get("email") or "")
@@ -501,6 +504,11 @@ class GoogleGmailSettingsCollector:
                 continue
             if user.get("suspended") or user.get("archived"):
                 skipped_inactive += 1
+                continue
+            if not gmail_mailbox_identifier(user_email):
+                # A Directory address that names no single mailbox is never used as a delegated subject, a coverage
+                # name or a bundle value: it is one unreadable mailbox.
+                unreadable_users += 1
                 continue
             emails.append(user_email)
 
@@ -556,6 +564,21 @@ class GoogleGmailSettingsCollector:
             coverage.append(skipped_row)
 
         rows: list[dict[str, Any]] = []
+        for _ in range(unreadable_users if per_user else 0):
+            rows.append({"userEmail": UNREADABLE_MAILBOX})
+            coverage.append(
+                _coverage(
+                    self.name,
+                    "mailboxSettings:unknown",
+                    status="failed",
+                    item_count=0,
+                    duration_ms=0,
+                    endpoint="gmail.users.settings",
+                    error_class="malformed_response",
+                    error="The Directory user record names no readable mailbox.",
+                    subject_scoped=subject_scope,
+                )
+            )
         for user_email in targets:
             start = time.perf_counter()
             try:

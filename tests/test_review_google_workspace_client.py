@@ -908,3 +908,75 @@ def test_live_fix_1_r2_m2_an_empty_gmail_probe_proves_no_read_and_no_exact_scope
         coverage_rows=preflight,
     )[0]
     assert capability["status"] == "supported"
+
+
+# ---- LIVE-FIX-1 final small fix ------------------------------------------------------------------------------------
+
+
+def test_live_fix_1_final_b1_a_rejected_directory_address_never_reaches_coverage_or_the_bundle() -> None:
+    from auditex.google_workspace.collectors import GoogleGmailSettingsCollector
+
+    bad = "/srv/synthetic/live-invalid-mailbox.txt"
+    settings = _CountingSettings(_NOT_ENABLED)
+    client = _delegated_gmail_client({"a@example.com": _GmailSettings({}), bad: settings})
+    result = GoogleGmailSettingsCollector().run({"client": client, "users": [{"primaryEmail": "a@example.com"}, {"primaryEmail": bad}]})
+    assert settings.calls == []  # never used as a delegated subject
+    assert result.status == "partial"
+    assert "live-invalid-mailbox" not in repr((result.payload, result.coverage))
+    names = {row["name"]: row for row in result.coverage}
+    assert names["mailboxSettings:unknown"]["status"] == "failed"
+    assert names["mailboxSettings:a@example.com"]["status"] == "ok"
+    assert {"userEmail": "redacted:mailbox"} in result.payload["mailboxSettings"]["value"]
+
+
+def test_live_fix_1_final_b2_a_local_part_of_only_dots_is_no_mailbox() -> None:
+    from auditex.google_workspace.client import (
+        gmail_mail_service_not_enabled,
+        gmail_settings_status,
+    )
+
+    for address in (".@example.com", "..@example.com"):
+        payload = {"userEmail": address, "mailService": "not_enabled"}
+        assert gmail_mail_service_not_enabled(payload) is False
+        assert gmail_settings_status(payload)[0] == "failed"
+    assert gmail_mail_service_not_enabled({"userEmail": "a.b@example.com", "mailService": "not_enabled"}) is True
+
+
+def test_live_fix_1_final_b2_replay_of_a_dots_only_marker_is_partial_and_withheld(tmp_path: Any) -> None:
+    import json
+
+    from auditex.google_workspace.run import run_google_offline
+
+    sample = tmp_path / "sample.json"
+    row = {"userEmail": ".@example.com", "mailService": "not_enabled"}
+    sample.write_text(json.dumps({"google_gmail_settings": {"mailboxSettings": {"value": [row]}}}), encoding="utf-8")
+    rc = run_google_offline(sample_path=sample, out=tmp_path / "out", tenant_name="T", run_name="r",
+                            domain="example.com", customer_id=None)
+    run = tmp_path / "out" / "T-r"
+    manifest = json.loads((run / "run-manifest.json").read_text(encoding="utf-8"))
+    assert (rc, manifest["overall_status"]) == (1, "partial")
+    assert ".@example.com" not in "".join(path.read_text(encoding="utf-8", errors="ignore")
+                                        for path in run.rglob("*.json"))
+
+
+@pytest.mark.parametrize("row", [None, {"userEmail": "b@example.com"}, {"userEmail": "b@example.com", "skippedSettings": []}])
+def test_live_fix_1_final_m2_a_row_that_supplies_no_settings_is_never_a_complete_read(tmp_path: Any, row: Any) -> None:
+    import json
+
+    from auditex.google_workspace.client import gmail_settings_status
+    from auditex.google_workspace.run import run_google_offline
+
+    if isinstance(row, dict):
+        assert gmail_settings_status(row)[0] == "failed"
+    sample = tmp_path / "sample.json"
+    sample.write_text(json.dumps({"google_gmail_settings": {"mailboxSettings": {"value": [row]}}}), encoding="utf-8")
+    rc = run_google_offline(sample_path=sample, out=tmp_path / "out", tenant_name="T", run_name="r",
+                            domain="example.com", customer_id=None)
+    manifest = json.loads((tmp_path / "out" / "T-r" / "run-manifest.json").read_text(encoding="utf-8"))
+    assert (rc, manifest["overall_status"]) == (1, "partial")
+
+
+def test_live_fix_1_final_m2_a_row_with_one_read_setting_is_still_complete() -> None:
+    from auditex.google_workspace.client import gmail_settings_status
+
+    assert gmail_settings_status({"userEmail": "b@example.com", "imap": {"enabled": False}}) == ("ok", None, None)

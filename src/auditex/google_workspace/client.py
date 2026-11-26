@@ -236,6 +236,9 @@ def gmail_settings_status(payload: dict[str, Any]) -> tuple[str, str | None, str
         for name in attempted
         if isinstance(error := payload.get(f"{name}_error"), dict) and error
     }
+    if not any(name in payload or f"{name}_error" in payload for name in attempted):
+        # A row that supplies no setting and no failed read proves nothing: it is never a complete read.
+        return "failed", "malformed_response", "The Gmail settings row carries no settings."
     if not failures:
         if skipped:
             # A setting these credentials cannot read (delegates under OAuth) is a gap, never a complete read.

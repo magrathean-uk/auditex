@@ -700,7 +700,7 @@ def _replayed_mailbox_rows(collector: str, payload: dict[str, Any]) -> list[dict
     rows: list[dict[str, Any]] = []
     for mailbox in mailboxes if isinstance(mailboxes, list) else []:
         if not isinstance(mailbox, dict):
-            continue
+            mailbox = {}
         status, error_class, error = gmail_settings_status(mailbox)
         if status == "ok":
             continue

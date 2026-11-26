@@ -496,10 +496,12 @@ def _policy_values_by_identity(section: str, value: dict[str, Any]) -> list[tupl
 
 def _policy_order_conflicts(policies: list[tuple[int | float | None, dict[str, Any]]]) -> bool:
     """Different values for one identity need distinct, known orders."""
-    if any(order is None for order, _ in policies):
+    if any(order is None or not finite_policy_number(order) for order, _ in policies):
         return any(value != policies[0][1] for _, value in policies[1:])
-    ranked: dict[int | float | None, dict[str, Any]] = {}
-    return any(ranked.setdefault(order, value) != value for order, value in policies)
+    # D11 applies at the effective rank only: a tie below the winning rank is shadowed by the policy above it.
+    top = max(order for order, _ in policies)
+    winners = [value for order, value in policies if order == top]
+    return any(value != winners[0] for value in winners[1:])
 
 
 def _policy_settings_read(

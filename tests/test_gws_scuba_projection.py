@@ -2001,3 +2001,26 @@ def test_dec_193_equal_policies_repeated_per_licence_population_keep_the_read_co
     records = rows(run, "google_policy_settings")
     normalised(run, "google_policy_settings", [records[0], *records[:-1], {**records[-1], "record_count": len(records)}])
     assert project_gws_run(run)["gws_policies"]["complete"] is False
+
+
+def test_live_fix_1_final_m1_a_tie_below_the_winning_rank_never_withholds_the_setting(tmp_path: Path) -> None:
+    # Rank 300 decides; the conflicting pair at rank 100 is shadowed by it (ScubaGoggles fills only missing fields).
+    run = replay(tmp_path, [
+        ENROLLED,
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 300, ROOT_TERM),
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 100, f"{ROOT_TERM} && {SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 100, f"{ROOT_TERM} && !{SKU_A}"),
+    ])
+    projection = project_gws_run(run)
+    assert projection["gws_policies"]["complete"] is True
+    assert verdict(projection, "GWS.COMMONCONTROLS.8.1v1") == ("not_met", "unit_violates")
+
+
+def test_live_fix_1_final_m1_a_tie_at_the_winning_rank_still_withholds_the_setting(tmp_path: Path) -> None:
+    run = replay(tmp_path, [
+        ENROLLED,
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 300, f"{ROOT_TERM} && {SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": False}, 300, f"{ROOT_TERM} && !{SKU_A}"),
+        ranked(RECOVERY, {"enableAccountRecovery": True}, 100, ROOT_TERM),
+    ])
+    assert verdict(project_gws_run(run), "GWS.COMMONCONTROLS.8.1v1") == ("not_assessed", "data_unusable_setting_value")

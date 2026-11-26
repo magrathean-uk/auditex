@@ -139,9 +139,10 @@ def minimise_device_configurations(value: Any) -> Any:
 
 # The mailbox a Gmail settings row names: the signed-in mailbox (``me``, OAuth) or one Google account address
 # (domain-wide delegation). A Google username holds letters, digits, ``.``, ``_``, ``-``, ``+`` and ``'``; a domain is
-# dot-separated DNS labels (letters, digits, inner hyphens) under an alphabetic top-level label.
+# dot-separated DNS labels (letters, digits, inner hyphens) under an alphabetic top-level label. A local part made only
+# of dots names nothing.
 _GMAIL_MAILBOX_ADDRESS = re.compile(
-    r"[A-Za-z0-9._'+-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}"
+    r"(?!\.+@)[A-Za-z0-9._'+-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}"
 )
 # What a Gmail settings row keeps in place of a ``userEmail`` that names no readable mailbox: never the value itself.
 UNREADABLE_MAILBOX = "redacted:mailbox"
