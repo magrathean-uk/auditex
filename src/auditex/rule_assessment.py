@@ -350,7 +350,7 @@ def _envelope(projection: Any, records: list[dict[str, Any]], scope: dict[str, A
 
 @guarded_operation
 def assess_run(run_dir: str | Path, *, policies: list[str] | None = None,
-               projection_max_items: int = DEFAULT_MAX_ITEMS, projection_max_chars: int = DEFAULT_MAX_CHARS,
+               projection_max_items: int | None = None, projection_max_chars: int | None = None,
                projection_scan_max_rows: int = DEFAULT_SCAN_MAX_ROWS,
                projection_scan_max_bytes: int = DEFAULT_SCAN_MAX_BYTES,
                projection_scan_max_chunks: int = DEFAULT_SCAN_MAX_CHUNKS) -> dict[str, Any]:
@@ -358,13 +358,18 @@ def assess_run(run_dir: str | Path, *, policies: list[str] | None = None,
     root, manifest, catalogue, selected = _admit_run(run_dir, policies, ASSESSMENT_FILENAME)
     target = root / ASSESSMENT_FILENAME
     generated_at = datetime.now(UTC).isoformat()
-    bounds = dict(max_items=projection_max_items, max_chars=projection_max_chars,
-                  scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
+    bounds = dict(scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
                   scan_max_chunks=projection_scan_max_chunks)
+    if projection_max_items is not None:
+        bounds["max_items"] = projection_max_items
+    if projection_max_chars is not None:
+        bounds["max_chars"] = projection_max_chars
     if manifest.get("platform") == "google_workspace":
         from .gws_assessment import assess_google_run
         assess = assess_google_run
     else:
+        bounds.setdefault("max_items", DEFAULT_MAX_ITEMS)
+        bounds.setdefault("max_chars", DEFAULT_MAX_CHARS)
         assess = _assess_m365_run
     result = assess(root, selected, catalogue, generated_at=generated_at, run_id=manifest["run_id"], **bounds)
     from azure_tenant_audit.scuba_assessment import validate_assessment
