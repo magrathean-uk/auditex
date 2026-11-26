@@ -7,7 +7,9 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
-These changes are planned for 2.1.0. The run-bundle `CONTRACT_VERSION` stays `2026-11-11`, and earlier bundles still
+## [2.1.0] - 2026-11-26
+
+Released 26 November 2026. The run-bundle `CONTRACT_VERSION` stays `2026-11-11`, and earlier bundles still
 load and validate.
 
 ### SCuBA answers for Google Workspace
@@ -2051,7 +2053,8 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/magrathean-uk/auditex/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/magrathean-uk/auditex/compare/v1.8.0...v2.0.0
 [1.8.0]: https://github.com/magrathean-uk/auditex/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/magrathean-uk/auditex/compare/v1.6.0...v1.7.0
