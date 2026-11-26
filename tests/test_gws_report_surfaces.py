@@ -10,18 +10,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from test_gws_scuba_projection import dns_only, good_domain
 
 from auditex import local_answer as la
-from auditex.answer_digest import build_digest, digest_from_assessment
+from auditex.answer_digest import DigestError, build_digest, digest_from_assessment
 from auditex.cli import main
 from auditex.google_workspace.run import run_google_offline
 from auditex.mcp_registry import TOOL_REGISTRY
 from auditex.reporting import (
-    _policy_explanations_title,
+    _append_policy_explanations_markdown,
+    _load_policy_explanations,
+    _render_policy_explanations_html,
     preview_report,
     write_enterprise_handoff_pack,
 )
 from auditex.rule_assessment import assess_run
+from azure_tenant_audit.scuba_assessment import validate_assessment
+
+pytest_plugins = ("test_gws_scuba_projection",)
 
 REPO = Path(__file__).resolve().parents[1]
 GWS_TITLE = "CISA SCuBA Google Workspace (ScubaGoggles v1.1.0)"
@@ -77,14 +83,162 @@ def test_customer_pack_report_carries_the_gws_section(google_run: Path, tmp_path
     assert f"## {GWS_TITLE}\n" in report and "Policy explanations" not in report
 
 
-def test_section_title_follows_the_baseline_of_the_rows() -> None:
-    assert _policy_explanations_title([{"policy_id": "GWS.GMAIL.4.1v1"}, {"policy_id": "GWS.CHAT.1.1v1"}]) == GWS_TITLE
-    assert _policy_explanations_title([{"policy_id": "MS.AAD.1.1v1"}]) == "Policy explanations"
-    # Mixed, empty and malformed rows never claim the Google baseline.
-    assert _policy_explanations_title([{"policy_id": "GWS.GMAIL.4.1v1"}, {"policy_id": "MS.AAD.1.1v1"}]) \
-        == "Policy explanations"
-    assert _policy_explanations_title([]) == "Policy explanations"
-    assert _policy_explanations_title([{"policy_id": None}, {}]) == "Policy explanations"
+M365_ROW = {"policy_id": "MS.AAD.1.1v1", "verdict": "not_met",
+            "explainer": {"explanation": "Something is off.", "remediation_steps": ["Fix it."]}}
+
+
+def test_m365_policy_section_renders_exactly_as_before() -> None:
+    """Without a Google heading (every Microsoft 365 report) the section is byte for byte what it always was."""
+    lines: list[str] = []
+    _append_policy_explanations_markdown(lines, [M365_ROW])
+    assert "\n".join(lines) == ("\n## Policy explanations\n\n### MS\\.AAD\\.1\\.1v1 - Not met\n\n**What this means**\n\n"
+                                "Something is off\\.\n\n**What to do**\n\n1. Fix it\\.\n")
+    assert _render_policy_explanations_html([M365_ROW]) == (
+        "<section><h2>Policy explanations</h2><h3>MS.AAD.1.1v1 - Not met</h3><h4>What this means</h4>"
+        "<p>Something is off.</p><h4>What to do</h4><ol><li>Fix it.</li></ol></section>")
+    # A heading that is not the Google one changes nothing.
+    for heading in (None, {}, {"title": "Policy explanations"}, {"title": GWS_TITLE.upper()}, ["title"]):
+        assert _render_policy_explanations_html([M365_ROW], heading) == _render_policy_explanations_html([M365_ROW])
+
+
+# --- Repair round (review M13-L16): admission, withheld evidence, redacted heading, coverage ----------------------
+
+WITHHELD_DNS = "Data unavailable: required evidence section(s) not collected: gws_dns."
+PARTIAL_REPORT = ("Partial: the rules assessed 1 of the 138 SCuBA Google Workspace checks in the shipped catalogue; "
+                  "the other 137 are not in this report.")
+
+
+@pytest.fixture
+def dmarc_run(bundle: Path) -> Path:
+    """A synthetic Google run with one completely read domain and a valid DMARC TXT record, assessed for
+    GWS.GMAIL.4.1v1 only: the rules answer met."""
+    dns_only(bundle, good_domain())
+    assert main(["assess", str(bundle), "--policies", DMARC_POLICY]) == 0
+    [row] = json.loads((bundle / "model_assessment.json").read_text())["policies"]
+    assert row["claims"][0] == {"id": "requirement_met", "status": "confirmed", "value": True,
+                                "evidence_ids": ["e0", "e1"]}
+    return bundle
+
+
+def _rewrite_assessment(run: Path, change) -> dict:
+    path = run / "model_assessment.json"
+    payload = json.loads(path.read_text())
+    change(payload)
+    sections = payload["projection"]["sections"].values()
+    payload["limitations"] = [] if any(s["status"] == "projected" for s in sections) else ["projection_not_implemented"]
+    validate_assessment(payload)          # the contradiction is schema-valid: only admission can catch it
+    path.write_text(json.dumps(payload))
+    return payload
+
+
+def _withhold(name: str):
+    def change(payload: dict) -> None:
+        payload["projection"]["sections"][name] = {"status": "not_collected", "reason": "oversize",
+                                                   "source": ["run-manifest.json"]}
+    return change
+
+
+def test_a_pass_from_withheld_dns_evidence_is_not_assessed(dmarc_run: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _rewrite_assessment(dmarc_run, _withhold("gws_dns"))
+    [item] = build_digest(dmarc_run)["items"]
+    assert item["verdict"] == "not_assessed"
+    values = {value["name"]: (value["text"], value["source"]) for value in item["values"]}
+    assert values["reason"] == (WITHHELD_DNS, "catalogue")
+    assert _load_policy_explanations(dmarc_run, {"run_id": "synthetic"})[0]["verdict"] == "not_assessed"
+    content = preview_report(run_dir=str(dmarc_run), format_name="md", profile="local")["content"]
+    assert "GWS\\.GMAIL\\.4\\.1v1 - Not assessed" in content and " - Met" not in content
+    monkeypatch.setattr(la, "runtime_version", lambda: None)
+    answer = la.explain_run(dmarc_run)
+    assert [entry["verdict"] for entry in answer["items"]] == ["not_assessed"]
+
+
+def test_an_unrelated_withheld_section_keeps_the_dns_answer(dmarc_run: Path) -> None:
+    _rewrite_assessment(dmarc_run, _withhold("gws_admins"))
+    [item] = build_digest(dmarc_run)["items"]
+    assert item["verdict"] == "met"
+    assert {value["name"]: value["text"] for value in item["values"]}["reason"] == DMARC_MET
+
+
+@pytest.mark.parametrize("manifest", [
+    {"run_id": "synthetic", "platform": "m365"},
+    {"run_id": "synthetic"},
+])
+def test_a_google_assessment_in_a_microsoft_run_is_refused(dmarc_run: Path, tmp_path: Path, manifest: dict,
+                                                            capsys: pytest.CaptureFixture[str]) -> None:
+    run = tmp_path / "m365"
+    run.mkdir()
+    (run / "run-manifest.json").write_text(json.dumps(manifest))
+    (run / "model_assessment.json").write_bytes((dmarc_run / "model_assessment.json").read_bytes())
+    with pytest.raises(DigestError, match="belongs to another run"):
+        build_digest(run)
+    assert _load_policy_explanations(run, manifest) == []
+    assert main(["explain", str(run)]) == 2
+    assert "Met: 1" not in capsys.readouterr().out
+    assert not (run / "local_answer.json").exists()
+
+
+def test_a_microsoft_assessment_in_a_google_run_is_refused(tmp_path: Path) -> None:
+    m365 = tmp_path / "m365"
+    m365.mkdir()
+    (m365 / "run-manifest.json").write_text('{"run_id":"synthetic"}')
+    assess_run(m365, policies=["MS.POWERBI.1.1v1"])
+    assert build_digest(m365)["catalogue"] == {"policies": 102, "assessed": 1}     # legacy: no baseline, no platform
+    google = tmp_path / "google"
+    google.mkdir()
+    manifest = {"run_id": "synthetic", "platform": "google_workspace"}
+    (google / "run-manifest.json").write_text(json.dumps(manifest))
+    (google / "model_assessment.json").write_bytes((m365 / "model_assessment.json").read_bytes())
+    with pytest.raises(DigestError, match="belongs to another run"):
+        build_digest(google)
+    assert _load_policy_explanations(google, manifest) == []
+
+
+@pytest.fixture(scope="module")
+def masked_name_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The shipped sample with one directory user named "Gws Gmail", assessed for GWS.GMAIL.4.1v1 only."""
+    out = tmp_path_factory.mktemp("gws-masked")
+    sample = json.loads((REPO / "examples/google_workspace_sample.json").read_text())
+    [user] = [u for u in sample["google_directory"]["users"]["value"] if u["id"] == "u-user"]
+    user["name"]["fullName"] = "Gws Gmail"
+    (out / "sample.json").write_text(json.dumps(sample))
+    runs = out / "runs"
+    assert run_google_offline(sample_path=out / "sample.json", out=runs, tenant_name="ci", run_name="google",
+                              domain="example.com", customer_id=None,
+                              as_of=datetime(2026, 11, 11, tzinfo=UTC)) == 0
+    [run] = [path for path in runs.iterdir() if path.is_dir()]
+    assert main(["assess", str(run), "--policies", DMARC_POLICY]) == 0
+    return run
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack"])
+def test_a_masked_policy_id_keeps_the_google_heading(masked_name_run: Path, profile: str) -> None:
+    md = preview_report(run_dir=str(masked_name_run), format_name="md", profile=profile)["content"]
+    html = preview_report(run_dir=str(masked_name_run), format_name="html", profile=profile)["content"]
+    assert md.count(f"## {GWS_TITLE}\n") == 1 and "Policy explanations" not in md
+    assert html.count(f"<section><h2>{GWS_TITLE}</h2>") == 1 and "Policy explanations" not in html
+
+
+def test_the_customer_pack_keeps_the_google_heading_over_a_masked_id(masked_name_run: Path, tmp_path: Path) -> None:
+    write_enterprise_handoff_pack(masked_name_run, tmp_path / "pack")
+    report = (tmp_path / "pack" / "report.md").read_text()
+    assert f"## {GWS_TITLE}\n\n{PARTIAL_REPORT}\n" in report and "Policy explanations" not in report
+
+
+@pytest.mark.parametrize("fmt,expected", [
+    ("md", f"## {GWS_TITLE}\n\n{PARTIAL_REPORT}\n\n### GWS\\.GMAIL\\.4\\.1v1 - Met\n"),
+    ("html", f'<section><h2>{GWS_TITLE}</h2><p class="coverage-note">{PARTIAL_REPORT}</p><h3>GWS.GMAIL.4.1v1 - Met</h3>'),
+])
+def test_a_one_policy_google_report_states_its_coverage(dmarc_run: Path, fmt: str, expected: str) -> None:
+    content = preview_report(run_dir=str(dmarc_run), format_name=fmt, profile="customer_pack",
+                             include_sections=["policy_explanations"])["content"]
+    assert content.count(expected) == 1
+
+
+@pytest.mark.parametrize("fmt", ["md", "html"])
+def test_a_full_google_report_has_no_partial_note(google_run: Path, fmt: str) -> None:
+    content = preview_report(run_dir=str(google_run), format_name=fmt, profile="customer_pack",
+                             include_sections=["policy_explanations"])["content"]
+    assert "Partial:" not in content and "coverage-note" not in content
 
 
 def test_gws_digest_builds_from_shipped_text_only(google_run: Path) -> None:
