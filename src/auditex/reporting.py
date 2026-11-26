@@ -617,9 +617,9 @@ def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[
         sections["local_answer"] = local_answer
     bundle = {"run_dir": str(run_path), "manifest": manifest, "summary_json": fallback_summary, "sections": sections}
     if heading is not None:
-        # Outside the sections: chosen from the validated baseline here, before any redaction, and never part of the
-        # JSON report, so the row contract and the Microsoft 365 output stay as they were.
-        bundle["policy_explanations_heading"] = heading
+        # The section's heading, outside the sections: chosen from the validated baseline here, before any redaction,
+        # and never part of the JSON report, so the row contract and the Microsoft 365 output stay as they were.
+        bundle["policy_explanations"] = heading
     return bundle
 
 
@@ -3275,8 +3275,8 @@ def _append_local_answer_markdown(lines: list[str], payload: Mapping[str, Any]) 
 
 
 # The section title by assessment baseline (design M13 section 9.3). The heading is chosen from the validated
-# assessment's baseline when the report is loaded (``policy_explanations_heading``), before any redaction, so masking
-# a policy id can never change it; with no heading the Microsoft 365 title stays as it always was.
+# assessment's baseline when the report is loaded (the bundle's ``policy_explanations``), before any redaction, so
+# masking a policy id can never change it; with no heading the Microsoft 365 title stays as it always was.
 POLICY_EXPLANATIONS_TITLE = "Policy explanations"
 GWS_POLICY_EXPLANATIONS_TITLE = "CISA SCuBA Google Workspace (ScubaGoggles v1.1.0)"
 
@@ -4629,11 +4629,8 @@ def preview_report(
     if format_name in {"csv", "sarif", "oscal"}:
         selected.pop("policy_explanations", None)
         selected.pop("local_answer", None)
-    if "policy_explanations" in selected and bundle.get("policy_explanations_heading") is not None:
-        # The Google heading comes from the unredacted, validated baseline, never from the masked rows.
-        renderers_heading = {"policy_heading": bundle["policy_explanations_heading"]}
-    else:
-        renderers_heading = {}
+    # The Google heading comes from the unredacted, validated baseline, never from the masked rows.
+    heading = bundle.get("policy_explanations") if "policy_explanations" in selected else None
     run_path = Path(run_dir)
     citations, evidence_missing = _preview_section_citations(
         run_path=run_path,
@@ -4642,9 +4639,9 @@ def preview_report(
     )
     renderers = {
         "json": _render_json,
-        "md": functools.partial(_render_markdown, **renderers_heading),
+        "md": functools.partial(_render_markdown, policy_heading=heading),
         "csv": _render_csv,
-        "html": functools.partial(_render_html, **renderers_heading),
+        "html": functools.partial(_render_html, policy_heading=heading),
         "sarif": _render_sarif,
         "oscal": _render_oscal,
     }
