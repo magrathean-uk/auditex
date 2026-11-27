@@ -1758,8 +1758,8 @@ names its sample file (`replay_source.file`, the run log) with any customer id i
 
 | `internal_domains_status` | Meaning | External-principal rules |
 | --- | --- | --- |
-| `known` | The whole Directory domains list was read | Evaluated against every internal domain |
-| `partial` | The list was read but cut short by `--top` or only partly read | Evaluated against the domains that were read, and `google.internal_domains_unknown` says an internal address on a domain that was not listed may be reported as external |
+| `known` | The whole Directory domains list was read, every domain and alias row readable | Evaluated against every internal domain |
+| `partial` | The list was read but cut short by `--top`, only partly read, marked with a gap on its raw section, or holds a domain or alias row that cannot be read (not an object, no valid `domainName` or `domainAliasName`, a `domainAliases` that is not a list); the Drive collector's own reading of the list (`drive_scope.tenant_domain_names`) is not complete in exactly these cases | Evaluated against the domains that were read, and `google.internal_domains_unknown` says an internal address on a domain that was not listed may be reported as external |
 | `label_only` | The list was not read; only `--domain` is known | Evaluated against the label, and `google.internal_domains_unknown` says an internal secondary or alias domain address may be reported as external |
 | `unknown` | Neither the list nor a label | Not evaluated; `google.internal_domains_unknown` says so (raised only when there is evidence the rules would have read) |
 

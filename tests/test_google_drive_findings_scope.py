@@ -190,3 +190,74 @@ def test_empty_declared_domains_keep_every_file_in_scope() -> None:
 def test_files_without_permissions_and_malformed_owner_rows_do_not_break_findings() -> None:
     snapshot = _snapshot([{"id": "f1", "owners": "x"}, _file("f2", owners=("a@example.com",))])
     assert _drive_rules(snapshot) == KEPT
+
+
+# ---- LIVE-FIX-6 L1a: a domain or alias row that cannot be read makes the domain set partial ---------------------
+
+PRIMARY = {"domainName": "example.com", "isPrimary": True, "verified": True}
+UNREADABLE_DIRECTORIES = [
+    [{**PRIMARY, "domainAliases": [None]}],
+    [{**PRIMARY, "domainAliases": [{}]}],
+    [{**PRIMARY, "domainAliases": [{"domainAliasName": None}]}],
+    [{**PRIMARY, "domainAliases": [{"domainAliasName": ""}]}],
+    [{**PRIMARY, "domainAliases": [{"domainAliasName": 5}]}],
+    [{**PRIMARY, "domainAliases": [{"domainAliasName": "not a domain"}]}],
+    [{**PRIMARY, "domainAliases": ["alias.example.net"]}],
+    [{**PRIMARY, "domainAliases": None}],
+    [{**PRIMARY, "domainAliases": "alias.example.net"}],
+    [{**PRIMARY, "domainAliases": {"domainAliasName": "alias.example.net"}}],
+    [PRIMARY, None],
+    [PRIMARY, "example.org"],
+    [PRIMARY, {"domainName": None}],
+    [PRIMARY, {"domainName": ""}],
+    [PRIMARY, {"domainName": "-bad-.example"}],
+    [PRIMARY, {"domain": "example.org"}],
+]
+
+
+@pytest.mark.parametrize("directory", UNREADABLE_DIRECTORIES)
+def test_live_fix_6_l1a_an_unreadable_domain_or_alias_row_keeps_every_finding(directory: list[Any]) -> None:
+    from auditex.google_workspace.drive_scope import tenant_domain_names
+
+    snapshot = _snapshot([_file()], directory=directory)
+    assert snapshot["snapshot"]["internal_domains_status"] == "partial"
+    assert _drive_rules(snapshot) == KEPT
+    # The collector's reading of the same list agrees: not a complete set.
+    assert tenant_domain_names(directory) is None
+
+
+def test_live_fix_6_l1a_reviewer_scenario_an_owner_on_an_alias_lost_to_a_null_alias_row() -> None:
+    """The alias was in the complete baseline; a null alias row in the later list must not make its owner outside."""
+    owned = _file(owners=("owner@alias.example.net",))
+    complete = _snapshot([owned])
+    assert complete["snapshot"]["internal_domains_status"] == "known"
+    assert _drive_rules(complete) == KEPT
+    broken = _snapshot([owned], directory=[{**PRIMARY, "domainAliases": [None]}])
+    assert broken["snapshot"]["internal_domains_status"] == "partial"
+    assert _drive_rules(broken) == KEPT
+
+
+@pytest.mark.parametrize("marker", [
+    {"error_class": "malformed_response", "error": "domains: a read of this list failed or could not be read in full "
+                                                   "(malformed_response)."},
+    {"status": "partial", "error_class": "client_error"},
+    {"collection_truncated": True, "truncation_reason": "pagination_failed"},
+])
+def test_live_fix_6_l1a_a_marked_domains_section_is_partial(marker: dict[str, Any]) -> None:
+    payloads = {"google_drive_posture": {"driveFiles": {"value": [_file()]}},
+                "google_directory": {"domains": {"value": DIRECTORY, **marker}}}
+    snapshot = build_google_normalized_snapshot(
+        tenant_name="Example", run_id="run-1", collector_payloads=payloads, domain="example.com")
+    assert snapshot["snapshot"]["internal_domains_status"] == "partial"
+    assert _drive_rules(snapshot) == KEPT
+
+
+def test_live_fix_6_l1a_a_readable_list_stays_known_for_both_readers() -> None:
+    from auditex.google_workspace.drive_scope import tenant_domain_names
+
+    directory = [{**PRIMARY, "domainAliases": [{"domainAliasName": "alias.example.net"}]},
+                 {"domainName": "Example.ORG", "isPrimary": False}]
+    snapshot = _snapshot([_file()], directory=directory)
+    assert snapshot["snapshot"]["internal_domains_status"] == "known"
+    assert tenant_domain_names(directory) == frozenset({"example.com", "alias.example.net", "example.org"})
+    assert _drive_rules(snapshot) == []

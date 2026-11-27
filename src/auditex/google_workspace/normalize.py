@@ -41,6 +41,7 @@ from .collectors import (
     scuba_read_rows,
     two_step_subset_differs,
 )
+from .drive_scope import tenant_domain_names
 
 
 def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
@@ -885,7 +886,14 @@ def build_google_normalized_snapshot(
     domains_section = (collector_payloads.get("google_directory") or {}).get("domains")
     domains_incomplete = any(
         row.get("status") not in (None, "ok") or row.get("collection_truncated") is True for row in domain_rows
-    ) or (isinstance(domains_section, dict) and domains_section.get("collection_truncated") is True)
+    ) or (isinstance(domains_section, dict) and (
+        domains_section.get("collection_truncated") is True
+        or bool(domains_section.get("error") or domains_section.get("error_class"))
+        # A domain or alias row that cannot be read (not an object, no valid name, an alias list that is not a list)
+        # may be a name the tenant holds: the set is not known, exactly when the Drive collector's own reading of the
+        # same list is not complete (drive_scope.tenant_domain_names, LIVE-FIX-6 L1a).
+        or tenant_domain_names(domains_section.get("value")) is None
+    ))
     if seen_domains:
         # A list cut short or partly read can miss a secondary or alias domain, so it is not "known".
         internal_domains_status = "partial" if domains_incomplete else "known"
