@@ -1131,6 +1131,17 @@ others can read, or a link, is refused with `service_account_key_refused`.
 lines can carry a pre-authenticated download query. Redirect-hop and download-host errors name only the host, path and
 status.
 
+While a Google sign-in runs (cache load, refresh, browser consent and token exchange), the dependency loggers
+`requests_oauthlib`, `oauthlib`, `google_auth_oauthlib`, `google.auth`, `google.oauth2` and `urllib3`, and any child of
+them with a level of its own, are held at WARNING or higher: at DEBUG they log the token request body, the token
+obtained and request material, and google-auth-oauthlib logs the consent redirect (which carries the authorisation
+code) at INFO. This applies whatever the host process has configured (an embedding application, the MCP server, a
+DEBUG root logger). Each logger's level and `propagate` setting are put back when sign-in ends, on an error too;
+Auditex's own logging and every other path are unchanged. A token refresh google-auth makes later inside an API call
+(an access token expiring mid-run) is outside that window; google-auth masks token fields in its own request logs,
+and the httplib2 transport the API clients use logs only the method and URL. The Microsoft 365 certificate sign-in needs no such hold: msal masks the access token, client secret and assertion in
+its DEBUG token-cache record, and `urllib3` logs only the token endpoint's request line.
+
 Use AI and MCP only with bundle artifacts intended for reasoning, such as
 `summary.json`, `summary.md`, `data-handling.json`, `audit-plan.json`,
 `api-inventory.json`, report-pack data, proof-table rows, `ai_context.json`,

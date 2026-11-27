@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import os
-from collections.abc import Mapping
+import threading
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -98,6 +101,60 @@ def ensure_google_dependencies() -> None:
         raise RuntimeError(status["install_hint"])
 
 
+# Dependency loggers that write OAuth request and response details at DEBUG (requests-oauthlib logs the token exchange's
+# request body and the token it obtained; oauthlib, google-auth and urllib3 log request material) or the consent
+# redirect, which carries the authorisation code, at INFO (google-auth-oauthlib's local server). Children are covered.
+_AUTH_DEPENDENCY_LOGGERS: tuple[str, ...] = (
+    "requests_oauthlib",
+    "oauthlib",
+    "google_auth_oauthlib",
+    "google.auth",
+    "google.oauth2",
+    "urllib3",
+)
+_quiet_lock = threading.Lock()
+_quiet_depth = 0
+_quiet_saved: list[tuple[logging.Logger, int, bool]] = []
+
+
+def _auth_dependency_loggers() -> list[logging.Logger]:
+    """Each named dependency logger and every existing child with a level of its own (a host may set one directly)."""
+    names = set(_AUTH_DEPENDENCY_LOGGERS)
+    prefixes = tuple(f"{name}." for name in _AUTH_DEPENDENCY_LOGGERS)
+    existing = list(logging.Logger.manager.loggerDict.items())
+    names.update(name for name, item in existing if isinstance(item, logging.Logger) and name.startswith(prefixes))
+    return [logging.getLogger(name) for name in sorted(names)]
+
+
+@contextmanager
+def quiet_auth_dependency_logs() -> Iterator[None]:
+    """Hold the OAuth dependency loggers at WARNING or higher while sign-in, consent, token exchange and refresh run.
+
+    A host (an embedding application, the MCP server, or a user with a DEBUG root logger) would otherwise have codes,
+    tokens or refresh tokens written to its logs. Each logger's own level and ``propagate`` setting are put back when
+    the last overlapping guard ends, on an exception too. Auditex's own loggers are untouched.
+    """
+    global _quiet_depth
+    with _quiet_lock:
+        if _quiet_depth == 0:
+            for logger in _auth_dependency_loggers():
+                _quiet_saved.append((logger, logger.level, logger.propagate))
+                if logger.level < logging.WARNING:  # NOTSET (0) inherits, so it is pinned too
+                    logger.setLevel(logging.WARNING)
+        _quiet_depth += 1
+    try:
+        yield
+    finally:
+        with _quiet_lock:
+            _quiet_depth -= 1
+            if _quiet_depth == 0:
+                for logger, level, propagate in reversed(_quiet_saved):
+                    logger.setLevel(level)
+                    logger.propagate = propagate
+                _quiet_saved.clear()
+
+
+@quiet_auth_dependency_logs()  # sign-in, consent, token exchange and refresh all run inside it
 def build_google_credentials(config: GoogleAuthConfig) -> Any:
     ensure_google_dependencies()
     if config.auth_mode == "domain-delegation":
