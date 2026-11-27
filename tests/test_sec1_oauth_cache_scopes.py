@@ -937,3 +937,50 @@ def test_the_native_lock_open_returns_a_regular_lock_file(tmp_path: Path) -> Non
     finally:
         os.close(descriptor)
     assert lock.is_file()
+
+
+def test_clearing_the_unverified_marker_removes_only_a_regular_file_this_account_owns(tmp_path: Path) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    cache = folder / "token.json"
+    marker = folder / ".token.json.unverified"
+    marker.touch(mode=0o600)
+    secret_hygiene.clear_secret_unverified(cache)
+    assert not os.path.lexists(marker)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX ownership and dir_fd lookups")
+def test_clearing_the_unverified_marker_leaves_a_link_and_its_target_in_place(tmp_path: Path) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    marker = folder / ".token.json.unverified"
+    marker.symlink_to(victim)
+    secret_hygiene.clear_secret_unverified(folder / "token.json")
+    assert os.path.islink(marker)
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert secret_hygiene.secret_unverified(folder / "token.json") is True
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX ownership and dir_fd lookups")
+def test_clearing_the_unverified_marker_leaves_another_accounts_file_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    marker = folder / ".token.json.unverified"
+    marker.touch(mode=0o600)
+    real_stat = os.stat
+
+    def other_owner(name: Any, *args: Any, **kwargs: Any) -> Any:
+        info = real_stat(name, *args, **kwargs)
+        if name == ".token.json.unverified":
+            values = list(info)
+            values[stat.ST_UID] = info.st_uid + 1
+            return os.stat_result(values)
+        return info
+
+    monkeypatch.setattr(secret_hygiene.os, "stat", other_owner)
+    secret_hygiene.clear_secret_unverified(folder / "token.json")
+    assert os.path.lexists(marker)

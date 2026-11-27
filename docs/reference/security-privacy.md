@@ -1131,7 +1131,9 @@ grant, the run continues and records nothing. When it differs, Auditex first lea
 `.<cache name>.unverified`, beside the cache (created without the lock and never through a link), then stops with
 "Google sign-in stopped: another Auditex sign-in is updating the Google token cache; nothing was recorded; run again."
 While that marker is present, or when it cannot be checked, the cache's recorded grant covers nothing for the outage
-fallback; the next rewrite under the lock removes the marker after writing the new record. A `--token-cache` whose
+fallback; the next rewrite under the lock removes the marker after writing the new record, and only when it is a
+regular file this account owns (a link, a folder or another account's file at that name is left in place and keeps
+counting as the marker). A `--token-cache` whose
 file name has the lock or marker form (starts with `.` and ends with `.lock` or `.unverified`) is refused with
 `token_cache_refused`, and no secret file is ever written onto such a name. An older cache that records no grant at all keeps the earlier rule: it is used
 when the scopes it asked for include every scope the run needs, and is then trusted only for what the refresh grants.

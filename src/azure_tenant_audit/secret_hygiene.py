@@ -514,13 +514,33 @@ def secret_unverified(path: str | Path) -> bool:
 def clear_secret_unverified(path: str | Path) -> None:
     """Remove the ``.unverified`` marker; call it only under the file's lock, after the file has been rewritten.
 
-    A marker that cannot be removed stays (it only ever makes the file's own record count for less).
+    A marker that cannot be removed stays (it only ever makes the file's own record count for less). Only a regular
+    file this account owns is removed, looked up without following links inside the checked folder; anything else at
+    the marker name (a link, a folder, another account's file) is left in place, where it keeps counting as the marker.
     """
     target = Path(path).expanduser()
+    name = _unverified_name(target)
+    if os.name != "posix":
+        marker = target.parent / name
+        try:
+            info = os.lstat(marker)
+            if stat.S_ISREG(info.st_mode) and not getattr(info, "st_file_attributes", 0) & _REPARSE_POINT:
+                os.unlink(marker)
+        except OSError:
+            pass
+        return
     try:
-        os.unlink(target.parent / _unverified_name(target))
+        folder = _open_secret_folder(target.parent)
+    except OSError:
+        return
+    try:
+        info = os.stat(name, dir_fd=folder, follow_symlinks=False)
+        if stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid():
+            os.unlink(name, dir_fd=folder)
     except OSError:
         pass
+    finally:
+        os.close(folder)
 
 
 def _lock_backend() -> tuple[str, Callable[[int], bool], Callable[[int], None]] | None:
