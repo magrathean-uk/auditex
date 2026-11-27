@@ -149,6 +149,8 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("azure_tenant_audit.run_files:copy_run_file", "private", "guarded unredacted copies to a caller-selected destination"),
     SinkEntry("azure_tenant_audit.run_files:open_run_file", "private", "read-only guarded descriptor; the scanner treats its flags as a write"),
     SinkEntry("azure_tenant_audit.secret_hygiene:_open_lock_file", "private", "creates an empty 0600 lock file beside a credential file; writes no content"),
+    SinkEntry("azure_tenant_audit.secret_hygiene:_open_native_lock_file", "private", "creates an empty lock file beside a credential file (native Windows); writes no content"),
+    SinkEntry("azure_tenant_audit.secret_hygiene:mark_secret_unverified", "private", "creates an empty 0600 marker file beside a credential file; writes no content"),
     SinkEntry("azure_tenant_audit.secret_hygiene:secure_write_*", "private", "unredacted 0600 file primitives for credentials"),
     SinkEntry("azure_tenant_audit.waivers:load_waivers", "private", "warning on the operator's terminal about a waiver file"),
 )

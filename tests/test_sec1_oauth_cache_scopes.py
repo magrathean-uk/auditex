@@ -348,6 +348,10 @@ class _ScopeChanged(Warning):
         self.new_scope = new_scope
 
 
+CACHE_BUSY = (
+    "Google sign-in stopped: another Auditex sign-in is updating the Google token cache; nothing was recorded; "
+    "run again."
+)
 MISSING_DOMAIN = (
     "Google sign-in did not grant every permission this run needs (missing scopes: "
     "https://www.googleapis.com/auth/admin.directory.domain.readonly); run again and approve every requested "
@@ -593,26 +597,39 @@ def test_a_narrower_cache_saved_inside_another_runs_narrowing_window_is_kept(
     assert credentials.scopes == ["https://www.googleapis.com/auth/drive.metadata.readonly"]
 
 
-def test_a_cache_lock_held_elsewhere_leaves_the_cache_as_it_is(
+def test_a_consent_grant_not_recorded_for_the_lock_marks_the_record_unverified_and_stops(
     tmp_path: Path, oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The record does not cover the run, so the run consents; the consent grants all three scopes (not the record) and
+    # its save finds the lock taken: the marker is left, the cache keeps its bytes and the run stops.
     path = _cache(tmp_path, [DRIVE_META, DOMAIN], verified=[DOMAIN, DRIVE_META])
     before = path.read_text(encoding="utf-8")
     monkeypatch.setattr(secret_hygiene, "SECRET_LOCK_WAIT", 0.2)
     with secret_hygiene.secret_file_lock(path) as held:
         assert held is True
-        # A narrowing (refused refresh) and a save (fresh consent) both find the lock taken and write nothing.
-        oauth["revoked"] = {DOMAIN}
-        oauth["consent_grant"] = [DRIVE_META, DRIVE_RO, DOMAIN]
-        credentials = google_auth.build_google_credentials(_config(tmp_path, (DRIVE_META, DOMAIN)))
-        assert credentials.scopes == [DRIVE_META, DOMAIN]
-        assert oauth["refresh_scopes"] == [[DRIVE_META, DOMAIN]]
+        with pytest.raises(RuntimeError) as caught:
+            google_auth.build_google_credentials(_config(tmp_path, DOMAIN_RUN))
+        assert str(caught.value) == CACHE_BUSY
+        assert oauth["refresh_scopes"] == []
         assert len(oauth["flow_scopes"]) == 1
         assert path.read_text(encoding="utf-8") == before
-    assert json.loads(path.read_text(encoding="utf-8"))[VERIFIED] == [
-        "https://www.googleapis.com/auth/admin.directory.domain.readonly",
-        "https://www.googleapis.com/auth/drive.metadata.readonly",
-    ]
+    marker = tmp_path / "cache" / ".token.json.unverified"
+    assert marker.is_file() and not marker.is_symlink()
+    assert marker.read_bytes() == b""
+
+
+def test_a_refresh_matching_the_record_with_the_lock_taken_continues_without_writing(
+    tmp_path: Path, oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _cache(tmp_path, [DRIVE_META, DRIVE_RO], verified=[DRIVE_META, DRIVE_RO])
+    before = path.read_text(encoding="utf-8")
+    monkeypatch.setattr(secret_hygiene, "SECRET_LOCK_WAIT", 0.2)
+    with secret_hygiene.secret_file_lock(path) as held:
+        assert held is True
+        credentials = google_auth.build_google_credentials(_config(tmp_path, DRIVE_RUN))
+    assert credentials.token == "tok-SYNTHETIC-refreshed"
+    assert path.read_text(encoding="utf-8") == before
+    assert not os.path.lexists(tmp_path / "cache" / ".token.json.unverified")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
@@ -625,14 +642,12 @@ def test_the_cache_lock_file_is_created_owner_only_beside_the_cache(tmp_path: Pa
 
 
 @pytest.mark.skipif(os.name != "posix", reason="a link at the lock path")
-def test_a_link_at_the_cache_lock_path_is_refused(tmp_path: Path) -> None:
+def test_a_link_at_the_cache_lock_path_is_never_held_or_followed(tmp_path: Path) -> None:
     folder = tmp_path / "cache"
     folder.mkdir(mode=0o700)
     (folder / ".token.json.lock").symlink_to(tmp_path / "elsewhere")
-    with pytest.raises(PermissionError) as caught:
-        with secret_hygiene.secret_file_lock(folder / "token.json"):
-            pass
-    assert str(caught.value).startswith("[Errno 13] secret_file_refused:")
+    with secret_hygiene.secret_file_lock(folder / "token.json") as held:
+        assert held is False
     assert not (tmp_path / "elsewhere").exists()
 
 
@@ -690,3 +705,235 @@ def test_a_lock_another_run_holds_is_waited_for_then_reported_as_not_held(
         assert time.monotonic() - started >= 0.3
     with secret_hygiene.secret_file_lock(target, wait=0.3) as again:
         assert again is True
+
+
+# ---- SEC-1d: a grant the lock kept from being recorded marks the record unverified; the lock file is owner-only ------
+
+TEMPORARY = "Google sign-in could not be refreshed (temporary error); run again later."
+
+
+def test_the_cache_lock_waits_sixty_seconds() -> None:
+    assert secret_hygiene.SECRET_LOCK_WAIT == 60.0
+
+
+@pytest.mark.parametrize("endpoint", ["refused", "narrower"])
+def test_a_narrowing_missed_for_the_lock_leaves_no_broader_record_for_the_outage_fallback(
+    tmp_path: Path, oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch, endpoint: str
+) -> None:
+    """The reviewer's case: the endpoint grants fewer scopes than the record holds and the narrowing cannot take the
+    lock. The run stops before any consent, the marker is left, and a later outage does not return the old token on
+    the strength of the broader record, even for a run the record covers."""
+    path = _cache(tmp_path, [DRIVE_META, DOMAIN], verified=[DOMAIN, DRIVE_META])
+    before = path.read_text(encoding="utf-8")
+    if endpoint == "refused":
+        oauth["revoked"] = {DOMAIN}
+    else:
+        oauth["refresh_grant"] = [DRIVE_META]
+    monkeypatch.setattr(secret_hygiene, "SECRET_LOCK_WAIT", 0.2)
+    with secret_hygiene.secret_file_lock(path) as held:
+        assert held is True
+        with pytest.raises(RuntimeError) as caught:
+            google_auth.build_google_credentials(_config(tmp_path, (DRIVE_META, DOMAIN)))
+    assert str(caught.value) == CACHE_BUSY
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__ is True
+    assert oauth["flow_scopes"] == []
+    assert path.read_text(encoding="utf-8") == before
+    marker = tmp_path / "cache" / ".token.json.unverified"
+    assert stat.S_IMODE(os.lstat(marker).st_mode) == 0o600
+    oauth["revoked"], oauth["refresh_grant"], oauth["down"] = set(), None, True
+    for scopes in [(DRIVE_META, DOMAIN), (DRIVE_META,)]:
+        with pytest.raises(RuntimeError) as outage:
+            google_auth.build_google_credentials(_config(tmp_path, scopes))
+        assert str(outage.value) == TEMPORARY
+
+
+def test_a_locked_rewrite_removes_the_unverified_marker_after_writing(tmp_path: Path, oauth: dict[str, Any]) -> None:
+    path = _cache(tmp_path, [DRIVE_META, DRIVE_RO], verified=[DRIVE_META, DRIVE_RO])
+    marker = tmp_path / "cache" / ".token.json.unverified"
+    marker.touch(mode=0o600)
+    oauth["down"] = True
+    with pytest.raises(RuntimeError) as outage:
+        google_auth.build_google_credentials(_config(tmp_path, DRIVE_RUN))
+    assert str(outage.value) == TEMPORARY
+    oauth["down"] = False
+    google_auth.build_google_credentials(_config(tmp_path, DRIVE_RUN))
+    assert not os.path.lexists(marker)
+    assert json.loads(path.read_text(encoding="utf-8"))["token"] == "tok-SYNTHETIC-refreshed"
+    oauth["down"] = True
+    credentials = google_auth.build_google_credentials(_config(tmp_path, DRIVE_RUN))
+    assert credentials.token == "tok-SYNTHETIC-refreshed"
+
+
+def test_a_locked_narrowing_removes_the_unverified_marker(tmp_path: Path, oauth: dict[str, Any]) -> None:
+    path = _cache(tmp_path, [DRIVE_META, DOMAIN], verified=[DOMAIN, DRIVE_META])
+    marker = tmp_path / "cache" / ".token.json.unverified"
+    marker.touch(mode=0o600)
+    oauth["refresh_grant"] = [DRIVE_META]
+    oauth["consent_error"] = RuntimeError("consent window closed")
+    with pytest.raises(RuntimeError):
+        google_auth.build_google_credentials(_config(tmp_path, (DRIVE_META, DOMAIN)))
+    assert json.loads(path.read_text(encoding="utf-8"))[VERIFIED] == [
+        "https://www.googleapis.com/auth/drive.metadata.readonly"
+    ]
+    assert not os.path.lexists(marker)
+
+
+def test_an_unverified_marker_that_cannot_be_checked_counts_as_present(
+    tmp_path: Path, oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cache(tmp_path, [DRIVE_META, DRIVE_RO], verified=[DRIVE_META, DRIVE_RO])
+    real_lstat = os.lstat
+
+    def _lstat(target: Any, *args: Any, **kwargs: Any) -> Any:
+        if str(target).endswith(".token.json.unverified"):
+            raise PermissionError(13, "Permission denied")
+        return real_lstat(target, *args, **kwargs)
+
+    monkeypatch.setattr(secret_hygiene.os, "lstat", _lstat)
+    assert secret_hygiene.secret_unverified(tmp_path / "cache" / "token.json") is True
+    oauth["down"] = True
+    with pytest.raises(RuntimeError) as outage:
+        google_auth.build_google_credentials(_config(tmp_path, DRIVE_RUN))
+    assert str(outage.value) == TEMPORARY
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a link at the marker path")
+def test_the_unverified_marker_is_created_owner_only_and_never_through_a_link(tmp_path: Path) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    target = folder / "token.json"
+    assert secret_hygiene.secret_unverified(target) is False
+    secret_hygiene.mark_secret_unverified(target)
+    assert stat.S_IMODE(os.lstat(folder / ".token.json.unverified").st_mode) == 0o600
+    secret_hygiene.mark_secret_unverified(target)  # already there: kept
+    assert secret_hygiene.secret_unverified(target) is True
+    secret_hygiene.clear_secret_unverified(target)
+    assert secret_hygiene.secret_unverified(target) is False
+    (folder / ".token.json.unverified").symlink_to(tmp_path / "elsewhere")
+    secret_hygiene.mark_secret_unverified(target)
+    assert not (tmp_path / "elsewhere").exists()
+    assert secret_hygiene.secret_unverified(target) is True
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
+@pytest.mark.parametrize("mode", [0o640, 0o604, 0o620, 0o602, 0o610, 0o666])
+def test_a_pre_existing_lock_file_with_group_or_other_bits_is_never_held(tmp_path: Path, mode: int) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    lock = folder / ".token.json.lock"
+    lock.touch(mode=0o600)
+    os.chmod(lock, mode)
+    with secret_hygiene.secret_file_lock(folder / "token.json") as held:
+        assert held is False
+    assert stat.S_IMODE(os.lstat(lock).st_mode) == mode
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
+def test_a_loose_lock_file_stops_a_narrowing_without_writing_the_cache(tmp_path: Path, oauth: dict[str, Any]) -> None:
+    path = _cache(tmp_path, [DRIVE_META, DOMAIN], verified=[DOMAIN, DRIVE_META])
+    before = path.read_text(encoding="utf-8")
+    lock = tmp_path / "cache" / ".token.json.lock"
+    lock.touch(mode=0o600)
+    os.chmod(lock, 0o666)
+    oauth["revoked"] = {DOMAIN}
+    with pytest.raises(RuntimeError) as caught:
+        google_auth.build_google_credentials(_config(tmp_path, (DRIVE_META, DOMAIN)))
+    assert str(caught.value) == CACHE_BUSY
+    assert path.read_text(encoding="utf-8") == before
+    assert os.path.lexists(tmp_path / "cache" / ".token.json.unverified")
+
+
+@pytest.mark.parametrize("name", [".token.json.lock", ".token.json.unverified", ".x.lock", ".x.unverified"])
+def test_a_token_cache_named_like_a_lock_or_marker_is_refused(tmp_path: Path, oauth: dict[str, Any], name: str) -> None:
+    config = google_auth.GoogleAuthConfig(auth_mode="oauth", scopes=DRIVE_RUN, oauth_client=tmp_path / "client.json",
+                                          token_cache=tmp_path / "cache" / name)
+    with pytest.raises(ValueError) as caught:
+        google_auth.build_google_credentials(config)
+    assert str(caught.value) == (
+        "token_cache_refused: the token cache file name is reserved for Auditex lock and marker files "
+        "(.<name>.lock, .<name>.unverified); choose another name."
+    )
+    assert oauth["flow_scopes"] == []
+
+
+@pytest.mark.parametrize("name", [".token.json.lock", ".token.json.unverified"])
+def test_a_secret_write_never_replaces_a_lock_or_marker(tmp_path: Path, name: str) -> None:
+    folder = tmp_path / "cache"
+    with secret_hygiene.secret_file_lock(folder / "token.json") as held:
+        assert held is True
+        lock_before = os.lstat(folder / ".token.json.lock")
+        with pytest.raises(PermissionError) as caught:
+            secret_hygiene.secure_write_text(folder / name, "{}")
+        assert str(caught.value).startswith("[Errno 13] secret_file_refused:")
+        lock_after = os.lstat(folder / ".token.json.lock")
+        assert (lock_after.st_ino, lock_after.st_size) == (lock_before.st_ino, 0)
+    assert not os.path.lexists(folder / ".token.json.unverified")
+
+
+@pytest.mark.parametrize(
+    ("name", "reserved"),
+    [(".token.json.lock", True), (".token.json.unverified", True), ("token.json", False), ("token.lock", False),
+     (".token.json", False), ("token.json.unverified", False)],
+)
+def test_reserved_secret_names(name: str, reserved: bool) -> None:
+    assert secret_hygiene.reserved_secret_name(name) is reserved
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a link stands in for a Windows link or junction")
+def test_the_native_lock_open_refuses_a_link_before_opening(tmp_path: Path) -> None:
+    lock = tmp_path / ".token.json.lock"
+    lock.symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(secret_hygiene._LockFileRefused):
+        secret_hygiene._open_native_lock_file(lock)
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_the_native_lock_open_refuses_a_reparse_point(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lock = tmp_path / ".token.json.lock"
+    lock.touch()
+    real_lstat = os.lstat
+
+    def _lstat(target: Any, *args: Any, **kwargs: Any) -> Any:
+        info = real_lstat(target, *args, **kwargs)
+        if str(target) == str(lock):
+            return types.SimpleNamespace(st_mode=info.st_mode, st_dev=info.st_dev, st_ino=info.st_ino,
+                                         st_file_attributes=0x400)
+        return info
+
+    monkeypatch.setattr(secret_hygiene.os, "lstat", _lstat)
+    with pytest.raises(secret_hygiene._LockFileRefused):
+        secret_hygiene._open_native_lock_file(lock)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a link stands in for a Windows link or junction")
+def test_the_native_lock_open_refuses_a_link_put_in_place_while_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / ".token.json.lock"
+    real_open = os.open
+    opened: list[int] = []
+
+    def _open_then_swap(target: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        descriptor = real_open(target, flags, *args, **kwargs)
+        if str(target) == str(lock):
+            opened.append(descriptor)
+            os.unlink(lock)
+            lock.symlink_to(tmp_path / "elsewhere")
+        return descriptor
+
+    monkeypatch.setattr(secret_hygiene.os, "open", _open_then_swap)
+    with pytest.raises(secret_hygiene._LockFileRefused):
+        secret_hygiene._open_native_lock_file(lock)
+    assert len(opened) == 1
+    with pytest.raises(OSError):
+        os.fstat(opened[0])  # closed on refusal
+
+
+def test_the_native_lock_open_returns_a_regular_lock_file(tmp_path: Path) -> None:
+    lock = tmp_path / ".token.json.lock"
+    descriptor = secret_hygiene._open_native_lock_file(lock)
+    try:
+        assert stat.S_ISREG(os.fstat(descriptor).st_mode)
+    finally:
+        os.close(descriptor)
+    assert lock.is_file()

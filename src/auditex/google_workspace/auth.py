@@ -8,12 +8,16 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from azure_tenant_audit.logger_hold import LoggerHold
 from azure_tenant_audit.secret_hygiene import (
+    clear_secret_unverified,
+    mark_secret_unverified,
     ownership_enforced,
+    reserved_secret_name,
     secret_file_lock,
+    secret_unverified,
     secure_read_text,
     secure_write_text,
 )
@@ -51,6 +55,10 @@ GMAIL_SETTINGS_SCOPES: tuple[str, ...] = (
 VERIFIED_SCOPES_KEY = "auditex_verified_scopes"
 # RFC 6749 section 3.3: scope-token = 1*( %x21 / %x23-5B / %x5D-7E ). ASCII only; no space, control, DEL, quote or backslash.
 _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5B\x5D-\x7E]+")
+# A grant that differs from the cache's record could not be recorded (the cache's lock was not obtained): fixed text.
+CACHE_BUSY_MESSAGE = (
+    "Google sign-in stopped: another Auditex sign-in is updating the Google token cache; nothing was recorded; run again."
+)
 
 _DEPENDENCIES = {
     "google.auth": "google-auth",
@@ -169,6 +177,11 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         from google_auth_oauthlib.flow import InstalledAppFlow
 
         token_cache = config.token_cache.expanduser()
+        if reserved_secret_name(token_cache.name):
+            raise ValueError(
+                "token_cache_refused: the token cache file name is reserved for Auditex lock and marker files "
+                "(.<name>.lock, .<name>.unverified); choose another name."
+            )
         credentials = None
         cached: Any = None
         recorded: frozenset[str] | None = None
@@ -205,12 +218,14 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                         # expired token, or a cache that cannot show the grant (an older one records only the scopes
                         # asked for), cannot be used, and signing in again would not help while the endpoint is down.
                         # On a volume that ignores ownership (macOS noowners) another account could have written the
-                        # recorded grant, so it is not used there.
+                        # recorded grant, so it is not used there. Nor is a record marked unverified (a run was granted
+                        # something else and could not record it), or one whose marker cannot be checked.
                         if (
                             credentials.valid
                             and recorded is not None
                             and set(config.scopes).issubset(recorded)
                             and ownership_enforced(token_cache)
+                            and not secret_unverified(token_cache)
                         ):
                             return credentials
                         raise RuntimeError(
@@ -253,7 +268,8 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
             raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
         # Only a successful refresh or a fresh consent is saved, with the grant Google reported for it. The write holds
         # the cache's lock, so it never lands inside another run's narrowing (between its re-read and its replace). A
-        # lock not obtained in time leaves the cache as it is: this run continues with what the endpoint granted now.
+        # lock not obtained in time leaves the cache as it is: when the grant matches the record this run continues;
+        # otherwise the record is marked unverified and the run stops.
         saved = json.loads(credentials.to_json())
         saved[VERIFIED_SCOPES_KEY] = sorted(_grant(credentials))
         with secret_file_lock(token_cache) as locked:
@@ -261,6 +277,9 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                 # Creates any missing folder owner-only; an existing folder (the working directory, a shared one) keeps
                 # its mode.
                 secure_write_text(token_cache, json.dumps(saved), mode=0o600)
+                clear_secret_unverified(token_cache)
+            elif frozenset(_grant(credentials)) != (_recorded_grant(cached) if isinstance(cached, dict) else None):
+                _cache_not_updated(token_cache)
         return credentials
 
     raise ValueError(f"unsupported Google auth mode: {config.auth_mode}")
@@ -364,7 +383,8 @@ def _narrow_cached_grant(
     rewritten only while it still holds exactly what this run read (another run may have saved a newer one meanwhile),
     and only when the record changes. The re-read, the comparison and the replace all run under the cache's exclusive
     lock, which every rewrite of the cache takes, so no other run's write can land between them. A lock not obtained in
-    time leaves the cache as it is. Returns the cache text and object now on disk.
+    time leaves the cache as it is, marks its record unverified (so no outage fallback trusts it) and stops the run.
+    Returns the cache text and object now on disk.
     """
     if raw is None or granted is None or not isinstance(cached, dict):
         return raw, cached
@@ -372,12 +392,28 @@ def _narrow_cached_grant(
     if cached.get(VERIFIED_SCOPES_KEY) == narrowed:
         return raw, cached
     with secret_file_lock(token_cache) as locked:
-        if not locked or secure_read_text(token_cache) != raw:
+        if not locked:
+            _cache_not_updated(token_cache)
+        if secure_read_text(token_cache) != raw:
             return raw, cached
         updated = {**cached, VERIFIED_SCOPES_KEY: narrowed}
         text = json.dumps(updated)
         secure_write_text(token_cache, text, mode=0o600)
+        clear_secret_unverified(token_cache)
     return text, updated
+
+
+def _cache_not_updated(token_cache: Path) -> NoReturn:
+    """Stop the run when a grant that differs from the cache's record could not be recorded (lock not obtained).
+
+    The marker beside the cache is left first, without the lock, so a later outage fallback never trusts the older
+    record; a marker that cannot be left still stops the run. The message is fixed: no token, no path.
+    """
+    try:
+        mark_secret_unverified(token_cache)
+    except OSError:
+        pass
+    raise RuntimeError(CACHE_BUSY_MESSAGE) from None
 
 
 def _can_refresh(credentials: Any) -> bool:

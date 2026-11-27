@@ -1123,13 +1123,22 @@ grants it. Every rewrite of the cache (this narrowing and the save after a refre
 advisory lock on `.<cache name>.lock`, created owner-only in the cache's own folder (`flock` on Linux and macOS): the
 narrowing reads the cache again under the lock and rewrites it only while it still holds what the run read, so a
 newer cache another run saved meanwhile is left as it is and no other run's save can land between that check and the
-replace. A lock not obtained within 5 seconds (or a file system that offers none) leaves the cache as it is: the run
-continues with what the token endpoint granted it now, and records nothing. An older cache that records no grant at all keeps the earlier rule: it is used
+replace. An existing lock file is used only when it is a regular file (not a link) you own with no group or other
+permission bits and no allowing ACL; on native Windows a link or reparse point at the lock name, before or after it is
+opened, is refused. A refused lock file counts as a lock not obtained. A lock not obtained within 60 seconds (or a file
+system that offers none) leaves the cache as it is. When what the token endpoint granted matches the cache's recorded
+grant, the run continues and records nothing. When it differs, Auditex first leaves an empty owner-only (0600) marker,
+`.<cache name>.unverified`, beside the cache (created without the lock and never through a link), then stops with
+"Google sign-in stopped: another Auditex sign-in is updating the Google token cache; nothing was recorded; run again."
+While that marker is present, or when it cannot be checked, the cache's recorded grant covers nothing for the outage
+fallback; the next rewrite under the lock removes the marker after writing the new record. A `--token-cache` whose
+file name has the lock or marker form (starts with `.` and ends with `.lock` or `.unverified`) is refused with
+`token_cache_refused`, and no secret file is ever written onto such a name. An older cache that records no grant at all keeps the earlier rule: it is used
 when the scopes it asked for include every scope the run needs, and is then trusted only for what the refresh grants.
 The cache is refreshed every run. A fresh consent that grants fewer scopes than the run needs is neither used nor
 saved (only the cache's recorded grant is narrowed, as above); the run stops and names the missing scopes. When Google's token endpoint is down, a cached token still in date
-is used without rewriting the cache, and only when its recorded grant covers the run; it then claims only this run's
-scopes. An older cache that records no grant stops the run with "run again later". This outage
+is used without rewriting the cache, and only when its recorded grant covers the run and no `.unverified` marker sits
+beside it; it then claims only this run's scopes. An older cache that records no grant stops the run with "run again later". This outage
 fallback is off where the owner check proves nothing: on a macOS volume with "Ignore ownership on this volume" set
 (mounted `noowners`, read from the volume's mount flags), when those flags cannot be read, and on Windows; there an
 outage always stops the run with "run again later". Only the token endpoint's own grant errors (`invalid_grant`,
