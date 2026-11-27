@@ -617,6 +617,39 @@ def _cut(values: Any, limit: int | None) -> CollectedRows:
     return result
 
 
+UNFOLLOWED_CURSOR_TEXT = (
+    "This Google list is read in one call, but its answer carried a continuation cursor; the rows read are kept, but "
+    "the list is not complete."
+)
+
+
+def _single_call_rows(payload: Any, field: str, limit: int | None) -> CollectedRows:
+    """The rows of a Directory list Google answers in one call, with no paging (LIVE-FIX-6 B1c).
+
+    orgunits.list (``organizationUnits``), users.aliases.list (``aliases``) and tokens.list (``items``) are
+    discovery-based Directory API lists, whose JSON leaves a repeated field out when it is empty, so only an absent
+    field is an empty list. A field that is present but not a list (null, false, 0, "", an object) holds rows that
+    cannot be read, as does a row that is not an object, and any cursor means rows that were not read: each keeps the
+    rows read and records a ``malformed_response`` page error, so the read is partial and proves no absence. A
+    payload that is not an object fails the read.
+    """
+    if not isinstance(payload, dict):
+        raise unreadable_rows_error()
+    if field not in payload:
+        result = CollectedRows([], result_limit=limit or None)
+    elif not isinstance(payload[field], list):
+        result = CollectedRows([], result_limit=limit or None, page_error=unreadable_rows_error())
+    else:
+        result = _cut(payload[field], limit)
+    if result.page_error is None:
+        token, readable = _page_cursor(payload)
+        if not readable:
+            result.page_error = unreadable_cursor_error()
+        elif token is not None:
+            result.page_error = PolicyReadError(UNFOLLOWED_CURSOR_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
+    return result
+
+
 @dataclass
 class GoogleWorkspaceClient:
     """Read-only Google Workspace client.
@@ -797,7 +830,7 @@ class GoogleWorkspaceClient:
             )
         if resource == "orgUnits":
             payload = _execute(lambda: service.orgunits().list(customerId=self.customer, type="allIncludingParent").execute())
-            return _cut(payload.get("organizationUnits") or [], top)
+            return _single_call_rows(payload, "organizationUnits", top)
         if resource == "domains":
             payload = _execute(lambda: service.domains().list(customer=self.customer).execute())
             domains = payload.get("domains") if isinstance(payload, dict) else None
@@ -805,7 +838,8 @@ class GoogleWorkspaceClient:
                 raise PolicyReadError("The Google Workspace domains list is unreadable.",
                                       error_class=POLICY_MALFORMED_ERROR_CLASS)
             rows = _cut(domains, top)
-            if any(not isinstance(item, dict) for item in domains) or payload.get("nextPageToken", "") != "":
+            # domains.list is read in one call: any cursor (only an absent or null one ends a list) means more rows.
+            if any(not isinstance(item, dict) for item in domains) or payload.get("nextPageToken") is not None:
                 rows.page_error = PolicyReadError("The Google Workspace domains list could not be read in full.",
                                                   error_class=POLICY_MALFORMED_ERROR_CLASS)
             return rows
@@ -839,12 +873,12 @@ class GoogleWorkspaceClient:
     def list_user_aliases(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
         payload = _execute(lambda: service.users().aliases().list(userKey=user_key).execute())
-        return _cut(payload.get("aliases") or [], top)
+        return _single_call_rows(payload, "aliases", top)
 
     def list_user_tokens(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
         payload = _execute(lambda: service.tokens().list(userKey=user_key).execute())
-        return _cut(payload.get("items") or [], top)
+        return _single_call_rows(payload, "items", top)
 
     def list_report_activities(
         self,

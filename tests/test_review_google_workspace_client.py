@@ -1119,3 +1119,125 @@ def test_live_fix_6_b1b_reviewer_scenario_a_numeric_cursor_is_a_partial_users_re
     assert users_row["collection_truncated"] is True
     assert users_row["truncation_reason"] == "pagination_failed"
     assert result.status == "partial"
+
+
+# ---- LIVE-FIX-6 B1c: a single-call list field of the wrong type is a malformed partial read ---------------------
+
+
+def _directory_client(answer: Any) -> GoogleWorkspaceClient:
+    """A client whose orgunits.list, users.aliases.list and tokens.list each answer ``answer``."""
+
+    class _Lister:
+        def list(self, **_kwargs: Any) -> _Request:
+            return _Request(answer)
+
+    class _Users:
+        def aliases(self) -> _Lister:
+            return _Lister()
+
+    service = type("Dir", (), {
+        "orgunits": lambda self: _Lister(), "users": lambda self: _Users(), "tokens": lambda self: _Lister(),
+    })()
+    client = GoogleWorkspaceClient(credentials=None)
+    assert client._services is not None
+    client._services[("admin", "directory_v1")] = service
+    return client
+
+
+_SINGLE_CALL_READS = [
+    ("organizationUnits", lambda client: client.list_directory("orgUnits")),
+    ("aliases", lambda client: client.list_user_aliases("ada@example.com")),
+    ("items", lambda client: client.list_user_tokens("ada@example.com")),
+]
+
+
+@pytest.mark.parametrize(("field", "read"), _SINGLE_CALL_READS)
+@pytest.mark.parametrize("value", [None, False, True, 0, 7, "", "row", {}, {"alias": "a@example.com"}])
+def test_live_fix_6_b1c_a_present_list_field_that_is_not_a_list_is_partial(field: str, read: Any, value: Any) -> None:
+    rows = read(_directory_client({"kind": "admin#directory#x", field: value}))
+    assert list(rows) == []
+    assert rows.page_error is not None
+    assert rows.page_error.error_class == "malformed_response"
+    assert str(rows.page_error) == (
+        "Some rows of this Google list cannot be read (not an object, or a list that is not a list); the rows read "
+        "are kept, but the list is not complete."
+    )
+
+
+@pytest.mark.parametrize(("field", "read"), _SINGLE_CALL_READS)
+def test_live_fix_6_b1c_an_absent_list_field_is_a_clean_empty_list(field: str, read: Any) -> None:
+    rows = read(_directory_client({"kind": "admin#directory#x", "etag": "e1"}))
+    assert list(rows) == [] and rows.page_error is None
+
+
+@pytest.mark.parametrize(("field", "read"), _SINGLE_CALL_READS)
+def test_live_fix_6_b1c_an_empty_or_whole_list_is_a_clean_read(field: str, read: Any) -> None:
+    assert read(_directory_client({field: []})).page_error is None
+    rows = read(_directory_client({field: [{"id": "r1"}, {"id": "r2"}]}))
+    assert list(rows) == [{"id": "r1"}, {"id": "r2"}] and rows.page_error is None
+
+
+@pytest.mark.parametrize(("field", "read"), _SINGLE_CALL_READS)
+@pytest.mark.parametrize(("token", "text"), [
+    ("p2", "This Google list is read in one call, but its answer carried a continuation cursor; the rows read are "
+           "kept, but the list is not complete."),
+    (0, "This Google list answer carried a continuation cursor that cannot be read (not a non-empty string); the "
+        "rows read are kept, but the list is not complete."),
+    ("", "This Google list answer carried a continuation cursor that cannot be read (not a non-empty string); the "
+         "rows read are kept, but the list is not complete."),
+])
+def test_live_fix_6_b1c_a_cursor_on_a_single_call_list_is_partial(field: str, read: Any, token: Any, text: str) -> None:
+    rows = read(_directory_client({field: [{"id": "r1"}], "nextPageToken": token}))
+    assert list(rows) == [{"id": "r1"}]
+    assert rows.page_error is not None and rows.page_error.error_class == "malformed_response"
+    assert str(rows.page_error) == text
+
+
+@pytest.mark.parametrize(("field", "read"), _SINGLE_CALL_READS)
+@pytest.mark.parametrize("answer", [None, "x", [{"id": "r1"}]])
+def test_live_fix_6_b1c_an_answer_that_is_not_an_object_fails_the_read(field: str, read: Any, answer: Any) -> None:
+    with pytest.raises(google_client.PolicyReadError):
+        read(_directory_client(answer))
+
+
+@pytest.mark.parametrize(("name", "answer"), [
+    ("orgUnits", {"organizationUnits": False}),
+    ("aliases:ada@example.com", {"aliases": {}}),
+    ("oauthGrants:ada@example.com", {"items": 0}),
+])
+def test_live_fix_6_b1c_reviewer_scenario_the_collector_records_the_gap(name: str, answer: dict[str, Any]) -> None:
+    good = {"organizationUnits": [{"orgUnitId": "id:root01", "orgUnitPath": "/"}],
+            "aliases": [], "items": []}
+
+    class _Lister:
+        def __init__(self, field: str) -> None:
+            self.field = field
+
+        def list(self, **_kwargs: Any) -> _Request:
+            wanted = {"orgUnits": "organizationUnits", "aliases": "aliases", "oauthGrants": "items"}[name.split(":")[0]]
+            return _Request(answer if self.field == wanted else {self.field: good[self.field]})
+
+    class _Users:
+        def list(self, **_kwargs: Any) -> _Request:
+            return _Request({"users": [{"id": "u100", "primaryEmail": "ada@example.com"}]})
+
+        def aliases(self) -> _Lister:
+            return _Lister("aliases")
+
+    class _Empty:
+        def list(self, **_kwargs: Any) -> _Request:
+            return _Request({"items": [], "groups": [], "domains": [{"domainName": "example.com"}]})
+
+    service = type("Dir", (), {
+        "orgunits": lambda self: _Lister("organizationUnits"), "users": lambda self: _Users(),
+        "tokens": lambda self: _Lister("items"), "groups": lambda self: _Empty(), "domains": lambda self: _Empty(),
+        "roles": lambda self: _Empty(), "roleAssignments": lambda self: _Empty(),
+    })()
+    client = GoogleWorkspaceClient(credentials=None)
+    assert client._services is not None
+    client._services[("admin", "directory_v1")] = service
+    result = GoogleDirectoryCollector().run({"client": client})
+    row = next(row for row in result.coverage if row["name"] == name)
+    assert (row["status"], row["error_class"], row["collection_truncated"]) == ("partial", "malformed_response", True)
+    assert result.status == "partial"
+    assert [r["name"] for r in result.coverage if r["status"] != "ok"] == [name]
