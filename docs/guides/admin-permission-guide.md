@@ -236,6 +236,8 @@ Everything preset additional scopes:
 https://www.googleapis.com/auth/drive.metadata.readonly,https://www.googleapis.com/auth/drive.readonly,https://www.googleapis.com/auth/apps.groups.settings,https://www.googleapis.com/auth/admin.directory.resource.calendar.readonly,https://www.googleapis.com/auth/calendar.calendarlist.readonly,https://www.googleapis.com/auth/calendar.acls.readonly
 ```
 
+`google_drive_posture` also uses `admin.directory.domain.readonly` (already in the core scopes) as an optional, read-only scope: it lists the tenant's domain and alias names (blast radius: reading those names), so a My Drive file owned wholly outside the tenant is not read as the organisation's sharing. A Drive-only selection lists it in `scopes_csv` and `optional_scopes` and asks for it in the same sign-in; under domain-wide delegation it is read on a token of its own, so leaving it out keeps every file in scope and fails nothing else.
+
 `drive.readonly` is broad. Auditex does not read Drive file content, but Google may require broad scope for some metadata or permission surfaces. The data-handling and API inventory artifacts declare the scope risk and no-content-read claim: `drive.readonly` is listed under `auth_scope_summary.content_capable` and `scope_risk` is `content_capable_scope_present` when no write-capable scope is present.
 
 #### What each collector's evidence covers

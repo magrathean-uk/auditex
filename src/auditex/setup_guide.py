@@ -171,7 +171,14 @@ def build_google_setup_guide(
     required_scopes = aggregate["required_permissions"]
     scope_warnings = aggregate["scope_warnings"]
     api_enablement = aggregate["api_enablement"]
-    scopes_csv = ",".join(required_scopes)
+    # A read-only optional scope (the Drive collector's Directory domains read) is asked for in the same sign-in as the
+    # run, so it is in the value to paste too; each is listed apart with its note. Leaving it out fails only that read.
+    optional_scopes: list[dict[str, str]] = []
+    for scope in aggregate["optional_permissions"]:
+        name = next(name for name in selected if scope in (_mapping(catalog.get(name)).get("optional_permissions") or []))
+        notes = _mapping(_mapping(catalog.get(name)).get("optional_permission_notes"))
+        optional_scopes.append({"scope": scope, "collector": name, "note": str(notes.get(scope) or "")})
+    scopes_csv = ",".join([*required_scopes, *(row["scope"] for row in optional_scopes)])
     provider_assertions = {
         "read_only_audit": True,
         "production_writes": False,
@@ -208,6 +215,7 @@ def build_google_setup_guide(
         "selected_collectors": selected,
         "api_enablement": api_enablement,
         "required_scopes": required_scopes,
+        "optional_scopes": optional_scopes,
         "scopes_csv": scopes_csv,
         "scope_warnings": scope_warnings,
         "provider_assertions": provider_assertions,
@@ -492,6 +500,12 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
 
     if provider == "google_workspace":
         lines.extend(["", "## OAuth Scopes", "", "Paste this comma-separated value into Google Admin domain-wide delegation:", "", "```text", str(payload.get("scopes_csv") or ""), "```"])
+        optional_scopes = [_mapping(row) for row in payload.get("optional_scopes") or []]
+        if optional_scopes:
+            lines.extend(["", "Optional scopes in that value (leaving one out fails only the read it serves):", ""])
+            for row in optional_scopes:
+                note = f": {row['note']}" if row.get("note") else ""
+                lines.append(f"- `{row.get('scope')}` (for `{row.get('collector')}`){note}")
         lines.extend(["", "## APIs To Enable", ""])
         for api in payload.get("api_enablement") or []:
             lines.append(f"- {api}")

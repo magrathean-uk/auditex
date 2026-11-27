@@ -15,6 +15,12 @@ from typing import Any
 from azure_tenant_audit.exposure_lookup import is_safe_domain_name
 
 DOMAIN_SCOPE = "https://www.googleapis.com/auth/admin.directory.domain.readonly"
+# The Drive collector's optional scope, as the scope inventory and the setup guide name it.
+DOMAIN_SCOPE_NOTE = (
+    "Optional for google_drive_posture, read-only: Directory domains.list, the tenant's domain and alias names only "
+    "(blast radius: reading those names; no write is possible). It tells My Drive files owned outside the tenant; "
+    "when it is not granted every file stays in scope and its sharing is read as before."
+)
 
 TenantDomains = Callable[[], "frozenset[str] | None"]
 

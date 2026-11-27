@@ -184,12 +184,19 @@ def _selected_collectors(config: GoogleRunConfig) -> list[str]:
 
 
 def scopes_for_collectors(selected: list[str]) -> tuple[str, ...]:
+    """Every scope the selected collectors use: their required scopes, then their optional ones.
+
+    The one sign-in asks for all of them, so every token comes from it. An optional scope (``optional_scopes``, such as
+    the Drive collector's read-only Directory domains scope) is never on its collector's own token
+    (``_collector_client`` narrows to ``required_scopes``): under domain-wide delegation it is read on a token of its
+    own, so a delegation that leaves it out fails only that read.
+    """
     scopes: list[str] = []
-    for name in selected:
-        collector = REGISTRY.get(name)
-        for scope in getattr(collector, "required_scopes", ()):
-            if scope not in scopes:
-                scopes.append(scope)
+    for attribute in ("required_scopes", "optional_scopes"):
+        for name in selected:
+            for scope in getattr(REGISTRY.get(name), attribute, ()):
+                if scope not in scopes:
+                    scopes.append(scope)
     return tuple(scopes)
 
 

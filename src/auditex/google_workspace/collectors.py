@@ -70,7 +70,7 @@ from .client import (
     policy_malformed_error,
 )
 from .customer_id import WITHHELD, CustomerIds, withheld_coverage_row
-from .drive_scope import read_tenant_domains
+from .drive_scope import DOMAIN_SCOPE, DOMAIN_SCOPE_NOTE, read_tenant_domains
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
@@ -1564,6 +1564,10 @@ class GoogleDrivePostureCollector:
         "https://www.googleapis.com/auth/drive.metadata.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
     )
+    # Asked for in the one sign-in and listed in the scope inventory, but never on the Drive reads' token: the domains
+    # list is read on a token of its own (drive_scope.read_tenant_domains), so a refusal keeps every file in scope.
+    optional_scopes = (DOMAIN_SCOPE,)
+    optional_scope_notes = {DOMAIN_SCOPE: DOMAIN_SCOPE_NOTE}
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")

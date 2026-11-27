@@ -134,11 +134,21 @@ def build_google_scope_catalog(
     catalog: dict[str, dict[str, Any]] = {}
     for collector_name, collector in registry.items():
         required_permissions = _dedupe([str(item) for item in getattr(collector, "required_scopes", ())])
+        # Optional scopes widen a collector's reads; they are asked for in the one sign-in but a refusal is not a gap.
+        optional_permissions = [
+            item for item in _dedupe([str(item) for item in getattr(collector, "optional_scopes", ())])
+            if item not in required_permissions
+        ]
+        notes = _mapping(getattr(collector, "optional_scope_notes", None))
         catalog[collector_name] = {
             "collector": collector_name,
             "provider": "google_workspace",
             "description": str(getattr(collector, "description", "")),
             "required_permissions": required_permissions,
+            "optional_permissions": optional_permissions,
+            "optional_permission_notes": {
+                scope: str(notes[scope]) for scope in optional_permissions if scope in notes
+            },
             "minimum_role_hints": list(GOOGLE_ROLE_HINTS),
             "tool_requirements": [],
             "optional_commands": [],

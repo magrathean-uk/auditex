@@ -123,6 +123,8 @@ Confirm the Drive collector is selected and scopes are present:
 https://www.googleapis.com/auth/drive.metadata.readonly,https://www.googleapis.com/auth/drive.readonly
 ```
 
+`https://www.googleapis.com/auth/admin.directory.domain.readonly` is optional for Drive: without it every file stays in scope and its sharing is read one by one.
+
 Auditex does not read Drive file content. Broad Drive scope risk is declared in the data-handling and API inventory artifacts.
 
 ### Alert Center blocked

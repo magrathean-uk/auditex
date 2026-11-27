@@ -407,3 +407,72 @@ def test_live_fix_5_b3_reviewer_scenario_a_malformed_owner_keeps_the_permissions
     assert [call for call in calls if call.startswith("permissions.list")] == ["permissions.list:f1"]
     assert (row["status"], row["error"], "out_of_scope_files" in row) == ("failed", UNREADABLE.format(n=1), False)
     assert result.status == "partial"
+
+
+# ---- LIVE-FIX-5 M1: the Drive collector declares its optional read-only domain scope -------------------------------
+
+def test_live_fix_5_m1_drive_alone_requests_and_inventories_the_domain_scope() -> None:
+    from auditex.google_workspace.run import (
+        REGISTRY,
+        _collector_client,
+        scopes_for_collectors,
+    )
+    from auditex.setup_guide import build_google_setup_guide
+    from azure_tenant_audit.scope_catalog import (
+        aggregate_catalog_rows,
+        build_google_scope_catalog,
+    )
+
+    assert DOMAIN_SCOPE == "https://www.googleapis.com/auth/admin.directory.domain.readonly"
+    assert scopes_for_collectors(["google_drive_posture"]) == (
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/admin.directory.domain.readonly",
+    )
+    # Required scopes first, then optional ones; a scope another collector requires is listed once.
+    assert scopes_for_collectors(["google_drive_posture", "google_dns_posture"]).count(DOMAIN_SCOPE) == 1
+
+    catalog = build_google_scope_catalog(registry=REGISTRY)
+    drive = catalog["google_drive_posture"]
+    assert drive["required_permissions"] == [
+        "https://www.googleapis.com/auth/drive.metadata.readonly", "https://www.googleapis.com/auth/drive.readonly"]
+    assert drive["optional_permissions"] == ["https://www.googleapis.com/auth/admin.directory.domain.readonly"]
+    note = drive["optional_permission_notes"]["https://www.googleapis.com/auth/admin.directory.domain.readonly"]
+    assert "read-only" in note and "blast radius" in note and "domain and alias names" in note
+    assert aggregate_catalog_rows(catalog, ["google_drive_posture"])["optional_permissions"] == [
+        "https://www.googleapis.com/auth/admin.directory.domain.readonly"]
+    # A collector that requires it lists it as required, not optional.
+    assert aggregate_catalog_rows(catalog, ["google_drive_posture", "google_dns_posture"])["optional_permissions"] == []
+
+    guide = build_google_setup_guide(collectors="google_drive_posture")
+    assert guide["scopes_csv"].split(",") == list(scopes_for_collectors(["google_drive_posture"]))
+    assert [(row["scope"], row["collector"]) for row in guide["optional_scopes"]] == [
+        ("https://www.googleapis.com/auth/admin.directory.domain.readonly", "google_drive_posture")]
+
+    # The Drive reads' own token never carries it, so a delegation without it fails only the domains read.
+    asked: list[tuple[str, ...]] = []
+
+    class _Client:
+        def for_scopes(self, scopes: tuple[str, ...]) -> _Client:
+            asked.append(tuple(scopes))
+            return self
+
+    _collector_client(_Client(), "google_drive_posture")
+    assert asked == [("https://www.googleapis.com/auth/drive.metadata.readonly",
+                      "https://www.googleapis.com/auth/drive.readonly")]
+
+
+def test_live_fix_5_m1_a_drive_only_run_asks_for_the_domain_scope_in_its_one_sign_in() -> None:
+    from auditex.google_workspace.run import (
+        GoogleRunConfig,
+        _auth_config,
+        _selected_collectors,
+    )
+
+    config = GoogleRunConfig(tenant_name="Example", out=None, domain="example.com", collectors="google_drive_posture")
+    auth = _auth_config(config, _selected_collectors(config))
+    assert auth.scopes == (
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/admin.directory.domain.readonly",
+    )
