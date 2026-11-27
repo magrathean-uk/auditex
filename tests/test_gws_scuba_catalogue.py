@@ -399,3 +399,67 @@ def test_gws_catalogue_does_not_unmask_m365_mapping_keys(tmp_path, person, key):
     assert f'"{_prose(_key(root), person)}": 1' in content
     assert key.lower() not in output_redaction._D5_FIELD_NAMES
 
+
+
+@pytest.mark.parametrize("field,wrong", [("manual", 0), ("events", 0), ("manual", 0.0), ("events", "false")])
+def test_partial_check_tells_false_from_zero_and_other_types(tmp_path, field, wrong):
+    # Both partial rows have false here; Python equality would let 0 and 0.0 pass for it.
+    catalogue = json.loads(CATALOGUE.read_text(encoding="utf-8"))
+    catalogue["policies"]["GWS.SITES.1.1v1"][field] = wrong
+    edited = tmp_path / "edited.json"
+    edited.write_text(json.dumps(catalogue), encoding="utf-8")
+    result = run_generator("--source", FIXTURE, "--out", edited, "--check", "--partial", PARTIAL)
+    assert result.returncode == 1
+    assert result.stderr == "drift: GWS.SITES.1.1v1\n"
+
+
+def test_partial_check_tells_true_from_one(tmp_path):
+    catalogue = json.loads(CATALOGUE.read_text(encoding="utf-8"))
+    catalogue["policies"]["GWS.GEMINI.3.1v1"]["manual"] = 1  # the committed value is true
+    edited = tmp_path / "edited.json"
+    edited.write_text(json.dumps(catalogue), encoding="utf-8")
+    result = run_generator("--source", FIXTURE, "--out", edited, "--check", "--partial", PARTIAL)
+    assert result.returncode == 1
+    assert result.stderr == "drift: GWS.GEMINI.3.1v1\n"
+
+
+def test_strict_equal_literals(generator):
+    equal = generator.strict_equal
+    assert equal(True, True) and equal(0, 0) and equal(1.5, 1.5) and equal("a", "a") and equal(None, None)
+    assert not equal(0, False) and not equal(False, 0) and not equal(1, True) and not equal(True, 1)
+    assert not equal(1, 1.0) and not equal(1.0, 1) and not equal(0, 0.0)
+    assert not equal("1", 1) and not equal(None, False) and not equal([], {})
+    assert equal({"a": [1, {"b": False}]}, {"a": [1, {"b": False}]})
+    assert not equal({"a": [1, {"b": False}]}, {"a": [1, {"b": 0}]})
+    assert not equal({"a": 1}, {"a": 1, "b": 2}) and not equal({"a": 1, "b": 2}, {"a": 1})
+    assert not equal([1, 2], [1]) and not equal([1], [1, 2]) and not equal([1, 2], [2, 1])
+
+
+def test_the_committed_catalogue_still_matches_after_the_strict_comparison(generator):
+    committed = generator.load_catalogue(CATALOGUE.read_text(encoding="utf-8"))
+    built = generator.build(FIXTURE, ("gemini.md", "sites.md"))
+    assert generator.differences(built, committed) == []
+
+
+@pytest.mark.parametrize("where", ["top", "policy"])
+def test_partial_check_refuses_duplicate_keys_in_the_committed_catalogue(tmp_path, where):
+    text = CATALOGUE.read_text(encoding="utf-8")
+    if where == "top":
+        old = '{\n  "schema_version"'
+        new = '{\n  "schema_version": "2026-11-25",\n  "schema_version"'
+    else:
+        old = '"GWS.SITES.1.1v1": {\n      "service": "SITES",'
+        new = '"GWS.SITES.1.1v1": {\n      "service": "SITES",\n      "service": "SITES",'
+    assert text.count(old) == 1
+    edited = tmp_path / "dup.json"
+    edited.write_text(text.replace(old, new), encoding="utf-8")
+    json.loads(edited.read_text(encoding="utf-8"))  # plain json.loads accepts it, which is the bug
+    result = run_generator("--source", FIXTURE, "--out", edited, "--check", "--partial", PARTIAL)
+    assert result.returncode == 1
+    assert result.stderr == "drift: the committed catalogue repeats a key\n"
+
+
+def test_load_catalogue_rejects_nested_duplicates_and_keeps_plain_json(generator):
+    assert generator.load_catalogue('{"a": {"b": [1, {"c": 2}]}}') == {"a": {"b": [1, {"c": 2}]}}
+    with pytest.raises(generator.DuplicateKeyError):
+        generator.load_catalogue('{"a": {"b": [1, {"c": 2, "c": 3}]}}')
