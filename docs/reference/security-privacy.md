@@ -691,11 +691,16 @@ under `customer` that is not a `customers/<id>` string; these are never learnt, 
 shape (exact member names and the discovery document's member types), or they are withheld whole before the ID is
 learnt: an activity's `id` (an object of string `applicationName` in Reports application form, `customerId`, an RFC
 3339 `time` and a decimal int64 string `uniqueQualifier`, nothing else; a row of a `<application>Activities` stream
-is an activity whatever it holds), an activity's `resourceDetails` (a list of objects of string `id`, `relation`,
-`title` and `type`, `appliedLabels` a list of label objects, and `ownerDetails`), a usage report's `entity` (an
-object, of its documented string members on a usage report), `ownerDetails` (an object of `ownerIdentity` and a
-string `ownerType`) and `ownerIdentity` (a list of objects whose members are the four identity objects, each holding
-only its own string members). A normalised activity record is named by its `uniqueQualifier` only when its `id` has
+is an activity whatever it holds), an activity's `resourceDetails` (a list of ResourceDetails objects), a usage
+report's `entity` (an object, of its documented string members on a usage report), `ownerDetails` (an object of
+`ownerIdentity` and a string `ownerType`) and `ownerIdentity` (a list of objects whose members are the four identity
+objects, each holding only its own string members). The check runs through every object beneath these fields, as
+the Admin Reports v1 discovery document declares it: each applied label, each of its field values and their typed
+values (date, selection, selection list, text list, user, user list), and each reason holds only its own members,
+each a string, boolean, decimal int64 string, integer, object of its own type or array of its item type. Nothing on
+these paths is accepted as any object or any list, and a value off schema at any depth withholds the whole field. A
+test compares the checked members with the discovery document shipped with google-api-python-client, so a member
+Google adds fails the build instead of passing unchecked. A normalised activity record is named by its `uniqueQualifier` only when its `id` has
 that shape; any other `id`, withheld or not, gives the record a key of its stream and position, which identifies
 nothing. Unrelated organisational unit names and paths are preserved even when they resemble a customer ID. If masking changes evidence outside an explicit ID field or diagnostic, a
 `customer_id_withheld` coverage row marks that collector partial. An organisational unit reference that was

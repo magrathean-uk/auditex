@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
-from functools import cached_property
+from functools import cache, cached_property
 from typing import Any
 from urllib.parse import unquote
 
@@ -128,15 +128,93 @@ def _application_name(value: Any) -> bool:
     return isinstance(value, str) and bool(_APPLICATION_NAME.fullmatch(value))
 
 
-def _object_of(value: Any, members: tuple[tuple[str, Callable[[Any], bool]], ...]) -> bool:
-    """An object whose every key is one of ``members`` (exact) and whose every value passes that member's check.
+@cache
+def _report_shapes() -> dict[str, tuple[tuple[str, Any], ...]]:
+    """Every Admin Reports v1 object reachable from a customer id path, by discovery schema name (an inline object by
+    its owner and member, ``Activity.id``): its members (exact names) and each member's type.
 
-    ``members`` is pairs, not a mapping display: these are the names the check reads, not field names Auditex writes,
-    so they never join the redaction's field-name exemption (``time`` among them must stay masked as a mapping key).
-    """
-    checks = dict(members)
+    A type is ``string``, ``boolean``, ``int64`` (a decimal string, the discovery ``format: int64``), ``int32`` (an
+    integer), ``date-time`` (an RFC 3339 string), ``application-name`` (a string of Reports application form), the
+    name of another schema here (an object of that type) or ``("array", <item type>)``. A test reads the discovery
+    document shipped with google-api-python-client and fails when this table and it disagree on any schema, member or
+    type. Pairs, not mapping displays: these are the names the checks read, not field names Auditex writes, so they
+    never join the redaction's field-name exemption (``time`` among them must stay masked as a mapping key)."""
+    return dict((
+        ("Activity.id", (
+            ("applicationName", "application-name"), ("customerId", "string"), ("time", "date-time"),
+            ("uniqueQualifier", "int64"),
+        )),
+        ("UsageReport.entity", tuple(
+            (name, "string") for name in ("customerId", "entityId", "profileId", "type", "userEmail")
+        )),
+        ("ResourceDetails", (
+            ("appliedLabels", ("array", "AppliedLabel")), ("id", "string"), ("ownerDetails", "OwnerDetails"),
+            ("relation", "string"), ("title", "string"), ("type", "string"),
+        )),
+        ("AppliedLabel", (
+            ("fieldValues", ("array", "FieldValue")), ("id", "string"), ("reason", "Reason"), ("title", "string"),
+        )),
+        ("FieldValue", (
+            ("dateValue", "Date"), ("displayName", "string"), ("id", "string"), ("integerValue", "int64"),
+            ("longTextValue", "string"), ("reason", "Reason"), ("selectionListValue", "FieldValueSelectionListValue"),
+            ("selectionValue", "FieldValueSelectionValue"), ("textListValue", "FieldValueTextListValue"),
+            ("textValue", "string"), ("type", "string"), ("unsetValue", "boolean"),
+            ("userListValue", "FieldValueUserListValue"), ("userValue", "FieldValueUserValue"),
+        )),
+        ("Date", (("day", "int32"), ("month", "int32"), ("year", "int32"))),
+        ("Reason", (("reasonType", "string"),)),
+        ("FieldValueSelectionListValue", (("values", ("array", "FieldValueSelectionValue")),)),
+        ("FieldValueSelectionValue", (("badged", "boolean"), ("displayName", "string"), ("id", "string"))),
+        ("FieldValueTextListValue", (("values", ("array", "string")),)),
+        ("FieldValueUserListValue", (("values", ("array", "FieldValueUserValue")),)),
+        ("FieldValueUserValue", (("email", "string"),)),
+        ("OwnerDetails", (("ownerIdentity", ("array", "OwnerIdentity")), ("ownerType", "string"))),
+        ("OwnerIdentity", (
+            ("customerIdentity", "CustomerIdentity"), ("groupIdentity", "GroupIdentity"),
+            ("sharedDriveIdentity", "SharedDriveIdentity"), ("userIdentity", "UserIdentity"),
+        )),
+        ("CustomerIdentity", (("id", "string"),)),
+        ("GroupIdentity", (("groupEmail", "string"), ("id", "string"))),
+        ("SharedDriveIdentity", (("id", "string"), ("sharedDriveName", "string"))),
+        ("UserIdentity", (("id", "string"), ("userEmail", "string"))),
+    ))
+
+
+def _int32(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and -(2**31) <= value < 2**31
+
+
+@cache
+def _scalar_check(kind: str) -> Callable[[Any], bool] | None:
+    return dict((
+        ("string", _string), ("boolean", lambda value: isinstance(value, bool)), ("int64", _int64_text),
+        ("int32", _int32), ("date-time", _rfc3339), ("application-name", _application_name),
+    )).get(kind)
+
+
+def _own_field(key: str) -> bool:
+    """A member the scrub checks as a field of its own (``ownerDetails``, ``ownerIdentity``), against the same table,
+    so a malformed one is withheld alone rather than with the object that holds it."""
+    return _norm(key) in ("ownerdetails", "owneridentity")
+
+
+def _conforms(value: Any, kind: Any) -> bool:
+    """Whether ``value`` has the Reports discovery type ``kind`` (see :func:`_report_shapes`), recursively: an object
+    holds only its own members (exact names), each of its own type; an array holds only items of its item type. Nothing
+    is accepted as any object or any list. Only :meth:`CustomerIds._scrub` reads a result, and it checks every value
+    under an accepted one again on its way down: a member that is a field of its own (:func:`_own_field`) and a
+    ``customerIdentity`` that :func:`_malformed_container` refuses are withheld there as their own fields."""
+    if isinstance(kind, tuple):
+        return isinstance(value, list) and all(_conforms(item, kind[1]) for item in value)
+    scalar = _scalar_check(kind)
+    if scalar is not None:
+        return scalar(value)
+    if kind == "CustomerIdentity" and _malformed_container("customeridentity", value):
+        return True
+    members = dict(_report_shapes()[kind])
     return isinstance(value, dict) and all(
-        isinstance(key, str) and key in checks and checks[key](item) for key, item in value.items()
+        isinstance(key, str) and key in members and (_own_field(key) or _conforms(item, members[key]))
+        for key, item in value.items()
     )
 
 
@@ -144,50 +222,7 @@ def valid_activity_id(value: Any) -> bool:
     """Whether a Reports Activity.id has its discovery shape: an object of ``applicationName`` (a Reports application
     name), ``customerId`` (a string), ``time`` (RFC 3339) and ``uniqueQualifier`` (a decimal int64 string), nothing
     else. Only such an id may name a normalised activity record."""
-    return _object_of(value, (
-        ("applicationName", _application_name), ("customerId", _string), ("time", _rfc3339),
-        ("uniqueQualifier", _int64_text),
-    ))
-
-
-def _valid_usage_entity(value: Any) -> bool:
-    return _object_of(value, tuple(
-        (name, _string) for name in ("customerId", "entityId", "profileId", "type", "userEmail")
-    ))
-
-
-def _valid_owner_identity_entry(value: Any) -> bool:
-    """One OwnerIdentity: any of the four identity objects, each of its own string members only. A ``customerIdentity``
-    that :func:`_malformed_container` refuses is withheld as its own field; one it accepts must also hold nothing but
-    its ``id`` (CustomerIdentity), or the whole list is withheld."""
-    def strings(*names: str) -> Callable[[Any], bool]:
-        return lambda item: _object_of(item, tuple((name, _string) for name in names))
-
-    return _object_of(value, (
-        ("customerIdentity", lambda item: _malformed_container("customeridentity", item) or strings("id")(item)),
-        ("groupIdentity", strings("groupEmail", "id")),
-        ("sharedDriveIdentity", strings("id", "sharedDriveName")),
-        ("userIdentity", strings("id", "userEmail")),
-    ))
-
-
-def _valid_owner_details(value: Any) -> bool:
-    """OwnerDetails: a string ``ownerType`` and an ``ownerIdentity`` (whose own shape is checked as its own field)."""
-    return _object_of(value, (("ownerIdentity", lambda _item: True), ("ownerType", _string)))
-
-
-def _valid_resource_details_entry(value: Any) -> bool:
-    """One ResourceDetails: string ``id``, ``relation``, ``title`` and ``type``, ``appliedLabels`` a list of
-    AppliedLabel objects, and an ``ownerDetails`` (whose own shape is checked as its own field)."""
-    applied_label = (
-        ("fieldValues", lambda item: isinstance(item, list)), ("id", _string),
-        ("reason", lambda item: isinstance(item, dict)), ("title", _string),
-    )
-    return _object_of(value, (
-        ("appliedLabels", lambda item: isinstance(item, list) and all(_object_of(label, applied_label) for label in item)),
-        ("id", _string), ("ownerDetails", lambda _item: True), ("relation", _string), ("title", _string),
-        ("type", _string),
-    ))
+    return _conforms(value, "Activity.id")
 
 
 def _activity_row(row: Any) -> bool:
@@ -209,9 +244,9 @@ def _usage_report_row(row: Any) -> bool:
 def _malformed_report_field(norm: str, member: Any, *, activity: bool, usage: bool) -> bool:
     """A Reports field on a customer id path whose value does not have its documented shape (withheld whole).
 
-    ``id`` of an activity must pass :func:`valid_activity_id`; ``resourceDetails`` must be a list of ResourceDetails
-    entries; ``entity`` must be an object (of the documented string members on a usage report); ``ownerDetails`` an
-    object of ``ownerIdentity`` and a string ``ownerType``; ``ownerIdentity`` a list of OwnerIdentity entries. Null, an
+    ``id`` of an activity must pass :func:`valid_activity_id`; ``resourceDetails`` must be a list of ResourceDetails,
+    ``ownerDetails`` an OwnerDetails and ``ownerIdentity`` a list of OwnerIdentity, each checked through every object
+    beneath it (:func:`_conforms`); ``entity`` must be an object (a UsageReport.entity on a usage report). Null, an
     empty string and ``my_customer`` hold nothing.
     """
     if _no_value(member):
@@ -219,13 +254,13 @@ def _malformed_report_field(norm: str, member: Any, *, activity: bool, usage: bo
     if norm == "id" and activity:
         return not valid_activity_id(member)
     if norm == "resourcedetails":
-        return not (isinstance(member, list) and all(_valid_resource_details_entry(entry) for entry in member))
+        return not _conforms(member, ("array", "ResourceDetails"))
     if norm == "entity":
-        return not (_valid_usage_entity(member) if usage else isinstance(member, dict))
+        return not (_conforms(member, "UsageReport.entity") if usage else isinstance(member, dict))
     if norm == "ownerdetails":
-        return not _valid_owner_details(member)
+        return not _conforms(member, "OwnerDetails")
     if norm == "owneridentity":
-        return not (isinstance(member, list) and all(_valid_owner_identity_entry(entry) for entry in member))
+        return not _conforms(member, ("array", "OwnerIdentity"))
     return False
 
 

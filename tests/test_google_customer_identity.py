@@ -606,3 +606,18 @@ def test_live_fix_7_b2a_an_unscrubbed_malformed_qualifier_never_names_the_normal
     assert [record["id"] for record in records] == [
         "adminActivities:0", "adminActivities:1", "adminActivities:2", "78"]
     assert CUSTOMER not in json.dumps(records)
+
+
+# ---- LIVE-FIX-8: an applied label is checked through every FieldValue and Reason (tests/test_google_reports_shapes.py)
+
+
+def test_live_fix_8_reviewer_reproduction_scalar_field_value_live_run_never_writes_the_id(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    activity = {"kind": "admin#reports#activity", "id": {"time": _TIME, "uniqueQualifier": "1"},
+                "resourceDetails": [{"appliedLabels": [{"fieldValues": [CUSTOMER]}]}]}
+    rc, run_dir = _live_run(tmp_path, monkeypatch, [activity])
+    assert rc == 0
+    assert [str(path.relative_to(run_dir)) for path in run_dir.rglob("*")
+            if path.is_file() and CUSTOMER.encode() in path.read_bytes()] == []
+    raw = json.loads((run_dir / "raw" / "google_reports.json").read_text(encoding="utf-8"))
+    assert raw["adminActivities"]["value"][0]["resourceDetails"] == "<customer-id>"
