@@ -1258,7 +1258,13 @@ def _admins(ctx: _Context) -> dict[str, Any]:
     writer makes it), one normalised row per distinct raw account, every id a readable identity, and each counted flag
     a real boolean in the raw read. The role-dependent inventory (roles, their assignments, delegated-admin flags) is
     separate: when it cannot be read, the privileged list gains one unplaceable entry (``user:unresolved``, no OU), so
-    COMMONCONTROLS.6.1 cannot conclude while 6.2 still can."""
+    COMMONCONTROLS.6.1 cannot conclude while 6.2 still can.
+
+    A highly privileged role held by an id outside the user read is a non-user principal, left out of the list, only
+    when the user read is complete and every such assignment of that id reads assignee type ``user`` in both files
+    (Google gives the Directory Sync service account its system role this way; it has no interactive sign-in, so
+    inbound SSO cannot apply, and ScubaGoggles never sees it). Any other outside assignee (a group, another, missing or
+    contradicted type, or any outside id while the user read is incomplete) still adds the unresolved entry."""
     users, users_whole = ctx.records("google_users")
     raw = ctx.directory()
     raw_users: dict[str, dict[str, Any]] = {}
@@ -1298,10 +1304,12 @@ def _admins(ctx: _Context) -> dict[str, Any]:
         people.append((user_id, admin or delegated, path))
     if len(people) != len(raw_users):
         complete = False
-    assigned = _usable_dependency(lambda: _assigned(ctx, raw), None)
-    if assigned is None or assigned - known:
-        # An unreadable or misjoined role inventory, or a privileged role held by anything but a user (a group), makes
-        # accounts privileged that no user row shows (ScubaGoggles counts user assignees only, provider.py:804-809).
+    assigned, user_typed = _usable_dependency(lambda: _assigned(ctx, raw), (None, frozenset()))
+    outside = set() if assigned is None else assigned - known
+    if assigned is None or outside and not (complete and outside <= user_typed):
+        # An unreadable or misjoined role inventory, or a privileged role held by anything but a user of the complete
+        # read (a group, an unproven type), makes accounts privileged that no user row shows (ScubaGoggles counts
+        # user assignees only, provider.py:804-809, and only users.list rows reach its policy).
         inventory = False
     by_path = _usable_dependency(ctx.path_index, {})
     member_of, memberships_complete = _usable_dependency(lambda: _memberships(ctx, raw, known, emails), ({}, False))
@@ -1353,26 +1361,48 @@ def _normalised_assignment_key(row: dict) -> tuple | None:
     return _assignment_key(role, who, row.get("id", f"{role}:{who}"), row.get("scope_type"), row.get("org_unit_id"))
 
 
-def _assigned(ctx: _Context, raw: dict[str, Any] | None) -> set[str] | None:
-    """Prove the role inventory independently of the user count."""
+def _assignee_is_user(item: dict[str, Any], row: dict[str, Any]) -> bool | None:
+    """Whether the raw assignment and its normalised twin both read assignee type user; None when they contradict.
+
+    The normaliser copies ``assigneeType`` to ``assignee_type`` and drops an absent, null or empty one, so a value on
+    one side only (or of another type) is a misjoin. A row without the field (written before it was carried) proves
+    no type. Only the exact spellings Google uses count as user."""
+    if "assignee_type" not in row:
+        return False
+    value = row["assignee_type"]
+    if "assigneeType" not in item or type(item["assigneeType"]) is not type(value) or item["assigneeType"] != value:
+        return None
+    return value in ("user", "USER")
+
+
+def _assigned(ctx: _Context, raw: dict[str, Any] | None) -> tuple[set[str] | None, frozenset[str]]:
+    """Prove the role inventory independently of the user count: the ids holding a highly privileged role (None when
+    unproven), and those of them whose every such assignment reads assignee type user in both files."""
     rows, whole = ctx.records("google_role_assignments", required=False)
     if not (ctx.read_ok(raw, _DIRECTORY, "roles") and ctx.read_ok(raw, _DIRECTORY, "roleAssignments")):
-        return None
+        return None, frozenset()
     assignments = raw["roleAssignments"]["value"]
     if not _rows_agree(rows, whole, assignments, _normalised_assignment_key, _raw_assignment_key):
-        return None
+        return None, frozenset()
+    twins = {_normalised_assignment_key(row): row for row in rows or ()}
     roles = _roles(raw)
     if len(roles) != len(raw["roles"]["value"]) or None in roles.values():
-        return None
-    assigned, seen = set(), set()
+        return None, frozenset()
+    assigned, unproven, seen = set(), set(), set()
     for item in assignments:
-        assignment, role, who, _, _ = _raw_assignment_key(item)
+        key = _raw_assignment_key(item)
+        assignment, role, who, _, _ = key
         if assignment in seen or role not in roles:
-            return None
+            return None, frozenset()
         seen.add(assignment)
+        is_user = _assignee_is_user(item, twins[key])
+        if is_user is None:
+            return None, frozenset()
         if roles[role]:
             assigned.add(who)
-    return assigned
+            if not is_user:
+                unproven.add(who)
+    return assigned, frozenset(assigned - unproven)
 
 
 def _member_key(group: Any, email: Any, kind: Any, identity: Any) -> tuple | None:

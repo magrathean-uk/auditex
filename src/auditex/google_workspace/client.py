@@ -25,6 +25,7 @@ from .auth import (
     user_delegated_credentials,
 )
 from .customer_id import learn_response_customer_ids, withhold_request_customer_ids
+from .drive_scope import owned_outside, owner_domains
 
 # Per-user services kept at once. The Gmail collector reads one user at a time, so a few are enough;
 # the bound keeps a 10,000-user run from holding 10,000 discovery clients.
@@ -445,6 +446,8 @@ class CollectedRows(list):
     truncation_reason: str | None = None
     permission_reads: int = 0
     permission_errors: list[dict[str, Any]] | None = None
+    # Drive only: files owned wholly outside the tenant, whose permissions were not read (see drive_scope).
+    permission_out_of_scope: int = 0
 
     def __init__(
         self,
@@ -551,12 +554,100 @@ def _collect_policy_pages(
     return result
 
 
-def _cut(values: list[dict[str, Any]], limit: int | None) -> CollectedRows:
-    """Dict rows of a single-call list cut to ``limit``; ``truncated`` says rows were dropped."""
+UNREADABLE_ROWS_TEXT = (
+    "Some rows of this Google list cannot be read (not an object, or a list that is not a list); the rows read are "
+    "kept, but the list is not complete."
+)
+
+
+def unreadable_rows_error() -> PolicyReadError:
+    """A fixed error for a list answer holding a row that cannot be read: the list is not proof of absence."""
+    return PolicyReadError(UNREADABLE_ROWS_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
+
+
+UNREADABLE_CURSOR_TEXT = (
+    "This Google list answer carried a continuation cursor that cannot be read (not a non-empty string); the rows "
+    "read are kept, but the list is not complete."
+)
+
+
+def unreadable_cursor_error() -> PolicyReadError:
+    """A fixed error for a page whose ``nextPageToken`` is present but not a cursor: the list may go on."""
+    return PolicyReadError(UNREADABLE_CURSOR_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
+
+
+def _page_cursor(payload: dict[str, Any]) -> tuple[str | None, bool]:
+    """The page's continuation cursor and whether it could be read.
+
+    Only an absent or null ``nextPageToken`` ends a list (the discovery-based Google APIs leave it out on the last
+    page). Anything else that is not a non-blank string (``""``, ``0``, ``false``, a list, an object) is a cursor that
+    cannot be read: the list may go on, so it proves no absence (LIVE-FIX-6 B1b).
+    """
+    raw = payload.get("nextPageToken")
+    if raw is None:
+        return None, True
+    if isinstance(raw, str) and raw.strip():
+        return raw, True
+    return None, False
+
+
+def _readable_rows(values: Any) -> tuple[list[dict[str, Any]], bool]:
+    """The object rows of one list answer, and whether every row could be read (an absent or empty list can)."""
+    if values is None or values == []:
+        return [], True
+    if not isinstance(values, list):
+        return [], False
     rows = [item for item in values if isinstance(item, dict)]
+    return rows, len(rows) == len(values)
+
+
+def _cut(values: Any, limit: int | None) -> CollectedRows:
+    """Dict rows of a single-call list cut to ``limit``; ``truncated`` says rows were dropped.
+
+    A row that is not an object, or a list field that is not a list, is never dropped silently: the result carries a
+    ``page_error`` (``malformed_response``), so the read is recorded as partial and proves no absence.
+    """
+    rows, whole = _readable_rows(values)
     if not limit or len(rows) <= limit:
-        return CollectedRows(rows, result_limit=limit or None)
-    return CollectedRows(rows[:limit], truncated=True, result_limit=limit)
+        result = CollectedRows(rows, result_limit=limit or None)
+    else:
+        result = CollectedRows(rows[:limit], truncated=True, result_limit=limit)
+    if not whole:
+        result.page_error = unreadable_rows_error()
+    return result
+
+
+UNFOLLOWED_CURSOR_TEXT = (
+    "This Google list is read in one call, but its answer carried a continuation cursor; the rows read are kept, but "
+    "the list is not complete."
+)
+
+
+def _single_call_rows(payload: Any, field: str, limit: int | None) -> CollectedRows:
+    """The rows of a Directory list Google answers in one call, with no paging (LIVE-FIX-6 B1c).
+
+    orgunits.list (``organizationUnits``), users.aliases.list (``aliases``) and tokens.list (``items``) are
+    discovery-based Directory API lists, whose JSON leaves a repeated field out when it is empty, so only an absent
+    field is an empty list. A field that is present but not a list (null, false, 0, "", an object) holds rows that
+    cannot be read, as does a row that is not an object, and any cursor means rows that were not read: each keeps the
+    rows read and records a ``malformed_response`` page error, so the read is partial and proves no absence. A
+    payload that is not an object fails the read.
+    """
+    if not isinstance(payload, dict):
+        raise unreadable_rows_error()
+    if field not in payload:
+        result = CollectedRows([], result_limit=limit or None)
+    elif not isinstance(payload[field], list):
+        result = CollectedRows([], result_limit=limit or None, page_error=unreadable_rows_error())
+    else:
+        result = _cut(payload[field], limit)
+    if result.page_error is None:
+        token, readable = _page_cursor(payload)
+        if not readable:
+            result.page_error = unreadable_cursor_error()
+        elif token is not None:
+            result.page_error = PolicyReadError(UNFOLLOWED_CURSOR_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
+    return result
 
 
 @dataclass
@@ -572,6 +663,9 @@ class GoogleWorkspaceClient:
     customer_id: str | None = None
     page_size: int = 100
     delegated: bool = False
+    # Whether the Drive collector may read the Directory domains list (drive_scope.read_tenant_domains): under
+    # domain-wide delegation, or under OAuth only when the grant holds a scope another selected collector requires.
+    tenant_domain_read: bool = False
     _services: dict[tuple[str, ...], Any] | None = None
     _subject_services: OrderedDict[tuple[str, str, str], Any] | None = None
 
@@ -676,6 +770,14 @@ class GoogleWorkspaceClient:
         rows: list[dict[str, Any]] = []
         token: str | None = None
         first_page = True
+        # A row that is not an object (null, a list, a string, a number) or a row list that is not a list is unread
+        # evidence: the rows read are kept, but the list is recorded as partial, never as complete (LIVE-FIX-5 B1).
+        unreadable = False
+
+        def finish(kept: list[dict[str, Any]], *, truncated: bool = False) -> CollectedRows:
+            return CollectedRows(kept, truncated=truncated, result_limit=limit,
+                                 page_error=unreadable_rows_error() if unreadable else None)
+
         while True:
             try:
                 payload = _execute(lambda token=token: request_factory(token).execute())
@@ -685,16 +787,30 @@ class GoogleWorkspaceClient:
                 # A later page failed after its retries: keep what was read, recorded as a list cut short.
                 kept = rows[:limit] if limit is not None else rows
                 return CollectedRows(kept, truncated=True, result_limit=limit, page_error=exc)
+            if not isinstance(payload, dict):
+                # A page that is not an object holds no rows and no cursor that can be read.
+                if first_page:
+                    raise unreadable_rows_error()
+                kept = rows[:limit] if limit is not None else rows
+                return CollectedRows(kept, truncated=True, result_limit=limit, page_error=unreadable_rows_error())
             first_page = False
-            values = payload.get(item_key) or payload.get("items") or payload.get("value") or []
-            if isinstance(values, list):
-                rows.extend(item for item in values if isinstance(item, dict))
-            token = payload.get("nextPageToken")
+            present = [payload[key] for key in (item_key, "items", "value") if key in payload]
+            values = next((value for value in present if value), None)
+            # A row list given as "", 0, {} or false is no list at all, not an empty one.
+            page_rows, whole = _readable_rows(values)
+            whole = whole and all(value is None or value == [] or value is values for value in present)
+            rows.extend(page_rows)
+            unreadable = unreadable or not whole
+            token, cursor_readable = _page_cursor(payload)
+            if not cursor_readable:
+                # A cursor of the wrong type or a blank one: the list may go on, so it is cut, never complete.
+                kept = rows[:limit] if limit is not None else rows
+                return CollectedRows(kept, truncated=True, result_limit=limit, page_error=unreadable_cursor_error())
             if limit is not None and len(rows) >= limit:
                 # More rows, or a further page, means the list was cut at the operator's limit.
-                return CollectedRows(rows[:limit], truncated=len(rows) > limit or bool(token), result_limit=limit)
+                return finish(rows[:limit], truncated=len(rows) > limit or bool(token))
             if not token:
-                return CollectedRows(rows, result_limit=limit)
+                return finish(rows)
 
     def list_directory(self, resource: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
@@ -717,7 +833,7 @@ class GoogleWorkspaceClient:
             )
         if resource == "orgUnits":
             payload = _execute(lambda: service.orgunits().list(customerId=self.customer, type="allIncludingParent").execute())
-            return _cut(payload.get("organizationUnits") or [], top)
+            return _single_call_rows(payload, "organizationUnits", top)
         if resource == "domains":
             payload = _execute(lambda: service.domains().list(customer=self.customer).execute())
             domains = payload.get("domains") if isinstance(payload, dict) else None
@@ -725,7 +841,8 @@ class GoogleWorkspaceClient:
                 raise PolicyReadError("The Google Workspace domains list is unreadable.",
                                       error_class=POLICY_MALFORMED_ERROR_CLASS)
             rows = _cut(domains, top)
-            if any(not isinstance(item, dict) for item in domains) or payload.get("nextPageToken", "") != "":
+            # domains.list is read in one call: any cursor (only an absent or null one ends a list) means more rows.
+            if any(not isinstance(item, dict) for item in domains) or payload.get("nextPageToken") is not None:
                 rows.page_error = PolicyReadError("The Google Workspace domains list could not be read in full.",
                                                   error_class=POLICY_MALFORMED_ERROR_CLASS)
             return rows
@@ -759,12 +876,12 @@ class GoogleWorkspaceClient:
     def list_user_aliases(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
         payload = _execute(lambda: service.users().aliases().list(userKey=user_key).execute())
-        return _cut(payload.get("aliases") or [], top)
+        return _single_call_rows(payload, "aliases", top)
 
     def list_user_tokens(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
         payload = _execute(lambda: service.tokens().list(userKey=user_key).execute())
-        return _cut(payload.get("items") or [], top)
+        return _single_call_rows(payload, "items", top)
 
     def list_report_activities(
         self,
@@ -867,12 +984,18 @@ class GoogleWorkspaceClient:
             }
         return minimise_gmail_settings(payload)
 
-    def list_drive_files(self, *, top: int | None = None) -> list[dict[str, Any]]:
+    def list_drive_files(
+        self, *, top: int | None = None, tenant_domains: Callable[[], frozenset[str] | None] | None = None,
+    ) -> list[dict[str, Any]]:
         """Drive files with their sharing.
 
         files.list does not return ``permissions`` for items in shared drives, nor for files the subject cannot
         share. Each file it left them out of has them read with permissions.list, so its sharing is never read as
         none; a file whose permissions cannot be read either is listed in ``permission_errors``.
+
+        ``tenant_domains`` (read once, only when needed) gives the tenant's complete domain names. A My Drive file
+        all of whose owners are positively outside them is not the organisation's exposure: its permissions are not
+        read and it is only counted in ``permission_out_of_scope``.
         """
         service = self._service("drive", "v3")
         page_size = min(self.page_size, top or self.page_size)
@@ -896,10 +1019,18 @@ class GoogleWorkspaceClient:
         if not isinstance(files, CollectedRows):
             files = CollectedRows(files)
         errors: list[dict[str, Any]] = []
+        domains: frozenset[str] | None = None
+        domains_read = False
         for drive_file in files:
             file_id = str(drive_file.get("id") or "")
             if "permissions" in drive_file or not file_id:
                 continue
+            if tenant_domains is not None and owner_domains(drive_file):
+                if not domains_read:
+                    domains, domains_read = tenant_domains(), True
+                if owned_outside(drive_file, domains):
+                    files.permission_out_of_scope += 1
+                    continue
             try:
                 permissions = self._collect_pages(
                     lambda page_token, file_id=file_id: service.permissions().list(

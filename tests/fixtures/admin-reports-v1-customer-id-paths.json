@@ -1,0 +1,308 @@
+{
+  "source": "google-api-python-client 2.202.0, googleapiclient/discovery_cache/documents/admin.reports_v1.json",
+  "revision": "20260929",
+  "note": "Subset: Activity.id, Activity.resourceDetails and UsageReport.entity and every schema they reach, with only type, format, $ref, items and properties kept.",
+  "schemas": {
+    "Activity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "properties": {
+            "applicationName": {
+              "type": "string"
+            },
+            "customerId": {
+              "type": "string"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "uniqueQualifier": {
+              "format": "int64",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "resourceDetails": {
+          "items": {
+            "$ref": "ResourceDetails"
+          },
+          "type": "array"
+        }
+      }
+    },
+    "AppliedLabel": {
+      "properties": {
+        "fieldValues": {
+          "items": {
+            "$ref": "FieldValue"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "Reason"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "CustomerIdentity": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Date": {
+      "properties": {
+        "day": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "month": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "year": {
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "FieldValue": {
+      "properties": {
+        "dateValue": {
+          "$ref": "Date"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "integerValue": {
+          "format": "int64",
+          "type": "string"
+        },
+        "longTextValue": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "Reason"
+        },
+        "selectionListValue": {
+          "$ref": "FieldValueSelectionListValue"
+        },
+        "selectionValue": {
+          "$ref": "FieldValueSelectionValue"
+        },
+        "textListValue": {
+          "$ref": "FieldValueTextListValue"
+        },
+        "textValue": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "unsetValue": {
+          "type": "boolean"
+        },
+        "userListValue": {
+          "$ref": "FieldValueUserListValue"
+        },
+        "userValue": {
+          "$ref": "FieldValueUserValue"
+        }
+      },
+      "type": "object"
+    },
+    "FieldValueSelectionListValue": {
+      "properties": {
+        "values": {
+          "items": {
+            "$ref": "FieldValueSelectionValue"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "FieldValueSelectionValue": {
+      "properties": {
+        "badged": {
+          "type": "boolean"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "FieldValueTextListValue": {
+      "properties": {
+        "values": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "FieldValueUserListValue": {
+      "properties": {
+        "values": {
+          "items": {
+            "$ref": "FieldValueUserValue"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "FieldValueUserValue": {
+      "properties": {
+        "email": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "GroupIdentity": {
+      "properties": {
+        "groupEmail": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "OwnerDetails": {
+      "properties": {
+        "ownerIdentity": {
+          "items": {
+            "$ref": "OwnerIdentity"
+          },
+          "type": "array"
+        },
+        "ownerType": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "OwnerIdentity": {
+      "properties": {
+        "customerIdentity": {
+          "$ref": "CustomerIdentity"
+        },
+        "groupIdentity": {
+          "$ref": "GroupIdentity"
+        },
+        "sharedDriveIdentity": {
+          "$ref": "SharedDriveIdentity"
+        },
+        "userIdentity": {
+          "$ref": "UserIdentity"
+        }
+      },
+      "type": "object"
+    },
+    "Reason": {
+      "properties": {
+        "reasonType": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ResourceDetails": {
+      "properties": {
+        "appliedLabels": {
+          "items": {
+            "$ref": "AppliedLabel"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ownerDetails": {
+          "$ref": "OwnerDetails"
+        },
+        "relation": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SharedDriveIdentity": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sharedDriveName": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "UsageReport": {
+      "type": "object",
+      "properties": {
+        "entity": {
+          "properties": {
+            "customerId": {
+              "type": "string"
+            },
+            "entityId": {
+              "type": "string"
+            },
+            "profileId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "userEmail": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    "UserIdentity": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userEmail": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  }
+}

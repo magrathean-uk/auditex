@@ -14,6 +14,7 @@ from azure_tenant_audit.collection_gaps import (
     REASON_OPERATOR_LIMIT,
     REASON_PAGINATION_FAILED,
     REASON_PAGINATION_NOT_FOLLOWED,
+    REASON_UNKNOWN,
     fanout_gap_row,
     section_was_cut,
 )
@@ -70,6 +71,7 @@ from .client import (
     policy_malformed_error,
 )
 from .customer_id import WITHHELD, CustomerIds, withheld_coverage_row
+from .drive_scope import DOMAIN_SCOPE, DOMAIN_SCOPE_NOTE, read_tenant_domains
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
@@ -1521,7 +1523,9 @@ def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: l
     """A coverage row for the files whose permissions had to be read one by one, failing where they could not be."""
     errors = [item for item in getattr(drive_files, "permission_errors", None) or [] if isinstance(item, dict)]
     reads = int(getattr(drive_files, "permission_reads", 0) or 0)
-    if not errors and not reads:
+    out_of_scope = getattr(drive_files, "permission_out_of_scope", 0)
+    out_of_scope = out_of_scope if type(out_of_scope) is int and out_of_scope > 0 else 0
+    if not errors and not reads and not out_of_scope:
         return
     error_class = error = None
     status = "ok"
@@ -1534,19 +1538,21 @@ def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: l
             f"Sharing of {len(errors)} of {len(errors) + reads} Drive files (shared-drive items or files the subject "
             f"cannot share) could not be read, so their exposure is unknown ({', '.join(sorted(set(classes)))})."
         )
-    coverage.append(
-        _coverage(
-            collector,
-            "drivePermissions",
-            status=status,
-            item_count=reads,
-            duration_ms=0,
-            endpoint="drive.permissions.list",
-            error_class=error_class,
-            error=error,
-            subject_scoped=SUBJECT_SCOPE_ADMIN,
-        )
+    row = _coverage(
+        collector,
+        "drivePermissions",
+        status=status,
+        item_count=reads,
+        duration_ms=0,
+        endpoint="drive.permissions.list",
+        error_class=error_class,
+        error=error,
+        subject_scoped=SUBJECT_SCOPE_ADMIN,
     )
+    if out_of_scope:
+        # A count only: files owned wholly outside the tenant are not its sharing exposure (drive_scope).
+        row["out_of_scope_files"] = out_of_scope
+    coverage.append(row)
 
 
 class GoogleDrivePostureCollector:
@@ -1559,6 +1565,10 @@ class GoogleDrivePostureCollector:
         "https://www.googleapis.com/auth/drive.metadata.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
     )
+    # Asked for in the one sign-in and listed in the scope inventory, but never on the Drive reads' token: the domains
+    # list is read on a token of its own (drive_scope.read_tenant_domains), so a refusal keeps every file in scope.
+    optional_scopes = (DOMAIN_SCOPE,)
+    optional_scope_notes = {DOMAIN_SCOPE: DOMAIN_SCOPE_NOTE}
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")
@@ -1575,7 +1585,7 @@ class GoogleDrivePostureCollector:
             coverage=coverage,
             log_event=log_event,
             endpoint="drive.files.list",
-            func=lambda: client.list_drive_files(top=file_limit),
+            func=lambda: client.list_drive_files(top=file_limit, tenant_domains=lambda: read_tenant_domains(client)),
             bounded_sample=sampled,
             subject_scoped=SUBJECT_SCOPE_ADMIN,
         )
@@ -1745,6 +1755,66 @@ class GoogleCalendarPostureCollector:
             len(resources) + len(calendars) + len(acl_rows) + len(acl_errors),
             coverage=coverage,
         )
+
+
+# The list reads whose gap a collector's raw section must carry: ``collector -> {read: raw section}``, where a fan-out
+# read is named by its prefix (``aliases`` for every ``aliases:<user>`` read). A live run keeps the rows of a list that
+# failed, was cut or held rows it could not read, and records the gap on the coverage ledger; the raw section then
+# carries the same marker, so an offline replay, compare or drift of those raw sections sees the read as incomplete
+# (LIVE-FIX-6 B1a). The policies, SCuBA-read and DNS posture collectors write their own markers.
+RAW_SECTION_READS: dict[str, dict[str, str]] = {
+    "google_directory": {
+        name: name
+        for name in ("users", "groups", "domains", "orgUnits", "roles", "roleAssignments", "groupMembers", "aliases",
+                     "oauthGrants")
+    },
+    "google_reports": {f"{app}Activities": f"{app}Activities" for app in GoogleReportsCollector.applications},
+    "google_alert_center": {"alerts": "alerts"},
+    # The users list is the set of mailboxes to read: a gap in it is a gap in the mailbox settings.
+    "google_gmail_settings": {"users": "mailboxSettings"},
+    "google_devices": {"mobileDevices": "mobileDevices", "chromeosDevices": "chromeosDevices"},
+    # A file whose permissions could not be read has unknown sharing: the file list is incomplete evidence.
+    "google_drive_posture": {"driveFiles": "driveFiles", "drivePermissions": "driveFiles", "sharedDrives": "sharedDrives"},
+    "google_groups_settings": {"groups": "groupSettings"},
+    "google_calendar_posture": {
+        "calendarResources": "calendarResources", "calendars": "calendars", "calendarAcls": "calendarAcls",
+    },
+}
+
+
+def mark_incomplete_sections(collector: str, payload: Any, coverage: Any) -> Any:
+    """``payload`` with each raw section of a failed, cut or partly read list marked as such (a copy when changed).
+
+    A cut list (``collection_truncated``) gets the cut marker with its reason and limit; a read that failed, or was
+    cut by a page error or an unreadable row (``pagination_failed``), also gets ``error_class`` and a fixed ``error``
+    (the class only, never the read's own text). The markers are the ones :func:`replay_coverage_rows` and the
+    normaliser read, so a replay records the same gap. A section that already carries a marker keeps it.
+    """
+    reads = RAW_SECTION_READS.get(collector)
+    if not reads or not isinstance(payload, dict) or not isinstance(coverage, list):
+        return payload
+    out = dict(payload)
+    for row in coverage:
+        if not isinstance(row, dict) or row.get("collector", collector) != collector:
+            continue
+        section_name = reads.get(str(row.get("name") or "").split(":", 1)[0])
+        section = out.get(section_name) if section_name else None
+        cut = row.get("collection_truncated") is True
+        if not isinstance(section, dict) or (row.get("status") == "ok" and not cut):
+            continue
+        section = out[section_name] = dict(section)
+        section["status"] = "partial"
+        if cut and section.get("collection_truncated") is not True:
+            section["collection_truncated"] = True
+            section["truncation_reason"] = str(row.get("truncation_reason") or REASON_UNKNOWN)
+            limit = row.get("result_limit")
+            if type(limit) is int and limit > 0:
+                section["result_limit"] = limit
+        if (not cut or row.get("truncation_reason") == REASON_PAGINATION_FAILED) and not section.get("error_class"):
+            error_class = str(row.get("error_class") or "client_error")
+            section["error_class"] = error_class
+            section["error"] = f"{section_name}: a read of this list failed or could not be read in full ({error_class})."
+    return out
 
 
 # The sections each collector's live run records: what an offline replay checks a sample against, so a collector the

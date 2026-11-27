@@ -7,6 +7,7 @@ from typing import Any
 from azure_tenant_audit.google_policy_schema import policy_enforced_at
 
 from .collectors import SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPED_COLLECTORS
+from .drive_scope import owned_outside
 from .normalize import COMPROMISED, UNKNOWN_COMPROMISE, compromised_state
 
 # Days without a login before an active account is reported by google.stale_user. Admin accounts keep the
@@ -734,6 +735,33 @@ def _external_domain(value: Any, internal_domains: Any) -> bool:
 def _internal_domain(value: Any, internal_domains: Any) -> bool:
     text = str(value or "").strip().lower()
     return bool(text) and text in _domain_set(internal_domains)
+
+
+def _tenant_domains_for_drive(snapshot: dict[str, Any]) -> frozenset[str] | None:
+    """The tenant's domains for judging Drive file ownership, or ``None`` unless they are positively complete.
+
+    Only the whole Directory domains list counts: ``internal_domains_status`` must be ``known`` and its source
+    must name the Directory (``directory`` or ``directory+label``; the ``--domain`` label alone, a partial list,
+    an unknown set and a snapshot written before the status existed are all ``None``). The label is part of the
+    set, which can only keep more files in scope.
+    """
+    if snapshot.get("internal_domains_status") != "known":
+        return None
+    if snapshot.get("internal_domains_source") not in {"directory", "directory+label"}:
+        return None
+    declared = snapshot.get("internal_domains")
+    if not isinstance(declared, list):
+        return None
+    return _domain_set(declared) or None
+
+
+def _drive_file_owned_outside(drive_file: dict[str, Any], tenant_domains: frozenset[str] | None) -> bool:
+    """True only for a My Drive file positively owned wholly outside the tenant (same rule as the collector).
+
+    The normalised record must say it is not in a shared drive (``in_shared_drive`` is ``False``); a record
+    that does not say is read as unknown and stays in scope.
+    """
+    return drive_file.get("in_shared_drive") is False and owned_outside(drive_file, tenant_domains)
 
 
 def _drive_permission_record(drive_file: dict[str, Any], permission: dict[str, Any]) -> dict[str, Any]:
@@ -1656,7 +1684,11 @@ def build_google_findings(
                         returned_value=delegate_email,
                     )
                 )
+    drive_tenant_domains = _tenant_domains_for_drive(snapshot)
     for drive_file in _records(normalized_snapshot, "google_drive_files"):
+        if _drive_file_owned_outside(drive_file, drive_tenant_domains):
+            # Someone else's file the subject can see: its sharing is that owner's, not the tenant's exposure.
+            continue
         for permission in drive_file.get("permissions") or []:
             if not isinstance(permission, dict):
                 continue

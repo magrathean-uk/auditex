@@ -336,6 +336,14 @@ def _grant(credentials: Any) -> set[str]:
     return {str(scope) for scope in granted or ()}
 
 
+def granted_scopes(credentials: Any) -> frozenset[str]:
+    """The scopes the credentials' last refresh or consent granted (see :func:`_grant`); empty when unknown."""
+    try:
+        return frozenset(_grant(credentials))
+    except Exception:  # noqa: BLE001 - an unreadable grant proves no scope
+        return frozenset()
+
+
 def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
     """Whether the last refresh granted every scope this run asks for."""
     granted = _grant(credentials)

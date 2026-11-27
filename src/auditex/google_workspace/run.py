@@ -47,6 +47,7 @@ from .auth import (
     GoogleAuthConfig,
     build_google_credentials,
     google_dependency_status,
+    granted_scopes,
     read_service_account_summary,
     safe_auth_summary,
 )
@@ -69,6 +70,7 @@ from .collectors import (
     SUBJECT_SCOPE_ADMIN,
     SUBJECT_SCOPE_USER,
     SUBJECT_SCOPED_COLLECTORS,
+    mark_incomplete_sections,
     policy_replay_rows,
     replay_policy_payload,
     replay_scuba_payload,
@@ -80,6 +82,7 @@ from .customer_id import (
     collect_customer_ids,
     withheld_coverage_row,
 )
+from .drive_scope import DOMAIN_SCOPE, read_tenant_domains
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
     DEFAULT_STALE_USER_DAYS,
@@ -182,14 +185,53 @@ def _selected_collectors(config: GoogleRunConfig) -> list[str]:
     return [name for name in selected if name in REGISTRY and name not in excluded]
 
 
-def scopes_for_collectors(selected: list[str]) -> tuple[str, ...]:
+def scopes_for_collectors(selected: list[str], *, auth_mode: str = "domain-delegation") -> tuple[str, ...]:
+    """Every scope the run asks for: the selected collectors' required scopes, then (delegation only) optional ones.
+
+    Under domain-wide delegation an optional scope (``optional_scopes``, such as the Drive collector's read-only
+    Directory domains scope) is never on its collector's own token (``_collector_client`` narrows to
+    ``required_scopes``): it is read on a token of its own, so a delegation that leaves it out fails only that read.
+    An OAuth sign-in asks only for the union of the required scopes (LIVE-FIX-7): every token comes from that one
+    sign-in, a grant must hold all of it, and no scope that is only optional is ever requested, cached or refreshed.
+    """
+    attributes = ("required_scopes",) if auth_mode == "oauth" else ("required_scopes", "optional_scopes")
     scopes: list[str] = []
-    for name in selected:
-        collector = REGISTRY.get(name)
-        for scope in getattr(collector, "required_scopes", ()):
-            if scope not in scopes:
-                scopes.append(scope)
+    for attribute in attributes:
+        for name in selected:
+            for scope in getattr(REGISTRY.get(name), attribute, ()):
+                if scope not in scopes:
+                    scopes.append(scope)
     return tuple(scopes)
+
+
+def drive_domain_read_mode(selected: list[str], auth_mode: str, scopes: tuple[str, ...]) -> str | None:
+    """How the Drive collector may read the tenant's domains in this run (``drive_domain_read`` in the auth context);
+    ``None`` when Drive is not selected.
+
+    ``delegation_own_token`` under domain-wide delegation (on a token of its own); ``oauth_required_scope`` under OAuth
+    when the domain scope is in the requested (required) set because another selected collector requires it;
+    otherwise ``not_requested``: it is neither asked for nor read.
+    """
+    if "google_drive_posture" not in selected:
+        return None
+    if auth_mode == "domain-delegation":
+        return "delegation_own_token"
+    if auth_mode == "oauth" and DOMAIN_SCOPE in scopes:
+        return "oauth_required_scope"
+    return "not_requested"
+
+
+def tenant_domain_read_allowed(auth_config: GoogleAuthConfig, credentials: Any) -> bool:
+    """Whether the client may read the Directory domains list for Drive: delegation, or an OAuth grant holding it.
+
+    Under OAuth the scope must be in this run's requested set (another selected collector requires it) and in the
+    grant the credentials carry; a scope only asked for, or not asked for, is never used.
+    """
+    if auth_config.auth_mode == "domain-delegation":
+        return True
+    if auth_config.auth_mode == "oauth":
+        return DOMAIN_SCOPE in auth_config.scopes and DOMAIN_SCOPE in granted_scopes(credentials)
+    return False
 
 
 def subject_scope_for_collectors(selected: list[str], *, per_user_delegation: bool) -> dict[str, str]:
@@ -219,10 +261,16 @@ def build_google_auth_context_payload(config: GoogleRunConfig, auth_config: Goog
         "customer_id": bundle_customer_id(config.customer_id),
         "scope_count": len(auth_config.scopes),
         "scopes": list(auth_config.scopes),
+        **_drive_domain_read_field(_selected_collectors(config), auth_config.auth_mode, auth_config.scopes),
         "service_account_key_present": auth_summary["service_account_key_present"],
         "oauth_client_present": auth_summary["oauth_client_present"],
         "token_cache_present": auth_summary["token_cache_present"],
     }
+
+
+def _drive_domain_read_field(selected: list[str], auth_mode: str, scopes: tuple[str, ...]) -> dict[str, str]:
+    mode = drive_domain_read_mode(selected, auth_mode, scopes)
+    return {} if mode is None else {"drive_domain_read": mode}
 
 
 def _authenticated_google_read(row: dict[str, Any]) -> bool:
@@ -535,7 +583,8 @@ def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None
         # The row is a readiness note with no lookup behind it (``live_read`` false): it verifies nothing.
         rows.append({"collector": collector, "type": "dns", "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None, "live_read": False})
     elif collector == "google_drive_posture":
-        rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
+        rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(
+            top=top, tenant_domains=lambda: read_tenant_domains(client))))
         rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
     elif collector == "google_groups_settings":
         def group_settings_check() -> list[dict[str, Any]]:
@@ -936,7 +985,7 @@ def google_dns_notice(doh_endpoint: str) -> str:
 
 
 def _auth_config(config: GoogleRunConfig, selected: list[str]) -> GoogleAuthConfig:
-    scopes = scopes_for_collectors(selected)
+    scopes = scopes_for_collectors(selected, auth_mode=config.auth)
     return GoogleAuthConfig(
         auth_mode=config.auth,
         scopes=scopes,
@@ -984,6 +1033,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         customer_id=config.customer_id,
         page_size=config.page_size,
         delegated=auth_config.supports_user_delegation,
+        tenant_domain_read=tenant_domain_read_allowed(auth_config, credentials),
     )
     # One collector can disclose the ID of a customer another already mentioned in free text.
     # Buffer the runner's events and results in memory until all reads have supplied their IDs.
@@ -1040,7 +1090,9 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     coverage_rows: list[dict[str, Any]] = []
     collector_payloads: dict[str, dict[str, Any]] = {}
     for name, output in zip(selected, outputs, strict=True):
-        payload, changed = ids.evidence(output.result.payload)
+        # A list read that failed, was cut or held unreadable rows is marked on its raw section too, so an offline
+        # replay, compare or drift of the raw evidence sees the same gap as this run (LIVE-FIX-6 B1a).
+        payload, changed = ids.evidence(mark_incomplete_sections(name, output.result.payload, output.coverage_rows))
         payload = writer.valid_text(payload)
         rows = writer.valid_text(ids.scrub(output.coverage_rows))
         row = writer.valid_text(ids.scrub(dict(output.result_row)))
@@ -1100,7 +1152,7 @@ def google_doctor(config: GoogleRunConfig | None = None) -> dict[str, Any]:
     }
     if config is not None:
         selected = _selected_collectors(config)
-        scopes = list(scopes_for_collectors(selected))
+        scopes = list(scopes_for_collectors(selected, auth_mode=config.auth))
         payload["auth"] = {
             "mode": config.auth,
             "subject": config.subject,
@@ -1109,6 +1161,7 @@ def google_doctor(config: GoogleRunConfig | None = None) -> dict[str, Any]:
             "scopes_csv": ",".join(scopes),
             "per_user_delegation": config.auth == "domain-delegation",
             "isolated_scopes": [scope for scope in scopes if scope in ISOLATED_GOOGLE_SCOPES],
+            **_drive_domain_read_field(selected, config.auth, tuple(scopes)),
             "subject_scope": subject_scope_for_collectors(selected, per_user_delegation=config.auth == "domain-delegation"),
             "service_account": read_service_account_summary(config.service_account_key),
             "oauth_client_present": bool(config.oauth_client and config.oauth_client.expanduser().exists()),
@@ -1322,6 +1375,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
                     customer_id=config.customer_id,
                     page_size=config.page_size,
                     delegated=auth_config.supports_user_delegation,
+                    tenant_domain_read=tenant_domain_read_allowed(auth_config, credentials),
                 )
                 preflight_rows = build_google_preflight_rows(
                     client, selected, domain=config.domain, top=5 if config.top is None else max(1, min(config.top, 5)),

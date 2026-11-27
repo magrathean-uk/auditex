@@ -2,7 +2,8 @@
   "schema_version": 1,
   "sources": {
     "gws-design": "Auditex M13 design for SCuBA on Google Workspace (gws-scuba/design.md, owner records): section 8.3 rows D1-D10 and the 25 Nov 2026 addendum rows D11-D22 (cited as 8.3a); policy scope from its section 14 per-policy table (kind and not_assessed reasons)",
-    "m365-spec": "Auditex value-rules spec v3.9.1 replay vectors (sha256 3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e): every vector whose disagreement reads 'expected: Dnn', grouped by policy and Dnn"
+    "m365-spec": "Auditex value-rules spec v3.9.1 replay vectors (sha256 3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e): every vector whose disagreement reads 'expected: Dnn', grouped by policy and Dnn",
+    "output-contract": "Auditex output contract (docs/reference/output-contract.md), section Google Workspace evidence scope, domains and rules, the Divergences from ScubaGoggles table: rows D23 and D24, added after the design addendum; policy scope and verdicts from the shipped rules"
   },
   "rows": {
     "gws-design": {
@@ -28,6 +29,10 @@
         "D20": "ScubaGoggles reads own values only for DRIVEDOCS.3.1, CHAT.4.1, CC.11.1; Auditex combines own and inherited",
         "D21": "ScubaGoggles skips sub-units without own values under a top unit with the service off; Auditex judges inherited values",
         "D22": "ScubaGoggles ignores non-DMARC TXT records at _dmarc; Auditex reads a mixed set strictly"
+    },
+    "output-contract": {
+        "D23": "ScubaGoggles: GMAIL.14.1 counts the allow-list only with Gmail on at the top unit; Auditex: with Gmail on in any unit",
+        "D24": "ScubaGoggles: CC.6.1 privileged accounts are super and delegated admins only; Auditex adds privileged role holders, and an unproven role holder is unplaceable"
     }
   },
   "entries": [
@@ -268,6 +273,7 @@
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3a D12", "id": "D12", "policy_id": "GWS.COMMONCONTROLS.5.6v1", "reason_codes": ["data_unavailable_service_status_absent", "data_unusable_setting_value"]},
     {"auditex": ["not_met"], "cisa": ["pass"], "cite": "gws-design 8.3a D21", "id": "D21", "policy_id": "GWS.COMMONCONTROLS.5.6v1"},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3a D14", "id": "D14", "policy_id": "GWS.COMMONCONTROLS.6.1v1", "reason_codes": ["data_unusable_setting_value"]},
+    {"auditex": ["not_met"], "cisa": ["pass"], "cite": "output-contract D24", "id": "D24", "policy_id": "GWS.COMMONCONTROLS.6.1v1", "reason_codes": ["admin_uses_external_sso"]},
     {"auditex": ["met", "not_met"], "cisa": ["fail", "pass"], "cite": "gws-design 8.3 D9", "id": "D9", "policy_id": "GWS.COMMONCONTROLS.6.2v1"},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3a D13", "id": "D13", "policy_id": "GWS.COMMONCONTROLS.6.2v1"},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3 D2", "id": "D2", "policy_id": "GWS.COMMONCONTROLS.7.1v1", "reason_codes": ["data_unavailable_setting_absent"]},
@@ -395,6 +401,8 @@
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3 D3", "id": "D3", "policy_id": "GWS.GMAIL.14.1v1", "reason_codes": ["data_unavailable_service_status_absent"]},
     {"auditex": ["not_assessed"], "cisa": ["fail", "pass"], "cite": "gws-design 8.3a D11", "id": "D11", "policy_id": "GWS.GMAIL.14.1v1", "reason_codes": ["data_unusable_setting_value"]},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3a D12", "id": "D12", "policy_id": "GWS.GMAIL.14.1v1", "reason_codes": ["data_unavailable_service_status_absent", "data_unusable_setting_value"]},
+    {"auditex": ["not_met"], "cisa": ["pass"], "cite": "output-contract D23", "id": "D23", "policy_id": "GWS.GMAIL.14.1v1", "reason_codes": ["unit_violates"]},
+    {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "output-contract D23", "id": "D23", "policy_id": "GWS.GMAIL.14.1v1", "reason_codes": ["data_unusable_setting_value"]},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3 D2", "id": "D2", "policy_id": "GWS.GMAIL.15.1v1", "reason_codes": ["data_unavailable_setting_absent"]},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3 D3", "id": "D3", "policy_id": "GWS.GMAIL.15.1v1", "reason_codes": ["data_unavailable_service_status_absent"]},
     {"auditex": ["not_assessed"], "cisa": ["fail", "pass"], "cite": "gws-design 8.3a D11", "id": "D11", "policy_id": "GWS.GMAIL.15.1v1", "reason_codes": ["data_unusable_setting_value"]},

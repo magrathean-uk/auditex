@@ -105,6 +105,13 @@ row: a failed prerequisite is not a documented rule difference.
   D10 and the 25 Nov 2026 addendum rows D11 to D22, with a one-line summary of each under `rows`. Policy scope
   comes from the design's per-policy table (rule kind and not_assessed reasons). D10 (Error against
   `section_not_collected`) has no entries: both sides are undecided, so it is `neither_decided` by construction.
+- `output-contract Dn`: rows D23 (GMAIL.14.1 applies with Gmail on in any unit) and D24 (the CC.6.1 privileged
+  set) of the ScubaGoggles divergence table in `docs/reference/output-contract.md`, added after the design
+  addendum, with their summaries under `rows`. Their entries carry the verdicts and reason codes the shipped rules
+  give in those cases: D23 `not_met` (`unit_violates`) or `not_assessed` (`data_unusable_setting_value`) against
+  `pass`; D24 `not_met` (`admin_uses_external_sso`) against `pass`. D24's `not_assessed`
+  (`data_unusable_section_shape`) has no entry: an unplaceable flagged admin gives the same answer, so the pair would
+  label an unrelated data gap documented; it reports as `auditex_not_assessed`.
 - `m365-spec Dn`: the value-rules spec v3.9.1 divergences from the pinned ScubaGear Rego. These are derived from
   the spec's replay vectors whose disagreement reads `expected: Dn` (vectors sha256 recorded in the file),
   grouped by policy and D id, with the Rego gold mapped to a CISA class and the rule's verdict and reason codes
@@ -112,8 +119,8 @@ row: a failed prerequisite is not a documented rule difference.
   shows; ScubaGear's only undecided non-error result is N/A.
 - D19 (no top-level event before a child-unit violation) matches `no_events` only, never `Error`.
 
-The file is generated from the owner's records, not by hand; regenerate it when a design D row or the spec
-changes. Limits: a pattern matches the verdict pair and reason code, not the evidence, so a real fault that lands on
+The `gws-design` and `m365-spec` entries are generated from the owner's records, not by hand; regenerate them when
+a design D row or the spec changes. The `output-contract` entries are kept by hand with the contract table. Limits: a pattern matches the verdict pair and reason code, not the evidence, so a real fault that lands on
 a documented pair with the same reason code is labelled documented. The reason-code scoping keeps that narrow.
 Spec rows relabelled after v3.9.1 (the replay test's review relabels) may leave an entry that no longer matches
 anything, which is harmless.

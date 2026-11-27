@@ -53,6 +53,12 @@ GOOGLE_API_ENABLEMENT = {
     "google_calendar_posture": ["Google Calendar API", "Admin SDK API"],
 }
 
+# APIs a collector uses only for an optional scope's read: enabled for that read alone, which falls back without it.
+GOOGLE_OPTIONAL_API_ENABLEMENT = {
+    # The Drive collector's optional Directory domains read (admin.directory.domain.readonly).
+    "google_drive_posture": ["Admin SDK API"],
+}
+
 GOOGLE_ROLE_HINTS = ["Google Workspace super admin or delegated admin"]
 
 
@@ -134,11 +140,22 @@ def build_google_scope_catalog(
     catalog: dict[str, dict[str, Any]] = {}
     for collector_name, collector in registry.items():
         required_permissions = _dedupe([str(item) for item in getattr(collector, "required_scopes", ())])
+        # Optional scopes widen a collector's reads: asked for under domain-wide delegation (on a token of their own),
+        # never by an OAuth sign-in unless another selected collector requires them; a refusal is not a gap.
+        optional_permissions = [
+            item for item in _dedupe([str(item) for item in getattr(collector, "optional_scopes", ())])
+            if item not in required_permissions
+        ]
+        notes = _mapping(getattr(collector, "optional_scope_notes", None))
         catalog[collector_name] = {
             "collector": collector_name,
             "provider": "google_workspace",
             "description": str(getattr(collector, "description", "")),
             "required_permissions": required_permissions,
+            "optional_permissions": optional_permissions,
+            "optional_permission_notes": {
+                scope: str(notes[scope]) for scope in optional_permissions if scope in notes
+            },
             "minimum_role_hints": list(GOOGLE_ROLE_HINTS),
             "tool_requirements": [],
             "optional_commands": [],
@@ -148,6 +165,10 @@ def build_google_scope_catalog(
                 if scope in GOOGLE_SCOPE_NOTES
             ],
             "api_enablement": list(GOOGLE_API_ENABLEMENT.get(collector_name, [])),
+            "optional_api_enablement": [
+                api for api in GOOGLE_OPTIONAL_API_ENABLEMENT.get(collector_name, [])
+                if api not in GOOGLE_API_ENABLEMENT.get(collector_name, [])
+            ],
             "notes": f"Google Workspace access metadata for {collector_name}.",
         }
     return catalog
@@ -164,6 +185,7 @@ def aggregate_catalog_rows(
     tool_requirements: list[str] = []
     optional_commands: list[str] = []
     api_enablement: list[str] = []
+    optional_api_enablement: list[str] = []
     scope_warnings: list[dict[str, Any]] = []
     warning_keys: set[str] = set()
     collector_rows: list[dict[str, Any]] = []
@@ -180,6 +202,7 @@ def aggregate_catalog_rows(
         tool_requirements.extend([str(item) for item in row.get("tool_requirements") or []])
         optional_commands.extend([str(item) for item in row.get("optional_commands") or []])
         api_enablement.extend([str(item) for item in row.get("api_enablement") or []])
+        optional_api_enablement.extend([str(item) for item in row.get("optional_api_enablement") or []])
         for warning in row.get("scope_warnings") or []:
             if not isinstance(warning, Mapping):
                 continue
@@ -201,5 +224,9 @@ def aggregate_catalog_rows(
         "tool_requirements": _dedupe(tool_requirements),
         "optional_commands": _dedupe(optional_commands),
         "api_enablement": _dedupe(api_enablement),
+        # An API one selected collector needs is required, not optional.
+        "optional_api_enablement": [
+            item for item in _dedupe(optional_api_enablement) if item not in set(api_enablement)
+        ],
         "scope_warnings": scope_warnings,
     }

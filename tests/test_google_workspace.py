@@ -828,6 +828,27 @@ def test_google_alert_severity_and_status_read_metadata_with_legacy_fallback() -
     assert (rows["a-legacy"]["severity"], rows["a-legacy"]["status"]) == ("LOW", "CLOSED")
 
 
+def test_google_role_assignment_carries_the_assignee_type_as_read() -> None:
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    result = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        collector_payloads={"google_directory": {"roleAssignments": {"value": [
+            {"roleAssignmentId": "ra1", "roleId": "r1", "assignedTo": "u1", "assigneeType": "user"},
+            {"roleAssignmentId": "ra2", "roleId": "r1", "assignedTo": "g1", "assigneeType": "group"},
+            {"roleAssignmentId": "ra3", "roleId": "r1", "assignedTo": "u3"},
+            {"roleAssignmentId": "ra4", "roleId": "r1", "assignedTo": "u4", "assigneeType": None},
+        ]}}},
+        domain="example.com",
+        customer_id="C123",
+    )
+    rows = {r["id"]: r for r in result["google_role_assignments"]["records"]}
+    assert rows["ra1"]["assignee_type"] == "user"
+    assert rows["ra2"]["assignee_type"] == "group"
+    assert "assignee_type" not in rows["ra3"] and "assignee_type" not in rows["ra4"]
+
+
 def test_google_drive_and_group_settings_findings_from_sample() -> None:
     from auditex.google_workspace.findings import build_google_findings
     from auditex.google_workspace.normalize import build_google_normalized_snapshot

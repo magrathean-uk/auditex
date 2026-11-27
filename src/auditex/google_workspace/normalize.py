@@ -41,6 +41,8 @@ from .collectors import (
     scuba_read_rows,
     two_step_subset_differs,
 )
+from .customer_id import valid_activity_id
+from .drive_scope import tenant_domain_names
 
 
 def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
@@ -857,7 +859,10 @@ def build_google_normalized_snapshot(
                 verified=item.get("verified"),
             )
         )
-        for alias in item.get("domainAliases") or []:
+        # An alias list of the wrong type (true, a string, a mapping) is read as no aliases here, never iterated; the
+        # domain set is then partial through tenant_domain_names below (LIVE-FIX-7, as LIVE-FIX-6 L1a).
+        aliases = item.get("domainAliases")
+        for alias in aliases if isinstance(aliases, list) else []:
             if not isinstance(alias, dict):
                 continue
             alias_name = str(alias.get("domainAliasName") or "").strip().lower()
@@ -885,7 +890,14 @@ def build_google_normalized_snapshot(
     domains_section = (collector_payloads.get("google_directory") or {}).get("domains")
     domains_incomplete = any(
         row.get("status") not in (None, "ok") or row.get("collection_truncated") is True for row in domain_rows
-    ) or (isinstance(domains_section, dict) and domains_section.get("collection_truncated") is True)
+    ) or (isinstance(domains_section, dict) and (
+        domains_section.get("collection_truncated") is True
+        or bool(domains_section.get("error") or domains_section.get("error_class"))
+        # A domain or alias row that cannot be read (not an object, no valid name, an alias list that is not a list)
+        # may be a name the tenant holds: the set is not known, exactly when the Drive collector's own reading of the
+        # same list is not complete (drive_scope.tenant_domain_names, LIVE-FIX-6 L1a).
+        or tenant_domain_names(domains_section.get("value")) is None
+    ))
     if seen_domains:
         # A list cut short or partly read can miss a secondary or alias domain, so it is not "known".
         internal_domains_status = "partial" if domains_incomplete else "known"
@@ -972,6 +984,7 @@ def build_google_normalized_snapshot(
             role_id=item.get("roleId"),
             role_name=(roles.get(str(item.get("roleId"))) or {}).get("roleName"),
             assigned_to=item.get("assignedTo"),
+            assignee_type=item.get("assigneeType"),
             scope_type=item.get("scopeType"),
             org_unit_id=item.get("orgUnitId"),
         )
@@ -1096,6 +1109,9 @@ def build_google_normalized_snapshot(
             web_view_link=item.get("webViewLink"),
             shared=item.get("shared"),
             owners=item.get("owners") or [],
+            # Whether the file sits in a shared drive, so findings can tell it from a My Drive file; a record
+            # written before this field existed carries none and is read as unknown.
+            in_shared_drive="driveId" in item,
             permissions=item.get("permissions") or [],
             modified_time=item.get("modifiedTime"),
         )
@@ -1202,11 +1218,17 @@ def build_google_normalized_snapshot(
     activity_records: list[dict[str, Any]] = []
     for source, payload in collector_payloads.get("google_reports", {}).items():
         for item in _values({"items": payload}, "items"):
+            # Only an Activity.id of its discovery shape (valid_activity_id: a decimal int64 uniqueQualifier among
+            # them) names the record by its uniqueQualifier, as before. Any other id, withheld or not, is never copied
+            # into a record key: it can hold a customer id (LIVE-FIX-6 B2a, LIVE-FIX-7 B2a). The record is then keyed
+            # by its stream and position, which identify nothing.
+            activity_id = item.get("id")
             activity_records.append(
                 _record(
                     "google_activity",
                     f"google_reports.{source}",
-                    str(item.get("id", {}).get("uniqueQualifier") if isinstance(item.get("id"), dict) else item.get("id") or f"{source}:{len(activity_records)}"),
+                    str(activity_id.get("uniqueQualifier")) if valid_activity_id(activity_id)
+                    else f"{source}:{len(activity_records)}",
                     application=source.replace("Activities", ""),
                     actor_email=(item.get("actor") or {}).get("email") if isinstance(item.get("actor"), dict) else None,
                     event_names=[
