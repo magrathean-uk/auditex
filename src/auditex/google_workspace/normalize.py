@@ -1097,6 +1097,9 @@ def build_google_normalized_snapshot(
             web_view_link=item.get("webViewLink"),
             shared=item.get("shared"),
             owners=item.get("owners") or [],
+            # Whether the file sits in a shared drive, so findings can tell it from a My Drive file; a record
+            # written before this field existed carries none and is read as unknown.
+            in_shared_drive="driveId" in item,
             permissions=item.get("permissions") or [],
             modified_time=item.get("modifiedTime"),
         )
