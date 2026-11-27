@@ -274,7 +274,6 @@
     {"auditex": ["not_met"], "cisa": ["pass"], "cite": "gws-design 8.3a D21", "id": "D21", "policy_id": "GWS.COMMONCONTROLS.5.6v1"},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3a D14", "id": "D14", "policy_id": "GWS.COMMONCONTROLS.6.1v1", "reason_codes": ["data_unusable_setting_value"]},
     {"auditex": ["not_met"], "cisa": ["pass"], "cite": "output-contract D24", "id": "D24", "policy_id": "GWS.COMMONCONTROLS.6.1v1", "reason_codes": ["admin_uses_external_sso"]},
-    {"auditex": ["not_assessed"], "cisa": ["fail", "pass"], "cite": "output-contract D24", "id": "D24", "policy_id": "GWS.COMMONCONTROLS.6.1v1", "reason_codes": ["data_unusable_section_shape"]},
     {"auditex": ["met", "not_met"], "cisa": ["fail", "pass"], "cite": "gws-design 8.3 D9", "id": "D9", "policy_id": "GWS.COMMONCONTROLS.6.2v1"},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3a D13", "id": "D13", "policy_id": "GWS.COMMONCONTROLS.6.2v1"},
     {"auditex": ["not_assessed"], "cisa": ["pass"], "cite": "gws-design 8.3 D2", "id": "D2", "policy_id": "GWS.COMMONCONTROLS.7.1v1", "reason_codes": ["data_unavailable_setting_absent"]},

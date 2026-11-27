@@ -854,7 +854,6 @@ def test_divergence_map_is_valid_and_cites_its_rows():
         assert f"\n| {did} | " in contract
     assert [(e["policy_id"], e["cisa"], e["auditex"], e["reason_codes"]) for e in gws if e["id"] in {"D23", "D24"}] == [
         ("GWS.COMMONCONTROLS.6.1v1", ["pass"], ["not_met"], ["admin_uses_external_sso"]),
-        ("GWS.COMMONCONTROLS.6.1v1", ["fail", "pass"], ["not_assessed"], ["data_unusable_section_shape"]),
         ("GWS.GMAIL.14.1v1", ["pass"], ["not_met"], ["unit_violates"]),
         ("GWS.GMAIL.14.1v1", ["pass"], ["not_assessed"], ["data_unusable_setting_value"]),
     ]
@@ -875,8 +874,10 @@ def test_divergence_map_is_valid_and_cites_its_rows():
     ("GWS.GMAIL.14.1v1", "pass", "not_assessed", "data_unusable_setting_value", ["D11", "D12", "D23"]),
     ("GWS.GMAIL.14.1v1", "fail", "not_assessed", "data_unusable_setting_value", ["D11"]),
     ("GWS.GMAIL.14.1v1", "no_events", "not_met", "unit_violates", []),
-    ("GWS.COMMONCONTROLS.6.1v1", "pass", "not_assessed", "data_unusable_section_shape", ["D24"]),
-    ("GWS.COMMONCONTROLS.6.1v1", "fail", "not_assessed", "data_unusable_section_shape", ["D24"]),
+    # LIVE-FIX-5 M2: the unplaceable role holder and an unplaceable flagged admin give the same shape answer, so it is
+    # never labelled D24: it reports as auditex_not_assessed.
+    ("GWS.COMMONCONTROLS.6.1v1", "pass", "not_assessed", "data_unusable_section_shape", []),
+    ("GWS.COMMONCONTROLS.6.1v1", "fail", "not_assessed", "data_unusable_section_shape", []),
     ("GWS.COMMONCONTROLS.6.1v1", "pass", "not_met", "admin_uses_external_sso", ["D24"]),
     ("GWS.COMMONCONTROLS.6.1v1", "pass", "not_assessed", "data_unavailable_sso_read_incomplete", []),
     ("GWS.COMMONCONTROLS.6.1v1", "fail", "met", "admins_use_google_sign_in", []),
@@ -886,6 +887,8 @@ def test_output_contract_divergences_match_only_their_cases(policy_id, cisa, aud
     assert found == expected
     if expected:
         assert parity.categorise(cisa, auditex, found) == "documented_divergence"
+    elif auditex == "not_assessed" and cisa in {"pass", "fail"}:
+        assert parity.categorise(cisa, auditex, found) == "auditex_not_assessed"
 
 
 @pytest.mark.parametrize("bad", [

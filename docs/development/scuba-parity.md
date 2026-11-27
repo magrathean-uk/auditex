@@ -109,8 +109,9 @@ row: a failed prerequisite is not a documented rule difference.
   set) of the ScubaGoggles divergence table in `docs/reference/output-contract.md`, added after the design
   addendum, with their summaries under `rows`. Their entries carry the verdicts and reason codes the shipped rules
   give in those cases: D23 `not_met` (`unit_violates`) or `not_assessed` (`data_unusable_setting_value`) against
-  `pass`; D24 `not_met` (`admin_uses_external_sso`) against `pass` and `not_assessed`
-  (`data_unusable_section_shape`) against `pass` or `fail`.
+  `pass`; D24 `not_met` (`admin_uses_external_sso`) against `pass`. D24's `not_assessed`
+  (`data_unusable_section_shape`) has no entry: an unplaceable flagged admin gives the same answer, so the pair would
+  label an unrelated data gap documented; it reports as `auditex_not_assessed`.
 - `m365-spec Dn`: the value-rules spec v3.9.1 divergences from the pinned ScubaGear Rego. These are derived from
   the spec's replay vectors whose disagreement reads `expected: Dn` (vectors sha256 recorded in the file),
   grouped by policy and D id, with the Rego gold mapped to a CISA class and the rule's verdict and reason codes
