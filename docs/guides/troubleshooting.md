@@ -123,7 +123,7 @@ Confirm the Drive collector is selected and scopes are present:
 https://www.googleapis.com/auth/drive.metadata.readonly,https://www.googleapis.com/auth/drive.readonly
 ```
 
-`https://www.googleapis.com/auth/admin.directory.domain.readonly` is optional for Drive: without it every file stays in scope and its sharing is read one by one.
+`https://www.googleapis.com/auth/admin.directory.domain.readonly` is optional for Drive: without it every file stays in scope and its sharing is read one by one. Declining it in an OAuth consent for a Drive-only run does not fail the sign-in, and the saved token is reused as it is; to add it later, delete the token cache and sign in again.
 
 Auditex does not read Drive file content. Broad Drive scope risk is declared in the data-handling and API inventory artifacts.
 
