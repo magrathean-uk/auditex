@@ -476,3 +476,34 @@ def test_live_fix_5_m1_a_drive_only_run_asks_for_the_domain_scope_in_its_one_sig
         "https://www.googleapis.com/auth/drive.readonly",
         "https://www.googleapis.com/auth/admin.directory.domain.readonly",
     )
+
+
+# ---- LIVE-FIX-6 M1b: the Drive-only setup guide lists the Admin SDK API for its optional read ---------------------
+
+def test_live_fix_6_m1b_drive_only_setup_guide_lists_the_admin_sdk_api_as_optional() -> None:
+    from auditex.google_workspace.collectors import REGISTRY
+    from auditex.setup_guide import (
+        build_google_setup_guide,
+        render_setup_guide_markdown,
+    )
+    from azure_tenant_audit.scope_catalog import build_google_scope_catalog
+
+    assert build_google_scope_catalog(registry=REGISTRY)["google_drive_posture"]["optional_api_enablement"] == [
+        "Admin SDK API"]
+    guide = build_google_setup_guide(collectors="google_drive_posture")
+    assert guide["api_enablement"] == ["Google Drive API"]
+    assert guide["optional_api_enablement"] == [{
+        "api": "Admin SDK API", "collector": "google_drive_posture",
+        "note": "Needed only for this collector's optional read-only scope; without it that read falls back.",
+    }]
+    markdown = render_setup_guide_markdown(guide)
+    assert "## APIs To Enable\n\n- Google Drive API\n- Admin SDK API (optional, for `google_drive_posture`: Needed only " \
+           "for this collector's optional read-only scope; without it that read falls back.)" in markdown
+
+
+def test_live_fix_6_m1b_a_collector_that_needs_the_admin_sdk_api_makes_it_required() -> None:
+    from auditex.setup_guide import build_google_setup_guide
+
+    guide = build_google_setup_guide(collectors="google_drive_posture,google_directory")
+    assert guide["api_enablement"] == ["Google Drive API", "Admin SDK API"]
+    assert guide["optional_api_enablement"] == []

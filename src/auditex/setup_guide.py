@@ -179,6 +179,14 @@ def build_google_setup_guide(
         notes = _mapping(_mapping(catalog.get(name)).get("optional_permission_notes"))
         optional_scopes.append({"scope": scope, "collector": name, "note": str(notes.get(scope) or "")})
     scopes_csv = ",".join([*required_scopes, *(row["scope"] for row in optional_scopes)])
+    # An API only an optional scope's read uses (the Admin SDK API for Drive's Directory domains read) is listed apart.
+    optional_api_enablement: list[dict[str, str]] = []
+    for api in aggregate["optional_api_enablement"]:
+        name = next(name for name in selected if api in (_mapping(catalog.get(name)).get("optional_api_enablement") or []))
+        optional_api_enablement.append({
+            "api": api, "collector": name,
+            "note": "Needed only for this collector's optional read-only scope; without it that read falls back.",
+        })
     provider_assertions = {
         "read_only_audit": True,
         "production_writes": False,
@@ -214,6 +222,7 @@ def build_google_setup_guide(
         "collector_preset": collector_preset,
         "selected_collectors": selected,
         "api_enablement": api_enablement,
+        "optional_api_enablement": optional_api_enablement,
         "required_scopes": required_scopes,
         "optional_scopes": optional_scopes,
         "scopes_csv": scopes_csv,
@@ -509,6 +518,8 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
         lines.extend(["", "## APIs To Enable", ""])
         for api in payload.get("api_enablement") or []:
             lines.append(f"- {api}")
+        for row in [_mapping(item) for item in payload.get("optional_api_enablement") or []]:
+            lines.append(f"- {row.get('api')} (optional, for `{row.get('collector')}`: {row.get('note')})")
     else:
         lines.extend(["", "## Microsoft Graph Permissions", ""])
         for permission in payload.get("graph_permissions") or []:
