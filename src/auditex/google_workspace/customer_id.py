@@ -128,10 +128,15 @@ def _application_name(value: Any) -> bool:
     return isinstance(value, str) and bool(_APPLICATION_NAME.fullmatch(value))
 
 
-def _object_of(value: Any, members: Mapping[str, Callable[[Any], bool]]) -> bool:
-    """An object whose every key is one of ``members`` (exact) and whose every value passes that member's check."""
+def _object_of(value: Any, members: tuple[tuple[str, Callable[[Any], bool]], ...]) -> bool:
+    """An object whose every key is one of ``members`` (exact) and whose every value passes that member's check.
+
+    ``members`` is pairs, not a mapping display: these are the names the check reads, not field names Auditex writes,
+    so they never join the redaction's field-name exemption (``time`` among them must stay masked as a mapping key).
+    """
+    checks = dict(members)
     return isinstance(value, dict) and all(
-        isinstance(key, str) and key in members and members[key](item) for key, item in value.items()
+        isinstance(key, str) and key in checks and checks[key](item) for key, item in value.items()
     )
 
 
@@ -139,47 +144,50 @@ def valid_activity_id(value: Any) -> bool:
     """Whether a Reports Activity.id has its discovery shape: an object of ``applicationName`` (a Reports application
     name), ``customerId`` (a string), ``time`` (RFC 3339) and ``uniqueQualifier`` (a decimal int64 string), nothing
     else. Only such an id may name a normalised activity record."""
-    return _object_of(value, {
-        "applicationName": _application_name, "customerId": _string, "time": _rfc3339, "uniqueQualifier": _int64_text,
-    })
+    return _object_of(value, (
+        ("applicationName", _application_name), ("customerId", _string), ("time", _rfc3339),
+        ("uniqueQualifier", _int64_text),
+    ))
 
 
 def _valid_usage_entity(value: Any) -> bool:
-    return _object_of(value, {
-        "customerId": _string, "entityId": _string, "profileId": _string, "type": _string, "userEmail": _string,
-    })
+    return _object_of(value, tuple(
+        (name, _string) for name in ("customerId", "entityId", "profileId", "type", "userEmail")
+    ))
 
 
 def _valid_owner_identity_entry(value: Any) -> bool:
     """One OwnerIdentity: any of the four identity objects, each of its own string members only. A ``customerIdentity``
     that :func:`_malformed_container` refuses is withheld as its own field; one it accepts must also hold nothing but
     its ``id`` (CustomerIdentity), or the whole list is withheld."""
-    return _object_of(value, {
-        "customerIdentity": lambda item: (
-            _malformed_container("customeridentity", item) or _object_of(item, {"id": _string})
-        ),
-        "groupIdentity": lambda item: _object_of(item, {"groupEmail": _string, "id": _string}),
-        "sharedDriveIdentity": lambda item: _object_of(item, {"id": _string, "sharedDriveName": _string}),
-        "userIdentity": lambda item: _object_of(item, {"id": _string, "userEmail": _string}),
-    })
+    def strings(*names: str) -> Callable[[Any], bool]:
+        return lambda item: _object_of(item, tuple((name, _string) for name in names))
+
+    return _object_of(value, (
+        ("customerIdentity", lambda item: _malformed_container("customeridentity", item) or strings("id")(item)),
+        ("groupIdentity", strings("groupEmail", "id")),
+        ("sharedDriveIdentity", strings("id", "sharedDriveName")),
+        ("userIdentity", strings("id", "userEmail")),
+    ))
 
 
 def _valid_owner_details(value: Any) -> bool:
     """OwnerDetails: a string ``ownerType`` and an ``ownerIdentity`` (whose own shape is checked as its own field)."""
-    return _object_of(value, {"ownerIdentity": lambda _item: True, "ownerType": _string})
+    return _object_of(value, (("ownerIdentity", lambda _item: True), ("ownerType", _string)))
 
 
 def _valid_resource_details_entry(value: Any) -> bool:
     """One ResourceDetails: string ``id``, ``relation``, ``title`` and ``type``, ``appliedLabels`` a list of
     AppliedLabel objects, and an ``ownerDetails`` (whose own shape is checked as its own field)."""
-    applied_label = {
-        "fieldValues": lambda item: isinstance(item, list), "id": _string,
-        "reason": lambda item: isinstance(item, dict), "title": _string,
-    }
-    return _object_of(value, {
-        "appliedLabels": lambda item: isinstance(item, list) and all(_object_of(label, applied_label) for label in item),
-        "id": _string, "ownerDetails": lambda _item: True, "relation": _string, "title": _string, "type": _string,
-    })
+    applied_label = (
+        ("fieldValues", lambda item: isinstance(item, list)), ("id", _string),
+        ("reason", lambda item: isinstance(item, dict)), ("title", _string),
+    )
+    return _object_of(value, (
+        ("appliedLabels", lambda item: isinstance(item, list) and all(_object_of(label, applied_label) for label in item)),
+        ("id", _string), ("ownerDetails", lambda _item: True), ("relation", _string), ("title", _string),
+        ("type", _string),
+    ))
 
 
 def _activity_row(row: Any) -> bool:
