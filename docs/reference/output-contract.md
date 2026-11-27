@@ -1377,7 +1377,9 @@ coverage gap, never a silent pass:
 - The list's coverage row (`coverage.json`) has `collection_truncated: true` and a
   `truncation_reason`: `operator_limit` (the `--top` limit was reached and the list
   continued), `pagination_failed` (a later page could not be read, so the rows read
-  so far are a prefix), `next_link_refused` (a next-page link outside Microsoft
+  so far are a prefix; on Google Workspace also a page holding a row that is not an object, or a row
+  list that is not a list: the readable rows are kept, the row is `partial` with
+  `error_class` `malformed_response`, and the list proves no absence), `next_link_refused` (a next-page link outside Microsoft
   Graph was not followed), `fanout_limit` (a collector's own bound on how many
   objects it expands) `input_limited` (a derived result built from a list that
   was cut) or `pagination_not_followed` (a next-page link the collector did not

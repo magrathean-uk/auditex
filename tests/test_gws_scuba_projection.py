@@ -985,6 +985,22 @@ def test_an_outside_user_assignee_on_an_incomplete_user_read_stays_unresolved(bu
     assert admins["privileged"][-1] == UNRESOLVED
 
 
+def test_live_fix_5_b1_a_users_read_that_dropped_a_row_proves_no_absence(bundle: Path) -> None:
+    """The reviewer's case: the five readable users kept, one unreadable row dropped by the paginator, and a user-typed
+    privileged assignee outside them. The collector now records that read as partial (malformed_response), so the
+    assignee may be the dropped row: CC.6.1 and CC.6.2 are not assessed."""
+    placed(bundle)
+    sso(bundle, {"target_org_unit": "orgUnits/root01", "sso_mode": "SSO_OFF"})
+    service_principal(bundle)
+    edit_coverage(bundle, "users", status="partial", error_class="malformed_response", collection_truncated=True,
+                  truncation_reason="pagination_failed")
+    projection = project_gws_run(bundle)
+    assert projection["gws_admins"]["complete"] is False
+    assert projection["gws_admins"]["privileged"][-1] == UNRESOLVED
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.1v1") == ("not_assessed", "data_unusable_section_shape")
+    assert verdict(projection, "GWS.COMMONCONTROLS.6.2v1") == ("not_assessed", "data_unavailable_user_read_incomplete")
+
+
 @pytest.mark.parametrize("role,privileged", [({"roleId": 5}, None), ({"roleId": 5, "rolePrivileges": []}, False),
                                              ({"roleId": 5, "roleName": "Services Admin"}, True),
                                              ({"roleId": 5, "isSuperAdminRole": True}, True)])

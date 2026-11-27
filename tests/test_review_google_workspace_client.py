@@ -980,3 +980,64 @@ def test_live_fix_1_final_m2_a_row_with_one_read_setting_is_still_complete() -> 
     from auditex.google_workspace.client import gmail_settings_status
 
     assert gmail_settings_status({"userEmail": "b@example.com", "imap": {"enabled": False}}) == ("ok", None, None)
+
+
+# ---- LIVE-FIX-5 B1: a list row that cannot be read is never dropped silently ----------------------------------
+
+_GOOD_USERS = [{"id": "u100", "primaryEmail": "ada@example.com"}, {"id": "u200", "primaryEmail": "bo@example.com"}]
+
+
+@pytest.mark.parametrize("bad_row", [None, ["u300"], "u300", 300, True, 1.5])
+def test_live_fix_5_b1_an_unreadable_user_row_makes_the_list_partial(bad_row: Any) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    rows = client._collect_pages(_paged({None: [{"users": [_GOOD_USERS[0], bad_row, _GOOD_USERS[1]]}]}),
+                                 "users", limit=None)
+    assert list(rows) == _GOOD_USERS
+    assert isinstance(rows.page_error, google_client.PolicyReadError)
+    assert rows.page_error.error_class == "malformed_response"
+
+
+@pytest.mark.parametrize("bad_list", ["u300", "", 0, 7, False, True, {}, {"id": "u300"}])
+def test_live_fix_5_b1_a_row_list_that_is_not_a_list_makes_the_list_partial(bad_list: Any) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    rows = client._collect_pages(_paged({None: [{"users": list(_GOOD_USERS), "nextPageToken": "p2"}],
+                                         "p2": [{"users": bad_list}]}), "users", limit=None)
+    assert list(rows) == _GOOD_USERS
+    assert rows.page_error is not None and rows.page_error.error_class == "malformed_response"
+
+
+@pytest.mark.parametrize("page", [{}, {"users": []}, {"users": None}, {"kind": "admin#directory#users"}])
+def test_live_fix_5_b1_an_absent_or_empty_row_list_is_still_a_complete_read(page: dict[str, Any]) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    rows = client._collect_pages(_paged({None: [{"users": list(_GOOD_USERS), "nextPageToken": "p2"}], "p2": [page]}),
+                                 "users", limit=None)
+    assert list(rows) == _GOOD_USERS
+    assert rows.page_error is None and rows.truncated is False
+
+
+@pytest.mark.parametrize("values", [[{"orgUnitId": "id:root01"}, None], [{"orgUnitId": "id:root01"}, "x"],
+                                    "id:root01", 5, {"orgUnitId": "id:root01"}])
+def test_live_fix_5_b1_a_single_call_list_with_an_unreadable_row_is_partial(values: Any) -> None:
+    rows = google_client._cut(values, None)
+    assert rows.page_error is not None and rows.page_error.error_class == "malformed_response"
+
+
+def test_live_fix_5_b1_reviewer_scenario_a_null_user_row_is_a_partial_users_read() -> None:
+    """Five readable users and one null row: the users read is partial, so it proves no absence (CC.6.1)."""
+    users = [{"id": f"u{n}00", "primaryEmail": f"user{n}@example.com", "isAdmin": n < 3} for n in range(1, 6)]
+
+    class _Client:
+        def list_directory(self, resource: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            if resource == "users":
+                client = GoogleWorkspaceClient(credentials=None)
+                return client._collect_pages(_paged({None: [{"users": [*users[:3], None, *users[3:]]}]}),
+                                             "users", limit=None)
+            return []
+
+    result = GoogleDirectoryCollector().run({"client": _Client()})
+    users_row = next(row for row in result.coverage if row["name"] == "users")
+    assert result.payload["users"]["value"] == users
+    assert users_row["status"] == "partial"
+    assert users_row["error_class"] == "malformed_response"
+    assert users_row["collection_truncated"] is True
+    assert result.status == "partial"

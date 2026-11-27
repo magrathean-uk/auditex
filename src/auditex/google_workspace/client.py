@@ -554,12 +554,41 @@ def _collect_policy_pages(
     return result
 
 
-def _cut(values: list[dict[str, Any]], limit: int | None) -> CollectedRows:
-    """Dict rows of a single-call list cut to ``limit``; ``truncated`` says rows were dropped."""
+UNREADABLE_ROWS_TEXT = (
+    "Some rows of this Google list cannot be read (not an object, or a list that is not a list); the rows read are "
+    "kept, but the list is not complete."
+)
+
+
+def unreadable_rows_error() -> PolicyReadError:
+    """A fixed error for a list answer holding a row that cannot be read: the list is not proof of absence."""
+    return PolicyReadError(UNREADABLE_ROWS_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
+
+
+def _readable_rows(values: Any) -> tuple[list[dict[str, Any]], bool]:
+    """The object rows of one list answer, and whether every row could be read (an absent or empty list can)."""
+    if values is None or values == []:
+        return [], True
+    if not isinstance(values, list):
+        return [], False
     rows = [item for item in values if isinstance(item, dict)]
+    return rows, len(rows) == len(values)
+
+
+def _cut(values: Any, limit: int | None) -> CollectedRows:
+    """Dict rows of a single-call list cut to ``limit``; ``truncated`` says rows were dropped.
+
+    A row that is not an object, or a list field that is not a list, is never dropped silently: the result carries a
+    ``page_error`` (``malformed_response``), so the read is recorded as partial and proves no absence.
+    """
+    rows, whole = _readable_rows(values)
     if not limit or len(rows) <= limit:
-        return CollectedRows(rows, result_limit=limit or None)
-    return CollectedRows(rows[:limit], truncated=True, result_limit=limit)
+        result = CollectedRows(rows, result_limit=limit or None)
+    else:
+        result = CollectedRows(rows[:limit], truncated=True, result_limit=limit)
+    if not whole:
+        result.page_error = unreadable_rows_error()
+    return result
 
 
 @dataclass
@@ -679,6 +708,14 @@ class GoogleWorkspaceClient:
         rows: list[dict[str, Any]] = []
         token: str | None = None
         first_page = True
+        # A row that is not an object (null, a list, a string, a number) or a row list that is not a list is unread
+        # evidence: the rows read are kept, but the list is recorded as partial, never as complete (LIVE-FIX-5 B1).
+        unreadable = False
+
+        def finish(kept: list[dict[str, Any]], *, truncated: bool = False) -> CollectedRows:
+            return CollectedRows(kept, truncated=truncated, result_limit=limit,
+                                 page_error=unreadable_rows_error() if unreadable else None)
+
         while True:
             try:
                 payload = _execute(lambda token=token: request_factory(token).execute())
@@ -689,15 +726,19 @@ class GoogleWorkspaceClient:
                 kept = rows[:limit] if limit is not None else rows
                 return CollectedRows(kept, truncated=True, result_limit=limit, page_error=exc)
             first_page = False
-            values = payload.get(item_key) or payload.get("items") or payload.get("value") or []
-            if isinstance(values, list):
-                rows.extend(item for item in values if isinstance(item, dict))
+            present = [payload[key] for key in (item_key, "items", "value") if key in payload]
+            values = next((value for value in present if value), None)
+            # A row list given as "", 0, {} or false is no list at all, not an empty one.
+            page_rows, whole = _readable_rows(values)
+            whole = whole and all(value is None or value == [] or value is values for value in present)
+            rows.extend(page_rows)
+            unreadable = unreadable or not whole
             token = payload.get("nextPageToken")
             if limit is not None and len(rows) >= limit:
                 # More rows, or a further page, means the list was cut at the operator's limit.
-                return CollectedRows(rows[:limit], truncated=len(rows) > limit or bool(token), result_limit=limit)
+                return finish(rows[:limit], truncated=len(rows) > limit or bool(token))
             if not token:
-                return CollectedRows(rows, result_limit=limit)
+                return finish(rows)
 
     def list_directory(self, resource: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
