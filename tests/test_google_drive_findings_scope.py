@@ -261,3 +261,14 @@ def test_live_fix_6_l1a_a_readable_list_stays_known_for_both_readers() -> None:
     assert snapshot["snapshot"]["internal_domains_status"] == "known"
     assert tenant_domain_names(directory) == frozenset({"example.com", "alias.example.net", "example.org"})
     assert _drive_rules(snapshot) == []
+
+
+# ---- LIVE-FIX-7 item 3: an alias list of the wrong type never crashes normalisation; the set is partial ------------
+
+@pytest.mark.parametrize("aliases", [True, False, 5, 1.5, "alias.example.net", {"domainAliasName": "alias.example.net"}, ""])
+def test_live_fix_7_domain_aliases_of_the_wrong_type_make_the_domain_set_partial(aliases: Any) -> None:
+    owned = _file(owners=("owner@alias.example.net",))
+    snapshot = _snapshot([owned], directory=[{**PRIMARY, "domainAliases": aliases}])
+    assert snapshot["snapshot"]["internal_domains_status"] == "partial"
+    assert [record["domain_name"] for record in snapshot["google_domains"]["records"]] == ["example.com"]
+    assert _drive_rules(snapshot) == KEPT

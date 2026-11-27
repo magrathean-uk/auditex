@@ -859,7 +859,10 @@ def build_google_normalized_snapshot(
                 verified=item.get("verified"),
             )
         )
-        for alias in item.get("domainAliases") or []:
+        # An alias list of the wrong type (true, a string, a mapping) is read as no aliases here, never iterated; the
+        # domain set is then partial through tenant_domain_names below (LIVE-FIX-7, as LIVE-FIX-6 L1a).
+        aliases = item.get("domainAliases")
+        for alias in aliases if isinstance(aliases, list) else []:
             if not isinstance(alias, dict):
                 continue
             alias_name = str(alias.get("domainAliasName") or "").strip().lower()
