@@ -8,6 +8,7 @@ owners that are missing, empty, malformed, without an email or inside the tenant
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -16,6 +17,22 @@ from azure_tenant_audit.exposure_lookup import is_safe_domain_name
 DOMAIN_SCOPE = "https://www.googleapis.com/auth/admin.directory.domain.readonly"
 
 TenantDomains = Callable[[], "frozenset[str] | None"]
+
+# An owner address proves a domain only in its plain form: an RFC 5322 dot-atom local part of ASCII atext (no
+# whitespace, control or quoted characters, no leading, trailing or doubled dot), exactly one "@", then a domain
+# is_safe_domain_name accepts. Anything else (a space, a tab, a second "@", an empty side) is unknown, never
+# stripped and accepted (LIVE-FIX-5 B3).
+_LOCAL_PART = re.compile(r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*", re.ASCII)
+
+
+def owner_address_domain(email: Any) -> str | None:
+    """The lower-cased domain of one well-formed owner address, or ``None`` when the address proves nothing."""
+    if not isinstance(email, str) or len(email) > 254 or email.count("@") != 1:
+        return None
+    local, domain = email.split("@")
+    if len(local) > 64 or not _LOCAL_PART.fullmatch(local) or not is_safe_domain_name(domain):
+        return None
+    return domain.lower()
 
 
 def tenant_domain_names(rows: Any) -> frozenset[str] | None:
@@ -52,13 +69,10 @@ def owner_domains(drive_file: Any) -> frozenset[str] | None:
         return None
     domains: set[str] = set()
     for owner in owners:
-        email = owner.get("emailAddress") if isinstance(owner, dict) else None
-        if not isinstance(email, str) or email.count("@") != 1:
+        domain = owner_address_domain(owner.get("emailAddress") if isinstance(owner, dict) else None)
+        if domain is None:
             return None
-        local, domain = email.split("@")
-        if not local or not is_safe_domain_name(domain):
-            return None
-        domains.add(domain.lower())
+        domains.add(domain)
     return frozenset(domains)
 
 

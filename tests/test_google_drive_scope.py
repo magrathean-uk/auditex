@@ -342,3 +342,68 @@ def test_out_of_scope_files_raise_no_drive_findings() -> None:
         collector_payloads={"google_drive_posture": {"driveFiles": {"value": list(files)}, "sharedDrives": {"value": []}}},
     )
     assert [item["rule_id"] for item in build_google_findings(snapshot) if item["rule_id"].startswith("google.drive")] == []
+
+
+# ---- LIVE-FIX-5 B3: an owner address proves its domain only in its plain form ------------------------------------
+
+MALFORMED_OWNERS = [
+    " @example.org",
+    "@example.org",
+    "a @example.org",
+    " a@example.org",
+    "a@example.org ",
+    "a@ example.org",
+    "a\t@example.org",
+    "a\n@example.org",
+    "a@example.org\n",
+    "a\x00b@example.org",
+    "a\x7f@example.org",
+    "a b@example.org",
+    "a@exa mple.org",
+    "a@b@example.org",
+    "a@@example.org",
+    "a@",
+    "@",
+    "",
+    " ",
+    ".a@example.org",
+    "a.@example.org",
+    "a..b@example.org",
+    '"a b"@example.org',
+    "é@example.org",
+    "a@example.org.",
+    "a@-example.org",
+    "a@example",
+    "a" * 65 + "@example.org",
+    None,
+    42,
+    ["a@example.org"],
+    {"emailAddress": "a@example.org"},
+]
+
+
+@pytest.mark.parametrize("email", MALFORMED_OWNERS)
+def test_live_fix_5_b3_a_malformed_owner_address_is_unknown(email: Any) -> None:
+    assert owner_domains(_owned(email)) is None
+    assert owner_domains(_owned("b@example.org", email)) is None
+    assert owned_outside(_owned(email), TENANT) is False
+
+
+@pytest.mark.parametrize(("email", "domain"), [
+    ("a@example.org", "example.org"),
+    ("first.last+tag@Example.ORG", "example.org"),
+    ("o'brien_x-y@sub.example.org", "sub.example.org"),
+])
+def test_live_fix_5_b3_a_plain_owner_address_still_proves_its_domain(email: str, domain: str) -> None:
+    assert owner_domains(_owned(email)) == frozenset({domain})
+
+
+@pytest.mark.parametrize("email", [" @example.org", "a @example.org", "a@example.org ", "a@b@example.org", ""])
+def test_live_fix_5_b3_reviewer_scenario_a_malformed_owner_keeps_the_permissions_gap(email: str) -> None:
+    calls: list[str] = []
+    drive_file = {"id": "f1", "name": "Theirs", "owners": [{"emailAddress": email}]}
+    result = GoogleDrivePostureCollector().run({"client": _client([drive_file], DOMAINS, calls)})
+    row = next(item for item in result.coverage if item["name"] == "drivePermissions")
+    assert [call for call in calls if call.startswith("permissions.list")] == ["permissions.list:f1"]
+    assert (row["status"], row["error"], "out_of_scope_files" in row) == ("failed", UNREADABLE.format(n=1), False)
+    assert result.status == "partial"
