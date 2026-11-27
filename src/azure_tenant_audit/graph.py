@@ -18,11 +18,15 @@ from requests.exceptions import RequestException, Timeout
 from . import auth_context, certificate_auth
 from .certificate_auth import CERTIFICATE_ERRORS, CertificateAuthError
 from .config import CERTIFICATE_WAY, AuthConfig, check_single_credential
+from .logger_hold import LoggerHold
 from .versioning import package_user_agent
 
 LOG = logging.getLogger(__name__)
 # A certificate token is refreshed this many seconds before msal says it expires.
 _CERTIFICATE_REFRESH_MARGIN_SECONDS = 300.0
+# msal and its children are silent while the certificate token exchange runs (``logger.exception`` logs a non-JSON token
+# endpoint reply raw, at ERROR); restored when the last overlapping exchange ends.
+_MSAL_LOG_HOLD = LoggerHold(("msal",), logging.CRITICAL + 1)
 
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
@@ -456,19 +460,24 @@ class GraphClient:
             return token
 
     def _certificate_exchange(self, scope: str) -> tuple[str | None, float, str | None]:
-        """Run msal inside one frame; every failure comes back as a fixed code, never an exception or body."""
+        """Run msal inside one frame; every failure comes back as a fixed code, never an exception or body.
+
+        msal's loggers are held silent for the exchange: msal logs a token endpoint reply that is not JSON, raw, at
+        ERROR before the failure reaches this frame, and that body can carry a token.
+        """
         try:
-            app = self._certificate_app
-            if app is None:
-                authority = certificate_auth.certificate_authority(self.auth.authority, self.auth.tenant_id)
-                app = certificate_auth.build_confidential_client(
-                    self.auth.certificate,
-                    client_id=self.auth.client_id,
-                    authority=authority,
-                    timeout=self.auth.timeout_seconds,
-                )
-                self._certificate_app = app
-            result = app.acquire_token_for_client(scopes=[scope])
+            with _MSAL_LOG_HOLD.hold():
+                app = self._certificate_app
+                if app is None:
+                    authority = certificate_auth.certificate_authority(self.auth.authority, self.auth.tenant_id)
+                    app = certificate_auth.build_confidential_client(
+                        self.auth.certificate,
+                        client_id=self.auth.client_id,
+                        authority=authority,
+                        timeout=self.auth.timeout_seconds,
+                    )
+                    self._certificate_app = app
+                result = app.acquire_token_for_client(scopes=[scope])
         except CertificateAuthError as exc:
             return None, 0.0, exc.error_code
         except Exception:  # noqa: BLE001 - msal and transport messages can carry request material

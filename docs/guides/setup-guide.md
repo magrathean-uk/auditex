@@ -155,7 +155,7 @@ Treat OAuth output as partial if domain-wide admin surfaces are blocked. OAuth c
 
 With an OAuth sign-in, Gmail delegates cannot be listed (Google allows that only under domain-wide delegation), so the Gmail surface is reported as partial and the report shows `delegates` as not read.
 
-Each run checks the cached sign-in with Google. If the run needs scopes the cache was not granted, or the sign-in was revoked or has expired (OAuth clients in Testing status expire refresh tokens after 7 days), the browser sign-in opens again; you never need to delete the token cache by hand. If Google's sign-in service is briefly unavailable, a sign-in that is still in date is used as it is; an expired one stops the run with "run again later" and does not open the browser.
+Each run checks the cached sign-in with Google and asks it only for the scopes that run needs, even when an earlier run's sign-in was granted more. If the run needs scopes the cache was not granted, or the sign-in was revoked or has expired (OAuth clients in Testing status expire refresh tokens after 7 days), the browser sign-in opens again; you never need to delete the token cache by hand. If Google's sign-in service is briefly unavailable, a sign-in that is still in date is used as it is; an expired one stops the run with "run again later" and does not open the browser.
 
 The service-account key must be an owner-only JSON file: `chmod 600 key.json`. Auditex refuses a key file that others can read, or a link, with `service_account_key_refused`.
 

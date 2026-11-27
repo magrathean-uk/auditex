@@ -105,6 +105,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("auditex.notify:_jira_search_existing", "private", "GET carrying the project key and the fingerprint digest only"),
     SinkEntry("auditex.notify:_github_search_existing_issue", "private", "GET carrying the repository and the fingerprint digest only"),
     SinkEntry("auditex.google_workspace.auth:build_google_credentials", "private", "operator's Google credential file (0600)"),
+    SinkEntry("auditex.google_workspace.auth:_narrow_cached_grant", "private", "operator's Google credential file (0600): narrows its recorded grant after a refused refresh or declined consent"),
     SinkEntry("auditex.google_workspace.collectors:GoogleDnsPostureCollector._DohSession.get", "private", "forwards the shared DNS-over-HTTPS GET to the configured resolver with a DNS query name and TXT type"),
     SinkEntry("auditex.bootstrap:print_doctor_report", "private", "operator terminal: toolchain status; diagnostics masked by the command-output boundary"),
     SinkEntry("auditex.bootstrap:run_setup", "private", "operator terminal: the install command for an optional extra (fixed text plus the interpreter and wheel paths)"),
@@ -147,6 +148,9 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("azure_tenant_audit.probe:run_live_probe", "private", "operator terminal: fixed collection notices, including the default DNS endpoint; no tenant data"),
     SinkEntry("azure_tenant_audit.run_files:copy_run_file", "private", "guarded unredacted copies to a caller-selected destination"),
     SinkEntry("azure_tenant_audit.run_files:open_run_file", "private", "read-only guarded descriptor; the scanner treats its flags as a write"),
+    SinkEntry("azure_tenant_audit.secret_hygiene:_open_lock_file", "private", "creates an empty 0600 lock file beside a credential file; writes no content"),
+    SinkEntry("azure_tenant_audit.secret_hygiene:_open_native_lock_file", "private", "creates an empty lock file beside a credential file (native Windows); writes no content"),
+    SinkEntry("azure_tenant_audit.secret_hygiene:mark_secret_unverified", "private", "creates an empty 0600 marker file beside a credential file; writes no content"),
     SinkEntry("azure_tenant_audit.secret_hygiene:secure_write_*", "private", "unredacted 0600 file primitives for credentials"),
     SinkEntry("azure_tenant_audit.waivers:load_waivers", "private", "warning on the operator's terminal about a waiver file"),
 )

@@ -629,12 +629,28 @@ def test_item26_old_cache_cannot_vouch_for_a_scope_during_an_outage(tmp_path: Pa
         google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_B,)))
 
 
-def test_item26_verified_grant_without_the_scope_fails_closed_during_an_outage(
-    tmp_path: Path, real_oauth: dict[str, Any]
+def test_item26_verified_grant_without_the_scope_signs_in_again_without_a_refresh(
+    tmp_path: Path, real_oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # SEC-1: a cache whose verified grant does not cover the run never stands in for it, outage or not; the run signs in
+    # again (here the consent is refused, so the run fails without proceeding as if granted).
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
     _real_cache(tmp_path, [_SCOPE_A, _SCOPE_B], verified=[_SCOPE_A])
-    with pytest.raises(RuntimeError, match="run again later"):
+    refreshes: list[int] = []
+    real_oauth["during_refresh"] = lambda: refreshes.append(1)
+    consents: list[list[str]] = []
+
+    def _consent(_cls: Any, _path: str, scopes: list[str]) -> Any:
+        consents.append(list(scopes))
+        raise OSError(5, "consent unavailable")
+
+    monkeypatch.setattr(InstalledAppFlow, "from_client_secrets_file", classmethod(_consent))
+    with pytest.raises(ValueError) as caught:
         google_auth.build_google_credentials(_oauth_config(tmp_path, (_SCOPE_B,)))
+    assert str(caught.value) == "oauth_client_unreadable: the configured OAuth client file could not be read (consent unavailable)."
+    assert consents == [[_SCOPE_B]]
+    assert refreshes == []
 
 
 def test_item16_fallback_returns_the_cached_token_and_never_writes_it_back(

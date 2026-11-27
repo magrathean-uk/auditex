@@ -1107,11 +1107,40 @@ is refused with `secret_folder_refused`, which never names the path. Point `--to
 owner-controlled writable folder; the default `.secrets/` folder is created `0700`. The cache is read through the same
 folder check, and only when it is a regular file (not a link) you own with no group or world write and no allowing ACL;
 otherwise the run stops with `secret_file_refused`, so a cache another account could have planted is never used. The
-cache is refreshed every run and saved only after a successful refresh or a fresh consent, together with the scopes
-Google actually granted (`auditex_verified_scopes`). A fresh consent that grants fewer scopes than the run needs is
-neither used nor saved; the run stops and names the missing scopes. When Google's token endpoint is down, a cached
-token still in date is used without rewriting the cache, and only when its recorded grant covers the run; an older
-cache that records no grant, or one whose grant is narrower, stops the run with "run again later". This outage
+cache's credentials are saved only after a successful refresh or a fresh consent, together with the scopes Google actually granted
+(`auditex_verified_scopes`), and the saved credentials name only that run's scopes. A loaded cache is narrowed to the
+scopes this run needs: it stands in for the run only when its recorded grant holds every one of them, and its refresh
+then asks for those scopes and no others, so a scope only an earlier run needed (or one the user has since declined or
+revoked) is never sent again. A cache whose recorded grant does not cover the run, or whose recorded value is null,
+empty, not a list or holds anything but scope tokens (a non-string, or a string outside the RFC 6749 section 3.3
+scope-token grammar, such as an empty string or one holding whitespace, a control character, DEL, a double quote, a
+backslash or a non-ASCII character: any such entry proves nothing, so the whole record grants nothing), is not refreshed: the run signs
+in again, at most once. When the token endpoint refuses a refresh with a grant error, the recorded grant is emptied
+before the new consent starts; when a refresh or a consent grants fewer scopes than the run needs, the recorded grant
+keeps only scopes that grant includes. The recorded grant is therefore never wider than what the token endpoint granted
+last, and a scope Google refused is neither sent on a later refresh nor claimed by the outage fallback until a consent
+grants it. Every rewrite of the cache (this narrowing and the save after a refresh or consent) holds an exclusive
+advisory lock on `.<cache name>.lock`, created owner-only in the cache's own folder (`flock` on Linux and macOS): the
+narrowing reads the cache again under the lock and rewrites it only while it still holds what the run read, so a
+newer cache another run saved meanwhile is left as it is and no other run's save can land between that check and the
+replace. An existing lock file is used only when it is a regular file (not a link) you own with no group or other
+permission bits and no allowing ACL; on native Windows a link or reparse point at the lock name, before or after it is
+opened, is refused. A refused lock file counts as a lock not obtained. A lock not obtained within 60 seconds (or a file
+system that offers none) leaves the cache as it is. When what the token endpoint granted matches the cache's recorded
+grant, the run continues and records nothing. When it differs, Auditex first leaves an empty owner-only (0600) marker,
+`.<cache name>.unverified`, beside the cache (created without the lock and never through a link), then stops with
+"Google sign-in stopped: another Auditex sign-in is updating the Google token cache; nothing was recorded; run again."
+While that marker is present, or when it cannot be checked, the cache's recorded grant covers nothing for the outage
+fallback; the next rewrite under the lock removes the marker after writing the new record, and only when it is a
+regular file this account owns (a link, a folder or another account's file at that name is left in place and keeps
+counting as the marker). A `--token-cache` whose
+file name has the lock or marker form (starts with `.` and ends with `.lock` or `.unverified`) is refused with
+`token_cache_refused`, and no secret file is ever written onto such a name. An older cache that records no grant at all keeps the earlier rule: it is used
+when the scopes it asked for include every scope the run needs, and is then trusted only for what the refresh grants.
+The cache is refreshed every run. A fresh consent that grants fewer scopes than the run needs is neither used nor
+saved (only the cache's recorded grant is narrowed, as above); the run stops and names the missing scopes. When Google's token endpoint is down, a cached token still in date
+is used without rewriting the cache, and only when its recorded grant covers the run and no `.unverified` marker sits
+beside it; it then claims only this run's scopes. An older cache that records no grant stops the run with "run again later". This outage
 fallback is off where the owner check proves nothing: on a macOS volume with "Ignore ownership on this volume" set
 (mounted `noowners`, read from the volume's mount flags), when those flags cannot be read, and on Windows; there an
 outage always stops the run with "run again later". Only the token endpoint's own grant errors (`invalid_grant`,
@@ -1123,6 +1152,21 @@ others can read, or a link, is refused with `service_account_key_refused`.
 `--verbose` raises Auditex's own logging to DEBUG but keeps `urllib3` and `msal` at WARNING, because their request
 lines can carry a pre-authenticated download query. Redirect-hop and download-host errors name only the host, path and
 status.
+
+While a Google sign-in runs (cache load, refresh, browser consent and token exchange), the dependency loggers
+`requests_oauthlib`, `oauthlib`, `google_auth_oauthlib`, `google.auth`, `google.oauth2` and `urllib3`, and any child of
+them with a level of its own, are held at WARNING or higher: at DEBUG they log the token request body, the token
+obtained and request material, and google-auth-oauthlib logs the consent redirect (which carries the authorisation
+code) at INFO. This applies whatever the host process has configured (an embedding application, the MCP server, a
+DEBUG root logger). Each logger's level and `propagate` setting are put back when the last overlapping sign-in ends, on
+an error too. Logger levels are process-wide, so while any sign-in runs these logger families drop every message below
+WARNING from every thread, including unrelated `urllib3` DEBUG lines from other work in the same process; Auditex's own
+logging and other logger families are unchanged. A token refresh google-auth makes later inside an API call
+(an access token expiring mid-run) is outside that window; google-auth masks token fields in its own request logs,
+and the httplib2 transport the API clients use logs only the method and URL. During the Microsoft 365 certificate token exchange the `msal` logger and its children are held silent (above
+CRITICAL), restored when the last overlapping exchange ends: msal logs a token endpoint reply that is not JSON, raw, at
+ERROR before Auditex turns the failure into `certificate_token_failed`, and that body can carry a token. Other msal
+messages from the same window (in any thread) are dropped too. `urllib3` logs only the token endpoint's request line.
 
 Use AI and MCP only with bundle artifacts intended for reasoning, such as
 `summary.json`, `summary.md`, `data-handling.json`, `audit-plan.json`,

@@ -164,12 +164,13 @@ def test_oauth_drive_alone_cache_with_a_granted_domain_scope_is_reused_but_the_d
     tmp_path: Path, oauth: dict[str, Any]
 ) -> None:
     # A cache from an earlier run whose consent granted the domain scope: still a real grant, but this run did not
-    # ask for it, so the Drive collector does not use it.
+    # ask for it, so the refresh leaves it out (SEC-1) and the Drive collector does not use it.
     _cache(tmp_path, [DRIVE_META, DRIVE_RO, DOMAIN])
     config = _auth(tmp_path, auth="oauth", collectors=DRIVE_ONLY)
     credentials = google_auth.build_google_credentials(config)
     assert oauth["flow_scopes"] == []
-    assert oauth["refresh_scopes"] == [[DRIVE_META, DRIVE_RO, DOMAIN]]
+    assert oauth["refresh_scopes"] == [[DRIVE_META, DRIVE_RO]]
+    assert credentials.has_scopes([DOMAIN]) is False
     assert tenant_domain_read_allowed(config, credentials) is False
 
 

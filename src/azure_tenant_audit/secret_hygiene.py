@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import errno
 import functools
 import json
@@ -10,7 +11,8 @@ import shlex
 import stat
 import sys
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -388,6 +390,8 @@ def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> P
     """
 
     target = Path(path).expanduser()
+    if reserved_secret_name(target.name):  # never replaces another secret file's lock or marker
+        raise _secret_file_refused()
     try:
         _create_private_parents(target.parent)
     except OSError:  # the OS message names the folder, which may be a sensitive argument such as --token-cache
@@ -444,6 +448,262 @@ def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> P
     finally:
         os.close(folder)
     return target
+
+
+# How long a read-modify-write of a secret file waits for another run holding its lock (a write takes milliseconds).
+SECRET_LOCK_WAIT = 60.0
+_SECRET_LOCK_POLL = 0.05
+# Windows marks a link or junction with this file attribute (``stat.FILE_ATTRIBUTE_REPARSE_POINT``).
+_REPARSE_POINT = 0x400
+
+
+def _lock_name(target: Path) -> str:
+    return f".{target.name}.lock"
+
+
+def _unverified_name(target: Path) -> str:
+    return f".{target.name}.unverified"
+
+
+def reserved_secret_name(name: str) -> bool:
+    """Whether ``name`` is in the namespace of another secret file's lock or marker (``.<name>.lock``,
+    ``.<name>.unverified``).
+
+    A secret file given such a name could be replaced onto, or be replaced by, another file's held lock or its marker,
+    so it is refused as a secret file path.
+    """
+    return name.startswith(".") and (name.endswith(".lock") or name.endswith(".unverified"))
+
+
+def mark_secret_unverified(path: str | Path) -> None:
+    """Leave ``.<name>.unverified`` beside the secret file at ``path``: what it records about itself is not current.
+
+    Needs no lock: the marker is created owner-only (0600) and never through a link; anything already at its name
+    (a marker another run left, a link, any other entry) counts as the marker. It is removed only by
+    :func:`clear_secret_unverified`, which a rewrite under the file's lock calls after writing.
+    """
+    target = Path(path).expanduser()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    if os.name != "posix":
+        try:
+            os.close(os.open(str(target.parent / _unverified_name(target)), flags | getattr(os, "O_BINARY", 0), 0o600))
+        except FileExistsError:
+            pass
+        return
+    folder = _open_secret_folder(target.parent)
+    try:
+        os.close(os.open(_unverified_name(target), flags, 0o600, dir_fd=folder))
+    except FileExistsError:
+        pass
+    finally:
+        os.close(folder)
+
+
+def secret_unverified(path: str | Path) -> bool:
+    """Whether the secret file at ``path`` has its ``.unverified`` marker, or the marker cannot be checked."""
+    target = Path(path).expanduser()
+    try:
+        os.lstat(target.parent / _unverified_name(target))
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        return True
+    return True
+
+
+def clear_secret_unverified(path: str | Path) -> None:
+    """Remove the ``.unverified`` marker; call it only under the file's lock, after the file has been rewritten.
+
+    A marker that cannot be removed stays (it only ever makes the file's own record count for less). Only a regular
+    file this account owns is removed, looked up without following links inside the checked folder; anything else at
+    the marker name (a link, a folder, another account's file) is left in place, where it keeps counting as the marker.
+    """
+    target = Path(path).expanduser()
+    name = _unverified_name(target)
+    if os.name != "posix":
+        marker = target.parent / name
+        try:
+            info = os.lstat(marker)
+            if stat.S_ISREG(info.st_mode) and not getattr(info, "st_file_attributes", 0) & _REPARSE_POINT:
+                os.unlink(marker)
+        except OSError:
+            pass
+        return
+    try:
+        folder = _open_secret_folder(target.parent)
+    except OSError:
+        return
+    try:
+        info = os.stat(name, dir_fd=folder, follow_symlinks=False)
+        if stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid():
+            os.unlink(name, dir_fd=folder)
+    except OSError:
+        pass
+    finally:
+        os.close(folder)
+
+
+def _lock_backend() -> tuple[str, Callable[[int], bool], Callable[[int], None]] | None:
+    """The advisory lock this platform offers: ``fcntl.flock`` on POSIX, ``msvcrt.locking`` on Windows, else ``None``.
+
+    Each returns the backend name, a non-blocking try (True when the lock is now held) and a release.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None  # type: ignore[assignment]
+    if fcntl is not None:
+
+        def _try_flock(descriptor: int) -> bool:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            return True
+
+        def _release_flock(descriptor: int) -> None:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+        return "fcntl", _try_flock, _release_flock
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+
+    def _try_locking(descriptor: int) -> bool:
+        os.lseek(descriptor, 0, os.SEEK_SET)  # msvcrt locks bytes from the current position: always the first byte
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+
+    def _release_locking(descriptor: int) -> None:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+
+    return "msvcrt", _try_locking, _release_locking
+
+
+class _LockFileRefused(Exception):
+    """The lock file is not one only this account can use (a link, a reparse point, another owner, loose mode)."""
+
+
+def _is_link_or_reparse_point(info: os.stat_result) -> bool:
+    return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & _REPARSE_POINT)
+
+
+def _open_native_lock_file(lock: Path) -> int:
+    """The lock file on a system without POSIX folder descriptors (native Windows): refused when the entry is a link or
+    a reparse point before or after it is opened, or is not the entry that was opened."""
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        before = os.lstat(lock)
+    except FileNotFoundError:
+        before = None
+    except OSError:
+        raise _LockFileRefused() from None
+    if before is not None and _is_link_or_reparse_point(before):
+        raise _LockFileRefused()
+    try:
+        descriptor = os.open(str(lock), flags, 0o600)
+    except OSError:
+        raise _LockFileRefused() from None
+    try:
+        after = os.lstat(lock)
+        opened = os.fstat(descriptor)
+        usable = (
+            not _is_link_or_reparse_point(after)
+            and stat.S_ISREG(opened.st_mode)
+            and (after.st_dev, after.st_ino) == (opened.st_dev, opened.st_ino)
+        )
+    except OSError:
+        usable = False
+    if not usable:
+        os.close(descriptor)
+        raise _LockFileRefused()
+    return descriptor
+
+
+def _open_lock_file(target: Path) -> int:
+    """The lock file beside ``target`` (``.<name>.lock``, created owner-only, never through a link), opened read-write.
+
+    Raises :class:`_LockFileRefused` unless it is a regular file this account owns with no group or other permission
+    bits and no ACL that allows anything: a lock file another account can open could hold every run's lock.
+    """
+    name = _lock_name(target)
+    if os.name != "posix":
+        return _open_native_lock_file(target.parent / name)
+    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    folder = _open_secret_folder(target.parent)
+    try:
+        descriptor = os.open(name, flags, 0o600, dir_fd=folder)
+    except OSError:  # a link (ELOOP) or an entry this account cannot open
+        raise _LockFileRefused() from None
+    finally:
+        os.close(folder)
+    try:
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+            or _acl_grants_access(descriptor)
+        ):
+            raise _LockFileRefused()
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+@contextlib.contextmanager
+def secret_file_lock(path: str | Path, *, wait: float | None = None) -> Iterator[bool]:
+    """Hold an exclusive advisory lock for a read-modify-write of the secret file at ``path``; yields whether it is held.
+
+    The lock is on ``.<name>.lock`` in the secret file's own folder (checked as for :func:`secure_write_text`), so every
+    run that rewrites the file through this lock is serialised: read the file again inside it, decide, write, and only
+    then let the next run in. ``False`` means the lock could not be taken within ``wait`` seconds (another run holds it,
+    the file system offers no lock, or the lock file is refused: a link, a reparse point, another owner, group or
+    other permission bits); the caller must then leave the file as it is. Released on an exception too.
+    """
+    target = Path(path).expanduser()
+    if reserved_secret_name(target.name):
+        raise _secret_file_refused()
+    backend = _lock_backend()
+    if backend is None:
+        yield False
+        return
+    _name, try_lock, release = backend
+    try:
+        _create_private_parents(target.parent)
+    except OSError:
+        raise _secret_folder_refused() from None
+    try:
+        descriptor = _open_lock_file(target)
+    except _LockFileRefused:
+        yield False
+        return
+    try:
+        deadline = time.monotonic() + (SECRET_LOCK_WAIT if wait is None else wait)
+        while True:
+            try:
+                held = try_lock(descriptor)
+            except OSError:  # no lock on this file system (ENOLCK, ENOTSUP): treated as never obtained
+                held = False
+                deadline = 0.0
+            if held or time.monotonic() >= deadline:
+                break
+            time.sleep(_SECRET_LOCK_POLL)
+        if not held:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            release(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def secure_write_json(path: str | Path, payload: Any, *, mode: int = 0o600) -> Path:

@@ -501,3 +501,60 @@ def test_malformed_authority_port_stops_the_engine_before_the_run_folder(monkeyp
         assert cli.run_live(args) == 2
     assert "private-marker" not in caplog.text
     assert not out.exists()
+
+
+# A token endpoint reply that is not JSON never reaches a log handler (SEC-1b) -----------------------------------
+
+class _RawReply:
+    def __init__(self, text: str) -> None:
+        self.status_code = 200
+        self.text = text
+        self.headers: dict[str, str] = {}
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _ListHandler(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.lines.append(f"{record.name} {record.levelname} {record.getMessage()}")
+
+
+def test_a_non_json_token_reply_is_never_logged_raw_by_msal(certificate_material, monkeypatch, caplog):
+    body = "<html>proxy page echoing access_token=tok-SYNTHETIC-raw-body</html>"
+
+    class NonJsonEntra(FakeEntra):
+        def post(self, url, data=None, **kwargs):
+            super().post(url, data=data, **kwargs)
+            return _RawReply(body)
+
+    fake = NonJsonEntra(certificate_material)
+    real = certificate_auth.build_confidential_client
+    monkeypatch.setattr(certificate_auth, "build_confidential_client",
+                        lambda credential, **kwargs: real(credential, **{**kwargs, "http_client": fake}))
+    # A handler straight on msal's emitting logger (a host may attach one there), and DEBUG on the root via caplog.
+    direct = _ListHandler()
+    emitter = logging.getLogger("msal.oauth2cli.oauth2")
+    emitter.addHandler(direct)
+    family = ("msal", "msal.oauth2cli", "msal.oauth2cli.oauth2", "msal.application")
+    before = {name: (logging.getLogger(name).level, logging.getLogger(name).propagate) for name in family}
+    events: list[tuple] = []
+    try:
+        client = certificate_client(certificate_material, events)
+        with pytest.raises(GraphError) as caught:
+            client.ensure_token()
+    finally:
+        emitter.removeHandler(direct)
+    assert caught.value.error_code == "certificate_token_failed"
+    assert len(fake.token_requests) == 1
+    assert [line for line in direct.lines if "tok-SYNTHETIC" in line] == []
+    assert "tok-SYNTHETIC" not in caplog.text
+    assert "tok-SYNTHETIC" not in json.dumps(events) + str(caught.value)
+    assert {name: (logging.getLogger(name).level, logging.getLogger(name).propagate) for name in family} == before
+    # Outside the exchange msal logs as the host configured it.
+    emitter.error("after the exchange")
+    assert "after the exchange" in caplog.text
