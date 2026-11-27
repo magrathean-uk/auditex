@@ -29,7 +29,7 @@ _PYTHON_VERSION = re.compile(r"(?:Python\s+)?(\d{1,4})\.(\d{1,4})(?![0-9])")
 
 
 def tested_python_range_text() -> str:
-    """For example ``3.11 to 3.14``."""
+    """For example ``3.11 to 3.15``."""
     return "{}.{} to {}.{}".format(*PYTHON_MINIMUM, *PYTHON_NEWEST_TESTED)
 
 
