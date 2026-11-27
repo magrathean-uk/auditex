@@ -24,11 +24,6 @@ DOMAIN_SCOPE_NOTE = (
     "is not read every file stays in scope and its sharing is read as before."
 )
 
-# How a run may read the tenant's domains for the Drive collector (``drive_domain_read`` in the auth context):
-# on a delegated token of its own, on the OAuth grant because another selected collector requires the scope, or not.
-DRIVE_DOMAIN_READ_DELEGATION = "delegation_own_token"
-DRIVE_DOMAIN_READ_OAUTH_REQUIRED = "oauth_required_scope"
-DRIVE_DOMAIN_READ_NOT_REQUESTED = "not_requested"
 
 TenantDomains = Callable[[], "frozenset[str] | None"]
 

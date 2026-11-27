@@ -82,13 +82,7 @@ from .customer_id import (
     collect_customer_ids,
     withheld_coverage_row,
 )
-from .drive_scope import (
-    DOMAIN_SCOPE,
-    DRIVE_DOMAIN_READ_DELEGATION,
-    DRIVE_DOMAIN_READ_NOT_REQUESTED,
-    DRIVE_DOMAIN_READ_OAUTH_REQUIRED,
-    read_tenant_domains,
-)
+from .drive_scope import DOMAIN_SCOPE, read_tenant_domains
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
     DEFAULT_STALE_USER_DAYS,
@@ -211,18 +205,20 @@ def scopes_for_collectors(selected: list[str], *, auth_mode: str = "domain-deleg
 
 
 def drive_domain_read_mode(selected: list[str], auth_mode: str, scopes: tuple[str, ...]) -> str | None:
-    """How the Drive collector may read the tenant's domains in this run; ``None`` when Drive is not selected.
+    """How the Drive collector may read the tenant's domains in this run (``drive_domain_read`` in the auth context);
+    ``None`` when Drive is not selected.
 
-    Under domain-wide delegation on a token of its own; under OAuth only when the domain scope is in the requested
-    (required) set because another selected collector requires it; otherwise it is not requested and not read.
+    ``delegation_own_token`` under domain-wide delegation (on a token of its own); ``oauth_required_scope`` under OAuth
+    when the domain scope is in the requested (required) set because another selected collector requires it;
+    otherwise ``not_requested``: it is neither asked for nor read.
     """
     if "google_drive_posture" not in selected:
         return None
     if auth_mode == "domain-delegation":
-        return DRIVE_DOMAIN_READ_DELEGATION
+        return "delegation_own_token"
     if auth_mode == "oauth" and DOMAIN_SCOPE in scopes:
-        return DRIVE_DOMAIN_READ_OAUTH_REQUIRED
-    return DRIVE_DOMAIN_READ_NOT_REQUESTED
+        return "oauth_required_scope"
+    return "not_requested"
 
 
 def tenant_domain_read_allowed(auth_config: GoogleAuthConfig, credentials: Any) -> bool:
