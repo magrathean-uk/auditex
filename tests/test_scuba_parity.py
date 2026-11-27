@@ -834,16 +834,30 @@ def test_divergence_map_is_valid_and_cites_its_rows():
     data = json.loads(parity.DIVERGENCE_FILE.read_text(encoding="utf-8"))
     entries = parity.load_divergences()
     assert entries == data["entries"]
-    assert set(data["sources"]) == {"gws-design", "m365-spec"}
+    assert set(data["sources"]) == {"gws-design", "m365-spec", "output-contract"}
     gws = [e for e in entries if e["policy_id"].startswith("GWS.")]
     m365 = [e for e in entries if e["policy_id"].startswith("MS.")]
-    assert {e["cite"].split(" ")[0] for e in gws} == {"gws-design"}
+    assert {e["cite"].split(" ")[0] for e in gws} == {"gws-design", "output-contract"}
     assert {e["cite"].split(" ")[0] for e in m365} == {"m365-spec"}
     # D10 (Error against section_not_collected) is neither_decided by construction and needs no entry.
-    assert {e["id"] for e in gws} == {f"D{n}" for n in range(1, 23)} - {"D10"}
+    assert {e["id"] for e in gws} == {f"D{n}" for n in range(1, 25)} - {"D10"}
+    assert set(data["rows"]) == {"gws-design", "output-contract"}
     assert set(data["rows"]["gws-design"]) == {f"D{n}" for n in range(1, 23)}
+    assert set(data["rows"]["output-contract"]) == {"D23", "D24"}
     for entry in gws:
-        assert entry["cite"] == f"gws-design {'8.3' if int(entry['id'][1:]) <= 10 else '8.3a'} {entry['id']}"
+        number = int(entry["id"][1:])
+        source = "output-contract" if number >= 23 else f"gws-design {'8.3' if number <= 10 else '8.3a'}"
+        assert entry["cite"] == f"{source} {entry['id']}"
+    # The cited output-contract rows exist in its ScubaGoggles divergence table.
+    contract = (ROOT / "docs" / "reference" / "output-contract.md").read_text(encoding="utf-8")
+    for did in data["rows"]["output-contract"]:
+        assert f"\n| {did} | " in contract
+    assert [(e["policy_id"], e["cisa"], e["auditex"], e["reason_codes"]) for e in gws if e["id"] in {"D23", "D24"}] == [
+        ("GWS.COMMONCONTROLS.6.1v1", ["pass"], ["not_met"], ["admin_uses_external_sso"]),
+        ("GWS.COMMONCONTROLS.6.1v1", ["fail", "pass"], ["not_assessed"], ["data_unusable_section_shape"]),
+        ("GWS.GMAIL.14.1v1", ["pass"], ["not_met"], ["unit_violates"]),
+        ("GWS.GMAIL.14.1v1", ["pass"], ["not_assessed"], ["data_unusable_setting_value"]),
+    ]
     gws_ids = set(json.loads((ROOT / "configs" / "scuba-gws-value-rules.json").read_text())["policy_ids"])
     m365_ids = set(json.loads((ROOT / "configs" / "scuba-policy-sections.json").read_text())["policies"])
     assert {e["policy_id"] for e in gws} <= gws_ids
@@ -853,6 +867,25 @@ def test_divergence_map_is_valid_and_cites_its_rows():
     assert pinned["GWS.COMMONCONTROLS.1.4v1"] == {
         "auditex": ["not_met"], "cisa": ["pass"], "cite": "gws-design 8.3 D5", "id": "D5",
         "policy_id": "GWS.COMMONCONTROLS.1.4v1"}
+
+
+@pytest.mark.parametrize(("policy_id", "cisa", "auditex", "reason", "expected"), [
+    # LIVE-FIX-3: D23 and D24 from the output contract are documented, each scoped to its reason codes.
+    ("GWS.GMAIL.14.1v1", "pass", "not_met", "unit_violates", ["D23"]),
+    ("GWS.GMAIL.14.1v1", "pass", "not_assessed", "data_unusable_setting_value", ["D11", "D12", "D23"]),
+    ("GWS.GMAIL.14.1v1", "fail", "not_assessed", "data_unusable_setting_value", ["D11"]),
+    ("GWS.GMAIL.14.1v1", "no_events", "not_met", "unit_violates", []),
+    ("GWS.COMMONCONTROLS.6.1v1", "pass", "not_assessed", "data_unusable_section_shape", ["D24"]),
+    ("GWS.COMMONCONTROLS.6.1v1", "fail", "not_assessed", "data_unusable_section_shape", ["D24"]),
+    ("GWS.COMMONCONTROLS.6.1v1", "pass", "not_met", "admin_uses_external_sso", ["D24"]),
+    ("GWS.COMMONCONTROLS.6.1v1", "pass", "not_assessed", "data_unavailable_sso_read_incomplete", []),
+    ("GWS.COMMONCONTROLS.6.1v1", "fail", "met", "admins_use_google_sign_in", []),
+])
+def test_output_contract_divergences_match_only_their_cases(policy_id, cisa, auditex, reason, expected):
+    found = parity.matching_divergences(parity.load_divergences(), policy_id, cisa, auditex, reason)
+    assert found == expected
+    if expected:
+        assert parity.categorise(cisa, auditex, found) == "documented_divergence"
 
 
 @pytest.mark.parametrize("bad", [
