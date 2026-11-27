@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import datetime
 from functools import cached_property
 from typing import Any
 from urllib.parse import unquote
@@ -72,35 +73,113 @@ def _malformed_container(norm: str, member: Any) -> bool:
     return False
 
 
-# Fixed Reports API objects that hold a customer id (admin.reports_v1 discovery document): Activity.id,
-# UsageReport.entity, ResourceDetails.ownerDetails and its ownerIdentity entries. Each must have its documented shape;
-# a value of any other shape may hold the customer id under another key or none, before it is learnt, so it is
-# withheld whole, as a malformed customerIdentity is (LIVE-FIX-6 B2a).
+# Fixed Reports API objects on a customer id path (admin.reports_v1 discovery document): Activity.id,
+# Activity.resourceDetails and each entry, UsageReport.entity, ResourceDetails.ownerDetails and its ownerIdentity
+# entries. Each must have its documented shape, member names (exact) and member types included; a value of any other
+# shape may hold the customer id under another key or none, before it is learnt, so it is withheld whole, as a
+# malformed customerIdentity is (LIVE-FIX-6 B2a, LIVE-FIX-7 B2a).
 _ACTIVITY_KIND = "admin#reports#activity"
 _USAGE_REPORT_KIND = "admin#reports#usageReport"
+# int64 in decimal (the discovery document's "format": "int64" string), RFC 3339 date-time, and a Reports application
+# name (lower-case letters, digits and underscores, as every documented applicationName is). A customer id ("C" and
+# a digit) has none of these forms.
+_INT64 = re.compile(r"-?[0-9]{1,19}")
+_RFC3339 = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]{1,9})?(?:[Zz]|[+-]([0-9]{2}):([0-9]{2}))"
+)
+_APPLICATION_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
 def _report_members() -> tuple[frozenset[str], ...]:
-    """Normalised member names of the fixed Reports objects (admin.reports_v1 discovery document): an Activity's own
-    members other than ``id``, ``kind`` and ``etag`` (any of them marks an object as an activity), then the members of
-    Activity.id, UsageReport.entity, OwnerDetails and OwnerIdentity. Kept out of module constants: they are what the
-    shape check reads, not field names Auditex writes, so they never join the redaction's field-name exemption."""
+    """Normalised names of an Activity's own members other than ``id``, ``kind`` and ``etag`` (any of them marks an
+    object as an activity). Kept out of module constants, as every member name below is: they are what the shape
+    checks read, not field names Auditex writes, so they never join the redaction's field-name exemption."""
     return (
         frozenset({"actor", "events", "ipaddress", "ownerdomain", "resourcedetails", "networkinfo", "userdeviceinfo",
                    "isagenticaction"}),
-        frozenset({"applicationname", "customerid", "time", "uniquequalifier"}),
-        frozenset({"customerid", "entityid", "profileid", "type", "useremail"}),
-        frozenset({"owneridentity", "ownertype"}),
-        frozenset({"customeridentity", "groupidentity", "shareddriveidentity", "useridentity"}),
     )
 
 
-def _scalar(value: Any) -> bool:
-    """A JSON scalar member of a fixed Reports object: a string, a whole number or null (never a container)."""
-    return value is None or isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool))
+def _string(value: Any) -> bool:
+    return isinstance(value, str)
 
 
-def _fixed_object(value: Any, members: frozenset[str]) -> bool:
-    """An object whose every key is one of ``members`` and whose every value is a scalar."""
-    return isinstance(value, dict) and all(_norm(key) in members and _scalar(item) for key, item in value.items())
+def _int64_text(value: Any) -> bool:
+    """A decimal int64 string (the discovery document's ``format: int64``); a number, or any other text, is not one."""
+    return isinstance(value, str) and bool(_INT64.fullmatch(value)) and -(2**63) <= int(value) < 2**63
+
+
+def _rfc3339(value: Any) -> bool:
+    """An RFC 3339 date-time string with a real calendar date and time (``format: date-time``)."""
+    match = _RFC3339.fullmatch(value) if isinstance(value, str) else None
+    if match is None:
+        return False
+    year, month, day, hour, minute, second, offset_hour, offset_minute = (
+        int(part) if part is not None else 0 for part in match.groups()
+    )
+    try:
+        datetime(year, month, day, hour, minute, min(second, 59))
+    except ValueError:
+        return False
+    return second <= 60 and offset_hour <= 23 and offset_minute <= 59
+
+
+def _application_name(value: Any) -> bool:
+    return isinstance(value, str) and bool(_APPLICATION_NAME.fullmatch(value))
+
+
+def _object_of(value: Any, members: Mapping[str, Callable[[Any], bool]]) -> bool:
+    """An object whose every key is one of ``members`` (exact) and whose every value passes that member's check."""
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and key in members and members[key](item) for key, item in value.items()
+    )
+
+
+def valid_activity_id(value: Any) -> bool:
+    """Whether a Reports Activity.id has its discovery shape: an object of ``applicationName`` (a Reports application
+    name), ``customerId`` (a string), ``time`` (RFC 3339) and ``uniqueQualifier`` (a decimal int64 string), nothing
+    else. Only such an id may name a normalised activity record."""
+    return _object_of(value, {
+        "applicationName": _application_name, "customerId": _string, "time": _rfc3339, "uniqueQualifier": _int64_text,
+    })
+
+
+def _valid_usage_entity(value: Any) -> bool:
+    return _object_of(value, {
+        "customerId": _string, "entityId": _string, "profileId": _string, "type": _string, "userEmail": _string,
+    })
+
+
+def _valid_owner_identity_entry(value: Any) -> bool:
+    """One OwnerIdentity: any of the four identity objects, each of its own string members only. A ``customerIdentity``
+    that :func:`_malformed_container` refuses is withheld as its own field; one it accepts must also hold nothing but
+    its ``id`` (CustomerIdentity), or the whole list is withheld."""
+    return _object_of(value, {
+        "customerIdentity": lambda item: (
+            _malformed_container("customeridentity", item) or _object_of(item, {"id": _string})
+        ),
+        "groupIdentity": lambda item: _object_of(item, {"groupEmail": _string, "id": _string}),
+        "sharedDriveIdentity": lambda item: _object_of(item, {"id": _string, "sharedDriveName": _string}),
+        "userIdentity": lambda item: _object_of(item, {"id": _string, "userEmail": _string}),
+    })
+
+
+def _valid_owner_details(value: Any) -> bool:
+    """OwnerDetails: a string ``ownerType`` and an ``ownerIdentity`` (whose own shape is checked as its own field)."""
+    return _object_of(value, {"ownerIdentity": lambda _item: True, "ownerType": _string})
+
+
+def _valid_resource_details_entry(value: Any) -> bool:
+    """One ResourceDetails: string ``id``, ``relation``, ``title`` and ``type``, ``appliedLabels`` a list of
+    AppliedLabel objects, and an ``ownerDetails`` (whose own shape is checked as its own field)."""
+    applied_label = {
+        "fieldValues": lambda item: isinstance(item, list), "id": _string,
+        "reason": lambda item: isinstance(item, dict), "title": _string,
+    }
+    return _object_of(value, {
+        "appliedLabels": lambda item: isinstance(item, list) and all(_object_of(label, applied_label) for label in item),
+        "id": _string, "ownerDetails": lambda _item: True, "relation": _string, "title": _string, "type": _string,
+    })
 
 
 def _activity_row(row: Any) -> bool:
@@ -122,33 +201,23 @@ def _usage_report_row(row: Any) -> bool:
 def _malformed_report_field(norm: str, member: Any, *, activity: bool, usage: bool) -> bool:
     """A Reports field on a customer id path whose value does not have its documented shape (withheld whole).
 
-    ``id`` of an activity must be an object of scalar ``applicationName``, ``customerId``, ``time`` and
-    ``uniqueQualifier`` members; ``entity`` must be an object (of the documented scalar members on a usage report);
-    ``ownerDetails`` an object of ``ownerIdentity`` and a scalar ``ownerType``; ``ownerIdentity`` a list of objects
-    whose members are the four identity objects. Null, an empty string and ``my_customer`` hold nothing.
+    ``id`` of an activity must pass :func:`valid_activity_id`; ``resourceDetails`` must be a list of ResourceDetails
+    entries; ``entity`` must be an object (of the documented string members on a usage report); ``ownerDetails`` an
+    object of ``ownerIdentity`` and a string ``ownerType``; ``ownerIdentity`` a list of OwnerIdentity entries. Null, an
+    empty string and ``my_customer`` hold nothing.
     """
     if _no_value(member):
         return False
-    _, id_members, entity_members, details_members, identity_members = _report_members()
     if norm == "id" and activity:
-        return not _fixed_object(member, id_members)
+        return not valid_activity_id(member)
+    if norm == "resourcedetails":
+        return not (isinstance(member, list) and all(_valid_resource_details_entry(entry) for entry in member))
     if norm == "entity":
-        return not (_fixed_object(member, entity_members) if usage else isinstance(member, dict))
+        return not (_valid_usage_entity(member) if usage else isinstance(member, dict))
     if norm == "ownerdetails":
-        return not (
-            isinstance(member, dict)
-            and all(_norm(key) in details_members for key in member)
-            and _scalar(next((item for key, item in member.items() if _norm(key) == "ownertype"), None))
-        )
+        return not _valid_owner_details(member)
     if norm == "owneridentity":
-        return not (isinstance(member, list) and all(
-            isinstance(entry, dict) and all(
-                _norm(key) in identity_members and (item is None or isinstance(item, dict)
-                                                          or _norm(key) == "customeridentity")
-                for key, item in entry.items()
-            )
-            for entry in member
-        ))
+        return not (isinstance(member, list) and all(_valid_owner_identity_entry(entry) for entry in member))
     return False
 
 

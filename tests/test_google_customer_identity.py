@@ -338,8 +338,9 @@ def test_live_fix_6_b2a_a_well_formed_activity_id_is_kept_with_its_customer_id_w
     assert ids.values == {CUSTOMER}
     assert ids.evidence(rows) == ([_with_id({"time": _TIME, "uniqueQualifier": "-12", "applicationName": "admin",
                                              "customerId": "<customer-id>"})], False)
+    # A number is not the discovery document's int64 string (LIVE-FIX-7 B2a): withheld whole.
     numeric = [_with_id({"time": _TIME, "uniqueQualifier": 12})]
-    assert CustomerIds().evidence(numeric) == (numeric, False)
+    assert CustomerIds().evidence(numeric) == ([_with_id("<customer-id>")], False)
 
 
 @pytest.mark.parametrize("row", [
@@ -457,4 +458,151 @@ def test_live_fix_6_b2a_a_scalar_activity_id_never_names_the_normalised_record()
     snapshot = build_google_normalized_snapshot(tenant_name="Example", run_id="r1", collector_payloads=payloads)
     records = snapshot["google_activity_events"]["records"]
     assert [record["id"] for record in records] == ["adminActivities:0", "77"]
+    assert CUSTOMER not in json.dumps(records)
+
+
+# ---- LIVE-FIX-7 B2a: every member of a Reports customer id path has its discovery type and form ----------------------
+
+WRONG_ACTIVITY_ID_MEMBERS = [
+    # The reviewer's first reproduction: an otherwise readable id whose qualifier is a customer id.
+    {"applicationName": "admin", "time": _TIME, "uniqueQualifier": CUSTOMER},
+    {"time": _TIME, "uniqueQualifier": "12a"},
+    {"time": _TIME, "uniqueQualifier": "1.5"},
+    {"time": _TIME, "uniqueQualifier": ""},
+    {"time": _TIME, "uniqueQualifier": " 12"},
+    {"time": _TIME, "uniqueQualifier": "9223372036854775808"},
+    {"time": _TIME, "uniqueQualifier": None},
+    {"time": _TIME, "uniqueQualifier": True},
+    {"time": CUSTOMER, "uniqueQualifier": "1"},
+    {"time": "2026-13-01T00:00:00Z", "uniqueQualifier": "1"},
+    {"time": "2026-11-01 00:00:00", "uniqueQualifier": "1"},
+    {"time": 1793491200, "uniqueQualifier": "1"},
+    {"time": _TIME, "uniqueQualifier": "1", "applicationName": CUSTOMER},
+    {"time": _TIME, "uniqueQualifier": "1", "applicationName": "Admin"},
+    {"time": _TIME, "uniqueQualifier": "1", "applicationName": 5},
+    {"time": _TIME, "uniqueQualifier": "1", "customerId": 5},
+    {"time": _TIME, "uniqueQualifier": "1", "customerId": None},
+    {"time": _TIME, "unique_qualifier": "1"},
+]
+
+
+@pytest.mark.parametrize("activity_id", WRONG_ACTIVITY_ID_MEMBERS)
+def test_live_fix_7_b2a_an_activity_id_member_of_the_wrong_type_or_form_withholds_the_id_whole(activity_id: Any) -> None:
+    rows = [_with_id(activity_id)]
+    safe, changed = CustomerIds().evidence(rows)
+    assert safe == [{"kind": "admin#reports#activity", "id": "<customer-id>",
+                     "events": [{"name": "CHANGE_APPLICATION_SETTING"}]}]
+    assert changed is False
+    assert CUSTOMER not in json.dumps(CustomerIds().scrub(rows))
+
+
+def test_live_fix_7_b2a_a_well_formed_activity_id_with_every_member_is_kept() -> None:
+    activity_id = {"applicationName": "user_accounts", "customerId": CUSTOMER, "time": "2026-11-01T10:20:30.123456Z",
+                   "uniqueQualifier": "-9223372036854775808"}
+    safe, changed = CustomerIds().evidence([_with_id(activity_id)])
+    assert safe == [_with_id({"applicationName": "user_accounts", "customerId": "<customer-id>",
+                              "time": "2026-11-01T10:20:30.123456Z", "uniqueQualifier": "-9223372036854775808"})]
+    assert changed is False
+    offset = {"time": "2026-11-01T10:20:30+01:00", "uniqueQualifier": "9223372036854775807"}
+    assert CustomerIds().evidence([_with_id(offset)]) == ([_with_id(offset)], False)
+
+
+WRONG_RESOURCE_DETAILS = [
+    # The reviewer's second reproduction: a scalar entry holding an id that was never learnt.
+    [CUSTOMER],
+    [{"id": "r1"}, CUSTOMER],
+    CUSTOMER,
+    {"id": "r1"},
+    [None],
+    [7],
+    [{"id": 5}],
+    [{"id": "r1", "title": [CUSTOMER]}],
+    [{"id": "r1", "owner": CUSTOMER}],
+    [{"id": "r1", "appliedLabels": CUSTOMER}],
+    [{"id": "r1", "appliedLabels": [CUSTOMER]}],
+    [{"id": "r1", "appliedLabels": [{"id": "l1", "owner": CUSTOMER}]}],
+]
+
+
+@pytest.mark.parametrize("resource_details", WRONG_RESOURCE_DETAILS)
+def test_live_fix_7_b2a_resource_details_off_schema_are_withheld_whole(resource_details: Any) -> None:
+    rows = [{"kind": "admin#reports#activity", "id": {"time": _TIME, "uniqueQualifier": "1"},
+             "resourceDetails": resource_details}]
+    safe, changed = CustomerIds().evidence(rows)
+    assert safe == [{"kind": "admin#reports#activity", "id": {"time": _TIME, "uniqueQualifier": "1"},
+                     "resourceDetails": "<customer-id>"}]
+    assert changed is False
+
+
+def test_live_fix_7_b2a_well_formed_resource_details_are_kept() -> None:
+    details = [{"id": "r1", "title": "Plan", "type": "document", "relation": "TARGET",
+                "appliedLabels": [{"id": "l1", "title": "Secret", "fieldValues": [], "reason": {"reasonType": "x"}}],
+                "ownerDetails": {"ownerType": "USER", "ownerIdentity": [
+                    {"userIdentity": {"id": "u1", "userEmail": "ada@example.com"}}]}}]
+    rows = [{"kind": "admin#reports#activity", "id": {"time": _TIME, "uniqueQualifier": "1"},
+             "resourceDetails": details}]
+    assert CustomerIds().evidence(rows) == (rows, False)
+
+
+@pytest.mark.parametrize("owner_identity", [
+    [{"userIdentity": {"id": "u1", "owner": CUSTOMER}}],
+    [{"customerIdentity": {"id": "C11111111", "extra": CUSTOMER}}],
+    [{"customerIdentity": {"ID": CUSTOMER}}],
+    [{"userIdentity": None}],
+    [{"groupIdentity": {"id": 5}}],
+    [{"sharedDriveIdentity": {"id": "d1", "sharedDriveName": [CUSTOMER]}}],
+])
+def test_live_fix_7_b2a_an_owner_identity_member_off_schema_withholds_the_list_whole(owner_identity: Any) -> None:
+    rows = [{"kind": "admin#reports#activity", "id": {"time": _TIME}, "resourceDetails": [
+        {"id": "r1", "ownerDetails": {"ownerType": "CUSTOMER", "ownerIdentity": owner_identity}}]}]
+    safe, changed = CustomerIds().evidence(rows)
+    assert safe[0]["resourceDetails"][0]["ownerDetails"] == {"ownerType": "CUSTOMER", "ownerIdentity": "<customer-id>"}
+    assert changed is False
+    assert CUSTOMER not in json.dumps(CustomerIds().scrub(rows))
+
+
+@pytest.mark.parametrize("details", [{"ownerType": 5}, {"ownerType": None}, {"ownerType": True, "ownerIdentity": []}])
+def test_live_fix_7_b2a_an_owner_type_that_is_not_a_string_withholds_the_owner_details(details: Any) -> None:
+    rows = [{"kind": "admin#reports#activity", "id": {"time": _TIME},
+             "resourceDetails": [{"id": "r1", "ownerDetails": details}]}]
+    assert CustomerIds().evidence(rows)[0][0]["resourceDetails"] == [{"id": "r1", "ownerDetails": "<customer-id>"}]
+
+
+@pytest.mark.parametrize("entity", [{"type": "CUSTOMER", "profileId": 5}, {"type": None}, {"Type": "CUSTOMER"}])
+def test_live_fix_7_b2a_a_usage_entity_member_of_the_wrong_type_or_name_is_withheld_whole(entity: Any) -> None:
+    rows = [{"kind": "admin#reports#usageReport", "date": "2026-11-01", "entity": entity, "parameters": []}]
+    assert CustomerIds().evidence(rows)[0] == [
+        {"kind": "admin#reports#usageReport", "date": "2026-11-01", "entity": "<customer-id>", "parameters": []}]
+
+
+@pytest.mark.parametrize("activity", [
+    _with_id({"applicationName": "admin", "time": _TIME, "uniqueQualifier": CUSTOMER}),
+    {"kind": "admin#reports#activity", "id": {"time": _TIME, "uniqueQualifier": "1"}, "resourceDetails": [CUSTOMER]},
+])
+def test_live_fix_7_b2a_reviewer_reproductions_live_run_never_writes_the_id(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, activity: dict[str, Any]) -> None:
+    rc, run_dir = _live_run(tmp_path, monkeypatch, [activity])
+    assert rc == 0
+    assert [str(path.relative_to(run_dir)) for path in run_dir.rglob("*")
+            if path.is_file() and CUSTOMER.encode() in path.read_bytes()] == []
+    raw = json.loads((run_dir / "raw" / "google_reports.json").read_text(encoding="utf-8"))
+    assert "<customer-id>" in json.dumps(raw["adminActivities"]["value"][0])
+    records = json.loads((run_dir / "normalized" / "google_activity_events.json").read_text(encoding="utf-8"))["records"]
+    assert [record["id"] for record in records] == (
+        ["adminActivities:0"] if activity["id"] != {"time": _TIME, "uniqueQualifier": "1"} else ["1"])
+
+
+def test_live_fix_7_b2a_an_unscrubbed_malformed_qualifier_never_names_the_normalised_record() -> None:
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    payloads = {"google_reports": {"adminActivities": {"value": [
+        {"id": {"time": _TIME, "uniqueQualifier": CUSTOMER}, "events": [{"name": "x"}]},
+        {"id": {"time": _TIME, "uniqueQualifier": 12}, "events": [{"name": "x"}]},
+        {"id": {"time": _TIME, "uniqueQualifier": "77", "owner": CUSTOMER}, "events": [{"name": "x"}]},
+        {"id": {"time": _TIME, "uniqueQualifier": "78"}, "events": [{"name": "y"}]},
+    ]}}}
+    snapshot = build_google_normalized_snapshot(tenant_name="Example", run_id="r1", collector_payloads=payloads)
+    records = snapshot["google_activity_events"]["records"]
+    assert [record["id"] for record in records] == [
+        "adminActivities:0", "adminActivities:1", "adminActivities:2", "78"]
     assert CUSTOMER not in json.dumps(records)

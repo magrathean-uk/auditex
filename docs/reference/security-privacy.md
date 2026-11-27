@@ -688,13 +688,16 @@ values in evidence strings, mapping keys and diagnostics before writing a run. A
 object whose every `id` is a string (a list, a string, a number, an object without a string id) and anything
 under `customer` that is not a `customers/<id>` string; these are never learnt, and null, empty and
 `my_customer` values are kept. The Reports API objects on a customer ID path must also have their documented
-shape, or they are withheld whole before the ID is learnt: an activity's `id` (an object of scalar
-`applicationName`, `customerId`, `time` and `uniqueQualifier`; a row of a `<application>Activities` stream is an
-activity whatever it holds), a usage report's `entity` (an object, of its documented scalar members on a usage
-report), `ownerDetails` (an object of `ownerIdentity` and a scalar `ownerType`) and `ownerIdentity` (a list of
-objects whose members are the four identity objects). A normalised activity record is never named by an `id` of
-any other shape. Unrelated organisational unit names and paths are preserved even when they
-resemble a customer ID. If masking changes evidence outside an explicit ID field or diagnostic, a
+shape (exact member names and the discovery document's member types), or they are withheld whole before the ID is
+learnt: an activity's `id` (an object of string `applicationName` in Reports application form, `customerId`, an RFC
+3339 `time` and a decimal int64 string `uniqueQualifier`, nothing else; a row of a `<application>Activities` stream
+is an activity whatever it holds), an activity's `resourceDetails` (a list of objects of string `id`, `relation`,
+`title` and `type`, `appliedLabels` a list of label objects, and `ownerDetails`), a usage report's `entity` (an
+object, of its documented string members on a usage report), `ownerDetails` (an object of `ownerIdentity` and a
+string `ownerType`) and `ownerIdentity` (a list of objects whose members are the four identity objects, each holding
+only its own string members). A normalised activity record is named by its `uniqueQualifier` only when its `id` has
+that shape; any other `id`, withheld or not, gives the record a key of its stream and position, which identifies
+nothing. Unrelated organisational unit names and paths are preserved even when they resemble a customer ID. If masking changes evidence outside an explicit ID field or diagnostic, a
 `customer_id_withheld` coverage row marks that collector partial. An organisational unit reference that was
 changed cannot establish complete setting-event coverage.
 

@@ -41,6 +41,7 @@ from .collectors import (
     scuba_read_rows,
     two_step_subset_differs,
 )
+from .customer_id import valid_activity_id
 from .drive_scope import tenant_domain_names
 
 
@@ -1214,14 +1215,16 @@ def build_google_normalized_snapshot(
     activity_records: list[dict[str, Any]] = []
     for source, payload in collector_payloads.get("google_reports", {}).items():
         for item in _values({"items": payload}, "items"):
-            # Activity.id is an object whose uniqueQualifier names the record (as before). An id of any other shape
-            # is never copied into a record key: it can be a customer id (LIVE-FIX-6 B2a).
+            # Only an Activity.id of its discovery shape (valid_activity_id: a decimal int64 uniqueQualifier among
+            # them) names the record by its uniqueQualifier, as before. Any other id, withheld or not, is never copied
+            # into a record key: it can hold a customer id (LIVE-FIX-6 B2a, LIVE-FIX-7 B2a). The record is then keyed
+            # by its stream and position, which identify nothing.
             activity_id = item.get("id")
             activity_records.append(
                 _record(
                     "google_activity",
                     f"google_reports.{source}",
-                    str(activity_id.get("uniqueQualifier")) if isinstance(activity_id, dict)
+                    str(activity_id.get("uniqueQualifier")) if valid_activity_id(activity_id)
                     else f"{source}:{len(activity_records)}",
                     application=source.replace("Activities", ""),
                     actor_email=(item.get("actor") or {}).get("email") if isinstance(item.get("actor"), dict) else None,
