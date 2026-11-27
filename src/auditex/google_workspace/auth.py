@@ -13,6 +13,7 @@ from typing import Any
 from azure_tenant_audit.logger_hold import LoggerHold
 from azure_tenant_audit.secret_hygiene import (
     ownership_enforced,
+    secret_file_lock,
     secure_read_text,
     secure_write_text,
 )
@@ -250,11 +251,16 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         except GoogleAuthError as exc:
             # A fixed message: the library's text can carry token material.
             raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
-        # Only a successful refresh or a fresh consent is saved, with the grant Google reported for it.
+        # Only a successful refresh or a fresh consent is saved, with the grant Google reported for it. The write holds
+        # the cache's lock, so it never lands inside another run's narrowing (between its re-read and its replace). A
+        # lock not obtained in time leaves the cache as it is: this run continues with what the endpoint granted now.
         saved = json.loads(credentials.to_json())
         saved[VERIFIED_SCOPES_KEY] = sorted(_grant(credentials))
-        # Creates any missing folder owner-only; an existing folder (the working directory, a shared one) keeps its mode.
-        secure_write_text(token_cache, json.dumps(saved), mode=0o600)
+        with secret_file_lock(token_cache) as locked:
+            if locked:
+                # Creates any missing folder owner-only; an existing folder (the working directory, a shared one) keeps
+                # its mode.
+                secure_write_text(token_cache, json.dumps(saved), mode=0o600)
         return credentials
 
     raise ValueError(f"unsupported Google auth mode: {config.auth_mode}")
@@ -356,18 +362,21 @@ def _narrow_cached_grant(
     scope Google refused is neither sent on the next refresh nor claimed by a later outage fallback until a consent
     grants it. An older cache that records no grant proves nothing, so it is recorded as granting nothing. The cache is
     rewritten only while it still holds exactly what this run read (another run may have saved a newer one meanwhile),
-    and only when the record changes. Returns the cache text and object now on disk.
+    and only when the record changes. The re-read, the comparison and the replace all run under the cache's exclusive
+    lock, which every rewrite of the cache takes, so no other run's write can land between them. A lock not obtained in
+    time leaves the cache as it is. Returns the cache text and object now on disk.
     """
     if raw is None or granted is None or not isinstance(cached, dict):
         return raw, cached
     narrowed = sorted((_recorded_grant(cached) or frozenset()) & granted)
     if cached.get(VERIFIED_SCOPES_KEY) == narrowed:
         return raw, cached
-    if secure_read_text(token_cache) != raw:
-        return raw, cached
-    updated = {**cached, VERIFIED_SCOPES_KEY: narrowed}
-    text = json.dumps(updated)
-    secure_write_text(token_cache, text, mode=0o600)
+    with secret_file_lock(token_cache) as locked:
+        if not locked or secure_read_text(token_cache) != raw:
+            return raw, cached
+        updated = {**cached, VERIFIED_SCOPES_KEY: narrowed}
+        text = json.dumps(updated)
+        secure_write_text(token_cache, text, mode=0o600)
     return text, updated
 
 

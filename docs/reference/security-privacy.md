@@ -1119,8 +1119,12 @@ in again, at most once. When the token endpoint refuses a refresh with a grant e
 before the new consent starts; when a refresh or a consent grants fewer scopes than the run needs, the recorded grant
 keeps only scopes that grant includes. The recorded grant is therefore never wider than what the token endpoint granted
 last, and a scope Google refused is neither sent on a later refresh nor claimed by the outage fallback until a consent
-grants it. This rewrite happens only while the cache still holds what the run read, so a newer cache another run saved
-meanwhile is left as it is. An older cache that records no grant at all keeps the earlier rule: it is used
+grants it. Every rewrite of the cache (this narrowing and the save after a refresh or consent) holds an exclusive
+advisory lock on `.<cache name>.lock`, created owner-only in the cache's own folder (`flock` on Linux and macOS): the
+narrowing reads the cache again under the lock and rewrites it only while it still holds what the run read, so a
+newer cache another run saved meanwhile is left as it is and no other run's save can land between that check and the
+replace. A lock not obtained within 5 seconds (or a file system that offers none) leaves the cache as it is: the run
+continues with what the token endpoint granted it now, and records nothing. An older cache that records no grant at all keeps the earlier rule: it is used
 when the scopes it asked for include every scope the run needs, and is then trusted only for what the refresh grants.
 The cache is refreshed every run. A fresh consent that grants fewer scopes than the run needs is neither used nor
 saved (only the cache's recorded grant is narrowed, as above); the run stops and names the missing scopes. When Google's token endpoint is down, a cached token still in date

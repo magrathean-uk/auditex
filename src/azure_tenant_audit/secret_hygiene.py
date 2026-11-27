@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import errno
 import functools
 import json
@@ -10,7 +11,8 @@ import shlex
 import stat
 import sys
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -444,6 +446,118 @@ def secure_write_text(path: str | Path, content: str, *, mode: int = 0o600) -> P
     finally:
         os.close(folder)
     return target
+
+
+# How long a read-modify-write of a secret file waits for another run holding its lock (a write takes milliseconds).
+SECRET_LOCK_WAIT = 5.0
+_SECRET_LOCK_POLL = 0.05
+
+
+def _lock_backend() -> tuple[str, Callable[[int], bool], Callable[[int], None]] | None:
+    """The advisory lock this platform offers: ``fcntl.flock`` on POSIX, ``msvcrt.locking`` on Windows, else ``None``.
+
+    Each returns the backend name, a non-blocking try (True when the lock is now held) and a release.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None  # type: ignore[assignment]
+    if fcntl is not None:
+
+        def _try_flock(descriptor: int) -> bool:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            return True
+
+        def _release_flock(descriptor: int) -> None:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+        return "fcntl", _try_flock, _release_flock
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+
+    def _try_locking(descriptor: int) -> bool:
+        os.lseek(descriptor, 0, os.SEEK_SET)  # msvcrt locks bytes from the current position: always the first byte
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+
+    def _release_locking(descriptor: int) -> None:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+
+    return "msvcrt", _try_locking, _release_locking
+
+
+def _open_lock_file(target: Path) -> int:
+    """The lock file beside ``target`` (``.<name>.lock``, created owner-only, never through a link), opened read-write."""
+    name = f".{target.name}.lock"
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+    if os.name != "posix":
+        return os.open(str(target.parent / name), flags | getattr(os, "O_BINARY", 0), 0o600)
+    folder = _open_secret_folder(target.parent)
+    try:
+        descriptor = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=folder)
+    except OSError:  # a link (ELOOP) or an entry this account cannot open: a fixed refusal, never the path
+        raise _secret_file_refused() from None
+    finally:
+        os.close(folder)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise _secret_file_refused()
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+@contextlib.contextmanager
+def secret_file_lock(path: str | Path, *, wait: float | None = None) -> Iterator[bool]:
+    """Hold an exclusive advisory lock for a read-modify-write of the secret file at ``path``; yields whether it is held.
+
+    The lock is on ``.<name>.lock`` in the secret file's own folder (checked as for :func:`secure_write_text`), so every
+    run that rewrites the file through this lock is serialised: read the file again inside it, decide, write, and only
+    then let the next run in. ``False`` means the lock could not be taken within ``wait`` seconds (another run holds it,
+    or the file system offers no lock); the caller must then leave the file as it is. Released on an exception too.
+    """
+    target = Path(path).expanduser()
+    backend = _lock_backend()
+    if backend is None:
+        yield False
+        return
+    _name, try_lock, release = backend
+    try:
+        _create_private_parents(target.parent)
+    except OSError:
+        raise _secret_folder_refused() from None
+    descriptor = _open_lock_file(target)
+    try:
+        deadline = time.monotonic() + (SECRET_LOCK_WAIT if wait is None else wait)
+        while True:
+            try:
+                held = try_lock(descriptor)
+            except OSError:  # no lock on this file system (ENOLCK, ENOTSUP): treated as never obtained
+                held = False
+                deadline = 0.0
+            if held or time.monotonic() >= deadline:
+                break
+            time.sleep(_SECRET_LOCK_POLL)
+        if not held:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            release(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def secure_write_json(path: str | Path, payload: Any, *, mode: int = 0o600) -> Path:

@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import sys
+import threading
 import types
 from datetime import timedelta
 from pathlib import Path
@@ -19,6 +22,7 @@ from typing import Any
 import pytest
 
 from auditex.google_workspace import auth as google_auth
+from azure_tenant_audit import secret_hygiene
 
 DRIVE_META = "https://www.googleapis.com/auth/drive.metadata.readonly"
 DRIVE_RO = "https://www.googleapis.com/auth/drive.readonly"
@@ -510,3 +514,179 @@ def test_an_on_disk_cache_written_with_the_literal_verified_scopes_key_still_loa
     assert oauth["flow_scopes"] == []
     assert path.read_text(encoding="utf-8") == on_disk
 
+
+# ---- every rewrite of the cache holds its lock: a concurrent narrower save is never lost ---------------------------
+
+
+def test_a_narrower_cache_saved_inside_another_runs_narrowing_window_is_kept(
+    tmp_path: Path, oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reviewer's interleaving: a broad run is granted only the Drive scopes and pauses after comparing the cache
+    text, before replacing it; a Drive-metadata run then refreshes and saves its own token granting Drive metadata only.
+    The broad run's narrowing must not replace that newer, narrower record with its old token claiming both Drive scopes.
+    """
+    from google.auth import _helpers, exceptions
+    from google.oauth2 import reauth
+
+    path = _cache(tmp_path, [DRIVE_META, DRIVE_RO, DOMAIN], verified=[DOMAIN, DRIVE_META, DRIVE_RO])
+
+    def _refresh_grant(_request: Any, _uri: str, refresh_token: str, *_a: Any, scopes: Any = None, **_k: Any) -> Any:
+        asked = list(scopes or [])
+        broad = DOMAIN in asked
+        granted = [DRIVE_META, DRIVE_RO] if broad else asked
+        token = "tok-SYNTHETIC-broad-run" if broad else "tok-SYNTHETIC-meta-run"
+        return token, refresh_token, _helpers.utcnow() + timedelta(hours=1), {"scope": " ".join(granted)}, None
+
+    monkeypatch.setattr(reauth, "refresh_grant", _refresh_grant)
+    oauth["consent_error"] = _ScopeChanged([DRIVE_META, DRIVE_RO])  # the broad run's consent declines the domain scope
+
+    real_write = google_auth.secure_write_text
+    at_window, resume = threading.Event(), threading.Event()
+    writes: list[str] = []
+
+    def _write_pausing_the_broad_run(target: Any, content: str, **kwargs: Any) -> Any:
+        if threading.current_thread().name == "broad" and not at_window.is_set():
+            at_window.set()  # compared, about to replace
+            assert resume.wait(10)
+        result = real_write(target, content, **kwargs)
+        writes.append(threading.current_thread().name)
+        return result
+
+    monkeypatch.setattr(google_auth, "secure_write_text", _write_pausing_the_broad_run)
+    outcome: dict[str, Any] = {}
+
+    def _run(name: str, scopes: tuple[str, ...]) -> None:
+        try:
+            outcome[name] = google_auth.build_google_credentials(_config(tmp_path, scopes))
+        except Exception as exc:  # noqa: BLE001 - recorded for the assertions below
+            outcome[name] = exc
+
+    broad = threading.Thread(target=_run, args=("broad", DOMAIN_RUN), name="broad")
+    meta = threading.Thread(target=_run, args=("meta", (DRIVE_META,)), name="meta")
+    broad.start()
+    assert at_window.wait(10)
+    meta.start()
+    meta.join(1.0)  # without the lock the metadata run saves at once; with it, it waits for the broad run
+    resume.set()
+    broad.join(10)
+    meta.join(10)
+
+    assert isinstance(outcome["broad"], RuntimeError)
+    assert str(outcome["broad"]) == MISSING_DOMAIN
+    assert outcome["meta"].token == "tok-SYNTHETIC-meta-run"
+    assert writes == ["broad", "meta"]
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["token"] == "tok-SYNTHETIC-meta-run"
+    assert saved[VERIFIED] == ["https://www.googleapis.com/auth/drive.metadata.readonly"]
+
+    # A later outage: the old token never comes back claiming both Drive scopes; the metadata run's token claims one.
+    def _down(*_a: Any, **_k: Any) -> Any:
+        raise exceptions.TransportError("connection refused")
+
+    monkeypatch.setattr(reauth, "refresh_grant", _down)
+    oauth["consent_error"] = RuntimeError("consent window closed")
+    with pytest.raises(RuntimeError) as caught:
+        google_auth.build_google_credentials(_config(tmp_path, DRIVE_RUN))
+    assert str(caught.value) == "Google sign-in failed (RuntimeError); run again to sign in."
+    credentials = google_auth.build_google_credentials(_config(tmp_path, (DRIVE_META,)))
+    assert credentials.token == "tok-SYNTHETIC-meta-run"
+    assert credentials.scopes == ["https://www.googleapis.com/auth/drive.metadata.readonly"]
+
+
+def test_a_cache_lock_held_elsewhere_leaves_the_cache_as_it_is(
+    tmp_path: Path, oauth: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _cache(tmp_path, [DRIVE_META, DOMAIN], verified=[DOMAIN, DRIVE_META])
+    before = path.read_text(encoding="utf-8")
+    monkeypatch.setattr(secret_hygiene, "SECRET_LOCK_WAIT", 0.2)
+    with secret_hygiene.secret_file_lock(path) as held:
+        assert held is True
+        # A narrowing (refused refresh) and a save (fresh consent) both find the lock taken and write nothing.
+        oauth["revoked"] = {DOMAIN}
+        oauth["consent_grant"] = [DRIVE_META, DRIVE_RO, DOMAIN]
+        credentials = google_auth.build_google_credentials(_config(tmp_path, (DRIVE_META, DOMAIN)))
+        assert credentials.scopes == [DRIVE_META, DOMAIN]
+        assert oauth["refresh_scopes"] == [[DRIVE_META, DOMAIN]]
+        assert len(oauth["flow_scopes"]) == 1
+        assert path.read_text(encoding="utf-8") == before
+    assert json.loads(path.read_text(encoding="utf-8"))[VERIFIED] == [
+        "https://www.googleapis.com/auth/admin.directory.domain.readonly",
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+    ]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
+def test_the_cache_lock_file_is_created_owner_only_beside_the_cache(tmp_path: Path, oauth: dict[str, Any]) -> None:
+    _cache(tmp_path, [DRIVE_META, DRIVE_RO], verified=[DRIVE_META, DRIVE_RO])
+    google_auth.build_google_credentials(_config(tmp_path, DRIVE_RUN))
+    lock = tmp_path / "cache" / ".token.json.lock"
+    assert stat.S_IMODE(os.stat(lock).st_mode) == 0o600
+    assert sorted(entry.name for entry in (tmp_path / "cache").iterdir()) == [".token.json.lock", "token.json"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a link at the lock path")
+def test_a_link_at_the_cache_lock_path_is_refused(tmp_path: Path) -> None:
+    folder = tmp_path / "cache"
+    folder.mkdir(mode=0o700)
+    (folder / ".token.json.lock").symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(PermissionError) as caught:
+        with secret_hygiene.secret_file_lock(folder / "token.json"):
+            pass
+    assert str(caught.value).startswith("[Errno 13] secret_file_refused:")
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_the_lock_backend_is_flock_on_posix() -> None:
+    if os.name != "posix":
+        pytest.skip("POSIX")
+    backend = secret_hygiene._lock_backend()
+    assert backend is not None and backend[0] == "fcntl"
+
+
+def test_the_lock_backend_is_msvcrt_where_fcntl_is_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[int, int]] = []
+    held: set[int] = set()
+
+    def _locking(descriptor: int, mode: int, nbytes: int) -> None:
+        assert nbytes == 1
+        assert os.lseek(descriptor, 0, os.SEEK_CUR) == 0
+        calls.append((mode, nbytes))
+        if mode == 2:  # LK_NBLCK
+            if descriptor in held:
+                raise OSError(36, "Resource deadlock avoided")
+            held.add(descriptor)
+        elif mode == 0:  # LK_UNLCK
+            held.discard(descriptor)
+
+    fake = types.SimpleNamespace(locking=_locking, LK_NBLCK=2, LK_UNLCK=0)
+    monkeypatch.setitem(sys.modules, "fcntl", None)  # import fcntl now raises ImportError
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    backend = secret_hygiene._lock_backend()
+    assert backend is not None and backend[0] == "msvcrt"
+    with secret_hygiene.secret_file_lock(tmp_path / "token.json") as locked:
+        assert locked is True
+    assert calls == [(2, 1), (0, 1)]
+
+
+def test_no_lock_backend_means_the_lock_is_never_held(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    monkeypatch.setitem(sys.modules, "msvcrt", None)
+    assert secret_hygiene._lock_backend() is None
+    with secret_hygiene.secret_file_lock(tmp_path / "token.json") as locked:
+        assert locked is False
+
+
+def test_a_lock_another_run_holds_is_waited_for_then_reported_as_not_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    target = tmp_path / "cache" / "token.json"
+    with secret_hygiene.secret_file_lock(target) as first:
+        assert first is True
+        started = time.monotonic()
+        with secret_hygiene.secret_file_lock(target, wait=0.3) as second:
+            assert second is False
+        assert time.monotonic() - started >= 0.3
+    with secret_hygiene.secret_file_lock(target, wait=0.3) as again:
+        assert again is True
