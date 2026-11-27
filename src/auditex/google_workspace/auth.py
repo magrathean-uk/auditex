@@ -134,43 +134,45 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
         token_cache = config.token_cache.expanduser()
         credentials = None
         cached: Any = None
+        recorded: frozenset[str] | None = None
         # Read once, through the same folder and file checks as the write: the grant recorded beside the credentials
         # is then one this account saved, never one planted by another account (a fixed refusal otherwise).
         raw_cache = secure_read_text(token_cache)
         try:
             if raw_cache is not None:
-                # Loaded with the scopes it was granted (not this run's), so a run that needs more signs in again
-                # rather than reusing a token its new collectors cannot use. A cache lacking a field a refresh needs is
-                # found here, on the credentials, so no refresh error text is ever read to decide it. A cache
-                # google-auth cannot load at all (Google may leave the refresh token out of a consent, and the cache
-                # then has none) signs in again too; google-auth's text is never kept.
+                # A cache lacking a field a refresh needs is found here, on the credentials, so no refresh error text is
+                # ever read to decide it. A cache google-auth cannot load at all (Google may leave the refresh token out
+                # of a consent, and the cache then has none) signs in again too; google-auth's text is never kept.
                 try:
                     cached = json.loads(raw_cache)
                     if not isinstance(cached, dict):
                         raise ValueError("not a token cache")
-                    credentials = Credentials.from_authorized_user_info(cached)
-                except ValueError:
-                    cached, credentials = None, None
-                if credentials is not None and (
-                    not _has_scopes(credentials, config.scopes) or not _can_refresh(credentials)
-                ):
+                    recorded = _recorded_grant(cached)
+                    if _cache_covers(cached, recorded, config.scopes):
+                        # Narrowed to this run's scopes (all of them inside the grant, as just checked): a scope only an
+                        # earlier run needed is never asked for on refresh, nor claimed by the credentials returned.
+                        credentials = Credentials.from_authorized_user_info(cached, scopes=list(config.scopes))
+                except (ValueError, TypeError, AttributeError):  # a wrong-typed field google-auth cannot parse
+                    cached, recorded, credentials = None, None, None
+                if credentials is not None and not _can_refresh(credentials):
                     credentials = None
             if credentials is not None:
-                # The cache's scopes are what was asked for (an older cache may claim scopes never granted), so it is
-                # refreshed every run and trusted only for the scopes Google's token endpoint grants now.
+                # Refreshed every run and trusted only for the scopes Google's token endpoint grants now.
                 try:
                     credentials.refresh(Request())
                 except (RefreshError, TransportError) as exc:
                     if isinstance(exc, TransportError) or not _is_grant_error(exc):
                         # The token endpoint is down or busy: that says nothing about the grant. A token still in
-                        # date whose recorded grant covers this run is used as it is, and the cache is left as it is
-                        # (another run may have replaced it meanwhile). An expired token, or a cache that cannot show
-                        # the grant (an older one records only the scopes asked for), cannot be used, and signing in
-                        # again would not help while the endpoint is down. On a volume that ignores ownership (macOS
-                        # noowners) another account could have written the recorded grant, so it is not used there.
+                        # date whose recorded grant covers this run is used as it is (it claims only this run's
+                        # scopes), and the cache is left as it is (another run may have replaced it meanwhile). An
+                        # expired token, or a cache that cannot show the grant (an older one records only the scopes
+                        # asked for), cannot be used, and signing in again would not help while the endpoint is down.
+                        # On a volume that ignores ownership (macOS noowners) another account could have written the
+                        # recorded grant, so it is not used there.
                         if (
                             credentials.valid
-                            and _verified_cover(cached, config.scopes)
+                            and recorded is not None
+                            and set(config.scopes).issubset(recorded)
                             and ownership_enforced(token_cache)
                         ):
                             return credentials
@@ -264,17 +266,6 @@ def _parse_service_account_key(raw: bytes) -> dict[str, Any]:
     return info
 
 
-def _has_scopes(credentials: Any, scopes: tuple[str, ...]) -> bool:
-    """Whether cached OAuth credentials were granted every scope this run asks for."""
-    has_scopes = getattr(credentials, "has_scopes", None)
-    if has_scopes is None:
-        return False
-    try:
-        return bool(has_scopes(list(scopes)))
-    except Exception:  # noqa: BLE001 - an unreadable cache is signed in again, never trusted
-        return False
-
-
 # Token endpoint errors that say the grant itself is gone or narrower (RFC 6749 5.2); a fresh consent fixes those.
 # Anything else (a 5xx page, a timeout, a busy endpoint, another error code) is temporary and says nothing about the grant.
 _GRANT_ERRORS = frozenset({"invalid_grant", "invalid_scope", "invalid_client", "unauthorized_client"})
@@ -350,12 +341,38 @@ def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
     return bool(granted) and set(scopes).issubset(granted)
 
 
-def _verified_cover(cached: Any, scopes: tuple[str, ...]) -> bool:
-    """Whether the grant recorded in the token cache covers this run (an older cache records none)."""
-    recorded = cached.get(VERIFIED_SCOPES_KEY) if isinstance(cached, Mapping) else None
-    if not isinstance(recorded, list) or not all(isinstance(scope, str) for scope in recorded):
+def _recorded_grant(cached: Mapping[str, Any]) -> frozenset[str] | None:
+    """The grant recorded in the token cache; ``None`` for an older cache that records none.
+
+    A recorded value that is not a non-empty list of non-empty strings (null, a string, a number, a mapping, an empty
+    list, a list holding anything else) proves nothing, so it grants nothing: an empty set.
+    """
+    if VERIFIED_SCOPES_KEY not in cached:
+        return None
+    recorded = cached.get(VERIFIED_SCOPES_KEY)
+    if not isinstance(recorded, list) or not recorded:
+        return frozenset()
+    if not all(isinstance(scope, str) and scope for scope in recorded):
+        return frozenset()
+    return frozenset(recorded)
+
+
+def _cache_covers(cached: Mapping[str, Any], recorded: frozenset[str] | None, scopes: tuple[str, ...]) -> bool:
+    """Whether the token cache may stand in for this run's sign-in (decided before any refresh).
+
+    A cache that records its grant covers the run when that grant holds every scope the run needs; one that does not
+    (or whose record proves nothing) signs in again, so a scope the user declined or an earlier consent never granted
+    is not asked for on refresh. An older cache that records no grant keeps the earlier rule: the scopes it asked for
+    must include every scope the run needs, and the refresh then proves the grant.
+    """
+    if recorded is not None:
+        return bool(recorded) and set(scopes).issubset(recorded)
+    asked = cached.get("scopes")
+    if isinstance(asked, str):
+        asked = asked.split(" ")
+    if not isinstance(asked, list) or not all(isinstance(scope, str) for scope in asked):
         return False
-    return set(scopes).issubset(recorded)
+    return set(scopes).issubset(asked)
 
 
 def user_delegated_credentials(credentials: Any, subject: str, *, scopes: tuple[str, ...] | None = None) -> Any:

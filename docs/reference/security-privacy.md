@@ -1107,11 +1107,18 @@ is refused with `secret_folder_refused`, which never names the path. Point `--to
 owner-controlled writable folder; the default `.secrets/` folder is created `0700`. The cache is read through the same
 folder check, and only when it is a regular file (not a link) you own with no group or world write and no allowing ACL;
 otherwise the run stops with `secret_file_refused`, so a cache another account could have planted is never used. The
-cache is refreshed every run and saved only after a successful refresh or a fresh consent, together with the scopes
-Google actually granted (`auditex_verified_scopes`). A fresh consent that grants fewer scopes than the run needs is
-neither used nor saved; the run stops and names the missing scopes. When Google's token endpoint is down, a cached
-token still in date is used without rewriting the cache, and only when its recorded grant covers the run; an older
-cache that records no grant, or one whose grant is narrower, stops the run with "run again later". This outage
+cache is saved only after a successful refresh or a fresh consent, together with the scopes Google actually granted
+(`auditex_verified_scopes`), and the saved credentials name only that run's scopes. A loaded cache is narrowed to the
+scopes this run needs: it stands in for the run only when its recorded grant holds every one of them, and its refresh
+then asks for those scopes and no others, so a scope only an earlier run needed (or one the user has since declined or
+revoked) is never sent again. A cache whose recorded grant does not cover the run, or whose recorded value is null,
+empty, not a list or holds anything but non-empty strings (which proves nothing, so grants nothing), is not refreshed:
+the run signs in again, at most once. An older cache that records no grant at all keeps the earlier rule: it is used
+when the scopes it asked for include every scope the run needs, and is then trusted only for what the refresh grants.
+The cache is refreshed every run. A fresh consent that grants fewer scopes than the run needs is neither used nor
+saved; the run stops and names the missing scopes. When Google's token endpoint is down, a cached token still in date
+is used without rewriting the cache, and only when its recorded grant covers the run; it then claims only this run's
+scopes. An older cache that records no grant stops the run with "run again later". This outage
 fallback is off where the owner check proves nothing: on a macOS volume with "Ignore ownership on this volume" set
 (mounted `noowners`, read from the volume's mount flags), when those flags cannot be read, and on Windows; there an
 outage always stops the run with "run again later". Only the token endpoint's own grant errors (`invalid_grant`,
