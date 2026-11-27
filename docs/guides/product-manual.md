@@ -25,7 +25,7 @@ Auditex is an audit-only evidence collection and reporting toolkit for Microsoft
 
 ## Install
 
-Use Python 3.11, 3.12, 3.13 or 3.14 on Linux, macOS or Windows Subsystem for Linux 2 (WSL2). Native Windows is not supported yet: Auditex needs no-follow, descriptor-relative file opens to read its inputs safely, and on native Windows it refuses with "Auditex needs Linux, macOS or WSL2; native Windows is not supported yet." Install and run it inside a WSL2 distribution instead.
+Use Python 3.11, 3.12, 3.13, 3.14 or 3.15 on Linux, macOS or Windows Subsystem for Linux 2 (WSL2). Native Windows is not supported yet: Auditex needs no-follow, descriptor-relative file opens to read its inputs safely, and on native Windows it refuses with "Auditex needs Linux, macOS or WSL2; native Windows is not supported yet." Install and run it inside a WSL2 distribution instead.
 
 Install Auditex from PyPI with pipx; the [install guide](install-guide.md) covers every step, from installing Python
 and pipx to upgrading and removing it:

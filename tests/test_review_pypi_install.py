@@ -96,7 +96,7 @@ def test_the_wheel_metadata_is_fit_for_pypi(built_wheel: Path) -> None:
     classifiers = values("Classifier")
     assert "Operating System :: POSIX :: Linux" in classifiers and "Operating System :: MacOS" in classifiers
     assert not [c for c in classifiers if "Windows" in c]
-    for minor in (11, 12, 13, 14):
+    for minor in (11, 12, 13, 14, 15):
         assert f"Programming Language :: Python :: 3.{minor}" in classifiers
     assert values("Keywords")
 

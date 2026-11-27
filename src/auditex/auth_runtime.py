@@ -7,6 +7,7 @@ virtual environment, PowerShell 7 and the ExchangeOnlineManagement module that e
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -17,6 +18,37 @@ from typing import Any
 from azure_tenant_audit.secret_hygiene import redact_output
 
 JsonCommand = Callable[[list[str]], dict[str, Any]]
+
+# The Python range Auditex is tested on: the one place that states it. Older than the minimum is blocked, newer than
+# the newest tested minor is an "untested" warning, and a version that cannot be read is blocked, never supported.
+# pyproject.toml (requires-python and the classifiers), the CI matrix and the docs follow these two values; a test
+# checks that they do.
+PYTHON_MINIMUM = (3, 11)
+PYTHON_NEWEST_TESTED = (3, 15)
+_PYTHON_VERSION = re.compile(r"(?:Python\s+)?(\d{1,4})\.(\d{1,4})(?![0-9])")
+
+
+def tested_python_range_text() -> str:
+    """For example ``3.11 to 3.14``."""
+    return "{}.{} to {}.{}".format(*PYTHON_MINIMUM, *PYTHON_NEWEST_TESTED)
+
+
+def classify_python_version(version: object) -> tuple[str, str | None]:
+    """(status, error) for a Python version text such as ``Python 3.14.1``, ``3.15.0rc1`` or ``Python 3.12``.
+
+    ``supported`` inside the tested range, ``untested`` above its newest minor (a warning, still usable),
+    ``blocked`` below the minimum or when the text is not a readable major.minor version.
+    """
+    match = _PYTHON_VERSION.match(version.strip()) if isinstance(version, str) else None
+    if match is None:
+        return "blocked", "python_version_unreadable"
+    found = (int(match.group(1)), int(match.group(2)))
+    if found < PYTHON_MINIMUM:
+        return "blocked", "python_too_old"
+    if found > PYTHON_NEWEST_TESTED:
+        return "untested", None
+    return "supported", None
+
 # A readiness command that runs longer than this is reported as blocked, so auditex doctor always returns.
 COMMAND_TIMEOUT_SECONDS = 60
 
@@ -194,12 +226,13 @@ class ToolchainRuntime:
         stdout = (result.get("stdout") or "").strip()
         if result["status"] == "supported" and stdout:
             version, version_error = self.command_version([stdout, "--version"])
+            status, error = classify_python_version(version) if version else ("blocked", version_error)
             return {
-                "status": "supported" if version else "blocked",
+                "status": status,
                 "path": stdout,
                 "version": version,
                 "selector": str(self.select_python_script),
-                "error": version_error,
+                "error": error,
             }
         return {
             "status": "blocked",
