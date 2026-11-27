@@ -663,6 +663,9 @@ class GoogleWorkspaceClient:
     customer_id: str | None = None
     page_size: int = 100
     delegated: bool = False
+    # Whether the Drive collector may read the Directory domains list (drive_scope.read_tenant_domains): under
+    # domain-wide delegation, or under OAuth only when the grant holds a scope another selected collector requires.
+    tenant_domain_read: bool = False
     _services: dict[tuple[str, ...], Any] | None = None
     _subject_services: OrderedDict[tuple[str, str, str], Any] | None = None
 

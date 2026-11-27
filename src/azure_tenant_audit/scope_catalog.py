@@ -140,7 +140,8 @@ def build_google_scope_catalog(
     catalog: dict[str, dict[str, Any]] = {}
     for collector_name, collector in registry.items():
         required_permissions = _dedupe([str(item) for item in getattr(collector, "required_scopes", ())])
-        # Optional scopes widen a collector's reads; they are asked for in the one sign-in but a refusal is not a gap.
+        # Optional scopes widen a collector's reads: asked for under domain-wide delegation (on a token of their own),
+        # never by an OAuth sign-in unless another selected collector requires them; a refusal is not a gap.
         optional_permissions = [
             item for item in _dedupe([str(item) for item in getattr(collector, "optional_scopes", ())])
             if item not in required_permissions

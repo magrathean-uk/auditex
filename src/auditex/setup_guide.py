@@ -171,17 +171,23 @@ def build_google_setup_guide(
     required_scopes = aggregate["required_permissions"]
     scope_warnings = aggregate["scope_warnings"]
     api_enablement = aggregate["api_enablement"]
-    # A read-only optional scope (the Drive collector's Directory domains read) is asked for in the same sign-in as the
-    # run, so it is in the value to paste too; each is listed apart with its note. Leaving it out fails only that read.
-    optional_scopes: list[dict[str, str]] = []
+    if auth not in {"domain-delegation", "oauth"}:
+        raise ValueError("Google auth must be domain-delegation or oauth.")
+    # A read-only optional scope (the Drive collector's Directory domains read) is in the domain-wide delegation value
+    # to paste, listed apart with its note: it is read on a token of its own, so leaving it out fails only that read.
+    # An OAuth sign-in never asks for a scope that is only optional (LIVE-FIX-7): it is listed as not requested, and
+    # the API only its read uses is not needed.
+    optional_rows: list[dict[str, str]] = []
     for scope in aggregate["optional_permissions"]:
         name = next(name for name in selected if scope in (_mapping(catalog.get(name)).get("optional_permissions") or []))
         notes = _mapping(_mapping(catalog.get(name)).get("optional_permission_notes"))
-        optional_scopes.append({"scope": scope, "collector": name, "note": str(notes.get(scope) or "")})
+        optional_rows.append({"scope": scope, "collector": name, "note": str(notes.get(scope) or "")})
+    optional_scopes = optional_rows if auth == "domain-delegation" else []
+    oauth_unrequested_scopes = optional_rows if auth == "oauth" else []
     scopes_csv = ",".join([*required_scopes, *(row["scope"] for row in optional_scopes)])
     # An API only an optional scope's read uses (the Admin SDK API for Drive's Directory domains read) is listed apart.
     optional_api_enablement: list[dict[str, str]] = []
-    for api in aggregate["optional_api_enablement"]:
+    for api in aggregate["optional_api_enablement"] if auth == "domain-delegation" else []:
         name = next(name for name in selected if api in (_mapping(catalog.get(name)).get("optional_api_enablement") or []))
         optional_api_enablement.append({
             "api": api, "collector": name,
@@ -194,9 +200,6 @@ def build_google_setup_guide(
         "drive_file_content_reads": False,
         "broad_scopes_recorded_as_scope_risk": bool(scope_warnings),
     }
-
-    if auth not in {"domain-delegation", "oauth"}:
-        raise ValueError("Google auth must be domain-delegation or oauth.")
 
     domain_delegation_steps = [
         "Install Auditex with the google extra: pipx install --force \"auditex[google]\" (name every extra you keep "
@@ -225,6 +228,7 @@ def build_google_setup_guide(
         "optional_api_enablement": optional_api_enablement,
         "required_scopes": required_scopes,
         "optional_scopes": optional_scopes,
+        "oauth_unrequested_scopes": oauth_unrequested_scopes,
         "scopes_csv": scopes_csv,
         "scope_warnings": scope_warnings,
         "provider_assertions": provider_assertions,
@@ -515,6 +519,11 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
             for row in optional_scopes:
                 note = f": {row['note']}" if row.get("note") else ""
                 lines.append(f"- `{row.get('scope')}` (for `{row.get('collector')}`){note}")
+        unrequested = [_mapping(row) for row in payload.get("oauth_unrequested_scopes") or []]
+        if unrequested:
+            lines.extend(["", "Optional scopes an OAuth sign-in does not ask for (their read is not attempted):", ""])
+            for row in unrequested:
+                lines.append(f"- `{row.get('scope')}` (for `{row.get('collector')}`)")
         lines.extend(["", "## APIs To Enable", ""])
         for api in payload.get("api_enablement") or []:
             lines.append(f"- {api}")

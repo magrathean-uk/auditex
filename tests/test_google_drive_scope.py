@@ -160,6 +160,8 @@ def test_read_tenant_domains_asks_for_the_domain_scope_alone() -> None:
             return [{"domainName": "example.com"}]
 
     class _Client:
+        tenant_domain_read = True
+
         def for_scopes(self, scopes: tuple[str, ...]) -> _Narrowed:
             asked.append(scopes)
             return _Narrowed()
@@ -175,10 +177,12 @@ def test_read_tenant_domains_asks_for_the_domain_scope_alone() -> None:
 @pytest.mark.parametrize(
     "client",
     [
-        type("C", (), {"list_directory": lambda self, *_a, **_k: (_ for _ in ()).throw(_HttpError(403))})(),
-        type("C", (), {"for_scopes": lambda self, _s: (_ for _ in ()).throw(RuntimeError("no token"))})(),
-        type("C", (), {"list_directory": lambda self, *_a, **_k: [{"domainName": None}]})(),
-        type("C", (), {})(),
+        type("C", (), {"tenant_domain_read": True,
+                       "list_directory": lambda self, *_a, **_k: (_ for _ in ()).throw(_HttpError(403))})(),
+        type("C", (), {"tenant_domain_read": True,
+                       "for_scopes": lambda self, _s: (_ for _ in ()).throw(RuntimeError("no token"))})(),
+        type("C", (), {"tenant_domain_read": True, "list_directory": lambda self, *_a, **_k: [{"domainName": None}]})(),
+        type("C", (), {"tenant_domain_read": True})(),
         None,
     ],
 )
@@ -189,7 +193,9 @@ def test_read_tenant_domains_failures_are_unknown(client: Any) -> None:
 # ---- the Drive listing and the collector ---------------------------------------------------------------------------
 
 
-def _client(files: list[dict[str, Any]], domains: Any, calls: list[str]) -> GoogleWorkspaceClient:
+def _client(
+    files: list[dict[str, Any]], domains: Any, calls: list[str], *, tenant_domain_read: bool = True,
+) -> GoogleWorkspaceClient:
     class _Files:
         def list(self, **_kwargs: Any) -> _Request:
             calls.append("files.list")
@@ -212,7 +218,7 @@ def _client(files: list[dict[str, Any]], domains: Any, calls: list[str]) -> Goog
     drive = type("Drive", (), {"files": lambda self: _Files(), "permissions": lambda self: _Permissions(),
                                "drives": lambda self: _Drives()})()
     admin = type("Admin", (), {"domains": lambda self: _Domains()})()
-    client = GoogleWorkspaceClient(credentials=None)
+    client = GoogleWorkspaceClient(credentials=None, tenant_domain_read=tenant_domain_read)
     assert client._services is not None
     client._services[("drive", "v3")] = drive
     client._services[("admin", "directory_v1")] = admin

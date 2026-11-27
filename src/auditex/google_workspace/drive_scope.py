@@ -18,9 +18,17 @@ DOMAIN_SCOPE = "https://www.googleapis.com/auth/admin.directory.domain.readonly"
 # The Drive collector's optional scope, as the scope inventory and the setup guide name it.
 DOMAIN_SCOPE_NOTE = (
     "Optional for google_drive_posture, read-only: Directory domains.list, the tenant's domain and alias names only "
-    "(blast radius: reading those names; no write is possible). It tells My Drive files owned outside the tenant; "
-    "when it is not granted every file stays in scope and its sharing is read as before."
+    "(blast radius: reading those names; no write is possible). It tells My Drive files owned outside the tenant. "
+    "Read under domain-wide delegation on a token of its own; under OAuth only when another selected collector "
+    "requires this scope (Directory, DNS posture), since an OAuth sign-in never asks for an optional scope. When it "
+    "is not read every file stays in scope and its sharing is read as before."
 )
+
+# How a run may read the tenant's domains for the Drive collector (``drive_domain_read`` in the auth context):
+# on a delegated token of its own, on the OAuth grant because another selected collector requires the scope, or not.
+DRIVE_DOMAIN_READ_DELEGATION = "delegation_own_token"
+DRIVE_DOMAIN_READ_OAUTH_REQUIRED = "oauth_required_scope"
+DRIVE_DOMAIN_READ_NOT_REQUESTED = "not_requested"
 
 TenantDomains = Callable[[], "frozenset[str] | None"]
 
@@ -94,8 +102,12 @@ def read_tenant_domains(client: Any) -> frozenset[str] | None:
     """The tenant's domains from the Directory domains list, read on a token asking for that scope alone.
 
     A separate token keeps a delegation without the domain scope from failing the Drive reads. Any failure is
-    ``None`` (unknown), never an empty set.
+    ``None`` (unknown), never an empty set. The read is attempted only when the client says it may be
+    (``tenant_domain_read``: domain-wide delegation, or an OAuth grant holding the scope because another selected
+    collector requires it); otherwise nothing is read and every file stays in scope (LIVE-FIX-7).
     """
+    if getattr(client, "tenant_domain_read", False) is not True:
+        return None
     narrow = getattr(client, "for_scopes", None)
     try:
         domain_client = narrow((DOMAIN_SCOPE,)) if narrow is not None else client
