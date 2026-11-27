@@ -48,6 +48,30 @@ def _explicit_id(norm: str, *, identity: bool) -> bool:
     return norm == "customerid" or (identity and norm == "id")
 
 
+def _no_value(member: Any) -> bool:
+    """A field value that holds nothing to withhold: null, an empty string or the ``my_customer`` alias."""
+    return member is None or member == "" or bundle_customer_id(member) is not None
+
+
+def _malformed_container(norm: str, member: Any) -> bool:
+    """A field that names the customer but does not have its shape, so whatever it holds is withheld whole.
+
+    ``customerIdentity`` must be an object whose every ``id`` member is a string (at least one); ``customer`` must be
+    a ``customers/<id>`` string. Anything else under those keys (a list, a string, a number, an object without a
+    string id) may hold the customer id before it is learnt, so it is never copied (LIVE-FIX-5 B2).
+    """
+    if _no_value(member):
+        return False
+    if norm == "customeridentity":
+        if not isinstance(member, dict):
+            return True
+        ids = [value for key, value in member.items() if _norm(key) == "id"]
+        return not ids or not all(isinstance(value, str) for value in ids)
+    if norm == "customer":
+        return not (isinstance(member, str) and member.startswith("customers/"))
+    return False
+
+
 class CustomerIds:
     def __init__(self, *values: Any) -> None:
         self.values: set[str] = set()
@@ -108,7 +132,9 @@ class CustomerIds:
                     self.add(member)
                 elif norm == "customer" and isinstance(member, str) and member.startswith("customers/"):
                     self.add(member.removeprefix("customers/"))
-                self.learn(member, error=error or norm in _ERROR_KEYS, identity=_identity(norm, member))
+                # A customer identity of the wrong shape teaches nothing: its members are never read as its id.
+                self.learn(member, error=error or norm in _ERROR_KEYS,
+                           identity=_identity(norm, member) and not _malformed_container(norm, member))
         elif isinstance(value, (list, tuple)):
             for member in value:
                 self.learn(member, error=error)
@@ -132,9 +158,8 @@ class CustomerIds:
             for key, member in value.items():
                 norm = _norm(key)
                 safe_key = self.text(key) if isinstance(key, str) else key
-                if (_explicit_id(norm, identity=identity) and member is not None and member != ""
-                        and bundle_customer_id(member) is None):
-                    # A malformed ID field can contain arbitrary nested data.
+                if (_explicit_id(norm, identity=identity) and not _no_value(member)) or _malformed_container(norm, member):
+                    # A malformed ID field, or a customer field of the wrong shape, can contain arbitrary nested data.
                     safe_member = WITHHELD
                     member_changed = False
                 elif norm == "customer" and isinstance(member, str) and member.startswith("customers/"):

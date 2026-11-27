@@ -54,13 +54,14 @@ def test_customer_identity_key_spelling_is_normalised() -> None:
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
+        # LIVE-FIX-5 B2: an identity whose id is not a string is not a customer identity, so it is withheld whole.
         ({"nested": CUSTOMER}, "<customer-id>"),
         ([CUSTOMER], "<customer-id>"),
         (12345, "<customer-id>"),
         (True, "<customer-id>"),
-        (None, None),
-        ("", ""),
-        ("my_customer", "my_customer"),
+        (None, "<customer-id>"),
+        ("", {"id": ""}),
+        ("my_customer", {"id": "my_customer"}),
     ],
 )
 def test_malformed_customer_identity_id_is_withheld_whole_and_never_learnt(value: Any, expected: Any) -> None:
@@ -68,7 +69,7 @@ def test_malformed_customer_identity_id_is_withheld_whole_and_never_learnt(value
     rows = [{"customerIdentity": {"id": value}}]
     ids.learn(rows)
     assert ids.values == set()
-    assert ids.evidence(rows) == ([{"customerIdentity": {"id": expected}}], False)
+    assert ids.evidence(rows) == ([{"customerIdentity": expected}], False)
 
 
 def test_other_members_of_a_customer_identity_are_ordinary_evidence() -> None:
@@ -83,10 +84,6 @@ def test_other_members_of_a_customer_identity_are_ordinary_evidence() -> None:
     [
         # An ``id`` that is not directly under customerIdentity is not an explicit customer id field.
         [{"ownerIdentity": [{"id": CUSTOMER}]}],
-        [{"customerIdentity": {"user": {"id": CUSTOMER}}}],
-        # A customerIdentity that is not an object is not read as one.
-        [{"customerIdentity": CUSTOMER}],
-        [{"customerIdentity": [{"id": CUSTOMER}]}],
         [{"identity": {"id": CUSTOMER}}],
     ],
 )
@@ -168,3 +165,106 @@ def test_live_run_with_the_id_elsewhere_in_evidence_stays_partial(tmp_path: Path
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     assert [(row["name"], row["status"]) for row in summary["collectors"]] == [("google_reports", "partial")]
     assert rc == 1
+
+
+# ---- LIVE-FIX-5 B2: a customer field of the wrong shape is withheld whole, before or after the id is learnt -------
+
+WRONG_IDENTITY = [
+    [{"id": CUSTOMER}],
+    [CUSTOMER],
+    CUSTOMER,
+    f" {CUSTOMER} ",
+    f"customers/{CUSTOMER}",
+    9000000001,
+    1.5,
+    True,
+    {"user": {"id": CUSTOMER}},
+    {"id": None, "label": CUSTOMER},
+    {"id": [CUSTOMER]},
+    {"id": 7, "name": CUSTOMER},
+    {"id": "x", "ID": [CUSTOMER]},
+    {},
+]
+
+
+@pytest.mark.parametrize("learnt", [False, True])
+@pytest.mark.parametrize("identity", WRONG_IDENTITY)
+def test_live_fix_5_b2_a_wrong_typed_customer_identity_is_withheld_whole(identity: Any, learnt: bool) -> None:
+    ids = CustomerIds(CUSTOMER) if learnt else CustomerIds()
+    rows = [_activity({"customerIdentity": identity})]
+    ids.learn(rows)
+    assert ids.values == ({CUSTOMER} if learnt else set())
+    safe, changed = ids.evidence(rows)
+    assert safe[0]["resourceDetails"][0]["ownerDetails"]["ownerIdentity"] == [{"customerIdentity": "<customer-id>"}]
+    assert changed is False
+    assert CUSTOMER not in json.dumps(safe)
+    assert CUSTOMER not in json.dumps(CustomerIds().scrub(rows))
+
+
+@pytest.mark.parametrize("identity", [None, ""])
+def test_live_fix_5_b2_an_empty_customer_identity_holds_nothing_to_withhold(identity: Any) -> None:
+    rows = [{"customerIdentity": identity}]
+    assert CustomerIds().evidence(rows) == ([{"customerIdentity": identity}], False)
+
+
+@pytest.mark.parametrize("customer", [
+    [f"customers/{CUSTOMER}"], {"name": f"customers/{CUSTOMER}"}, CUSTOMER, f" customers/{CUSTOMER}", 9000000001,
+    True, {"id": CUSTOMER},
+])
+def test_live_fix_5_b2_a_wrong_typed_customer_field_is_withheld_whole(customer: Any) -> None:
+    ids = CustomerIds()
+    rows = [{"name": "policies/p1", "customer": customer}]
+    ids.learn(rows)
+    assert ids.values == set()
+    assert ids.evidence(rows) == ([{"name": "policies/p1", "customer": "<customer-id>"}], False)
+    assert CUSTOMER not in json.dumps(ids.scrub(rows))
+
+
+@pytest.mark.parametrize("customer", [None, "", "my_customer"])
+def test_live_fix_5_b2_an_empty_customer_field_is_kept(customer: Any) -> None:
+    rows = [{"customer": customer}]
+    assert CustomerIds().evidence(rows) == ([{"customer": customer}], False)
+
+
+def test_live_fix_5_b2_a_customers_path_is_still_learnt_and_masked() -> None:
+    ids = CustomerIds()
+    rows = [{"customer": f"customers/{CUSTOMER}"}]
+    ids.learn(rows)
+    assert ids.values == {CUSTOMER}
+    assert ids.evidence(rows) == ([{"customer": "customers/<customer-id>"}], False)
+
+
+@pytest.mark.parametrize("row", [
+    # Reports Activity.id.customerId and UsageReport.entity.customerId, well formed and in wrong-typed containers.
+    {"id": {"applicationName": "admin", "customerId": CUSTOMER}},
+    {"id": [{"customerId": CUSTOMER}]},
+    {"id": {"customerId": [CUSTOMER]}},
+    {"id": {"customerId": {"value": CUSTOMER}}},
+    {"id": {"customerId": 9000000001}},
+    {"entity": {"customerId": CUSTOMER, "type": "CUSTOMER"}},
+    {"entity": [{"customerId": CUSTOMER}]},
+    {"entity": {"customerId": [CUSTOMER]}},
+    {"entity": {"customer_id": {"id": CUSTOMER}}},
+    {"usageReports": [{"entity": [[{"customerId": CUSTOMER}]]}]},
+])
+def test_live_fix_5_b2_report_customer_id_paths_never_copy_the_id(row: dict[str, Any]) -> None:
+    ids = CustomerIds()
+    ids.learn([row])
+    safe, changed = ids.evidence([row])
+    assert changed is False
+    assert CUSTOMER not in json.dumps(safe)
+    assert "<customer-id>" in json.dumps(safe)
+
+
+@pytest.mark.parametrize("identity", [[{"id": CUSTOMER}], CUSTOMER, 9000000001, {"user": {"id": CUSTOMER}}])
+def test_live_fix_5_b2_reviewer_scenario_live_run_never_writes_the_id(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, identity: Any) -> None:
+    rc, run_dir = _live_run(tmp_path, monkeypatch, [_activity({"customerIdentity": identity})])
+
+    raw = json.loads((run_dir / "raw" / "google_reports.json").read_text(encoding="utf-8"))
+    owner = raw["adminActivities"]["value"][0]["resourceDetails"][0]["ownerDetails"]["ownerIdentity"]
+    assert owner == [{"customerIdentity": "<customer-id>"}]
+    needle = str(identity if not isinstance(identity, (list, dict)) else CUSTOMER).encode()
+    assert [str(path.relative_to(run_dir)) for path in run_dir.rglob("*")
+            if path.is_file() and needle in path.read_bytes()] == []
+    assert rc == 0

@@ -684,7 +684,10 @@ Auditex learns exact customer IDs from explicit API fields such as `customerId`,
 object (the Reports API's `resourceDetails[].ownerDetails.ownerIdentity[].customerIdentity.id`) and Cloud
 Identity's `customer: "customers/<id>"`, and from named customer parameters in API failure URLs. It masks those
 values in evidence strings, mapping keys and diagnostics before writing a run. A malformed object or list under
-`customerId` or `customerIdentity.id` is withheld whole. Unrelated organisational unit names and paths are preserved even when they
+`customerId` or `customerIdentity.id` is withheld whole. So is anything under `customerIdentity` that is not an
+object whose every `id` is a string (a list, a string, a number, an object without a string id) and anything
+under `customer` that is not a `customers/<id>` string; these are never learnt, and null, empty and
+`my_customer` values are kept. Unrelated organisational unit names and paths are preserved even when they
 resemble a customer ID. If masking changes evidence outside an explicit ID field or diagnostic, a
 `customer_id_withheld` coverage row marks that collector partial. An organisational unit reference that was
 changed cannot establish complete setting-event coverage.
