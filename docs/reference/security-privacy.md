@@ -687,7 +687,13 @@ values in evidence strings, mapping keys and diagnostics before writing a run. A
 `customerId` or `customerIdentity.id` is withheld whole. So is anything under `customerIdentity` that is not an
 object whose every `id` is a string (a list, a string, a number, an object without a string id) and anything
 under `customer` that is not a `customers/<id>` string; these are never learnt, and null, empty and
-`my_customer` values are kept. Unrelated organisational unit names and paths are preserved even when they
+`my_customer` values are kept. The Reports API objects on a customer ID path must also have their documented
+shape, or they are withheld whole before the ID is learnt: an activity's `id` (an object of scalar
+`applicationName`, `customerId`, `time` and `uniqueQualifier`; a row of a `<application>Activities` stream is an
+activity whatever it holds), a usage report's `entity` (an object, of its documented scalar members on a usage
+report), `ownerDetails` (an object of `ownerIdentity` and a scalar `ownerType`) and `ownerIdentity` (a list of
+objects whose members are the four identity objects). A normalised activity record is never named by an `id` of
+any other shape. Unrelated organisational unit names and paths are preserved even when they
 resemble a customer ID. If masking changes evidence outside an explicit ID field or diagnostic, a
 `customer_id_withheld` coverage row marks that collector partial. An organisational unit reference that was
 changed cannot establish complete setting-event coverage.

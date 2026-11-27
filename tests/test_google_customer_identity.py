@@ -82,8 +82,9 @@ def test_other_members_of_a_customer_identity_are_ordinary_evidence() -> None:
 @pytest.mark.parametrize(
     "rows",
     [
-        # An ``id`` that is not directly under customerIdentity is not an explicit customer id field.
-        [{"ownerIdentity": [{"id": CUSTOMER}]}],
+        # An ``id`` that is not directly under customerIdentity is not an explicit customer id field. (An ownerIdentity
+        # entry with a member of its own is withheld whole since LIVE-FIX-6 B2a, so a user identity stands in here.)
+        [{"ownerIdentity": [{"userIdentity": {"id": CUSTOMER}}]}],
         [{"identity": {"id": CUSTOMER}}],
     ],
 )
@@ -268,3 +269,192 @@ def test_live_fix_5_b2_reviewer_scenario_live_run_never_writes_the_id(
     assert [str(path.relative_to(run_dir)) for path in run_dir.rglob("*")
             if path.is_file() and needle in path.read_bytes()] == []
     assert rc == 0
+
+
+# ---- LIVE-FIX-6 B2a: a Reports field on a customer id path with the wrong shape is withheld whole -----------------
+
+_TIME = "2026-11-01T00:00:00Z"
+
+
+def _with_id(activity_id: Any) -> dict[str, Any]:
+    return {"kind": "admin#reports#activity", "id": activity_id, "events": [{"name": "CHANGE_APPLICATION_SETTING"}]}
+
+
+WRONG_ACTIVITY_ID = [
+    CUSTOMER,
+    f"id {CUSTOMER}",
+    [CUSTOMER],
+    [{"customerId": CUSTOMER}],
+    9000000001,
+    True,
+    {"time": _TIME, "cid": CUSTOMER},
+    {"time": _TIME, "uniqueQualifier": [CUSTOMER]},
+    {"applicationName": {"name": CUSTOMER}},
+    {"time": _TIME, "uniqueQualifier": "1", "owner": {"id": CUSTOMER}},
+]
+
+
+@pytest.mark.parametrize("learnt", [False, True])
+@pytest.mark.parametrize("activity_id", WRONG_ACTIVITY_ID)
+def test_live_fix_6_b2a_an_activity_id_of_the_wrong_shape_is_withheld_whole(activity_id: Any, learnt: bool) -> None:
+    ids = CustomerIds(CUSTOMER) if learnt else CustomerIds()
+    rows = [_with_id(activity_id)]
+    ids.learn(rows)
+    safe, changed = ids.evidence(rows)
+    assert safe == [{"kind": "admin#reports#activity", "id": "<customer-id>",
+                     "events": [{"name": "CHANGE_APPLICATION_SETTING"}]}]
+    assert changed is False
+    assert CUSTOMER not in json.dumps(CustomerIds().scrub(rows))
+
+
+@pytest.mark.parametrize("row", [
+    # No kind, but members only an activity has.
+    {"id": CUSTOMER, "actor": {"email": "ada@example.com"}},
+    {"id": [CUSTOMER], "ipAddress": "192.0.2.1"},
+    {"id": CUSTOMER, "resourceDetails": []},
+])
+def test_live_fix_6_b2a_an_activity_without_kind_is_still_an_activity(row: dict[str, Any]) -> None:
+    safe, _ = CustomerIds().evidence([row])
+    assert safe[0]["id"] == "<customer-id>"
+    assert CUSTOMER not in json.dumps(safe)
+
+
+@pytest.mark.parametrize("payload", [
+    {"adminActivities": {"value": [{"id": CUSTOMER}]}},
+    {"loginActivities": {"value": [{"id": [CUSTOMER]}], "status": "partial"}},
+    {"tokenActivities": [{"id": CUSTOMER}]},
+])
+def test_live_fix_6_b2a_a_row_of_a_reports_stream_is_an_activity_whatever_it_holds(payload: dict[str, Any]) -> None:
+    safe, changed = CustomerIds().evidence(payload)
+    assert CUSTOMER not in json.dumps(safe)
+    assert '"id": "<customer-id>"' in json.dumps(safe)
+    assert changed is False
+
+
+def test_live_fix_6_b2a_a_well_formed_activity_id_is_kept_with_its_customer_id_withheld() -> None:
+    rows = [_with_id({"time": _TIME, "uniqueQualifier": "-12", "applicationName": "admin", "customerId": CUSTOMER})]
+    ids = CustomerIds()
+    ids.learn(rows)
+    assert ids.values == {CUSTOMER}
+    assert ids.evidence(rows) == ([_with_id({"time": _TIME, "uniqueQualifier": "-12", "applicationName": "admin",
+                                             "customerId": "<customer-id>"})], False)
+    numeric = [_with_id({"time": _TIME, "uniqueQualifier": 12})]
+    assert CustomerIds().evidence(numeric) == (numeric, False)
+
+
+@pytest.mark.parametrize("row", [
+    # Objects that are not activities keep a scalar id: other kinds, and objects without an activity member.
+    {"kind": "google_activity", "id": "u1", "events": [{"name": "x"}]},
+    {"kind": "admin#directory#user", "id": "u1", "primaryEmail": "ada@example.com"},
+    {"id": "file-1", "name": "Plan"},
+    {"settingEvents": {"value": [{"id": {"time": _TIME}, "events": []}]}},
+])
+def test_live_fix_6_b2a_other_ids_are_ordinary_evidence(row: dict[str, Any]) -> None:
+    assert CustomerIds().evidence([row]) == ([row], False)
+
+
+WRONG_ENTITY = [CUSTOMER, [CUSTOMER], [{"customerId": CUSTOMER}], 7, {"type": "CUSTOMER", "owner": CUSTOMER},
+                {"type": "CUSTOMER", "userEmail": [CUSTOMER]}, {"customer": {"id": CUSTOMER}}]
+
+
+@pytest.mark.parametrize("learnt", [False, True])
+@pytest.mark.parametrize("entity", WRONG_ENTITY)
+def test_live_fix_6_b2a_a_usage_report_entity_of_the_wrong_shape_is_withheld_whole(entity: Any, learnt: bool) -> None:
+    ids = CustomerIds(CUSTOMER) if learnt else CustomerIds()
+    rows = [{"kind": "admin#reports#usageReport", "date": "2026-11-01", "entity": entity, "parameters": []}]
+    ids.learn(rows)
+    safe, changed = ids.evidence(rows)
+    assert safe == [{"kind": "admin#reports#usageReport", "date": "2026-11-01", "entity": "<customer-id>",
+                     "parameters": []}]
+    assert changed is False
+    assert CUSTOMER not in json.dumps(CustomerIds().scrub(rows))
+
+
+def test_live_fix_6_b2a_a_well_formed_usage_entity_and_an_alert_entity_are_kept() -> None:
+    usage = [{"kind": "admin#reports#usageReport", "date": "2026-11-01", "parameters": [],
+              "entity": {"type": "CUSTOMER", "customerId": CUSTOMER}}]
+    assert CustomerIds().evidence(usage)[0][0]["entity"] == {"type": "CUSTOMER", "customerId": "<customer-id>"}
+    alert = [{"alertId": "a1", "data": {"entity": {"emailAddress": "ada@example.com", "displayName": "Ada"}}}]
+    assert CustomerIds().evidence(alert) == (alert, False)
+    assert CustomerIds().evidence([{"entity": CUSTOMER}])[0] == [{"entity": "<customer-id>"}]
+
+
+WRONG_OWNER_DETAILS = [CUSTOMER, [CUSTOMER], 5, {"ownerType": "CUSTOMER", "owner": CUSTOMER},
+                       {"ownerType": [CUSTOMER]}, {"ownerType": {"id": CUSTOMER}}]
+
+
+@pytest.mark.parametrize("learnt", [False, True])
+@pytest.mark.parametrize("details", WRONG_OWNER_DETAILS)
+def test_live_fix_6_b2a_owner_details_of_the_wrong_shape_are_withheld_whole(details: Any, learnt: bool) -> None:
+    ids = CustomerIds(CUSTOMER) if learnt else CustomerIds()
+    rows = [{"kind": "admin#reports#activity", "id": {"time": _TIME},
+             "resourceDetails": [{"id": "r1", "ownerDetails": details}]}]
+    ids.learn(rows)
+    safe, changed = ids.evidence(rows)
+    assert safe[0]["resourceDetails"] == [{"id": "r1", "ownerDetails": "<customer-id>"}]
+    assert changed is False
+    assert CUSTOMER not in json.dumps(CustomerIds().scrub(rows))
+
+
+WRONG_OWNER_IDENTITY = [
+    [CUSTOMER],
+    CUSTOMER,
+    {"customerIdentity": {"id": CUSTOMER}},
+    [{"id": CUSTOMER}],
+    [{"customerIdentity": {"id": "C11111111"}}, CUSTOMER],
+    [{"userIdentity": CUSTOMER}],
+    [{"groupIdentity": [CUSTOMER]}],
+    [{"customerIdentity": {"id": "C11111111"}, "owner": CUSTOMER}],
+]
+
+
+@pytest.mark.parametrize("learnt", [False, True])
+@pytest.mark.parametrize("owner_identity", WRONG_OWNER_IDENTITY)
+def test_live_fix_6_b2a_an_owner_identity_of_the_wrong_shape_is_withheld_whole(owner_identity: Any, learnt: bool) -> None:
+    ids = CustomerIds(CUSTOMER) if learnt else CustomerIds()
+    rows = [{"kind": "admin#reports#activity", "id": {"time": _TIME}, "resourceDetails": [
+        {"id": "r1", "ownerDetails": {"ownerType": "CUSTOMER", "ownerIdentity": owner_identity}}]}]
+    ids.learn(rows)
+    safe, changed = ids.evidence(rows)
+    assert safe[0]["resourceDetails"][0]["ownerDetails"] == {"ownerType": "CUSTOMER", "ownerIdentity": "<customer-id>"}
+    assert changed is False
+    assert CUSTOMER not in json.dumps(CustomerIds().scrub(rows))
+
+
+def test_live_fix_6_b2a_well_formed_owner_identities_are_kept() -> None:
+    identity = [{"customerIdentity": {"id": CUSTOMER}}, {"userIdentity": {"id": "u1", "userEmail": "ada@example.com"}},
+                {"groupIdentity": {"id": "g1", "groupEmail": "team@example.com"}},
+                {"sharedDriveIdentity": {"id": "d1", "sharedDriveName": "Shared"}}]
+    safe, changed = CustomerIds().evidence([{"ownerDetails": {"ownerType": "CUSTOMER", "ownerIdentity": identity}}])
+    assert safe == [{"ownerDetails": {"ownerType": "CUSTOMER", "ownerIdentity": [
+        {"customerIdentity": {"id": "<customer-id>"}}, *identity[1:]]}}]
+    assert changed is False
+
+
+@pytest.mark.parametrize("activity", [
+    _with_id(CUSTOMER),
+    {"id": CUSTOMER},
+    {"kind": "admin#reports#activity", "id": {"time": _TIME, "uniqueQualifier": "1"}, "resourceDetails": [
+        {"id": "r1", "ownerDetails": {"ownerType": "CUSTOMER", "ownerIdentity": [CUSTOMER]}}]},
+])
+def test_live_fix_6_b2a_reviewer_scenario_live_run_never_writes_the_id(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, activity: dict[str, Any]) -> None:
+    rc, run_dir = _live_run(tmp_path, monkeypatch, [activity])
+    assert [str(path.relative_to(run_dir)) for path in run_dir.rglob("*")
+            if path.is_file() and CUSTOMER.encode() in path.read_bytes()] == []
+    raw = json.loads((run_dir / "raw" / "google_reports.json").read_text(encoding="utf-8"))
+    assert "<customer-id>" in json.dumps(raw["adminActivities"]["value"][0])
+    assert rc == 0
+
+
+def test_live_fix_6_b2a_a_scalar_activity_id_never_names_the_normalised_record() -> None:
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    payloads = {"google_reports": {"adminActivities": {"value": [
+        {"id": CUSTOMER, "events": [{"name": "x"}]},
+        {"id": {"time": _TIME, "uniqueQualifier": "77"}, "events": [{"name": "y"}]},
+    ]}}}
+    snapshot = build_google_normalized_snapshot(tenant_name="Example", run_id="r1", collector_payloads=payloads)
+    records = snapshot["google_activity_events"]["records"]
+    assert [record["id"] for record in records] == ["adminActivities:0", "77"]
+    assert CUSTOMER not in json.dumps(records)

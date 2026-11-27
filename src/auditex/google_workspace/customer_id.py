@@ -72,6 +72,86 @@ def _malformed_container(norm: str, member: Any) -> bool:
     return False
 
 
+# Fixed Reports API objects that hold a customer id (admin.reports_v1 discovery document): Activity.id,
+# UsageReport.entity, ResourceDetails.ownerDetails and its ownerIdentity entries. Each must have its documented shape;
+# a value of any other shape may hold the customer id under another key or none, before it is learnt, so it is
+# withheld whole, as a malformed customerIdentity is (LIVE-FIX-6 B2a).
+_ACTIVITY_KIND = "admin#reports#activity"
+_USAGE_REPORT_KIND = "admin#reports#usageReport"
+def _report_members() -> tuple[frozenset[str], ...]:
+    """Normalised member names of the fixed Reports objects (admin.reports_v1 discovery document): an Activity's own
+    members other than ``id``, ``kind`` and ``etag`` (any of them marks an object as an activity), then the members of
+    Activity.id, UsageReport.entity, OwnerDetails and OwnerIdentity. Kept out of module constants: they are what the
+    shape check reads, not field names Auditex writes, so they never join the redaction's field-name exemption."""
+    return (
+        frozenset({"actor", "events", "ipaddress", "ownerdomain", "resourcedetails", "networkinfo", "userdeviceinfo",
+                   "isagenticaction"}),
+        frozenset({"applicationname", "customerid", "time", "uniquequalifier"}),
+        frozenset({"customerid", "entityid", "profileid", "type", "useremail"}),
+        frozenset({"owneridentity", "ownertype"}),
+        frozenset({"customeridentity", "groupidentity", "shareddriveidentity", "useridentity"}),
+    )
+
+
+def _scalar(value: Any) -> bool:
+    """A JSON scalar member of a fixed Reports object: a string, a whole number or null (never a container)."""
+    return value is None or isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool))
+
+
+def _fixed_object(value: Any, members: frozenset[str]) -> bool:
+    """An object whose every key is one of ``members`` and whose every value is a scalar."""
+    return isinstance(value, dict) and all(_norm(key) in members and _scalar(item) for key, item in value.items())
+
+
+def _activity_row(row: Any) -> bool:
+    """Whether ``row`` is a Reports activity: its ``kind`` says so, or it has no ``kind`` and holds a member only an
+    activity has (in the Google discovery documents Auditex reads, only Activity has any of them). An object of another
+    ``kind`` (a normalised ``google_activity`` record, a Directory row) is not one."""
+    if not isinstance(row, dict):
+        return False
+    if "kind" in row:
+        return row["kind"] == _ACTIVITY_KIND
+    activity_members = _report_members()[0]
+    return any(_norm(key) in activity_members for key in row)
+
+
+def _usage_report_row(row: Any) -> bool:
+    return isinstance(row, dict) and (row.get("kind") == _USAGE_REPORT_KIND or ("date" in row and "parameters" in row))
+
+
+def _malformed_report_field(norm: str, member: Any, *, activity: bool, usage: bool) -> bool:
+    """A Reports field on a customer id path whose value does not have its documented shape (withheld whole).
+
+    ``id`` of an activity must be an object of scalar ``applicationName``, ``customerId``, ``time`` and
+    ``uniqueQualifier`` members; ``entity`` must be an object (of the documented scalar members on a usage report);
+    ``ownerDetails`` an object of ``ownerIdentity`` and a scalar ``ownerType``; ``ownerIdentity`` a list of objects
+    whose members are the four identity objects. Null, an empty string and ``my_customer`` hold nothing.
+    """
+    if _no_value(member):
+        return False
+    _, id_members, entity_members, details_members, identity_members = _report_members()
+    if norm == "id" and activity:
+        return not _fixed_object(member, id_members)
+    if norm == "entity":
+        return not (_fixed_object(member, entity_members) if usage else isinstance(member, dict))
+    if norm == "ownerdetails":
+        return not (
+            isinstance(member, dict)
+            and all(_norm(key) in details_members for key in member)
+            and _scalar(next((item for key, item in member.items() if _norm(key) == "ownertype"), None))
+        )
+    if norm == "owneridentity":
+        return not (isinstance(member, list) and all(
+            isinstance(entry, dict) and all(
+                _norm(key) in identity_members and (item is None or isinstance(item, dict)
+                                                          or _norm(key) == "customeridentity")
+                for key, item in entry.items()
+            )
+            for entry in member
+        ))
+    return False
+
+
 class CustomerIds:
     def __init__(self, *values: Any) -> None:
         self.values: set[str] = set()
@@ -151,14 +231,28 @@ class CustomerIds:
         """Return scrubbed evidence and whether a field used as evidence could have changed."""
         return self._scrub(value, error=False, failure=False)
 
-    def _scrub(self, value: Any, *, error: bool, failure: bool, identity: bool = False) -> tuple[Any, bool]:
+    def _scrub(
+        self, value: Any, *, error: bool, failure: bool, identity: bool = False, rows: str | None = None,
+    ) -> tuple[Any, bool]:
+        """``rows`` is what a section holds: ``activities`` for a Reports stream (``<application>Activities``), whose
+        rows are activities even when they carry no member that shows it, and ``activity`` for one such row."""
         if isinstance(value, dict):
             out: dict[Any, Any] = {}
             changed = False
+            activity = rows == "activity" or _activity_row(value)
+            usage = _usage_report_row(value)
             for key, member in value.items():
                 norm = _norm(key)
                 safe_key = self.text(key) if isinstance(key, str) else key
-                if (_explicit_id(norm, identity=identity) and not _no_value(member)) or _malformed_container(norm, member):
+                member_rows = (
+                    "activities" if norm.endswith("activities") or (rows == "activities" and norm in {"value", "items"})
+                    else None
+                )
+                if (
+                    (_explicit_id(norm, identity=identity) and not _no_value(member))
+                    or _malformed_container(norm, member)
+                    or _malformed_report_field(norm, member, activity=activity, usage=usage)
+                ):
                     # A malformed ID field, or a customer field of the wrong shape, can contain arbitrary nested data.
                     safe_member = WITHHELD
                     member_changed = False
@@ -168,13 +262,14 @@ class CustomerIds:
                 else:
                     safe_member, member_changed = self._scrub(
                         member, error=error or norm in _ERROR_KEYS, failure=failure or norm in _ERROR_KEYS,
-                        identity=_identity(norm, member),
+                        identity=_identity(norm, member), rows=member_rows,
                     )
                 out[safe_key] = safe_member
                 changed |= member_changed or (not error and safe_key != key)
             return out, changed
         if isinstance(value, (list, tuple)):
-            members = [self._scrub(member, error=error, failure=failure) for member in value]
+            member_rows = "activity" if rows == "activities" else None
+            members = [self._scrub(member, error=error, failure=failure, rows=member_rows) for member in value]
             safe_list = [member for member, _ in members]
             return (tuple(safe_list) if isinstance(value, tuple) else safe_list), any(changed for _, changed in members)
         if isinstance(value, str):

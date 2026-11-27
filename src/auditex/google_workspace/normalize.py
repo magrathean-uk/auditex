@@ -1206,11 +1206,15 @@ def build_google_normalized_snapshot(
     activity_records: list[dict[str, Any]] = []
     for source, payload in collector_payloads.get("google_reports", {}).items():
         for item in _values({"items": payload}, "items"):
+            # Activity.id is an object whose uniqueQualifier names the record (as before). An id of any other shape
+            # is never copied into a record key: it can be a customer id (LIVE-FIX-6 B2a).
+            activity_id = item.get("id")
             activity_records.append(
                 _record(
                     "google_activity",
                     f"google_reports.{source}",
-                    str(item.get("id", {}).get("uniqueQualifier") if isinstance(item.get("id"), dict) else item.get("id") or f"{source}:{len(activity_records)}"),
+                    str(activity_id.get("uniqueQualifier")) if isinstance(activity_id, dict)
+                    else f"{source}:{len(activity_records)}",
                     application=source.replace("Activities", ""),
                     actor_email=(item.get("actor") or {}).get("email") if isinstance(item.get("actor"), dict) else None,
                     event_names=[
