@@ -7,6 +7,44 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-27
+
+Released 27 November 2026. Fixes from the first live Google Workspace runs. The run-bundle `CONTRACT_VERSION` stays
+`2026-11-11`, and earlier bundles still load and validate.
+
+### Fixed (Google Workspace)
+
+- **A real Google run no longer ends partial because of the customer id.** The Reports API now returns the Google
+  customer id under `ownerIdentity[].customerIdentity.id`. Auditex learns and withholds it as an explicit customer id
+  field, so masking it no longer adds a `customer_id_withheld` row or makes the run exit 1. Every field on a Reports
+  customer id path is checked against the Admin Reports discovery shapes; a field of the wrong shape is withheld whole
+  and never copied.
+- **Drive files owned outside the organisation are not its exposure.** A My Drive file whose owners are all positively
+  outside the tenant's Directory domains (aliases included, matched exactly) is no longer read file by file and is not
+  a coverage gap; the `drivePermissions` row counts such files in `out_of_scope_files` (a count only). Drive sharing
+  findings leave them out too. Missing or malformed owners, an owner address that is not in plain form, a shared-drive
+  file, and an unknown or incomplete domain list keep every file in scope. The domain names come from a read-only
+  `admin.directory.domain.readonly` read: under domain-wide delegation the Drive collector asks for it as an optional
+  scope; under OAuth it is used only when another selected collector already needs that scope, so Drive alone on OAuth
+  reads sharing file by file as before.
+- **COMMONCONTROLS.6.1 answers on tenants that use Google Cloud Directory Sync.** A user-typed role holder that is
+  absent from a complete user read (a service principal, which cannot sign in through SSO) no longer leaves the
+  privileged set unresolved.
+- **Malformed list responses are never a complete read.** A Google list read with an unreadable row, a list field of
+  the wrong type or a continuation cursor of the wrong type is partial (`malformed_response`), and the raw section
+  carries the marker, so offline replay, compare and drift see the gap too. A Directory domain list of the wrong shape
+  is a partial domain set instead of a crash.
+- **ScubaGoggles parity map.** The output contract's D23 (GMAIL.14.1) and D24 (COMMONCONTROLS.6.1) differences are in
+  `scripts/scuba-parity-divergences.json`.
+- `assess` for a Google policy with a sections argument that is not a mapping answers not assessed
+  (`required_evidence_section_not_collected`) instead of raising.
+- The partial Google catalogue drift check compares types (true is not 1) and rejects duplicate keys.
+
+### Python
+
+- Tested on Python 3.11 to 3.15. `auditex doctor` reports a Python newer than 3.15 as untested (a warning, still
+  usable) rather than supported, and a version it cannot read as blocked.
+
 ## [2.1.0] - 2026-11-26
 
 Released 26 November 2026. The run-bundle `CONTRACT_VERSION` stays `2026-11-11`, and earlier bundles still
@@ -2053,7 +2091,8 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/magrathean-uk/auditex/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/magrathean-uk/auditex/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/magrathean-uk/auditex/compare/v1.8.0...v2.0.0
 [1.8.0]: https://github.com/magrathean-uk/auditex/compare/v1.7.0...v1.8.0
