@@ -7,6 +7,27 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-11-27
+
+Released 27 November 2026. Sign-in hardening. The run-bundle `CONTRACT_VERSION` stays `2026-11-11`, and earlier
+bundles and token caches still load.
+
+### Security (sign-in)
+
+- **The Google OAuth token cache holds only what Google granted this run.** A saved cache is narrowed to the run's
+  required scopes and the grant the token endpoint actually confirmed (`auditex_verified_scopes`). A scope the run does
+  not need is never sent on refresh, a scope Google refused is not resent until a consent grants it, and the outage
+  fallback (a refresh that fails for a network or server reason) may claim only recorded, confirmed scopes. A recorded
+  grant with any empty, padded, non-string or non-RFC 6749 entry grants nothing. Every rewrite of the cache holds an
+  owner-only lock file; when a differing grant cannot be recorded within 60 seconds, Auditex leaves an owner-only
+  `.<cache>.unverified` marker, which blocks the outage fallback until the next locked rewrite, and stops with "Google
+  sign-in stopped: another Auditex sign-in is updating the Google token cache; nothing was recorded; run again."
+- **Sign-in never writes token material to logs.** While Google sign-in, consent, token exchange or refresh runs, the
+  `requests_oauthlib`, `oauthlib`, `google.auth`, `google_auth_oauthlib` and `urllib3` loggers are held at WARNING
+  (process-wide for those loggers while any sign-in runs) and restored afterwards, so a host or MCP client logging at
+  DEBUG cannot capture codes or tokens. The Microsoft 365 certificate token exchange holds the `msal` loggers the same
+  way, so MSAL can no longer log a raw non-JSON token endpoint reply.
+
 ## [2.1.1] - 2026-11-27
 
 Released 27 November 2026. Fixes from the first live Google Workspace runs. The run-bundle `CONTRACT_VERSION` stays
@@ -2091,7 +2112,8 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v2.1.2...HEAD
+[2.1.2]: https://github.com/magrathean-uk/auditex/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/magrathean-uk/auditex/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/magrathean-uk/auditex/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/magrathean-uk/auditex/compare/v1.8.0...v2.0.0

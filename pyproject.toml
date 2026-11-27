@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditex"
-version = "2.1.1"
+version = "2.1.2"
 description = "Read-only Microsoft 365 and Google Workspace tenant-audit toolkit for evidence collection"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
