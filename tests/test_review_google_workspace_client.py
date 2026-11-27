@@ -1041,3 +1041,81 @@ def test_live_fix_5_b1_reviewer_scenario_a_null_user_row_is_a_partial_users_read
     assert users_row["error_class"] == "malformed_response"
     assert users_row["collection_truncated"] is True
     assert result.status == "partial"
+
+
+# ---- LIVE-FIX-6 B1b: only an absent or null cursor ends a list -------------------------------------------------
+
+_CURSOR_TEXT = (
+    "This Google list answer carried a continuation cursor that cannot be read (not a non-empty string); the rows "
+    "read are kept, but the list is not complete."
+)
+
+
+@pytest.mark.parametrize("token", [0, 1, False, True, 1.5, [], ["p2"], {}, {"page": "p2"}, "", "   "])
+def test_live_fix_6_b1b_a_cursor_of_the_wrong_type_makes_the_list_partial(token: Any) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    rows = client._collect_pages(_paged({None: [{"users": list(_GOOD_USERS), "nextPageToken": token}]}),
+                                 "users", limit=None)
+    assert list(rows) == _GOOD_USERS
+    assert rows.truncated is True
+    assert isinstance(rows.page_error, google_client.PolicyReadError)
+    assert rows.page_error.error_class == "malformed_response"
+    assert str(rows.page_error) == _CURSOR_TEXT
+
+
+@pytest.mark.parametrize("token", [0, False, ["p2"], ""])
+def test_live_fix_6_b1b_a_wrong_cursor_at_the_limit_is_still_partial(token: Any) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    rows = client._collect_pages(_paged({None: [{"users": list(_GOOD_USERS), "nextPageToken": token}]}),
+                                 "users", limit=2)
+    assert list(rows) == _GOOD_USERS
+    assert rows.truncated is True
+    assert rows.page_error is not None and rows.page_error.error_class == "malformed_response"
+
+
+@pytest.mark.parametrize("page", [{"users": [_GOOD_USERS[1]]}, {"users": [_GOOD_USERS[1]], "nextPageToken": None}])
+def test_live_fix_6_b1b_an_absent_or_null_cursor_ends_a_complete_list(page: dict[str, Any]) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    rows = client._collect_pages(_paged({None: [{"users": [_GOOD_USERS[0]], "nextPageToken": "p2"}], "p2": [page]}),
+                                 "users", limit=None)
+    assert list(rows) == _GOOD_USERS
+    assert rows.page_error is None and rows.truncated is False
+
+
+@pytest.mark.parametrize("page", [None, "page", 7, ["u300"]])
+def test_live_fix_6_b1b_a_later_page_that_is_not_an_object_is_partial(page: Any) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    rows = client._collect_pages(_paged({None: [{"users": list(_GOOD_USERS), "nextPageToken": "p2"}], "p2": [page]}),
+                                 "users", limit=None)
+    assert list(rows) == _GOOD_USERS
+    assert rows.truncated is True
+    assert rows.page_error is not None and rows.page_error.error_class == "malformed_response"
+
+
+@pytest.mark.parametrize("page", [None, "page", ["u300"]])
+def test_live_fix_6_b1b_a_first_page_that_is_not_an_object_fails_the_read(page: Any) -> None:
+    client = GoogleWorkspaceClient(credentials=None)
+    with pytest.raises(google_client.PolicyReadError):
+        client._collect_pages(_paged({None: [page]}), "users", limit=None)
+
+
+def test_live_fix_6_b1b_reviewer_scenario_a_numeric_cursor_is_a_partial_users_read() -> None:
+    """Five readable users and nextPageToken 0: the users read is partial, so it proves no absence (CC.6.1)."""
+    users = [{"id": f"u{n}00", "primaryEmail": f"user{n}@example.com", "isAdmin": n < 3} for n in range(1, 6)]
+
+    class _Client:
+        def list_directory(self, resource: str, **_kwargs: Any) -> list[dict[str, Any]]:
+            if resource == "users":
+                client = GoogleWorkspaceClient(credentials=None)
+                return client._collect_pages(_paged({None: [{"users": list(users), "nextPageToken": 0}]}),
+                                             "users", limit=None)
+            return []
+
+    result = GoogleDirectoryCollector().run({"client": _Client()})
+    users_row = next(row for row in result.coverage if row["name"] == "users")
+    assert result.payload["users"]["value"] == users
+    assert users_row["status"] == "partial"
+    assert users_row["error_class"] == "malformed_response"
+    assert users_row["collection_truncated"] is True
+    assert users_row["truncation_reason"] == "pagination_failed"
+    assert result.status == "partial"

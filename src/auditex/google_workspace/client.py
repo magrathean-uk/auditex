@@ -565,6 +565,32 @@ def unreadable_rows_error() -> PolicyReadError:
     return PolicyReadError(UNREADABLE_ROWS_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
 
 
+UNREADABLE_CURSOR_TEXT = (
+    "This Google list answer carried a continuation cursor that cannot be read (not a non-empty string); the rows "
+    "read are kept, but the list is not complete."
+)
+
+
+def unreadable_cursor_error() -> PolicyReadError:
+    """A fixed error for a page whose ``nextPageToken`` is present but not a cursor: the list may go on."""
+    return PolicyReadError(UNREADABLE_CURSOR_TEXT, error_class=POLICY_MALFORMED_ERROR_CLASS)
+
+
+def _page_cursor(payload: dict[str, Any]) -> tuple[str | None, bool]:
+    """The page's continuation cursor and whether it could be read.
+
+    Only an absent or null ``nextPageToken`` ends a list (the discovery-based Google APIs leave it out on the last
+    page). Anything else that is not a non-blank string (``""``, ``0``, ``false``, a list, an object) is a cursor that
+    cannot be read: the list may go on, so it proves no absence (LIVE-FIX-6 B1b).
+    """
+    raw = payload.get("nextPageToken")
+    if raw is None:
+        return None, True
+    if isinstance(raw, str) and raw.strip():
+        return raw, True
+    return None, False
+
+
 def _readable_rows(values: Any) -> tuple[list[dict[str, Any]], bool]:
     """The object rows of one list answer, and whether every row could be read (an absent or empty list can)."""
     if values is None or values == []:
@@ -725,6 +751,12 @@ class GoogleWorkspaceClient:
                 # A later page failed after its retries: keep what was read, recorded as a list cut short.
                 kept = rows[:limit] if limit is not None else rows
                 return CollectedRows(kept, truncated=True, result_limit=limit, page_error=exc)
+            if not isinstance(payload, dict):
+                # A page that is not an object holds no rows and no cursor that can be read.
+                if first_page:
+                    raise unreadable_rows_error()
+                kept = rows[:limit] if limit is not None else rows
+                return CollectedRows(kept, truncated=True, result_limit=limit, page_error=unreadable_rows_error())
             first_page = False
             present = [payload[key] for key in (item_key, "items", "value") if key in payload]
             values = next((value for value in present if value), None)
@@ -733,7 +765,11 @@ class GoogleWorkspaceClient:
             whole = whole and all(value is None or value == [] or value is values for value in present)
             rows.extend(page_rows)
             unreadable = unreadable or not whole
-            token = payload.get("nextPageToken")
+            token, cursor_readable = _page_cursor(payload)
+            if not cursor_readable:
+                # A cursor of the wrong type or a blank one: the list may go on, so it is cut, never complete.
+                kept = rows[:limit] if limit is not None else rows
+                return CollectedRows(kept, truncated=True, result_limit=limit, page_error=unreadable_cursor_error())
             if limit is not None and len(rows) >= limit:
                 # More rows, or a further page, means the list was cut at the operator's limit.
                 return finish(rows[:limit], truncated=len(rows) > limit or bool(token))
