@@ -71,6 +71,17 @@ def _reachable(schemas: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return table
 
 
+def _root_types(schemas: dict[str, Any]) -> dict[str, Any]:
+    """The discovery type of each customer id root member itself (a list of ResourceDetails, an Activity id object),
+    so a change of a root's container shows up even when the objects beneath it are unchanged."""
+    inline: dict[str, dict[str, Any]] = {}
+    return {
+        f"{owner}.{member}": _discovery_type(owner, member, schemas[owner]["properties"][member], inline)
+        for owner, members in _ROOTS
+        for member in members
+    }
+
+
 def _validator_table() -> dict[str, dict[str, Any]]:
     return {
         name: {member: _REFINED.get(kind, kind) if isinstance(kind, str) else kind for member, kind in members}
@@ -92,6 +103,10 @@ def test_vendored_subset_matches_the_installed_google_api_python_client_document
     assert path.is_file(), f"google-api-python-client no longer ships {path.name}"
     installed = json.loads(path.read_text(encoding="utf-8"))
     vendored = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    assert _root_types(installed["schemas"]) == _root_types(vendored["schemas"]), (
+        f"admin.reports_v1 revision {installed.get('revision')} changed the type of a customer id root; update "
+        "customer_id._malformed_report_field, customer_id._report_shapes and the fixture"
+    )
     assert _reachable(installed["schemas"]) == _reachable(vendored["schemas"]), (
         f"admin.reports_v1 revision {installed.get('revision')} changed a customer id path object; update "
         "customer_id._report_shapes and the fixture"
@@ -232,3 +247,11 @@ def test_a_well_formed_applied_label_with_every_field_value_kind_is_kept_whole()
     kinds = {member for field in WELL_FORMED_FIELDS for member in field}
     assert kinds == set(dict(cid._report_shapes()["FieldValue"]))
 
+
+def test_a_root_container_change_is_caught_even_when_the_objects_beneath_it_are_unchanged() -> None:
+    vendored = json.loads(_FIXTURE.read_text(encoding="utf-8"))["schemas"]
+    changed = json.loads(json.dumps(vendored))
+    changed["Activity"]["properties"]["resourceDetails"] = {"$ref": "ResourceDetails"}
+    assert _reachable(changed) == _reachable(vendored)
+    assert _root_types(changed) != _root_types(vendored)
+    assert _root_types(vendored)["Activity.resourceDetails"] == ("array", "ResourceDetails")
