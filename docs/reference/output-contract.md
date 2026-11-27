@@ -1378,7 +1378,9 @@ coverage gap, never a silent pass:
   `truncation_reason`: `operator_limit` (the `--top` limit was reached and the list
   continued), `pagination_failed` (a later page could not be read, so the rows read
   so far are a prefix; on Google Workspace also a page holding a row that is not an object, or a row
-  list that is not a list: the readable rows are kept, the row is `partial` with
+  list that is not a list, a `nextPageToken` that is present but not a non-blank string (only an absent or
+  null cursor ends a list), a one-call Directory list (`organizationUnits`, `aliases`, `items`) whose field is
+  present but not a list or that carries any cursor: the readable rows are kept, the row is `partial` with
   `error_class` `malformed_response`, and the list proves no absence), `next_link_refused` (a next-page link outside Microsoft
   Graph was not followed), `fanout_limit` (a collector's own bound on how many
   objects it expands) `input_limited` (a derived result built from a list that
@@ -1387,6 +1389,12 @@ coverage gap, never a silent pass:
   `collection_limit`, and `item_count` is the rows collected. A page that failed or
   was refused keeps `failed` and its error. A first page that cannot be read is a
   blocked read, not a truncation.
+- On Google Workspace the list's raw section (`raw/<collector>.json`) carries the same gap: `status: "partial"`,
+  `collection_truncated` with its `truncation_reason` and `result_limit` for a cut list, and `error_class` with a
+  fixed `error` (the class only) for a failed read or a `pagination_failed` cut. A fan-out read marks the section
+  it fills (`aliases:<user>` marks `aliases`), the Gmail users list marks `mailboxSettings`, the Groups settings
+  groups list marks `groupSettings`, and `drivePermissions` marks `driveFiles`. An offline replay of those raw
+  sections, and compare and drift over the replay, therefore record the same gap as the live run.
 - The collector is `partial`, so the run is `partial` (exit status 1) and baseline
   rules that read it report `not_assessed` with `collector_not_complete:<collector>`
   instead of `pass`. Findings that name the collector issue are raised from the row.

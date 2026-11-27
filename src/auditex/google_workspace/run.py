@@ -69,6 +69,7 @@ from .collectors import (
     SUBJECT_SCOPE_ADMIN,
     SUBJECT_SCOPE_USER,
     SUBJECT_SCOPED_COLLECTORS,
+    mark_incomplete_sections,
     policy_replay_rows,
     replay_policy_payload,
     replay_scuba_payload,
@@ -1049,7 +1050,9 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
     coverage_rows: list[dict[str, Any]] = []
     collector_payloads: dict[str, dict[str, Any]] = {}
     for name, output in zip(selected, outputs, strict=True):
-        payload, changed = ids.evidence(output.result.payload)
+        # A list read that failed, was cut or held unreadable rows is marked on its raw section too, so an offline
+        # replay, compare or drift of the raw evidence sees the same gap as this run (LIVE-FIX-6 B1a).
+        payload, changed = ids.evidence(mark_incomplete_sections(name, output.result.payload, output.coverage_rows))
         payload = writer.valid_text(payload)
         rows = writer.valid_text(ids.scrub(output.coverage_rows))
         row = writer.valid_text(ids.scrub(dict(output.result_row)))
