@@ -680,10 +680,11 @@ The manifest, snapshot, `ai_safe/run_summary.json`, auth context, and probe and 
 Offline replay retains the SHA-256 of the sample bytes and masks known customer IDs in the sample filename.
 Run and tenant labels also have known customer IDs masked.
 
-Auditex learns exact customer IDs from explicit API fields such as `customerId` and Cloud Identity's
-`customer: "customers/<id>"`, and from named customer parameters in API failure URLs. It masks those values in
-evidence strings, mapping keys and diagnostics before writing a run. A malformed object or list under
-`customerId` is withheld whole. Unrelated organisational unit names and paths are preserved even when they
+Auditex learns exact customer IDs from explicit API fields such as `customerId`, the `id` of a `customerIdentity`
+object (the Reports API's `resourceDetails[].ownerDetails.ownerIdentity[].customerIdentity.id`) and Cloud
+Identity's `customer: "customers/<id>"`, and from named customer parameters in API failure URLs. It masks those
+values in evidence strings, mapping keys and diagnostics before writing a run. A malformed object or list under
+`customerId` or `customerIdentity.id` is withheld whole. Unrelated organisational unit names and paths are preserved even when they
 resemble a customer ID. If masking changes evidence outside an explicit ID field or diagnostic, a
 `customer_id_withheld` coverage row marks that collector partial. An organisational unit reference that was
 changed cannot establish complete setting-event coverage.

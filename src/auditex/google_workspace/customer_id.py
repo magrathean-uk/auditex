@@ -38,6 +38,16 @@ def _norm(key: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(key).lower())
 
 
+def _identity(norm: str, member: Any) -> bool:
+    """Whether ``member`` is a customer identity object, such as a Reports API ``ownerIdentity[].customerIdentity``."""
+    return norm == "customeridentity" and isinstance(member, dict)
+
+
+def _explicit_id(norm: str, *, identity: bool) -> bool:
+    """A field that holds a Google customer id: ``customerId``, or the ``id`` of a customer identity object."""
+    return norm == "customerid" or (identity and norm == "id")
+
+
 class CustomerIds:
     def __init__(self, *values: Any) -> None:
         self.values: set[str] = set()
@@ -90,15 +100,15 @@ class CustomerIds:
             self.add(match[1])
         return self._request_text(text, learn=True)
 
-    def learn(self, value: Any, *, error: bool = False) -> None:
+    def learn(self, value: Any, *, error: bool = False, identity: bool = False) -> None:
         if isinstance(value, dict):
             for key, member in value.items():
                 norm = _norm(key)
-                if norm == "customerid":
+                if _explicit_id(norm, identity=identity):
                     self.add(member)
                 elif norm == "customer" and isinstance(member, str) and member.startswith("customers/"):
                     self.add(member.removeprefix("customers/"))
-                self.learn(member, error=error or norm in _ERROR_KEYS)
+                self.learn(member, error=error or norm in _ERROR_KEYS, identity=_identity(norm, member))
         elif isinstance(value, (list, tuple)):
             for member in value:
                 self.learn(member, error=error)
@@ -115,14 +125,15 @@ class CustomerIds:
         """Return scrubbed evidence and whether a field used as evidence could have changed."""
         return self._scrub(value, error=False, failure=False)
 
-    def _scrub(self, value: Any, *, error: bool, failure: bool) -> tuple[Any, bool]:
+    def _scrub(self, value: Any, *, error: bool, failure: bool, identity: bool = False) -> tuple[Any, bool]:
         if isinstance(value, dict):
             out: dict[Any, Any] = {}
             changed = False
             for key, member in value.items():
                 norm = _norm(key)
                 safe_key = self.text(key) if isinstance(key, str) else key
-                if norm == "customerid" and member is not None and member != "" and bundle_customer_id(member) is None:
+                if (_explicit_id(norm, identity=identity) and member is not None and member != ""
+                        and bundle_customer_id(member) is None):
                     # A malformed ID field can contain arbitrary nested data.
                     safe_member = WITHHELD
                     member_changed = False
@@ -132,6 +143,7 @@ class CustomerIds:
                 else:
                     safe_member, member_changed = self._scrub(
                         member, error=error or norm in _ERROR_KEYS, failure=failure or norm in _ERROR_KEYS,
+                        identity=_identity(norm, member),
                     )
                 out[safe_key] = safe_member
                 changed |= member_changed or (not error and safe_key != key)
