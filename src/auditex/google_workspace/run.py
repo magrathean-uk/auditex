@@ -201,17 +201,6 @@ def scopes_for_collectors(selected: list[str]) -> tuple[str, ...]:
     return tuple(scopes)
 
 
-def optional_scopes_for_collectors(selected: list[str]) -> tuple[str, ...]:
-    """The selected collectors' optional scopes that no selected collector requires (LIVE-FIX-6 M1a).
-
-    The one sign-in asks for them, but a grant or a cached token without them is used: their read falls back (the
-    Drive collector reads every file's permissions when the domains list cannot be read). A scope a selected collector
-    requires (the Directory collector's domain scope) stays required.
-    """
-    required = {scope for name in selected for scope in getattr(REGISTRY.get(name), "required_scopes", ())}
-    return tuple(scope for scope in scopes_for_collectors(selected) if scope not in required)
-
-
 def subject_scope_for_collectors(selected: list[str], *, per_user_delegation: bool) -> dict[str, str]:
     """``subject_scoped`` of each selected collector whose evidence is one subject's view, not the tenant's.
 
@@ -966,7 +955,6 @@ def _auth_config(config: GoogleRunConfig, selected: list[str]) -> GoogleAuthConf
         oauth_client=config.oauth_client,
         token_cache=config.token_cache,
         isolated_scopes=tuple(scope for scope in scopes if scope in ISOLATED_GOOGLE_SCOPES),
-        optional_scopes=optional_scopes_for_collectors(selected),
     )
 
 

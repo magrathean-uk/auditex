@@ -3,8 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -66,14 +65,6 @@ class GoogleAuthConfig:
     token_cache: Path | None = None
     # Scopes in ``scopes`` that domain-wide delegation requests on their own token (see POLICIES_SCOPE).
     isolated_scopes: tuple[str, ...] = ()
-    # Scopes in ``scopes`` that only widen a read with a safe fallback (the Drive collector's Directory domains read):
-    # asked for in the one sign-in, but a grant or a cached token without them is accepted and never re-consented.
-    optional_scopes: tuple[str, ...] = ()
-
-    @property
-    def required_scopes(self) -> tuple[str, ...]:
-        """The scopes a grant must hold: every scope asked for except the optional ones."""
-        return tuple(scope for scope in self.scopes if scope not in self.optional_scopes)
 
     @property
     def supports_user_delegation(self) -> bool:
@@ -160,9 +151,8 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                     credentials = Credentials.from_authorized_user_info(cached)
                 except ValueError:
                     cached, credentials = None, None
-                # Only the required scopes decide: a cache without an optional one is used as it is (LIVE-FIX-6 M1a).
                 if credentials is not None and (
-                    not _has_scopes(credentials, config.required_scopes) or not _can_refresh(credentials)
+                    not _has_scopes(credentials, config.scopes) or not _can_refresh(credentials)
                 ):
                     credentials = None
             if credentials is not None:
@@ -180,7 +170,7 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                         # noowners) another account could have written the recorded grant, so it is not used there.
                         if (
                             credentials.valid
-                            and _verified_cover(cached, config.required_scopes)
+                            and _verified_cover(cached, config.scopes)
                             and ownership_enforced(token_cache)
                         ):
                             return credentials
@@ -191,24 +181,21 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
                     # asked: sign in again.
                     credentials = None
                 else:
-                    if not _granted(credentials, config.required_scopes):
+                    if not _granted(credentials, config.scopes):
                         credentials = None
             if not credentials or not credentials.valid:
                 flow = _oauth_client_flow(InstalledAppFlow, config.oauth_client.expanduser(), config.scopes)
                 try:
-                    # A consent may leave out an optional scope: oauthlib then accepts the narrower grant (scope
-                    # relaxation, for this consent only) and the required scopes are checked against it below.
-                    with _relaxed_token_scope(bool(config.optional_scopes)):
-                        credentials = flow.run_local_server(port=0)
+                    credentials = flow.run_local_server(port=0)
                 except Exception as exc:  # noqa: BLE001 - oauthlib's denial and scope-change errors are not GoogleAuthError
                     # oauthlib refuses a narrower grant with its own Warning (unless scope relaxation is on); the
                     # missing scopes are named from this run's list, never the response text or token it carries.
-                    missing = _consent_missing_scopes(exc, config.required_scopes)
+                    missing = _consent_missing_scopes(exc, config.scopes)
                     if missing:
                         raise RuntimeError(_missing_scopes_message(missing)) from None
                     raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
-                # A consent narrower than the required scopes is neither used nor saved; an optional scope may be absent.
-                missing = sorted(set(config.required_scopes) - _grant(credentials))
+                # With oauthlib's scope relaxation a consent can return a narrower grant; it is neither used nor saved.
+                missing = sorted(set(config.scopes) - _grant(credentials))
                 if missing:
                     raise RuntimeError(_missing_scopes_message(missing))
         except GoogleAuthError as exc:
@@ -216,35 +203,12 @@ def build_google_credentials(config: GoogleAuthConfig) -> Any:
             raise RuntimeError(f"Google sign-in failed ({type(exc).__name__}); run again to sign in.") from None
         # Only a successful refresh or a fresh consent is saved, with the grant Google reported for it.
         saved = json.loads(credentials.to_json())
-        grant = _grant(credentials)
-        saved[VERIFIED_SCOPES_KEY] = sorted(grant)
-        if isinstance(saved.get("scopes"), list):
-            # The cache asks only for what was granted, so its refresh never asks for an optional scope the consent
-            # left out (a refresh asking for a scope never granted fails, and would force another consent).
-            saved["scopes"] = [scope for scope in saved["scopes"] if scope in grant]
+        saved[VERIFIED_SCOPES_KEY] = sorted(_grant(credentials))
         # Creates any missing folder owner-only; an existing folder (the working directory, a shared one) keeps its mode.
         secure_write_text(token_cache, json.dumps(saved), mode=0o600)
         return credentials
 
     raise ValueError(f"unsupported Google auth mode: {config.auth_mode}")
-
-
-@contextmanager
-def _relaxed_token_scope(relax: bool) -> Iterator[None]:
-    """oauthlib's scope relaxation (``OAUTHLIB_RELAX_TOKEN_SCOPE``) for one consent, restored afterwards."""
-    if not relax:
-        yield
-        return
-    name = "OAUTHLIB_RELAX_TOKEN_SCOPE"
-    previous = os.environ.get(name)
-    os.environ[name] = "1"
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = previous
 
 
 def _oauth_client_flow(flow_class: Any, client_file: Path, scopes: tuple[str, ...]) -> Any:
