@@ -80,6 +80,7 @@ from .customer_id import (
     collect_customer_ids,
     withheld_coverage_row,
 )
+from .drive_scope import read_tenant_domains
 from .findings import (
     DEFAULT_STALE_DEVICE_DAYS,
     DEFAULT_STALE_USER_DAYS,
@@ -535,7 +536,8 @@ def _collector_preflight_rows(client: Any, collector: str, *, domain: str | None
         # The row is a readiness note with no lookup behind it (``live_read`` false): it verifies nothing.
         rows.append({"collector": collector, "type": "dns", "name": "dns", "status": "ok", "item_count": 1 if domain else 0, "duration_ms": 0, "error_class": None, "error": None, "live_read": False})
     elif collector == "google_drive_posture":
-        rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(top=top)))
+        rows.append(_preflight_call(collector, "driveFiles", lambda: client.list_drive_files(
+            top=top, tenant_domains=lambda: read_tenant_domains(client))))
         rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
     elif collector == "google_groups_settings":
         def group_settings_check() -> list[dict[str, Any]]:

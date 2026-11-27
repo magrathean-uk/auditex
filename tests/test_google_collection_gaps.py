@@ -168,7 +168,7 @@ def test_google_event_logs_and_file_crawls_are_a_bounded_sample_unless_limited()
             seen.append(top)
             return CollectedRows([{"id": 1}] * (top or 0), truncated=True, result_limit=top)
 
-        def list_drive_files(self, *, top: int | None = None) -> CollectedRows:
+        def list_drive_files(self, *, top: int | None = None, **_k: Any) -> CollectedRows:
             seen.append(top)
             return CollectedRows([{"id": 1}] * (top or 0), truncated=True, result_limit=top)
 

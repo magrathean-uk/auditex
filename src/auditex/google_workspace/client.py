@@ -25,6 +25,7 @@ from .auth import (
     user_delegated_credentials,
 )
 from .customer_id import learn_response_customer_ids, withhold_request_customer_ids
+from .drive_scope import owned_outside, owner_domains
 
 # Per-user services kept at once. The Gmail collector reads one user at a time, so a few are enough;
 # the bound keeps a 10,000-user run from holding 10,000 discovery clients.
@@ -445,6 +446,8 @@ class CollectedRows(list):
     truncation_reason: str | None = None
     permission_reads: int = 0
     permission_errors: list[dict[str, Any]] | None = None
+    # Drive only: files owned wholly outside the tenant, whose permissions were not read (see drive_scope).
+    permission_out_of_scope: int = 0
 
     def __init__(
         self,
@@ -867,12 +870,18 @@ class GoogleWorkspaceClient:
             }
         return minimise_gmail_settings(payload)
 
-    def list_drive_files(self, *, top: int | None = None) -> list[dict[str, Any]]:
+    def list_drive_files(
+        self, *, top: int | None = None, tenant_domains: Callable[[], frozenset[str] | None] | None = None,
+    ) -> list[dict[str, Any]]:
         """Drive files with their sharing.
 
         files.list does not return ``permissions`` for items in shared drives, nor for files the subject cannot
         share. Each file it left them out of has them read with permissions.list, so its sharing is never read as
         none; a file whose permissions cannot be read either is listed in ``permission_errors``.
+
+        ``tenant_domains`` (read once, only when needed) gives the tenant's complete domain names. A My Drive file
+        all of whose owners are positively outside them is not the organisation's exposure: its permissions are not
+        read and it is only counted in ``permission_out_of_scope``.
         """
         service = self._service("drive", "v3")
         page_size = min(self.page_size, top or self.page_size)
@@ -896,10 +905,18 @@ class GoogleWorkspaceClient:
         if not isinstance(files, CollectedRows):
             files = CollectedRows(files)
         errors: list[dict[str, Any]] = []
+        domains: frozenset[str] | None = None
+        domains_read = False
         for drive_file in files:
             file_id = str(drive_file.get("id") or "")
             if "permissions" in drive_file or not file_id:
                 continue
+            if tenant_domains is not None and owner_domains(drive_file):
+                if not domains_read:
+                    domains, domains_read = tenant_domains(), True
+                if owned_outside(drive_file, domains):
+                    files.permission_out_of_scope += 1
+                    continue
             try:
                 permissions = self._collect_pages(
                     lambda page_token, file_id=file_id: service.permissions().list(

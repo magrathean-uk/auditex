@@ -70,6 +70,7 @@ from .client import (
     policy_malformed_error,
 )
 from .customer_id import WITHHELD, CustomerIds, withheld_coverage_row
+from .drive_scope import read_tenant_domains
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
@@ -1521,7 +1522,9 @@ def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: l
     """A coverage row for the files whose permissions had to be read one by one, failing where they could not be."""
     errors = [item for item in getattr(drive_files, "permission_errors", None) or [] if isinstance(item, dict)]
     reads = int(getattr(drive_files, "permission_reads", 0) or 0)
-    if not errors and not reads:
+    out_of_scope = getattr(drive_files, "permission_out_of_scope", 0)
+    out_of_scope = out_of_scope if type(out_of_scope) is int and out_of_scope > 0 else 0
+    if not errors and not reads and not out_of_scope:
         return
     error_class = error = None
     status = "ok"
@@ -1534,19 +1537,21 @@ def _record_drive_permission_reads(collector: str, drive_files: Any, coverage: l
             f"Sharing of {len(errors)} of {len(errors) + reads} Drive files (shared-drive items or files the subject "
             f"cannot share) could not be read, so their exposure is unknown ({', '.join(sorted(set(classes)))})."
         )
-    coverage.append(
-        _coverage(
-            collector,
-            "drivePermissions",
-            status=status,
-            item_count=reads,
-            duration_ms=0,
-            endpoint="drive.permissions.list",
-            error_class=error_class,
-            error=error,
-            subject_scoped=SUBJECT_SCOPE_ADMIN,
-        )
+    row = _coverage(
+        collector,
+        "drivePermissions",
+        status=status,
+        item_count=reads,
+        duration_ms=0,
+        endpoint="drive.permissions.list",
+        error_class=error_class,
+        error=error,
+        subject_scoped=SUBJECT_SCOPE_ADMIN,
     )
+    if out_of_scope:
+        # A count only: files owned wholly outside the tenant are not its sharing exposure (drive_scope).
+        row["out_of_scope_files"] = out_of_scope
+    coverage.append(row)
 
 
 class GoogleDrivePostureCollector:
@@ -1575,7 +1580,7 @@ class GoogleDrivePostureCollector:
             coverage=coverage,
             log_event=log_event,
             endpoint="drive.files.list",
-            func=lambda: client.list_drive_files(top=file_limit),
+            func=lambda: client.list_drive_files(top=file_limit, tenant_domains=lambda: read_tenant_domains(client)),
             bounded_sample=sampled,
             subject_scoped=SUBJECT_SCOPE_ADMIN,
         )
