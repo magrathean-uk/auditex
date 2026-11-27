@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+from collections.abc import Mapping
 
 from ..record import _not_collected, as_pack_response
 from .catalogue import cells_for, is_evidence_free, policy_ids, row_for, rule_policies
@@ -46,9 +47,15 @@ def _kind(row: dict):
 
 
 def assess(policy_id: str, sections: dict):
+    """The answer for one policy. ``sections`` that is not a mapping (None, a list, a string) is no evidence at all:
+    every section the rule reads is then cited as not collected, the answer a ``{}`` gets. (The M365 engine raises
+    for such a value on most policies; a missing projection is an answer here, never a crash.) An evidence-free kind
+    reads no section and answers as it always did."""
     row = row_for(policy_id)
     if row is None:
         return None
+    if not isinstance(sections, Mapping):
+        sections = {}
     gate = None if is_evidence_free(row["kind"]) else _not_collected(policy_id, sections, row["sections"])
     return checked_gws(gate or _kind(row)(policy_id, row, sections))
 

@@ -912,3 +912,37 @@ def test_max_map_orders_keys_by_rank_then_list_place():
         units = _root_only(policies, ["gmail_email_address_lists"])
         assert units.values["ou:root"]["gmail_email_address_lists"] == {
             "emailAddressList": [{"id": "y", "n": 1}, {"id": "b"}, {"id": "x"}]}
+
+
+NO_SECTIONS = ("Data unavailable: required evidence section(s) not collected: gws_tenant, gws_policies.")
+
+
+@pytest.mark.parametrize("sections", [None, [], ["gws_tenant", "gws_policies"], "gws_tenant", "", 0, 5, b"x",
+                                      ("gws_tenant",), {1, 2}])
+@pytest.mark.parametrize("policy_id", ["GWS.SITES.1.1v1", "GWS.COMMONCONTROLS.1.1v1"])
+def test_a_sections_argument_that_is_not_a_mapping_is_no_evidence(policy_id, sections):
+    # M365's engine raises TypeError or AttributeError for None and an int; GWS answers the existing
+    # section-not-collected reason for every non-mapping value, citing all the rule's sections.
+    record = gws.assess(policy_id, sections)
+    assert record == {"policy_id": policy_id, "verdict": "not_assessed",
+                      "reason_code": "required_evidence_section_not_collected", "reason_text": NO_SECTIONS,
+                      "cell": "section_not_collected", "cited_sections": ["gws_tenant", "gws_policies"],
+                      "detail": {}}
+
+
+@pytest.mark.parametrize("sections", [None, [], "gws_tenant", 0])
+def test_an_evidence_free_policy_answers_the_manual_reason_for_a_non_mapping(sections):
+    record = gws.assess("GWS.GEMINI.3.1v1", sections)
+    assert record == {"policy_id": "GWS.GEMINI.3.1v1", "verdict": "not_assessed",
+                      "reason_code": "data_unavailable_manual_check", "reason_text": MANUAL_TEXT,
+                      "cell": "manual_check", "cited_sections": ["gws_tenant"], "detail": {}}
+
+
+def test_an_empty_mapping_still_answers_as_before():
+    record = gws.assess("GWS.SITES.1.1v1", {})
+    assert (record["reason_code"], record["cell"], record["cited_sections"]) == (
+        "required_evidence_section_not_collected", "section_not_collected", ["gws_tenant", "gws_policies"])
+
+
+def test_an_unknown_policy_is_still_none_for_any_sections():
+    assert gws.assess("GWS.NOPE.1.1v1", None) is None

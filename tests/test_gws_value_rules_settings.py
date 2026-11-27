@@ -203,11 +203,6 @@ def test_operators(op, actual, pinned, expected):
      "gws_policies": {"complete": True, "policies": []}},
 ])
 def test_malformed_envelopes_never_answer_met(sections):
-    if sections is None:
-        # The shared section gate (not this lane) cannot look inside None; the caller never passes it.
-        with pytest.raises(TypeError):
-            gws.assess("GWS.GMAIL.5.1v1", sections)
-        return
     record = gws.assess("GWS.GMAIL.5.1v1", sections)
     assert record["verdict"] == "not_assessed"
 

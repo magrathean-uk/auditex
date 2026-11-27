@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from .auth_runtime import (
+    PYTHON_NEWEST_TESTED,
     ToolchainRuntime,
     ToolchainRuntimeAdapters,
+    classify_python_version,
     exchange_module_status,
 )
 
@@ -213,13 +215,13 @@ def _tool_status(
 def _selected_python() -> dict[str, Any]:
     if not is_source_checkout():
         # An installed package runs in the interpreter it was installed into; that interpreter is the Python.
-        supported = sys.version_info >= (3, 11)
+        status, error = classify_python_version(f"{sys.version_info[0]}.{sys.version_info[1]}")
         return {
-            "status": "supported" if supported else "blocked",
+            "status": status,
             "path": sys.executable,
             "version": f"Python {platform.python_version()}",
             "selector": "installed",
-            "error": None if supported else "python_too_old",
+            "error": error,
         }
     return _toolchain_runtime().selected_python()
 
@@ -239,9 +241,12 @@ def build_doctor_report() -> dict[str, Any]:
     venv_status = _venv_status()
     tools = {"pwsh": _tool_status("pwsh", version_args=["--version"])}
     exchange = exchange_module_status()
+    # An untested Python still runs Auditex: it is a warning, not a missing piece.
     core_missing = [
-        name for name, status in (("python", python_status), ("venv", venv_status)) if status["status"] != "supported"
+        name for name, status in (("python", python_status), ("venv", venv_status))
+        if status["status"] not in {"supported", "untested"}
     ]
+    warnings = ["python_untested"] if python_status["status"] == "untested" else []
     pwsh_missing = ["pwsh"] if tools["pwsh"]["status"] != "supported" else []
     exchange_missing = [*pwsh_missing, *([] if exchange.get("status") == "supported" else ["exchange_online_module"])]
     return {
@@ -262,6 +267,7 @@ def build_doctor_report() -> dict[str, Any]:
         "readiness": {
             "core_ready": not core_missing,
             "core_missing": core_missing,
+            "warnings": warnings,
             "exchange_ready": not exchange_missing,
             "exchange_missing": exchange_missing,
             "pwsh_ready": not pwsh_missing,
@@ -273,12 +279,14 @@ def build_doctor_report() -> dict[str, Any]:
 def _format_tool_line(name: str, tool: dict[str, Any]) -> str:
     version = tool.get("version")
     path = tool.get("path")
-    if tool.get("status") == "supported":
-        parts = [name, "supported"]
+    if tool.get("status") in {"supported", "untested"}:
+        parts = [name, tool["status"]]
         if version:
             parts.append(version)
         if path:
             parts.append(f"[{path}]")
+        if tool["status"] == "untested":
+            parts.append(f"(newer than the newest tested Python, {PYTHON_NEWEST_TESTED[0]}.{PYTHON_NEWEST_TESTED[1]})")
         return ": ".join([parts[0], " ".join(parts[1:])])
     return f"{name}: blocked" + (f" ({tool.get('error')})" if tool.get("error") else "")
 

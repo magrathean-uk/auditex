@@ -4,7 +4,7 @@ This guide installs Auditex from PyPI with pipx, step by step, on Linux, macOS o
 written for an IT administrator: you do not need to know Python. Every command is shown; type it into a terminal
 and press Enter. Lines that start with `#` in the boxes below are comments, not commands.
 
-The short version, for a computer that already has Python 3.11, 3.12, 3.13 or 3.14 and pipx:
+The short version, for a computer that already has Python 3.11, 3.12, 3.13, 3.14 or 3.15 and pipx:
 
 ```bash
 pipx install auditex
@@ -19,7 +19,7 @@ The rest of this guide explains each step, what you should see, and what to do w
 | Item | Requirement |
 |---|---|
 | Operating system | Linux (Ubuntu 22.04 or newer, Debian 12 or newer, Fedora, RHEL or Rocky Linux 9 or newer), macOS 13 or newer, or Windows 10 or 11 with WSL2. Native Windows (PowerShell or Command Prompt without WSL2) is not supported. |
-| Python | 3.11, 3.12, 3.13 or 3.14. Step 2 installs it if you do not have it. |
+| Python | 3.11, 3.12, 3.13, 3.14 or 3.15. Step 2 installs it if you do not have it. |
 | pipx | Any current version. Step 2 installs it. |
 | Network | Access to `pypi.org` and `files.pythonhosted.org` while installing. The offline demo needs no network afterwards. |
 | Disk | About 100 MB for Auditex and its libraries; run folders grow with tenant size. |
@@ -52,8 +52,10 @@ First check whether you already have a recent Python:
 python3 --version
 ```
 
-You should see `Python 3.11`, `3.12`, `3.13` or `3.14` (for example `Python 3.12.3`). If you see an older version or
+You should see `Python 3.11`, `3.12`, `3.13`, `3.14` or `3.15` (for example `Python 3.12.3`). If you see an older version or
 `command not found`, the commands below for your system install a suitable Python together with pipx.
+A Python newer than 3.15 still works but has not been tested: `auditex doctor` then prints `Python: untested` as a
+warning and `Core ready` stays `yes`.
 
 ### macOS
 

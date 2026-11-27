@@ -266,21 +266,54 @@ def render(catalogue: dict) -> str:
     return json.dumps(catalogue, indent=2, ensure_ascii=False) + "\n"
 
 
+_MISSING = object()
+
+
+def strict_equal(left: object, right: object) -> bool:
+    """JSON equality that tells types apart: ``0``, ``False`` and ``0.0`` are three different values, as in the
+    rendered bytes. Python's ``==`` would let ``1`` pass for ``true``."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(strict_equal(value, right[key]) for key, value in left.items())
+    if isinstance(left, list):
+        return len(left) == len(right) and all(strict_equal(a, b) for a, b in zip(left, right, strict=True))
+    return left == right
+
+
+class DuplicateKeyError(ValueError):
+    """A JSON object names one key twice; ``json.loads`` would silently keep the last value."""
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateKeyError("duplicate key")
+        result[key] = value
+    return result
+
+
+def load_catalogue(text: str) -> object:
+    """Parse the committed catalogue, refusing a duplicate key at any depth."""
+    return json.loads(text, object_pairs_hook=_no_duplicate_keys)
+
+
 def differences(built: dict, committed: dict) -> list[str]:
-    """Compare a partial build with the committed catalogue, file by file."""
+    """Compare a partial build with the committed catalogue, file by file, type for type."""
     problems = []
     for key in ("schema_version", "limitation_ids", "recommendation_ids"):
-        if built[key] != committed.get(key):
+        if not strict_equal(built[key], committed.get(key, _MISSING)):
             problems.append(key)
     source = committed["source"]
     for key in ("repo", "tag", "commit", "licence", "path", "attribution"):
-        if built["source"][key] != source.get(key):
+        if not strict_equal(built["source"][key], source.get(key, _MISSING)):
             problems.append(f"source.{key}")
     for name, digest in built["source"]["files"].items():
-        if source["files"].get(name) != digest:
+        if not strict_equal(digest, source["files"].get(name, _MISSING)):
             problems.append(f"source.files.{name}")
     for policy_id, item in built["policies"].items():
-        if committed["policies"].get(policy_id) != item:
+        if not strict_equal(item, committed["policies"].get(policy_id, _MISSING)):
             problems.append(policy_id)
     return problems
 
@@ -327,9 +360,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         committed_text = args.out.read_text(encoding="utf-8")
-        committed = json.loads(committed_text)
+        committed = load_catalogue(committed_text)
     except FileNotFoundError:
         print("drift: the committed catalogue is missing", file=sys.stderr)
+        return 1
+    except DuplicateKeyError:
+        print("drift: the committed catalogue repeats a key", file=sys.stderr)
         return 1
     except (ValueError, RecursionError):
         print("drift: the committed catalogue is not valid JSON", file=sys.stderr)

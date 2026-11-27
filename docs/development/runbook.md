@@ -4,7 +4,7 @@ Use this runbook for local setup, authorized audits, and development checks. To 
 
 ## Install and inspect
 
-Use Python 3.11, 3.12, 3.13 or 3.14 from the repository root:
+Use Python 3.11, 3.12, 3.13, 3.14 or 3.15 from the repository root:
 
 ```bash
 python3 -m venv .venv
