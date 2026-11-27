@@ -4,6 +4,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,8 @@ GMAIL_SETTINGS_SCOPES: tuple[str, ...] = (
 # The scopes Google's token endpoint actually granted (on the last refresh or consent), kept in the token cache beside
 # google-auth's own fields: google-auth serialises only the scopes asked for, which never prove a grant.
 VERIFIED_SCOPES_KEY = "auditex_verified_scopes"
+# RFC 6749 section 3.3: scope-token = 1*( %x21 / %x23-5B / %x5D-7E ). ASCII only; no space, control, DEL, quote or backslash.
+_SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5B\x5D-\x7E]+")
 
 _DEPENDENCIES = {
     "google.auth": "google-auth",
@@ -420,8 +423,9 @@ def _granted(credentials: Any, scopes: tuple[str, ...]) -> bool:
 def _recorded_grant(cached: Mapping[str, Any]) -> frozenset[str] | None:
     """The grant recorded in the token cache; ``None`` for an older cache that records none.
 
-    A recorded value that is not a non-empty list of scope strings (null, a string, a number, a mapping, an empty list, a
-    list holding anything else: a non-string, an empty or whitespace-only string, or a string with whitespace in it)
+    A recorded value that is not a non-empty list of scope tokens (null, a string, a number, a mapping, an empty list, a
+    list holding anything else: a non-string, or a string that is not an RFC 6749 section 3.3 scope-token, such as an
+    empty string, one with whitespace, a control character, DEL, a double quote, a backslash or a non-ASCII character)
     proves nothing, so it grants nothing: an empty set, whatever else the list holds.
     """
     if VERIFIED_SCOPES_KEY not in cached:
@@ -429,7 +433,7 @@ def _recorded_grant(cached: Mapping[str, Any]) -> frozenset[str] | None:
     recorded = cached.get(VERIFIED_SCOPES_KEY)
     if not isinstance(recorded, list) or not recorded:
         return frozenset()
-    if not all(isinstance(scope, str) and scope.split() == [scope] for scope in recorded):
+    if not all(isinstance(scope, str) and _SCOPE_TOKEN.fullmatch(scope) for scope in recorded):
         return frozenset()
     return frozenset(recorded)
 

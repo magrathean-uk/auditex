@@ -1112,8 +1112,9 @@ cache's credentials are saved only after a successful refresh or a fresh consent
 scopes this run needs: it stands in for the run only when its recorded grant holds every one of them, and its refresh
 then asks for those scopes and no others, so a scope only an earlier run needed (or one the user has since declined or
 revoked) is never sent again. A cache whose recorded grant does not cover the run, or whose recorded value is null,
-empty, not a list or holds anything but scope strings (a non-string, an empty or whitespace-only string, or one with
-whitespace in it: any such entry proves nothing, so the whole record grants nothing), is not refreshed: the run signs
+empty, not a list or holds anything but scope tokens (a non-string, or a string outside the RFC 6749 section 3.3
+scope-token grammar, such as an empty string or one holding whitespace, a control character, DEL, a double quote, a
+backslash or a non-ASCII character: any such entry proves nothing, so the whole record grants nothing), is not refreshed: the run signs
 in again, at most once. When the token endpoint refuses a refresh with a grant error, the recorded grant is emptied
 before the new consent starts; when a refresh or a consent grants fewer scopes than the run needs, the recorded grant
 keeps only scopes that grant includes. The recorded grant is therefore never wider than what the token endpoint granted

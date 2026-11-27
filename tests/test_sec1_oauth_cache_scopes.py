@@ -27,6 +27,15 @@ DRIVE_RUN = (DRIVE_META, DRIVE_RO)
 DOMAIN_RUN = (DRIVE_META, DRIVE_RO, DOMAIN)
 # The on-disk field name, written literally: a rename in the code must not pass these tests.
 VERIFIED = "auditex_verified_scopes"
+# RFC 6749 section 3.3 scope-token: 1*( %x21 / %x23-5B / %x5D-7E ). Each entry below breaks it; written literally.
+_NOT_SCOPE_TOKENS = {
+    "nul": "https://www.googleapis.com/auth/drive\x00",
+    "tab-inside": "https://www.googleapis.com/auth/drive\tfile",
+    "del": "https://www.googleapis.com/auth/drive\x7f",
+    "quote": 'https://www.googleapis.com/auth/"drive"',
+    "backslash": "https://www.googleapis.com/auth\\drive",
+    "non-ascii-letter": "https://www.googleapis.com/auth/driv\u00e9.readonly",
+}
 
 
 @pytest.fixture
@@ -242,6 +251,15 @@ def test_recorded_grant_values_that_prove_nothing_are_an_empty_grant(recorded: A
     assert google_auth._recorded_grant({VERIFIED: recorded}) == frozenset()
 
 
+@pytest.mark.parametrize("entry", list(_NOT_SCOPE_TOKENS.values()), ids=list(_NOT_SCOPE_TOKENS))
+def test_a_recorded_entry_outside_the_rfc6749_scope_token_grammar_makes_the_record_grant_nothing(entry: str) -> None:
+    assert google_auth._recorded_grant({VERIFIED: [DRIVE_META, DRIVE_RO, entry]}) == frozenset()
+
+
+def test_recorded_grant_accepts_scope_tokens_at_the_edges_of_the_rfc6749_grammar() -> None:
+    assert google_auth._recorded_grant({VERIFIED: ["openid", "!#[]~"]}) == frozenset({"openid", "!#[]~"})
+
+
 def test_recorded_grant_reads_a_list_of_scopes_and_is_none_only_when_the_key_is_absent() -> None:
     assert google_auth._recorded_grant({VERIFIED: [DRIVE_META, DRIVE_RO]}) == frozenset(
         {"https://www.googleapis.com/auth/drive.metadata.readonly", "https://www.googleapis.com/auth/drive.readonly"}
@@ -297,7 +315,11 @@ def test_a_wrong_typed_cache_field_signs_in_again_instead_of_raising(
     assert credentials.token == "tok-SYNTHETIC-access"
 
 
-@pytest.mark.parametrize("malformed", [" ", "", "\t", 7, None], ids=["space", "empty", "tab", "number", "null"])
+@pytest.mark.parametrize(
+    "malformed",
+    [" ", "", "\t", 7, None, *_NOT_SCOPE_TOKENS.values()],
+    ids=["space", "empty", "tab", "number", "null", *_NOT_SCOPE_TOKENS],
+)
 def test_outage_with_a_required_grant_plus_one_malformed_entry_is_not_trusted(
     tmp_path: Path, oauth: dict[str, Any], malformed: Any
 ) -> None:
@@ -487,3 +509,4 @@ def test_an_on_disk_cache_written_with_the_literal_verified_scopes_key_still_loa
     assert credentials.scopes == [DRIVE_META, DRIVE_RO]
     assert oauth["flow_scopes"] == []
     assert path.read_text(encoding="utf-8") == on_disk
+
