@@ -69,7 +69,7 @@ test = [
 # a C and C++ compiler (the Xcode command line tools on macOS, where the build uses Metal; the MSVC build tools on
 # Windows). Models are downloaded on first use, never installed by pip.
 local-answer = [
-    "llama-cpp-python==0.3.36",
+    "llama-cpp-python==0.3.37",
 ]
 google = [
     "google-auth>=2.58.1,<3",
